@@ -5,15 +5,15 @@
 # Add the main directory to the search path.
 import  os;
 import  sys;
-src_Path        : str   = os.path.abspath(os.path.pardir);
+src_Path        : str   = os.path.dirname(os.path.dirname(__file__));
 sys.path.append(src_Path);
 
 import  numpy               as      np
 import  torch
 from    scipy.integrate     import  odeint
 
-import  LatentDynamics
-from    InputParser         import InputParser
+from    LatentDynamics      import  LatentDynamics
+from    InputParser         import  InputParser
 from    FiniteDifference    import  FDdict
 
 
@@ -32,7 +32,7 @@ class SINDy(LatentDynamics):
                  dim        : int, 
                  nt         : int, 
                  config     : dict) -> None:
-        """
+        r"""
         Initializes a SINDy object. This is a subclass of the LatentDynamics class which uses the 
         SINDy algorithm as its model for the ODE governing the latent state. Specifically, we 
         assume there is a library of functions, f_1(z), ... , f_N(z), each one of which is a 
@@ -79,7 +79,7 @@ class SINDy(LatentDynamics):
 
         # Now, set up an Input parser to process the contents of the config['sindy'] dictionary. 
         assert('sindy' in config)
-        parser = InputParser(config['sindy'], name = 'sindy_input')
+        input_parser = InputParser(config['sindy'], name = 'sindy_input')
 
         """
         Determine which finite difference scheme we should use to approximate the time derivative
@@ -89,10 +89,10 @@ class SINDy(LatentDynamics):
             - 'sbp36': summation-by-parts 3rd/6th order operator
             - 'sbp48': summation-by-parts 4th/8th order operator
         """
-        self.fd_type    : str       = parser.getInput(['fd_type'], fallback = 'sbp12')
+        self.fd_type    : str       = input_parser.getInput(['fd_type'], fallback = 'sbp12')
         self.fd         : callable  = FDdict[self.fd_type]
 
-        """
+        r"""
         Fetch the operator matrix. What does this do? Suppose we have a time series with nt points, 
         x(t_0), ... , x(t_{nt - 1}) \in \mathbb{R}^d. Further assume that for each j, 
         t_j = t_0 + j \delta t, where \delta t is some positive constant. Let j \in {0, 1, ... , 
@@ -107,7 +107,7 @@ class SINDy(LatentDynamics):
 
         # Fetch the norm we are going to use on the sindy coefficients.
         # NOTE(kevin): by default, this will be L1 norm.
-        self.coef_norm_order = parser.getInput(['coef_norm_order'], fallback = 1)
+        self.coef_norm_order = input_parser.getInput(['coef_norm_order'], fallback = 1)
 
         # TODO(kevin): other loss functions
         self.MSE = torch.nn.MSELoss()
@@ -122,7 +122,7 @@ class SINDy(LatentDynamics):
                   dt            : float, 
                   compute_loss  : bool = True, 
                   numpy         : bool = False) -> (np.ndarray | torch.Tensor) | tuple[(np.ndarray | torch.Tensor), torch.Tensor, torch.Tensor]:
-        """
+        r"""
         This function computes the optimal SINDy coefficients using the current latent time 
         series'. Specifically, let us consider the case when Z has two dimensions (the case when 
         it has three is identical, just with different coefficients for each instance of the 
@@ -148,7 +148,7 @@ class SINDy(LatentDynamics):
 
         dt: The time step between time steps. See the description of the "Z" argument. 
 
-        compute_loss: A boolean which, if true, will prompt us to calculate the sindy and 
+        compute_loss: A boolean which, if true, will prompt us to calculate the SINDy and 
         coefficient losses, which we will then return with the optimal SINDy coefficients. If not, 
         we will only return the optimal SINDy coefficients.
 
@@ -160,8 +160,19 @@ class SINDy(LatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------
 
-        IF compute_loss is True, then we return three variables. The first is a matrix of shape
-        ()
+        If compute_loss is True, then we return three variables. 
+        
+        The first holds the coefficients. It is a matrix of shape (n_train, n_coef), where n_train 
+        is the number of parameter combinations in the training set and n_coef is the number of 
+        coefficients in the latent dynamics. The i,j entry of this array holds the value of the 
+        j'th coefficient when we use the i'th combination of parameter values.
+
+        The second holds the total SINDy loss. It is a single element tensor whose lone entry holds
+        the sum of the SINDy losses across the set of combinations of parameters in the training 
+        set. 
+
+        The third is a single element tensor whose lone element holds the sum of the L1 norms of 
+        the coefficients across the set of combinations of parameters in the training set.
         """
 
         # -----------------------------------------------------------------------------------------

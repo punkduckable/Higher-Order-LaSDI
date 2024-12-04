@@ -4,7 +4,7 @@
 
 import  numpy; 
 
-"""
+r"""
 The functions in this file implement Runge-Kutta solvers for a general second-order ODE of the 
 following form:
     y''(t)          = f(t,   y(t),   y'(t)).
@@ -74,8 +74,8 @@ def RK2(f   : callable,
         y0  : numpy.ndarray, 
         Dy0 : numpy.ndarray, 
         h   : float, 
-        N   : int) -> tuple(numpy.ndarray, numpy.ndarray):
-    """
+        N   : int) -> tuple[numpy.ndarray, numpy.ndarray]:
+    r"""
     This function implements a RK2 based ODE solver for second order ODE of the following form:
         y''(t)          = f(t,   y(t),   y'(t)).
     Here, y takes values in \mathbb{R}^d. 
@@ -177,8 +177,8 @@ def RK4(f   : callable,
         y0  : numpy.ndarray, 
         Dy0 : numpy.ndarray, 
         h   : float, 
-        N   : int) -> tuple(numpy.ndarray, numpy.ndarray):
-    """
+        N   : int) -> tuple[numpy.ndarray, numpy.ndarray]:
+    r"""
     This function implements a RK4 based ODE solver for second order ODE of the following form:
         y''(t)          = f(t,   y(t),   y'(t)).
     Here, y takes values in \mathbb{R}^d. 

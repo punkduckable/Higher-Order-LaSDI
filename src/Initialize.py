@@ -5,8 +5,8 @@
 # Add LatentDynamics, Physics directories to the search path.
 import  sys;
 import  os;
-LD_Path         : str = os.path.abspath(os.path.join(os.curdir, "LatentDynamics"));
-Physics_Path    : str = os.path.abspath(os.path.join(os.curdir, "Physics"));
+LD_Path         : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
+Physics_Path    : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
 sys.path.append(LD_Path); 
 sys.path.append(Physics_Path); 
 

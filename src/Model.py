@@ -5,7 +5,7 @@
 # Add the Physics directory to the search path.
 import  sys;
 import  os;
-Physics_Path    : str  = os.path.abspath(os.path.join(os.curdir, "Physics"));
+Physics_Path    : str  = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
 sys.path.append(Physics_Path);
 
 import  torch
@@ -115,7 +115,7 @@ class MultiLayerPerceptron(torch.nn.Module):
                     reshape_shape   : tuple[int]    = None,
                     threshold       : float         = 0.1, 
                     value           : float         = 0.0) -> None:
-        """
+        r"""
         This class defines a standard multi-layer network network.
 
 
@@ -301,7 +301,7 @@ class MultiLayerPerceptron(torch.nn.Module):
 
 class Autoencoder(torch.nn.Module):
     def __init__(self, physics : Physics, config : dict) -> None:
-        """
+        r"""
         Initializes an Autoencoder object. An Autoencoder consists of two networks, an encoder, 
         E : \mathbb{R}^F -> \mathbb{R}^L, and a decoder, D : \mathbb{R}^L -> \marthbb{R}^F. We 
         assume that the dataset consists of samples of a parameterized L-manifold in 

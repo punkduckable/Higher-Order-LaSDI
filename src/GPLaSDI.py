@@ -4,8 +4,8 @@
 
 import  sys;
 import  os;
-Physics_Path    : str   = os.path.abspath(os.path.join(os.path.curdir, "Physics"));
-LD_Path         : str   = os.path.abspath(os.path.join(os.path.curdir, "LatentDynamics"));
+Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
+LD_Path         : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
 sys.path.append(Physics_Path);
 sys.path.append(LD_Path);
 
@@ -194,7 +194,7 @@ def sample_roms(autoencoder     : Autoencoder,
 
 
 def get_fom_max_std(autoencoder : Autoencoder, Zis : np.ndarray) -> int:
-    """
+    r"""
     Computes the maximum standard deviation across the trajectories in Zis and returns the
     corresponding parameter index. Specifically, Zis is a 4d tensor of shape (n_test, n_samples, 
     n_t, n_z). The first axis specifies which parameter combination we're using. For each 

@@ -80,7 +80,7 @@ class Physics:
         Nothing!
         """
         
-        self = param_name_list
+        self.param_name_list = param_name_list
         return
     
 

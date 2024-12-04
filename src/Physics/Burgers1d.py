@@ -5,7 +5,7 @@
 # Add the main directory to the search path.
 import  os;
 import  sys;
-src_Path        : str   = os.path.abspath(os.path.pardir);
+src_Path        : str   = os.path.dirname(os.path.dirname(__file__));
 sys.path.append(src_Path);
 
 import  numpy               as      np
@@ -66,12 +66,12 @@ class Burgers1D(Physics):
         assert('burgers1d' in cfg)
         
         # Now, get a parser for cfg.
-        parser : InputParser = InputParser(cfg['burgers1d'], name = "burgers1d_input")
+        input_parser : InputParser = InputParser(cfg['burgers1d'], name = "burgers1d_input")
 
         # Fetch variables from the configuration. 
-        self.offline    : bool      = parser.getInput(['offline_driver'],       fallback = False)   # TODO: ??? What does this do ???
-        self.nt         : int       = parser.getInput(['number_of_timesteps'],  datatype = int)     # number of time steps when solving 
-        self.grid_size  : list[int] = parser.getInput(['grid_size'],            datatype = list)    # number of grid points along each spatial axis
+        self.offline    : bool      = input_parser.getInput(['offline_driver'],       fallback = False)   # TODO: ??? What does this do ???
+        self.nt         : int       = input_parser.getInput(['number_of_timesteps'],  datatype = int)     # number of time steps when solving 
+        self.grid_size  : list[int] = input_parser.getInput(['grid_size'],            datatype = list)    # number of grid points along each spatial axis
         self.qgrid_size : list[int] = self.grid_size                
         
         # If there are n spatial dimensions, then the grid needs to have n axes (one for each 
@@ -79,26 +79,26 @@ class Burgers1D(Physics):
         assert(self.dim == len(self.grid_size))
 
         # Fetch more variables from the 
-        self.xmin = parser.getInput(['xmin'], datatype = float)         # Minimum value of the spatial variable in the problem domain
-        self.xmax = parser.getInput(['xmax'], datatype = float)         # Maximum value of the spatial variable in the problem domain
-        self.dx = (self.xmax - self.xmin) / (self.grid_size[0] - 1)     # Spacing between grid points along the spatial axis.
+        self.xmin   = input_parser.getInput(['xmin'], datatype = float)     # Minimum value of the spatial variable in the problem domain
+        self.xmax   = input_parser.getInput(['xmax'], datatype = float)     # Maximum value of the spatial variable in the problem domain
+        self.dx     = (self.xmax - self.xmin) / (self.grid_size[0] - 1)     # Spacing between grid points along the spatial axis.
         assert(self.dx > 0.)
 
-        self.tmax   : float     = parser.getInput(['simulation_time'])  # Final simulation time. We solve form t = 0 to t = tmax
+        self.tmax   : float     = input_parser.getInput(['simulation_time'])  # Final simulation time. We solve form t = 0 to t = tmax
         self.dt     : float     = self.tmax / (self.nt - 1)             # step size between successive time steps/the time step we use when solving.
 
         # Set up the spatial, temporal grid.
         self.x_grid : np.ndarray    = np.linspace(self.xmin, self.xmax, self.grid_size[0])
         self.t_grid : np.ndarray    = np.linspace(0, self.tmax, self.nt)
 
-        self.maxk                   : int   = parser.getInput(['maxk'], fallback = 10)      # TODO: ??? What is this ???
-        self.convergence_threshold  : float = parser.getInput(['convergence_threshold'], fallback = 1.e-8)
+        self.maxk                   : int   = input_parser.getInput(['maxk'],                   fallback = 10)      # TODO: ??? What is this ???
+        self.convergence_threshold  : float = input_parser.getInput(['convergence_threshold'],  fallback = 1.e-8)
 
         # Determine which index corresponds to 'a' and 'w' (we pass an array of parameter values, 
         # we need this information to figure out which element corresponds to which variable).
         if (self.param_name_list is not None):
             if 'a' in self.param_name_list:
-                self.a_idx = self.param_nam_list.index('a')
+                self.a_idx = self.param_name_list.index('a')
             if 'w' in self.param_name_list:
                 self.w_idx = self.param_name_list.index('w')
         
@@ -134,6 +134,7 @@ class Burgers1D(Physics):
 
         # Fetch the parameter values.
         a, w = 1.0, 1.0
+
         if 'a' in self.param_name_list:
             a = param[self.a_idx]
         if 'w' in self.param_name_list:

@@ -123,6 +123,9 @@ class InputParser:
         if (fallback != None):
             if (type(val) != type(fallback)):
                 warn("%s does not match the type with the fallback value %s!" % (str(type(val)), str(type(fallback))))
+                print(fallback);
+                print(val);
+                print(keys, flush = True);
         
         # Check thast the final val matches the desired datatype
         if (datatype != None):
