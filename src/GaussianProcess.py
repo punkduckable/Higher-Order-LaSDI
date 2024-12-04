@@ -1,3 +1,7 @@
+# -------------------------------------------------------------------------------------------------
+# Imports and Setup
+# -------------------------------------------------------------------------------------------------
+
 import  numpy                               as      np
 from    sklearn.gaussian_process.kernels    import  ConstantKernel, Matern, RBF
 from    sklearn.gaussian_process            import  GaussianProcessRegressor

@@ -2,13 +2,19 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
+# Add the main directory to the search path.
+import  os;
+import  sys;
+src_Path        : str   = os.path.abspath(os.path.pardir);
+sys.path.append(src_Path);
+
 import  numpy               as      np
 import  torch
 from    scipy.integrate     import  odeint
 
-from    .                   import  LatentDynamics
-from    ..inputs            import  InputParser
-from    ..fd                import  FDdict
+import  LatentDynamics
+from    InputParser         import InputParser
+from    FiniteDifference    import  FDdict
 
 
 

@@ -1,29 +1,53 @@
-import numpy as np
-import yaml
-import torch
-import argparse
-import sys
-import h5py
-from .enums import *
-from .gplasdi import BayesianGLaSDI
-from .latent_space import Autoencoder
-from .latent_dynamics.sindy import SINDy
-from .physics.burgers1d import Burgers1D
-from .param import ParameterSpace
-from .inputs import InputParser
+# -------------------------------------------------------------------------------------------------
+# Imports and Setup
+# -------------------------------------------------------------------------------------------------
 
-trainer_dict = {'gplasdi': BayesianGLaSDI}
+# Add LatentDynamics, Physics directories to the search path.
+import  sys;
+import  os;
+LD_Path         : str = os.path.abspath(os.path.join(os.curdir, "Autoencoder"));
+Physics_Path    : str = os.path.abspath(os.path.join(os.curdir, "Autoencoder_Utils"));
+sys.path.append(LD_Path); 
+sys.path.append(Physics_Path); 
 
-latent_dict = {'ae': Autoencoder}
+import  yaml;
+import  argparse;
+import  h5py;
 
-ld_dict = {'sindy': SINDy}
+import  numpy as np;
+import  torch;
 
-physics_dict = {'burgers1d': Burgers1D}
+from    Enums               import NextStep, Result;
+from    GPLaSDI             import BayesianGLaSDI;
+from    Model               import Autoencoder;
+from    SINDy               import SINDy;
+from    burgers1d           import Burgers1D;
+from    ParameterSpace      import ParameterSpace;
+from    InputParser         import InputParser;
 
-parser = argparse.ArgumentParser(description = "",
-                                 formatter_class=argparse.RawTextHelpFormatter)
-parser.add_argument('config_file', metavar='string', type=str,
-                    help='config file to run LasDI workflow.\n')
+
+
+# -------------------------------------------------------------------------------------------------
+# Function + Class dictionaries, Command line setup
+# -------------------------------------------------------------------------------------------------
+
+trainer_dict    = {'gplasdi'    : BayesianGLaSDI};
+latent_dict     = {'ae'         : Autoencoder};
+ld_dict         = {'sindy'      : SINDy};
+physics_dict    = {'burgers1d'  : Burgers1D};
+
+parser = argparse.ArgumentParser(description        = "",
+                                 formatter_class    = argparse.RawTextHelpFormatter);
+parser.add_argument('config_file', 
+                    metavar     = 'string', 
+                    type        = str,
+                    help        = 'config file to run LasDI workflow.\n');
+
+
+
+# -------------------------------------------------------------------------------------------------
+# Main function
+# -------------------------------------------------------------------------------------------------
 
 def main():
     args = parser.parse_args(sys.argv[1:])
@@ -94,6 +118,8 @@ def main():
 
     return
 
+
+
 def step(trainer, next_step, config, use_restart=False):
 
     print("Running %s" % next_step)
@@ -138,6 +164,8 @@ def step(trainer, next_step, config, use_restart=False):
 
     return result, next_step
 
+
+
 def initialize_trainer(config, restart_file=None):
     '''
     Initialize a LaSDI class with a latent space model according to config file.
@@ -172,6 +200,8 @@ def initialize_trainer(config, restart_file=None):
 
     return trainer, param_space, physics, latent_space, latent_dynamics
 
+
+
 def initialize_latent_space(physics, config):
     '''
     Initialize a latent space model according to config file.
@@ -188,6 +218,8 @@ def initialize_latent_space(physics, config):
 
     return latent_space
 
+
+
 def initialize_physics(config, param_name):
     '''
     Initialize a physics FOM model according to config file.
@@ -199,6 +231,8 @@ def initialize_physics(config, param_name):
     physics = physics_dict[physics_type](physics_cfg, param_name)
 
     return physics
+
+
 
 '''
     Perform greedy sampling to pick a new parameter point.
@@ -258,6 +292,8 @@ def pick_samples(trainer, config):
     next_step, result = NextStep.CollectSample, Result.Success
     return result, next_step
 
+
+
 '''
     update trainer.X_train and trainer.X_test based on param_space.train_space and param_space.test_space.
 '''
@@ -289,7 +325,9 @@ def run_samples(trainer, config):
     # Since FOM simulations are already collected, we go to training phase directly.
     next_step, result = NextStep.Train, Result.Success
     return result, next_step
-    
+
+
+
 def collect_samples(trainer, config):
     cfg_parser = InputParser(config)
     assert(trainer.physics.offline)
@@ -327,6 +365,8 @@ def collect_samples(trainer, config):
 
     next_step, result = NextStep.Train, Result.Success
     return result, next_step
+
+
 
 if __name__ == "__main__":
     main()

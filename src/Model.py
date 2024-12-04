@@ -1,11 +1,17 @@
 # -------------------------------------------------------------------------------------------------
-# Imports and setup
+# Imports and Setup
 # -------------------------------------------------------------------------------------------------
+
+# Add the Physics directory to the search path.
+import  sys;
+import  os;
+Physics_Path    : str  = os.path.abspath(os.path.join(os.curdir, "Physics"));
+sys.path.append(Physics_Path);
 
 import  torch
 import  numpy       as      np
 
-from   .physics     import  Physics
+from    Physics     import  Physics
 
 # activation dict
 act_dict = {'ELU'           : torch.nn.ELU,

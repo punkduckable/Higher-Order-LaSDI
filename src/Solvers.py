@@ -1,7 +1,8 @@
+# -------------------------------------------------------------------------------------------------
+# Imports and Setup
+# -------------------------------------------------------------------------------------------------
+
 import  numpy; 
-
-
-
 
 """
 The functions in this file implement Runge-Kutta solvers for a general second-order ODE of the 
@@ -64,6 +65,10 @@ and { a_{i,j} : i = 1, 2, ... , s, j = 1, 2, ... , i - 1}, we can use the equati
 transform it into a method for solving 2nd order ODEs. 
 """
 
+
+# -------------------------------------------------------------------------------------------------
+# Runge-Kutta Solvers
+# -------------------------------------------------------------------------------------------------
 
 def RK2(f   : callable, 
         y0  : numpy.ndarray, 
@@ -165,8 +170,6 @@ def RK2(f   : callable,
 
     # All done!
     return (D, V);
-    
-
 
 
 

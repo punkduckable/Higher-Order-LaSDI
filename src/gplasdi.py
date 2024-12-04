@@ -1,22 +1,25 @@
 # -------------------------------------------------------------------------------------------------
-# Imports
+# Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-import  time
+import  sys;
+import  os;
+Physics_Path    : str   = os.path.abspath(os.path.join(os.path.curdir, "Physics"));
+LD_Path         : str   = os.path.abspath(os.path.join(os.path.curdir, "LatentDynamics"));
+sys.path.append(Physics_Path);
+sys.path.append(LD_Path);
 
-import  torch
-import  numpy                       as      np
-from    torch.optim                 import  Optimizer
-from    sklearn.gaussian_process    import  GaussianProcessRegressor
+import  torch;
+import  numpy                       as      np;
+from    torch.optim                 import  Optimizer;
+from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 
-from    .gp                         import  eval_gp, sample_coefs, fit_gps
-from    .latent_space               import  initial_condition_latent, Autoencoder
-from    .enums                      import  NextStep, Result
-from    .physics                    import  Physics
-from    .latent_dynamics            import  LatentDynamics     
-from    .timing                     import  Timer
-from    .param                      import  ParameterSpace
-
+from    GaussianProcess             import  eval_gp, sample_coefs, fit_gps;
+from    Model                       import  initial_condition_latent, Autoencoder;
+from    Timing                      import  Timer;
+from    ParameterSpace              import  ParameterSpace;
+from    Physics                     import  Physics;
+from    LatentDynamics              import  LatentDynamics;
 
 
 # -------------------------------------------------------------------------------------------------

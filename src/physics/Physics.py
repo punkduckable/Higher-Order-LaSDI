@@ -1,5 +1,5 @@
 # -------------------------------------------------------------------------------------------------
-# Imports  
+# Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
 import  numpy   as np
@@ -243,7 +243,7 @@ class OfflineFOM(Physics):
         self.offline = True
 
         assert('offline_fom' in cfg)
-        from ..inputs import InputParser
+        from ..InputParser import InputParser
         parser = InputParser(cfg['offline_fom'], name = "offline_fom_input")
 
         self.dim = parser.getInput(['space_dimension'], datatype = int)

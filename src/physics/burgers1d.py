@@ -2,14 +2,20 @@
 # Inputs
 # -------------------------------------------------------------------------------------------------
 
+# Add the main directory to the search path.
+import  os;
+import  sys;
+src_Path        : str   = os.path.abspath(os.path.pardir);
+sys.path.append(src_Path);
+
 import  numpy               as      np
 from    scipy.sparse.linalg import  spsolve
 from    scipy.sparse        import  spdiags
 import  torch
 
-from    ..inputs            import  InputParser
-from    .                   import  Physics
-from    ..fd                import  FDdict
+from    InputParser         import  InputParser
+from    Physics             import  Physics
+from    FiniteDifference    import  FDdict
 
 
 
@@ -321,7 +327,7 @@ def main():
         cfg_parser = InputParser(config, name='main')
 
     # initialize parameter space and physics class
-    from ..param import ParameterSpace
+    from ..ParameterSpace import ParameterSpace
     param_space = ParameterSpace(config)
     physics = Burgers1D(config['physics'], param_space.param_name)
 

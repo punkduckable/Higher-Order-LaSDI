@@ -1,9 +1,10 @@
 # -------------------------------------------------------------------------------------------------
-# Imports
+# Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-import  numpy   as      np
-from    .inputs import  InputParser
+import  numpy           as      np
+
+from    InputParser     import  InputParser
 
 
 
