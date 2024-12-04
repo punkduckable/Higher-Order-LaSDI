@@ -28,14 +28,17 @@ from    InputParser         import InputParser;
 
 
 # -------------------------------------------------------------------------------------------------
-# Function + Class dictionaries, Command line setup
+# Function + Class dictionaries, Command line arguments setup
 # -------------------------------------------------------------------------------------------------
 
+# Set up the dictionaries; we use this to allow the code to call different classes, functions 
+# depending on the settings.
 trainer_dict    = {'gplasdi'    : BayesianGLaSDI};
 latent_dict     = {'ae'         : Autoencoder};
 ld_dict         = {'sindy'      : SINDy};
 physics_dict    = {'burgers1d'  : Burgers1D};
 
+# Set up the command line arguments
 parser = argparse.ArgumentParser(description        = "",
                                  formatter_class    = argparse.RawTextHelpFormatter);
 parser.add_argument('config_file', 
@@ -50,39 +53,54 @@ parser.add_argument('config_file',
 # -------------------------------------------------------------------------------------------------
 
 def main():
-    args = parser.parse_args(sys.argv[1:])
-    print("config file: %s" % args.config_file)
+    # ---------------------------------------------------------------------------------------------
+    # Setup
+    # ---------------------------------------------------------------------------------------------
+
+    # Load in the argument
+    args : argparse.Namespace = parser.parse_args(sys.argv[1:]);
+    print("config file: %s" % args.config_file);
 
     with open(args.config_file, 'r') as f:
         config = yaml.safe_load(f)
         cfg_parser = InputParser(config, name='main')
 
-    use_restart = cfg_parser.getInput(['workflow', 'use_restart'], fallback=False)
+    use_restart = cfg_parser.getInput(['workflow', 'use_restart'], fallback = False)
     if (use_restart):
-        restart_filename = cfg_parser.getInput(['workflow', 'restart_file'], datatype=str)
-        from os.path import dirname
+        restart_filename = cfg_parser.getInput(['workflow', 'restart_file'], datatype = str)
         from pathlib import Path
-        Path(dirname(restart_filename)).mkdir(parents=True, exist_ok=True)
+        Path(os.path.dirname(restart_filename)).mkdir(parents = True, exist_ok = True)
+    
 
-    import os
+
+    # ---------------------------------------------------------------------------------------------
+    # Run the next step
+    # ---------------------------------------------------------------------------------------------
+
+    # Determine what the next step is. If we are loading from a restart, then the restart should
+    # have logged then next step. Otherwise, we set the next step step to "PickSample", which will 
+    # prompt the code to set up the training set of parameters.
     if (use_restart and (os.path.isfile(restart_filename))):
         # TODO(kevin): in long term, we should switch to hdf5 format.
-        restart_file = np.load(restart_filename, allow_pickle=True).item()
-        current_step = restart_file['next_step']
-        result = restart_file['result']
+        restart_file    = np.load(restart_filename, allow_pickle = True).item()
+        next_step       = restart_file['next_step']
+        result          = restart_file['result']
     else:
-        restart_file = None
-        current_step = NextStep.PickSample
-        result = Result.Unexecuted
+        restart_file    = None
+        next_step       = NextStep.PickSample
+        result          = Result.Unexecuted
     
+    # Initialize the trainer.
     trainer, param_space, physics, latent_space, latent_dynamics = initialize_trainer(config, restart_file)
 
     if ((not use_restart) and physics.offline):
         raise RuntimeError("Offline physics solver needs to use restart files!")
 
-    result, next_step = step(trainer, current_step, config, use_restart)
+    # Run the next step.
+    result, next_step = step(trainer, next_step, config, use_restart)
 
-    if (result is Result.Fail):
+    # Report the result
+    if (  result is Result.Fail):
         raise RuntimeError('Previous step has failed. Stopping the workflow.')
     elif (result is Result.Success):
         print("Previous step succeeded. Preparing for the next step.")
@@ -90,11 +108,22 @@ def main():
     elif (result is Result.Complete):
         print("Workflow is finished.")
 
-    # save restart (or final) file.
+
+
+    # ---------------------------------------------------------------------------------------------
+    # Save, shutdown
+    # ---------------------------------------------------------------------------------------------
+
+    # Save restart (or final) file.
     import time
-    date = time.localtime()
-    date_str = "{month:02d}_{day:02d}_{year:04d}_{hour:02d}_{minute:02d}"
-    date_str = date_str.format(month = date.tm_mon, day = date.tm_mday, year = date.tm_year, hour = date.tm_hour + 3, minute = date.tm_min)
+    date        = time.localtime()
+    date_str    = "{month:02d}_{day:02d}_{year:04d}_{hour:02d}_{minute:02d}"
+    date_str    = date_str.format(month     = date.tm_mon, 
+                                  day       = date.tm_mday, 
+                                  year      = date.tm_year, 
+                                  hour      = date.tm_hour + 3, 
+                                  minute    = date.tm_min)
+    
     if (use_restart):
         # rename old restart file if exists.
         if (os.path.isfile(restart_filename)):
@@ -104,69 +133,167 @@ def main():
     else:
         save_file = 'lasdi_' + date_str + '.npy'
     
-    save_dict = {'parameters': param_space.export(),
-                 'physics': physics.export(),
-                 'latent_space': latent_space.export(),
-                 'latent_dynamics': latent_dynamics.export(),
-                 'trainer': trainer.export(),
-                 'timestamp': date_str,
-                 'next_step': next_step,
-                 'result': result, # TODO(kevin): do we need to save result?
-                 }
-    
+    # Build the save dictionary and then save it.
+    save_dict = {'parameters'       : param_space.export(),
+                 'physics'          : physics.export(),
+                 'latent_space'     : latent_space.export(),
+                 'latent_dynamics'  : latent_dynamics.export(),
+                 'trainer'          : trainer.export(),
+                 'timestamp'        : date_str,
+                 'next_step'        : next_step,
+                 'result'           : result};
     np.save(save_file, save_dict)
 
+    # All done!
     return
 
 
 
-def step(trainer, next_step, config, use_restart=False):
 
-    print("Running %s" % next_step)
+# -------------------------------------------------------------------------------------------------
+# Step
+# -------------------------------------------------------------------------------------------------
 
+def step(trainer        : BayesianGLaSDI, 
+         next_step      : NextStep, 
+         config         : dict, 
+         use_restart    : bool = False):
+    """
+    This function runs the next step of the training procedure. Depending on what we have done, 
+    that next step could be training, picking new samples, generating fom solutions, or 
+    collecting samples. 
+
+    
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+    
+    trainer: A Trainer class object that we use when training the model for a particular instance
+    of the settings.
+
+    next_step: a NextStep object (a kind of enumeration) specifying what the next step is. 
+
+    config: This should be a dictionary that we loaded from a .yml file. It should house all the 
+    settings we expect to use to generate the data and train the models.
+
+    use_restart: a boolean which, if true, will prompt us to return after a single step.
+
+    
+
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    A Returns object (a kind of enumeration) that indicates what happened during the current step.
+    """
+
+
+    # ---------------------------------------------------------------------------------------------
+    # Run the next step 
+    # ---------------------------------------------------------------------------------------------
+
+    print("Running %s" % next_step);
     if (next_step is NextStep.Train):
-
+        # If our next step is to train, then let's train! This will set trainer.restart_iter to 
+        # the iteration number of the last iterating training.
         trainer.train()
-        if (trainer.restart_iter >= trainer.max_iter):
-            result = Result.Complete
-        else:
-            result = Result.Success
 
+        # Check if we should stop running steps.
+        # Recall that a trainer object's restart_iter member holds the iteration number of the last
+        # iteration in the last round of training. Likewise, its "max_iter" member specifies the 
+        # total number of iterations we want to train for. Thus, if restart_iter goes above 
+        # max_iter, then it is time to stop running steps. Otherwise, we can mark the current step
+        # as a success and move onto the next one.
+        if (trainer.restart_iter >= trainer.max_iter):
+            result  = Result.Complete
+        else:
+            result  = Result.Success
+
+        # Next, check if the restart_iter falls below the "max_greedy_iter". The later is the last
+        # iteration at which we want to run greedy sampling. If the restart_iter is below the 
+        # max_greedy_iter, then we should pick a new sample (perform greedy sampling). Otherwise, 
+        # we should continue training.
         if (trainer.restart_iter <= trainer.max_greedy_iter):
             next_step = NextStep.PickSample
         else:
             next_step = NextStep.Train
 
-    elif (next_step is NextStep.PickSample):
 
+
+    elif (next_step is NextStep.PickSample):
         result, next_step = pick_samples(trainer, config)
 
-    elif (next_step is NextStep.RunSample):
 
+
+    elif (next_step is NextStep.RunSample):
         result, next_step = run_samples(trainer, config)
 
+
+
     elif (next_step is NextStep.CollectSample):
-        
         result, next_step = collect_samples(trainer, config)
+
+
 
     else:
         raise RuntimeError("Unknown next step!")
     
-    # if fail or complete, break the loop regardless of use_restart.
+
+
+    # ---------------------------------------------------------------------------------------------
+    # Wrap up
+    # ---------------------------------------------------------------------------------------------
+
+    # If fail or complete, break the loop regardless of use_restart.
     if ((result is Result.Fail) or (result is Result.Complete)):
         return result, next_step
-    
-    print("Next step is: %s" % next_step)
-    
-    # continue the workflow if not using restart.
+        
+    # Continue the workflow if not using restart.
+    print("Next step is: %s" % next_step);
     if (not use_restart):
         result, next_step = step(trainer, next_step, config)
 
+    # All done!
     return result, next_step
 
 
 
-def initialize_trainer(config, restart_file=None):
+# -------------------------------------------------------------------------------------------------
+# Helper functions
+# -------------------------------------------------------------------------------------------------
+
+def initialize_trainer(config, restart_file : str = None):
+    """
+    Initialize a LaSDI object with a latent space model and physics object according to config 
+    file. Currently only 'gplasdi' is available.
+
+    
+
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+
+    config: This should be a dictionary that we loaded from a .yml file. It should house all the 
+    settings we expect to use to generate the data and train the models. We expect this dictionary 
+    to contain the following keys (if a key is within a dictionary that is specified by another 
+    key, then we tab the sub-key relative to the dictionary key): 
+        - physics           (used by "initialize_physics")
+            - type
+        - latent_dynamics   (how we parameterize the latent dynamics; e.g. SINDy)
+            - type
+        - lasdi
+            - type
+    
+            
+    
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    A "BayesianGLaSDI" object that has been initialized using the settings in config/is ready to 
+    begin training.
+    """
+
     '''
     Initialize a LaSDI class with a latent space model according to config file.
     Currently only 'gplasdi' is available.
@@ -177,8 +304,8 @@ def initialize_trainer(config, restart_file=None):
     if (restart_file is not None):
         param_space.load(restart_file['parameters'])
 
-    physics = initialize_physics(config, param_space.param_name)
-    latent_space = initialize_latent_space(physics, config)
+    physics         = initialize_physics(config, param_space.param_name)
+    latent_space    = initialize_latent_space(physics, config)
     if (restart_file is not None):
         latent_space.load(restart_file['latent_space'])
 
@@ -198,6 +325,7 @@ def initialize_trainer(config, restart_file=None):
     if (restart_file is not None):
         trainer.load(restart_file['trainer'])
 
+    # All done!
     return trainer, param_space, physics, latent_space, latent_dynamics
 
 
@@ -234,11 +362,13 @@ def initialize_physics(config, param_name):
 
 
 
-'''
-    Perform greedy sampling to pick a new parameter point.
-    if physics is offline solver, save parameter points to a hdf file that fom solver can read.
-'''
 def pick_samples(trainer, config):
+    """
+    This function uses greedy sampling to pick a new parameter point.
+
+    If physics is offline solver, then we save parameter points to a hdf file that the fom solver 
+    can read.
+    """
 
     # for initial step, get initial parameter points from parameter space.
     if (trainer.X_train.size(0) == 0):

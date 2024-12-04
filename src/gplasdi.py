@@ -380,8 +380,8 @@ class BayesianGLaSDI:
         self.n_samples          : int       = config['n_samples']       # Number of samples to draw per coefficient per combination of parameters
         self.lr                 : float     = config['lr']              # Learning rate for the optimizer.
         self.n_iter             : int       = config['n_iter']          # Number of iterations for one train and greedy sampling
-        self.max_iter           : int       = config['max_iter']        # Maximum iterations for overall training
-        self.max_greedy_iter    : int       = config['max_greedy_iter'] # Maximum iterations for greedy sampling
+        self.max_iter           : int       = config['max_iter']        # We stop training if restart_iter goes above this number. 
+        self.max_greedy_iter    : int       = config['max_greedy_iter'] # We stop performing greedy sampling if restart_iter goes above this number.
         self.ld_weight          : float     = config['ld_weight']       # Weight of the SINDy loss in the loss function. \beta_2 in the paper.
         self.coef_weight        : float     = config['coef_weight']     # Weight of the norm of matrix of latent dynamics coefficients. \beta_3 in the paper.
 
