@@ -5,8 +5,8 @@
 # Add LatentDynamics, Physics directories to the search path.
 import  sys;
 import  os;
-LD_Path         : str = os.path.abspath(os.path.join(os.curdir, "Autoencoder"));
-Physics_Path    : str = os.path.abspath(os.path.join(os.curdir, "Autoencoder_Utils"));
+LD_Path         : str = os.path.abspath(os.path.join(os.curdir, "LatentDynamics"));
+Physics_Path    : str = os.path.abspath(os.path.join(os.curdir, "Physics"));
 sys.path.append(LD_Path); 
 sys.path.append(Physics_Path); 
 
@@ -17,13 +17,14 @@ import  h5py;
 import  numpy as np;
 import  torch;
 
-from    Enums               import NextStep, Result;
-from    GPLaSDI             import BayesianGLaSDI;
-from    Model               import Autoencoder;
-from    SINDy               import SINDy;
-from    burgers1d           import Burgers1D;
-from    ParameterSpace      import ParameterSpace;
-from    InputParser         import InputParser;
+from    Enums               import  NextStep, Result;
+from    GPLaSDI             import  BayesianGLaSDI;
+from    Model               import  Autoencoder;
+from    SINDy               import  SINDy;
+from    burgers1d           import  Burgers1D;
+from    Physics             import  Physics
+from    ParameterSpace      import  ParameterSpace;
+from    InputParser         import  InputParser;
 
 
 
@@ -61,13 +62,15 @@ def main():
     args : argparse.Namespace = parser.parse_args(sys.argv[1:]);
     print("config file: %s" % args.config_file);
 
+    # Load the configuration file. 
     with open(args.config_file, 'r') as f:
         config = yaml.safe_load(f)
         cfg_parser = InputParser(config, name='main')
 
-    use_restart = cfg_parser.getInput(['workflow', 'use_restart'], fallback = False)
+    # Check if we are loading from a restart or not. If so, load it.
+    use_restart : bool = cfg_parser.getInput(['workflow', 'use_restart'], fallback = False)
     if (use_restart):
-        restart_filename = cfg_parser.getInput(['workflow', 'restart_file'], datatype = str)
+        restart_filename : str = cfg_parser.getInput(['workflow', 'restart_file'], datatype = str)
         from pathlib import Path
         Path(os.path.dirname(restart_filename)).mkdir(parents = True, exist_ok = True)
     
@@ -82,16 +85,16 @@ def main():
     # prompt the code to set up the training set of parameters.
     if (use_restart and (os.path.isfile(restart_filename))):
         # TODO(kevin): in long term, we should switch to hdf5 format.
-        restart_file    = np.load(restart_filename, allow_pickle = True).item()
-        next_step       = restart_file['next_step']
-        result          = restart_file['result']
+        restart_dict    = np.load(restart_filename, allow_pickle = True).item()
+        next_step       = restart_dict['next_step']
+        result          = restart_dict['result']
     else:
-        restart_file    = None
+        restart_dict    = None
         next_step       = NextStep.PickSample
         result          = Result.Unexecuted
     
     # Initialize the trainer.
-    trainer, param_space, physics, latent_space, latent_dynamics = initialize_trainer(config, restart_file)
+    trainer, param_space, physics, model, latent_dynamics = Initialize_Trainer(config, restart_dict)
 
     if ((not use_restart) and physics.offline):
         raise RuntimeError("Offline physics solver needs to use restart files!")
@@ -127,22 +130,23 @@ def main():
     if (use_restart):
         # rename old restart file if exists.
         if (os.path.isfile(restart_filename)):
-            old_timestamp = restart_file['timestamp']
+            old_timestamp = restart_dict['timestamp']
             os.rename(restart_filename, restart_filename + '.' + old_timestamp)
-        save_file = restart_filename
+        restart_path : str = restart_filename
     else:
-        save_file = 'lasdi_' + date_str + '.npy'
+        restart_path : str = 'lasdi_' + date_str + '.npy'
     
-    # Build the save dictionary and then save it.
-    save_dict = {'parameters'       : param_space.export(),
-                 'physics'          : physics.export(),
-                 'latent_space'     : latent_space.export(),
-                 'latent_dynamics'  : latent_dynamics.export(),
-                 'trainer'          : trainer.export(),
-                 'timestamp'        : date_str,
-                 'next_step'        : next_step,
-                 'result'           : result};
-    np.save(save_file, save_dict)
+    # Build the restart save dictionary and then save it.
+    restart_dict = {
+                'parameter_space'   : param_space.export(),
+                'physics'           : physics.export(),
+                'model'             : model.export(),
+                'latent_dynamics'   : latent_dynamics.export(),
+                'trainer'           : trainer.export(),
+                'timestamp'         : date_str,
+                'next_step'         : next_step,
+                'result'            : result};
+    np.save(restart_path, restart_dict)
 
     # All done!
     return
@@ -259,10 +263,10 @@ def step(trainer        : BayesianGLaSDI,
 
 
 # -------------------------------------------------------------------------------------------------
-# Helper functions
+# Initialization functions
 # -------------------------------------------------------------------------------------------------
 
-def initialize_trainer(config, restart_file : str = None):
+def Initialize_Trainer(config, restart_dict : dict = None):
     """
     Initialize a LaSDI object with a latent space model and physics object according to config 
     file. Currently only 'gplasdi' is available.
@@ -283,7 +287,13 @@ def initialize_trainer(config, restart_file : str = None):
             - type
         - lasdi
             - type
-    
+
+    restart_dict: The dictionary returned by numpy.load when we load from a restart. This should
+    contain the following keys:
+        - parameter_space
+        - model
+        - latent_dynamics
+        - trainer
             
     
     -----------------------------------------------------------------------------------------------
@@ -299,68 +309,141 @@ def initialize_trainer(config, restart_file : str = None):
     Currently only 'gplasdi' is available.
     '''
 
-    # TODO(kevin): load parameter train space from a restart file.
+    # Set up a ParameterSpace object. This will keep track of all parameter combinations we want
+    # to try during testing and training. We load the set of possible parameters and their possible
+    # values using the configuration file. If we are using a restart file, then load it's 
+    # ParameterSpace object.
     param_space = ParameterSpace(config)
-    if (restart_file is not None):
-        param_space.load(restart_file['parameters'])
+    if (restart_dict is not None):
+        param_space.load(restart_dict['parameter_space'])
+    
+    # Get the "physics" object we use to generate the fom dataset.
+    physics         = Initialize_Physics(config, param_space.param_name_list)
 
-    physics         = initialize_physics(config, param_space.param_name)
-    latent_space    = initialize_latent_space(physics, config)
-    if (restart_file is not None):
-        latent_space.load(restart_file['latent_space'])
+    # Get the Model (autoencoder). We try to learn dynamics that describe how the latent space of
+    # this model evolve over time. If we are using a restart file, then load the saved model 
+    # parameters from file.
+    Model           = Initialize_Model(physics, config)
+    if (restart_dict is not None):
+        Model.load(restart_dict['model'])
 
-    # do we need a separate routine for latent dynamics initialization?
+    # Initialize the latent dynamics model. If we are using a restart file, then load the saved
+    # latent dynamics from this file. 
     ld_type = config['latent_dynamics']['type']
     assert(ld_type in config['latent_dynamics'])
     assert(ld_type in ld_dict)
-    latent_dynamics = ld_dict[ld_type](latent_space.n_z, physics.nt, config['latent_dynamics'])
-    if (restart_file is not None):
-        latent_dynamics.load(restart_file['latent_dynamics'])
+    latent_dynamics = ld_dict[ld_type](Model.n_z, physics.nt, config['latent_dynamics'])
+    if (restart_dict is not None):
+        latent_dynamics.load(restart_dict['latent_dynamics'])
 
+    # Fetch the trainer type. Note that only "gplasdi" is allowed.
     trainer_type = config['lasdi']['type']
     assert(trainer_type in config['lasdi'])
     assert(trainer_type in trainer_dict)
 
-    trainer = trainer_dict[trainer_type](physics, latent_space, latent_dynamics, param_space, config['lasdi'][trainer_type])
-    if (restart_file is not None):
-        trainer.load(restart_file['trainer'])
+    # Initialize the trainer object. If we are using a restart file, then load the 
+    # trainer from that file.
+    trainer = trainer_dict[trainer_type](physics, Model, latent_dynamics, param_space, config['lasdi'][trainer_type])
+    if (restart_dict is not None):
+        trainer.load(restart_dict['trainer'])
 
     # All done!
-    return trainer, param_space, physics, latent_space, latent_dynamics
+    return trainer, param_space, physics, Model, latent_dynamics
 
 
 
-def initialize_latent_space(physics, config):
+def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
     '''
-    Initialize a latent space model according to config file.
-    Currently only 'ae' (autoencoder) is available.
+    Initialize a Model (autoencoder) according to config file. 
+    
+
+    
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+
+    physics: A "Physics" object that allows us to generate the fom dataset. Each Physics object has 
+    a corresponding PDE with parameters, and a way to generate a solution to that equation given
+    a particular set of parameter values (and an IC, BCs).
+
+    config: This should be a dictionary that we loaded from a .yml file. It should house all the 
+    settings we expect to use to generate the data and train the models. We expect this dictionary 
+    to contain the following keys (if a key is within a dictionary that is specified by another 
+    key, then we tab the sub-key relative to the dictionary key): 
+        - latent_space
+            - type
+    
+            
+    
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    A torch.nn.Module object that acts as the trainable model in the gplasdi framework. This model 
+    should have a latent space of some form. We learn a set of dynamics to describe how this latent
+    space evolves over time. 
     '''
 
-    latent_type = config['latent_space']['type']
-
+    # First, determine what model we are using in the latent dynamics. Make sure the user 
+    # included all the information that is necessary to initialize the corresponding dynamics.
+    latent_type : str = config['latent_space']['type']
     assert(latent_type in config['latent_space'])
     assert(latent_type in latent_dict)
     
-    latent_cfg = config['latent_space'][latent_type]
-    latent_space = latent_dict[latent_type](physics, latent_cfg)
+    # Next, initialize the latent space.
+    latent_cfg      : dict              = config['latent_space'][latent_type]
+    latent_space    : torch.nn.Module   = latent_dict[latent_type](physics, latent_cfg)
 
+    # All done!
     return latent_space
 
 
 
-def initialize_physics(config, param_name):
+def Initialize_Physics(config: dict, param_name_list : list[str]) -> Physics:
     '''
     Initialize a physics FOM model according to config file.
     Currently only 'burgers1d' is available.
+
+    
+
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+
+    config: This should be a dictionary that we loaded from a .yml file. It should house all the 
+    settings we expect to use to generate the data and train the models. We expect this dictionary 
+    to contain the following keys (if a key is within a dictionary that is specified by another 
+    key, then we tab the sub-key relative to the dictionary key): 
+        - physics 
+            - type
+
+    param_name_list: A list housing the names of the parameters in the physics model. There should
+    be an entry in the configuration file for each named parameter. 
+            
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    A "Physics" object initialized using the parameters in the config['physics'] dictionary. 
     '''
 
-    physics_cfg = config['physics']
-    physics_type = physics_cfg['type']
-    physics = physics_dict[physics_type](physics_cfg, param_name)
+    # First, determine what kind of "physics" object we want to load.
+    physics_cfg     : dict      = config['physics']
+    physics_type    : str       = physics_cfg['type']
 
+    # Next, initialize the "physics" object we are using to build the simulations.
+    physics         : Physics   = physics_dict[physics_type](physics_cfg, param_name_list)
+
+    # All done!
     return physics
 
 
+
+
+
+# -------------------------------------------------------------------------------------------------
+# Sampling functions
+# -------------------------------------------------------------------------------------------------
 
 def pick_samples(trainer, config):
     """
@@ -400,21 +483,21 @@ def pick_samples(trainer, config):
     Path(dirname(train_param_file)).mkdir(parents=True, exist_ok=True)
 
     with h5py.File(train_param_file, 'w') as f:
-        f.create_dataset("train_params", new_sample.shape, data=new_sample)
-        f.create_dataset("parameters", (len(trainer.param_space.param_name),), data=trainer.param_space.param_name)
+        f.create_dataset("train_params", new_sample.shape, data = new_sample)
+        f.create_dataset("parameters", (len(trainer.param_space.param_name_list),), data = trainer.param_space.param_name_list)
         f.attrs["n_params"] = trainer.param_space.n_param
         f.attrs["new_points"] = new_sample.shape[0]
 
     # clean up the previous test parameter point file.
-    test_param_file = cfg_parser.getInput(['workflow', 'offline_greedy_sampling', 'test_param_file'], fallback="new_test.h5")
+    test_param_file = cfg_parser.getInput(['workflow', 'offline_greedy_sampling', 'test_param_file'], fallback = "new_test.h5")
     Path(dirname(test_param_file)).mkdir(parents=True, exist_ok=True)
     if exists(test_param_file):
         remove(test_param_file)
 
     if (new_tests > 0):
         with h5py.File(test_param_file, 'w') as f:
-            f.create_dataset("test_params", new_test_params.shape, data=new_test_params)
-            f.create_dataset("parameters", (len(trainer.param_space.param_name),), data=trainer.param_space.param_name)
+            f.create_dataset("test_params", new_test_params.shape, data = new_test_params)
+            f.create_dataset("parameters", (len(trainer.param_space.param_name_list),), data = trainer.param_name_list)
             f.attrs["n_params"] = trainer.param_space.n_param
             f.attrs["new_points"] = new_test_params.shape[0]
 
@@ -424,10 +507,11 @@ def pick_samples(trainer, config):
 
 
 
-'''
-    update trainer.X_train and trainer.X_test based on param_space.train_space and param_space.test_space.
-'''
 def run_samples(trainer, config):
+    """
+    update trainer.X_train and trainer.X_test based on param_space.train_space and param_space.test_space.
+    """
+    
     if trainer.physics.offline:
         raise RuntimeError("Current physics solver is offline. RunSamples stage cannot be run online!")
 

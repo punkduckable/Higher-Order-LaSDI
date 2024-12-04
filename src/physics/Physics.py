@@ -49,11 +49,11 @@ class Physics:
     offline : bool = False
 
     # list of parameter names to parse parameters.
-    param_name : list[str] = None
+    param_name_list : list[str] = None
 
 
 
-    def __init__(self, cfg : dict, param_name : list[str] = None) -> None:
+    def __init__(self, cfg : dict, param_name_list : list[str] = None) -> None:
         """
         A Physics object acts as a wrapper around a solver for a particular equation. The initial 
         condition in that function can have named parameters. Each physics object should have a 
@@ -69,8 +69,8 @@ class Physics:
         cfg: A dictionary housing the settings for the Physics object. This should be the "physics"
         sub-dictionary of the main configuration file. 
 
-        param_name: A list of strings. There should be one list item for each parameter. The i'th 
-        element of this list should be a string housing the name of the i'th parameter.
+        param_name_list: A list of strings. There should be one list item for each parameter. The 
+        i'th element of this list should be a string housing the name of the i'th parameter.
 
         
         -------------------------------------------------------------------------------------------
@@ -80,7 +80,7 @@ class Physics:
         Nothing!
         """
         
-        self.param_name = param_name
+        self = param_name_list
         return
     
 
@@ -238,8 +238,8 @@ class Physics:
 # -------------------------------------------------------------------------------------------------
 
 class OfflineFOM(Physics):
-    def __init__(self, cfg, param_name = None):
-        super().__init__(cfg, param_name)
+    def __init__(self, cfg, param_name_list = None):
+        super().__init__(cfg, param_name_list)
         self.offline = True
 
         assert('offline_fom' in cfg)

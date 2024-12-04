@@ -118,7 +118,7 @@ getParam1DSpace : dict[str, callable]    = {'list'       : get_1dspace_from_list
 class ParameterSpace:
     # Initialize class variables
     param_list      : list[dict]        = []    # A list housing the parameter dictionaries (from the yml file)
-    param_name      : list[str]         = []    # A list housing the parameter names.
+    param_name_list : list[str]         = []    # A list housing the parameter names.
     n_param         : int               = 0     # The number of parameters.
     train_space     : np.ndarray        = None  # A 2D array of shape (n_train, n_param) whose i,j element is the j'th parameter value in the i'th combination of training parameters.
     test_space      : np.ndarray        = None  # A 2D array of shape (n_test, n_param) whose i,j element is the j'th parameter value in the i'th combination of testing parameters.
@@ -161,9 +161,9 @@ class ParameterSpace:
         self.param_list : list[dict]    = parser.getInput(['parameters'],           datatype    = list)
 
         # Fetch the parameter names.
-        self.param_name : list[str]     = []
+        self.param_name_list : list[str]     = []
         for param in self.param_list:
-            self.param_name += [param['name']];
+            self.param_name_list += [param['name']];
 
         # First, let's fetch the set of possible parameter values. This yields a 2^k x k matrix,
         # where k is the number of parameters. The i,j entry of this matrix gives the value of the 
@@ -311,10 +311,10 @@ class ParameterSpace:
             convert numpy array parameter vector to a dict.
             Physics class takes the dict for solve/initial_condition.
         '''
-        assert(param_vector.size == len(self.param_name))
+        assert(param_vector.size == len(self.param_name_list))
 
         param = {}
-        for k, name in enumerate(self.param_name):
+        for k, name in enumerate(self.param_name_list):
             param[name] = param_vector[k]
 
         return param
