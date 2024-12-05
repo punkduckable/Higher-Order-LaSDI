@@ -70,13 +70,112 @@ transform it into a method for solving 2nd order ODEs.
 # Runge-Kutta Solvers
 # -------------------------------------------------------------------------------------------------
 
+def RK1(f   : callable, 
+        y0  : numpy.ndarray, 
+        Dy0 : numpy.ndarray, 
+        h   : float, 
+        N   : int) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]:
+    r"""
+    This function implements a RK1 or Forward-Euler ODE solver for a second-order ODE of the 
+    following form:
+        y''(t)          = f(t,   y(t),   y'(t)).
+    Here, y takes values in \mathbb{R}^d. 
+  
+    In this function, we implement the Forward Euler (RK1) scheme:
+     with the following coefficients:
+        c_1 = 0
+        b_1 = 1
+        
+    Substituting these coefficients into the equations above gives \bar{b_i} = \bar{a_{i,j}} = 0
+    for each i,j. Thus, 
+        y_{n + 1}       = y_n  + h y'_n 
+        y'_{n + 1}      = y'_n + h l_1
+
+        l_1             = f(t_n,        y_n,                            y'_n)
+    This is the method we implement.
+
+
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+
+    f: The right-hand side of the ODE (see the top of this doc string). This is a function whose 
+    domain and co-domain are \mathbb{R} x \mathbb{R}^d x \mathbb{R}^d and \mathbb{R}^d, 
+    respectively. Thus, we assume that f(t, y(t), y'(t)) = y''(t). 
+
+    y0: The initial displacement (y0 = y(0)).
+
+    Dy0: The initial velocity (Dy0 = y'(0)).
+
+    h: The step size. This must be a positive number.
+
+    N: The number of steps we want to take. This must be a positive integer.
+
+
+    
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    Three numpy.ndarray objects: D, V, and T. 
+    
+    If y takes values in \mathbb{R}^d, then D and V have shape N + 1 x d. The i'th row of D, V
+    represent the displacement and the velocity at time i*h, respectively. Thus, if we denote the 
+    returned arrays by D and V, respectively, then 
+        D[i, :] = y_i   \approx y (i h) 
+        V[i, :] = y'_i  \approx y'(i h) 
+    Finally, T is an array of shape N + 1 whose i'th entry holds the i'th time value.
+    """
+
+    # First, run checks.
+    assert(N > 0)
+    assert(h > 0)
+    assert(len(y0.shape)    == 1)
+    assert(y0.shape         == Dy0.shape)
+
+    # Next, fetch d.
+    d : int = y0.size;
+
+    # Initialize D, V.
+    D : numpy.ndarray = numpy.empty((N + 1, d), dtype = numpy.float32);
+    V : numpy.ndarray = numpy.empty((N + 1, d), dtype = numpy.float32);
+    T : numpy.ndarray = numpy.empty(N + 1,      dtype = numpy.float32);
+
+    D[0, :] = y0;
+    V[0, :] = Dy0;
+    T[0]    = 0;
+
+    # Now, run the time stepping!
+    for n in range(N):
+        # Fetch the current time, displacement, velocity.
+        tn  : float         = n*h;
+        yn  : numpy.ndarray = D[n, :];
+        Dyn : numpy.ndarray = V[n, :];
+
+        # Compute l_1.
+        l_1 = f(tn, yn, Dyn);
+
+        # Now compute y{n + 1} and Dy{n + 1}.
+        yn1     : numpy.ndarray = yn  + h*Dyn;
+        Dyn1    : numpy.ndarray = Dyn + h*l_1
+
+        # All done with this step!
+        D[n + 1, :] = yn1;
+        V[n + 1, :] = Dyn1;
+        T[n + 1]    = tn + h;
+
+    # All done!
+    return (D, V, T);
+
+
+
 def RK2(f   : callable, 
         y0  : numpy.ndarray, 
         Dy0 : numpy.ndarray, 
         h   : float, 
-        N   : int) -> tuple[numpy.ndarray, numpy.ndarray]:
+        N   : int) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     r"""
-    This function implements a RK2 based ODE solver for second order ODE of the following form:
+    This function implements a RK2 based ODE solver for a second-order ODE of the following form:
         y''(t)          = f(t,   y(t),   y'(t)).
     Here, y takes values in \mathbb{R}^d. 
   
@@ -125,12 +224,14 @@ def RK2(f   : callable,
     Returns
     -----------------------------------------------------------------------------------------------
 
-    If y takes values in \mathbb{R}^d, then this function returns two numpy.ndarray objects, each 
-    of which has shape N + 1 x d. The i'th row of the two arrays represent the displacement and the 
-    velocity at time i h, respectively. Thus, if we denote the returned arrays by D and V, 
-    respectively, then 
+    Three numpy.ndarray objects: D, V, and T. 
+    
+    If y takes values in \mathbb{R}^d, then D and V have shape N + 1 x d. The i'th row of D, V
+    represent the displacement and the velocity at time i*h, respectively. Thus, if we denote the 
+    returned arrays by D and V, respectively, then 
         D[i, :] = y_i   \approx y (i h) 
         V[i, :] = y'_i  \approx y'(i h) 
+    Finally, T is an array of shape N + 1 whose i'th entry holds the i'th time value.
     """
 
     # First, run checks.
@@ -145,9 +246,11 @@ def RK2(f   : callable,
     # Initialize D, V.
     D : numpy.ndarray = numpy.empty((N + 1, d), dtype = numpy.float32);
     V : numpy.ndarray = numpy.empty((N + 1, d), dtype = numpy.float32);
+    T : numpy.ndarray = numpy.empty(N + 1,      dtype = numpy.float32);
 
     D[0, :] = y0;
     V[0, :] = Dy0;
+    T[0]    = 0;
 
     # Now, run the time stepping!
     for n in range(N):
@@ -167,9 +270,10 @@ def RK2(f   : callable,
         # All done with this step!
         D[n + 1, :] = yn1;
         V[n + 1, :] = Dyn1;
+        T[n + 1]    = tn + h;
 
     # All done!
-    return (D, V);
+    return (D, V, T);
 
 
 
@@ -179,7 +283,7 @@ def RK4(f   : callable,
         h   : float, 
         N   : int) -> tuple[numpy.ndarray, numpy.ndarray]:
     r"""
-    This function implements a RK4 based ODE solver for second order ODE of the following form:
+    This function implements a RK4 based ODE solver for a second-order ODE of the following form:
         y''(t)          = f(t,   y(t),   y'(t)).
     Here, y takes values in \mathbb{R}^d. 
   
@@ -242,12 +346,14 @@ def RK4(f   : callable,
     Returns
     -----------------------------------------------------------------------------------------------
 
-    If y takes values in \mathbb{R}^d, then this function returns two numpy.ndarray objects, each 
-    of which has shape N + 1 x d. The i'th row of the two arrays represent the displacement and the 
-    velocity at time i h, respectively. Thus, if we denote the returned arrays by D and V, 
-    respectively, then 
+    Three numpy.ndarray objects: D, V, and T. 
+    
+    If y takes values in \mathbb{R}^d, then D and V have shape N + 1 x d. The i'th row of D, V
+    represent the displacement and the velocity at time i*h, respectively. Thus, if we denote the 
+    returned arrays by D and V, respectively, then 
         D[i, :] = y_i   \approx y (i h) 
         V[i, :] = y'_i  \approx y'(i h) 
+    Finally, T is an array of shape N + 1 whose i'th entry holds the i'th time value.
     """
 
     # First, run checks.
@@ -262,9 +368,11 @@ def RK4(f   : callable,
     # Initialize D, V.
     D : numpy.ndarray = numpy.empty((N + 1, d), dtype = numpy.float32);
     V : numpy.ndarray = numpy.empty((N + 1, d), dtype = numpy.float32);
+    T : numpy.ndarray = numpy.empty((N + 1),    dtype = numpy.float32);
 
     D[0, :] = y0;
     V[0, :] = Dy0;
+    T[0]    = 0;
 
     # Now, run the time stepping!
     for n in range(N):
@@ -286,7 +394,8 @@ def RK4(f   : callable,
         # All done with this step!
         D[n + 1, :] = yn1;
         V[n + 1, :] = Dyn1;
-
+        T[n + 1]    = tn + h;
+    
     # All done!
-    return (D, V);
+    return (D, V, T);
     
