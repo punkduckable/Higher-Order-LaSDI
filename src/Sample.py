@@ -4,6 +4,7 @@
 
 import  h5py;
 import  torch;
+import  numpy               as      np; 
 
 from    InputParser         import  InputParser;
 from    Enums               import  NextStep, Result;  
@@ -15,30 +16,78 @@ from    GPLaSDI             import  BayesianGLaSDI;
 # Sampling functions
 # -------------------------------------------------------------------------------------------------
 
-def Pick_Samples(trainer : BayesianGLaSDI, config : dict):
+def Pick_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Result]:
     """
     This function uses greedy sampling to pick a new parameter point.
 
-    If physics is offline solver, then we save parameter points to a hdf file that the fom solver 
-    can read.
+    
+
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+
+    trainer: A BayesianGLaSDI object that we use for training. We sample a new training point 
+    from this trainer.
+
+    config: This should be a dictionary that we loaded from a .yml file. It should house all the 
+    settings we expect to use to generate the data and train the models.
+    
+
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    A tuple: (NextStep.RunSample, Result.Success). The first returned value, NextStep.RunSample, 
+    indicates that we have a new sample and need to generate the fom solution using the 
+    corresponding parameter values for the IC. The second returned value, Result.Success, indicates 
+    that we were able to pick a new sample without running into any problems. 
     """
 
-    # for initial step, get initial parameter points from parameter space.
+    # First, figure out which samples we need to run simulations for. 
     if (trainer.X_train.size(0) == 0):
-        new_sample = trainer.param_space.train_space
+        # If this is the initial step then trainer.X_Train will be empty, meaning that we need to 
+        # run a simulation for every combination of parameters in the train_space. 
+        new_sample  : np.ndarray    = trainer.param_space.train_space
     else:
-        # for greedy sampling, get a new parameter and append training space.
-        new_sample = trainer.get_new_sample_point()
+        # If this is not the initial step, then we need to use greedy sampling to pick the new 
+        # combination of parameter values.
+        new_sample  : np.ndarray    = trainer.get_new_sample_point()
         trainer.param_space.appendTrainSpace(new_sample)
 
-    # for initial step, get initial parameter points from parameter space.
-    new_tests = 0
+    # Now that we know the new points we need to generate simulations for, we need to get ready to
+    # actually run those simulations.
+    next_step, result = NextStep.RunSample, Result.Success
+    return result, next_step
+
+    """
+    This is code that uses the offline stuff (which I disabled). I kept it here for reference.
+    
+    # First, figure out which samples we need to run simulations for. 
+    if (trainer.X_train.size(0) == 0):
+        # If this is the initial step then trainer.X_Train will be empty, meaning that we need to 
+        # run a simulation for every combination of parameters in the train_space. 
+        new_sample  : np.ndarray    = trainer.param_space.train_space
+    else:
+        # If this is not the initial step, then we need to use greedy sampling to pick the new 
+        # combination of parameter values.
+        new_sample  : np.ndarray    = trainer.get_new_sample_point()
+        trainer.param_space.appendTrainSpace(new_sample)
+
+    # If this is the initial step, we also need to fetch the number of testing points.
+    new_tests : int = 0
     if (trainer.X_test.size(0) == 0):
-        new_test_params = trainer.param_space.test_space
-        new_tests = new_test_params.shape[0]
+        new_test_params     = trainer.param_space.test_space
+        new_tests           = new_test_params.shape[0]
     # TODO(kevin): greedy sampling for a new test parameter?
 
-    # For online physics solver, we go directly obtain new solutions.
+    # Now that we know the new points we need to generate simulations for, we need to get ready to
+    # actually run those simulations.
+    if not trainer.physics.offline:
+        next_step, result = NextStep.RunSample, Result.Success
+        return result, next_step
+
+    # Now that we know the new points we need to generate simulations for, we need to get ready to
+    # actually run those simulations.
     if not trainer.physics.offline:
         next_step, result = NextStep.RunSample, Result.Success
         return result, next_step
@@ -74,44 +123,74 @@ def Pick_Samples(trainer : BayesianGLaSDI, config : dict):
     # Next step is to collect sample from the offline FOM simulation.
     next_step, result = NextStep.CollectSample, Result.Success
     return result, next_step
-
-
-
-def Run_Samples(trainer : BayesianGLaSDI, config : dict):
     """
-    update trainer.X_train and trainer.X_test based on param_space.train_space and param_space.test_space.
+
+
+
+def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Result]:
+    """
+    This function updates trainer.X_train and trainer.X_test based on param_space.train_space and 
+    param_space.test_space.
+
+
+    
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+
+    trainer: A BayesianGLaSDI object that we use for training. 
+
+    config: This should be a dictionary that we loaded from a .yml file. It should house all the 
+    settings we expect to use to generate the data and train the models.
+
+    
+
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+
+    A tuple: (NextStep.Train, Result.Success). The first returned value, NextStep.Train, 
+    indicates that we have generated the fom solution for the new training point and need to 
+    resume training. The second return value, Result.Success, indicates that we were able to 
+    generate the fom solution without running into any problems. 
     """
     
-    if trainer.physics.offline:
-        raise RuntimeError("Current physics solver is offline. RunSamples stage cannot be run online!")
+    cfg_parser          : InputParser   = InputParser(config)
 
-    cfg_parser = InputParser(config)
-
-    new_trains = trainer.param_space.n_train() - trainer.X_train.size(0)
+    # Figure out how many new training examples there are. Note: we require there is at least one.
+    new_trains          : int           = trainer.param_space.n_train() - trainer.X_train.size(0)
     assert(new_trains > 0)
-    new_train_params = trainer.param_space.train_space[-new_trains:, :]
 
-    new_tests = trainer.param_space.n_test() - trainer.X_test.size(0)
+    # Fetch the parameters. The i'th row of this matrix gives the i'th combination of parameter
+    # values for which we have not generated a fom solution.
+    new_train_params    : np.ndarray    = trainer.param_space.train_space[-new_trains:, :]
+
+    # Figure out how many new testing parameter combinations there are. If there are any, fetch 
+    # them from the param space.
+    new_tests           : int           = trainer.param_space.n_test() - trainer.X_test.size(0)
     if (new_tests > 0):
-        new_test_params = trainer.param_space.test_space[-new_tests:, :]
+        new_test_params     : np.ndarray    = trainer.param_space.test_space[-new_tests:, :]
 
-    # We run FOM simulation directly here.
-
-    new_X = trainer.physics.generate_solutions(new_train_params)
-    trainer.X_train = torch.cat([trainer.X_train, new_X], dim = 0)
+    # Generate the fom solutions for the new training points. After we have generated them, we
+    # append them to trainer's X_Train variable.
+    new_X           : torch.Tensor      = trainer.physics.generate_solutions(new_train_params)
+    trainer.X_train                     = torch.cat([trainer.X_train, new_X], dim = 0)
     assert(trainer.X_train.size(0) == trainer.param_space.n_train())
-
+    
+    # Do the same thins for the testing points.
     if (new_tests > 0):
         new_X = trainer.physics.generate_solutions(new_test_params)
         trainer.X_test = torch.cat([trainer.X_test, new_X], dim = 0)
         assert(trainer.X_test.size(0) == trainer.param_space.n_test())
 
-    # Since FOM simulations are already collected, we go to training phase directly.
+    # We are now done. Since we now have the new fom solutions, the next step is training.
     next_step, result = NextStep.Train, Result.Success
     return result, next_step
 
 
 
+# Note: This code is for offline stuff... I did not document it.
 def Collect_Samples(trainer : BayesianGLaSDI, config : dict):
     cfg_parser = InputParser(config)
     assert(trainer.physics.offline)

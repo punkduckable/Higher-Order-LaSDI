@@ -43,11 +43,7 @@ class Physics:
 
     # time grid in numpy 1d array. 
     t_grid : np.ndarray = np.array([])
-
-    # Need an offline FOM simulation or not.
-    # Set at the initialization.
-    offline : bool = False
-
+    
     # list of parameter names to parse parameters.
     param_name_list : list[str] = None
 
@@ -230,51 +226,3 @@ class Physics:
 
         raise RuntimeError("Abstract method Physics.residual!")
         return res, res_norm
-
-
-
-# -------------------------------------------------------------------------------------------------
-# Offline full order model class
-# -------------------------------------------------------------------------------------------------
-
-class OfflineFOM(Physics):
-    def __init__(self, cfg, param_name_list = None):
-        super().__init__(cfg, param_name_list)
-        self.offline = True
-
-        assert('offline_fom' in cfg)
-        from ..InputParser import InputParser
-        parser = InputParser(cfg['offline_fom'], name = "offline_fom_input")
-
-        self.dim = parser.getInput(['space_dimension'], datatype = int)
-        self.qdim = parser.getInput(['solution_dimension'], datatype = int)
-
-        self.grid_size = parser.getInput(['grid_size'], datatype = list)
-        self.qgrid_size = self.grid_size
-        if (self.qdim > 1):
-            self.qgrid_size = [self.qdim] + self.qgrid_size
-        assert(self.dim == len(self.grid_size))
-
-        #TODO(kevin): a general file loading for spatial grid
-        #             There can be unstructured grids as well.
-        self.x_grid = None
-
-        # Assume uniform time stepping for now.
-        self.nt = parser.getInput(['number_of_timesteps'], datatype = int)
-        self.dt = parser.getInput(['timestep_size'], datatype = float)
-        self.t_grid = np.linspace(0.0, (self.nt-1) * self.dt, self.nt)
-
-        return
-    
-
-
-    def generate_solutions(self, params):
-        raise RuntimeError("OfflineFOM does not support generate_solutions!!")
-        return
-
-
-
-    def export(self):
-        dict_ = {'t_grid' : self.t_grid, 'x_grid' : self.x_grid, 'dt' : self.dt}
-        return dict_
-

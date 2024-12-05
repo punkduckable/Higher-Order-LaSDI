@@ -15,11 +15,6 @@ lasdi:
 workflow:
   use_restart:        false
   restart_file:       restarts/burgers1d.restart.npy
-  offline_greedy_sampling:
-    train_param_file: sampling/new_train.burgers1d.h5
-    test_param_file:  sampling/new_test.burgers1d.h5
-    train_sol_file:   sampling/new_Xtrain.burgers1d.h5
-    test_sol_file:    sampling/new_Xtest.burgers1d.h5
 
 parameter_space:
   parameters:
@@ -56,7 +51,6 @@ latent_dynamics:
 physics:
   type:                   burgers1d
   burgers1d:
-    offline_driver:       false
     number_of_timesteps:  1001
     simulation_time:      1.
     grid_size:            [1001]

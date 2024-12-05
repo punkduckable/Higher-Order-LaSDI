@@ -25,8 +25,9 @@ from    Sample              import  Run_Samples, Pick_Samples, Collect_Samples;
 # Set up the command line arguments
 parser = argparse.ArgumentParser(description        = "",
                                  formatter_class    = argparse.RawTextHelpFormatter);
-parser.add_argument('config_file', 
-                    metavar     = 'string', 
+parser.add_argument('--config', 
+                    default     = None,
+                    required    = True,
                     type        = str,
                     help        = 'config file to run LasDI workflow.\n');
 
@@ -43,10 +44,10 @@ def main():
 
     # Load in the argument
     args : argparse.Namespace = parser.parse_args(sys.argv[1:]);
-    print("config file: %s" % args.config_file);
+    print("config file: %s" % args.config);
 
     # Load the configuration file. 
-    with open(args.config_file, 'r') as f:
+    with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
         cfg_parser = InputParser(config, name='main')
 
@@ -78,9 +79,6 @@ def main():
     
     # Initialize the trainer.
     trainer, param_space, physics, model, latent_dynamics = Initialize_Trainer(config, restart_dict)
-
-    if ((not use_restart) and physics.offline):
-        raise RuntimeError("Offline physics solver needs to use restart files!")
 
     # Run the next step.
     result, next_step = step(trainer, next_step, config, use_restart)
@@ -218,6 +216,9 @@ def step(trainer        : BayesianGLaSDI,
 
 
     elif (next_step is NextStep.CollectSample):
+        # Note: We should only reach here if we are using the offline stuff... since I disabled 
+        # that, we should never reach this step.
+        print("NextStep = Collect_Samples. Has something gone wrong? We should only be here if running offline (which should be disabled).");
         result, next_step = Collect_Samples(trainer, config)
 
 
