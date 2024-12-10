@@ -17,13 +17,14 @@ from    SINDy               import  SINDy;
 from    Physics             import  Physics;
 from    ParameterSpace      import  ParameterSpace;
 from    GPLaSDI             import  BayesianGLaSDI;
-from    Model               import  Autoencoder;
+from    Model               import  Autoencoder, load_Autoencoder;
 from    Burgers1d           import  Burgers1D;
 
 # Set up the dictionaries; we use this to allow the code to call different classes, functions 
 # depending on the settings.
 trainer_dict    = {'gplasdi'    : BayesianGLaSDI};
 model_dict      = {'ae'         : Autoencoder};
+model_load_dict = {'ae'         : load_Autoencoder};
 ld_dict         = {'sindy'      : SINDy};
 physics_dict    = {'burgers1d'  : Burgers1D};
 
@@ -90,9 +91,11 @@ def Initialize_Trainer(config, restart_dict : dict = None):
     # Get the Model (autoencoder). We try to learn dynamics that describe how the latent space of
     # this model evolve over time. If we are using a restart file, then load the saved model 
     # parameters from file.
-    Model           = Initialize_Model(physics, config)
     if (restart_dict is not None):
-        Model.load(restart_dict['model'])
+        model_type : str    = config['model']['type'];
+        Model               = model_load_dict[model_type](restart_dict['model']);
+    else: 
+        Model               = Initialize_Model(physics, config)
 
     # Initialize the latent dynamics model. If we are using a restart file, then load the saved
     # latent dynamics from this file. 
