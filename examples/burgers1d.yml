@@ -36,10 +36,10 @@ parameter_space:
   test_space:
     type: grid
 
-latent_space:
+model:
   type:                   ae
   ae:
-    hidden_units:         [100]
+    hidden_widths:       [100]
     latent_dimension:     5
 
 latent_dynamics:
