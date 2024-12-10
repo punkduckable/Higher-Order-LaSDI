@@ -34,8 +34,7 @@ act_dict = {'ELU'           : torch.nn.ELU,
             'softplus'      : torch.nn.Softplus,
             'softshrink'    : torch.nn.Softshrink,
             'tanh'          : torch.nn.Tanh,
-            'tanhshrink'    : torch.nn.Tanhshrink,
-            'threshold'     : torch.nn.Threshold,}
+            'tanhshrink'    : torch.nn.Tanhshrink}
 
 
 
@@ -77,29 +76,29 @@ def initial_condition_latent(param_grid     : np.ndarray,
     the i'th set of parameters, then the i'th element of the returned list is Z0_i = encoder(U0_i).
     """
 
-    # Figure out how many parameters we are testing at. 
-    n_param     : int               = param_grid.shape[0]
-    Z0          : list[np.ndarray]  = []
-    sol_shape   : list[int]         = [1, 1] + physics.qgrid_size
+    # Figure out how many combinations of parameter values there are.
+    n_param     : int               = param_grid.shape[0];
+    Z0          : list[np.ndarray]  = [];
+    sol_shape   : list[int]         = [1, 1] + physics.qgrid_size;
     
     # Cycle through the parameters.
     for i in range(n_param):
         # TODO(kevin): generalize parameter class.
 
         # Fetch the IC for the i'th set of parameters. Then map it to a tensor.
-        u0 : np.ndarray = physics.initial_condition(param_grid[i])
-        u0              = u0.reshape(sol_shape)
-        u0              = torch.Tensor(u0)
+        u0 : np.ndarray = physics.initial_condition(param_grid[i]);
+        u0              = u0.reshape(sol_shape);
+        u0              = torch.Tensor(u0);
 
         # Encode the IC, then map the encoding to a numpy array.
-        z0 : np.ndarray = autoencoder.encoder(u0)
-        z0              = z0[0, 0, :].detach().numpy()
+        z0 : np.ndarray = autoencoder.encoder(u0);
+        z0              = z0[0, 0, :].detach().numpy();
 
         # Append the new IC to the list of latent ICs
-        Z0.append(z0)
+        Z0.append(z0);
 
     # Return the list of latent ICs.
-    return Z0
+    return Z0;
 
 
 
@@ -109,12 +108,10 @@ def initial_condition_latent(param_grid     : np.ndarray,
 
 class MultiLayerPerceptron(torch.nn.Module):
     def __init__(   self, 
-                    layer_sizes     : list[int],
-                    act_type        : str           = 'sigmoid',
+                    widths          : list[int],
+                    activation      : str           = 'sigmoid',
                     reshape_index   : int           = None, 
-                    reshape_shape   : tuple[int]    = None,
-                    threshold       : float         = 0.1, 
-                    value           : float         = 0.0) -> None:
+                    reshape_shape   : list[int]    = None) -> None:
         r"""
         This class defines a standard multi-layer network network.
 
@@ -123,14 +120,14 @@ class MultiLayerPerceptron(torch.nn.Module):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        layer_sizes: A list of integers specifying the widths of the layers (including the 
+        widths: A list of integers specifying the widths of the layers (including the 
         dimensionality of the domain of each layer, as well as the co-domain of the final layer).
         Suppose this list has N elements. Then the network will have N - 1 layers. The i'th layer 
         maps from \mathbb{R}^{layer_sizes[i]} to \mathbb{R}^{layers_sizes[i]}. Thus, the i'th 
         element of this list represents the domain of the i'th layer AND the co-domain of the 
         i-1'th layer.
 
-        act_type: A string specifying which activation function we want to use at the end of each 
+        activation: A string specifying which activation function we want to use at the end of each 
         layer (except the final one). We use the same activation for each layer. 
 
         reshape_index: This argument specifies if we should reshape the network's input or output 
@@ -141,19 +138,11 @@ class MultiLayerPerceptron(torch.nn.Module):
         specifies how we reshape the network output before returning it (the output to the last 
         layer). 
 
-        reshape_shape: These are lists of k integers specifying the final k dimensions of the shape
+        reshape_shape: This is a list of k integers specifying the final k dimensions of the shape
         of the input to the first layer (if reshape_index == 0) or the output of the last layer 
         (if reshape_index == -1). You must specify this argument if and only if you specify 
         reshape_index. 
 
-        threshold: You should only specify this argument if you are using the "Threshold" 
-        activation type. In this case, it specifies the threshold value for that activation (if x
-        is the input and x > threshold, then the function returns x. Otherwise, it returns the 
-        value).
-
-        value: You should only specify this argument if you are using the "Threshold" activation
-        type. In this case, "value" specifies the value that the function returns if the input is
-        below the threshold. 
 
 
         -------------------------------------------------------------------------------------------
@@ -175,39 +164,34 @@ class MultiLayerPerceptron(torch.nn.Module):
         # array to match the input domain of the first layer. On the other hand, reshape_index == -1 
         # then we reshape the final dimension of the output to match the reshape_shape. Thus, in 
         # both cases, we need the product of the components of reshape_shape to match a 
-        # corresponding element of layer_sizes.
-        assert((reshape_index is None) or (reshape_index in [0, -1]))
-        assert((reshape_shape is None) or (np.prod(reshape_shape) == layer_sizes[reshape_index]))
+        # corresponding element of widths.
+        assert((reshape_index is None) or (reshape_index in [0, -1]));
+        assert((reshape_shape is None) or (np.prod(reshape_shape) == widths[reshape_index]));
 
-        super(MultiLayerPerceptron, self).__init__()
+        super(MultiLayerPerceptron, self).__init__();
 
         # Note that layer_sizes specifies the dimensionality of the domains and co-domains of each
         # layer. Specifically, the i'th element specifies the input dimension of the i'th layer,
         # while the final element specifies the dimensionality of the co-domain of the final layer.
         # Thus, the number of layers is one less than the length of layer_sizes.
-        self.n_layers       : int                   = len(layer_sizes) - 1;
-        self.layer_sizes    : list[int]             = layer_sizes
+        self.n_layers       : int                   = len(widths) - 1;
+        self.widths         : list[int]             = widths;
 
         # Set up the affine parts of the layers.
         self.layers            : list[torch.nn.Module] = [];
         for k in range(self.n_layers):
-            self.layers += [torch.nn.Linear(layer_sizes[k], layer_sizes[k + 1])]
-        self.layers = torch.nn.ModuleList(self.layers)
+            self.layers += [torch.nn.Linear(widths[k], widths[k + 1])];
+        self.layers = torch.nn.ModuleList(self.layers);
 
         # Now, initialize the weight matrices and bias vectors in the affine portion of each layer.
-        self.init_weight()
+        self.init_weight();
 
         # Reshape input to the 1st layer or output of the last layer.
-        self.reshape_index : int        = reshape_index
-        self.reshape_shape : list[int]  = reshape_shape
+        self.reshape_index : int        = reshape_index;
+        self.reshape_shape : list[int]  = reshape_shape;
 
-        # Set up the activation function. Note that we need to handle the threshold activation type
-        # separately because it requires an extra set of parameters to initialize.
-        self.act_type   : str               = act_type
-        if act_type == "threshold":
-            self.act    : torch.nn.Module   = act_dict[act_type](threshold, value)
-        else:
-            self.act    : torch.nn.Module   = act_dict[act_type]()
+        # Set up the activation function. 
+        self.activation   : str               = activation;
 
         # All done!
         return
@@ -261,7 +245,7 @@ class MultiLayerPerceptron(torch.nn.Module):
         # function).
         for i in range(self.n_layers - 1):
             x : torch.Tensor = self.layers[i](x)   # apply linear layer
-            x : torch.Tensor = self.act(x)      # apply activation
+            x : torch.Tensor = self.activation(x)      # apply activation
 
         # Apply the final (output) layer.
         x = self.layers[-1](x)
@@ -300,7 +284,10 @@ class MultiLayerPerceptron(torch.nn.Module):
 # -------------------------------------------------------------------------------------------------
 
 class Autoencoder(torch.nn.Module):
-    def __init__(self, physics : Physics, config : dict) -> None:
+    def __init__(   self, 
+                    widths          : list[int], 
+                    activation      : str           = 'sigmoid',
+                    reshape_shape   : list[int]     = None) -> None:
         r"""
         Initializes an Autoencoder object. An Autoencoder consists of two networks, an encoder, 
         E : \mathbb{R}^F -> \mathbb{R}^L, and a decoder, D : \mathbb{R}^L -> \marthbb{R}^F. We 
@@ -314,10 +301,190 @@ class Autoencoder(torch.nn.Module):
         The Autoencoder class implements this model as a trainable torch.nn.Module object. 
 
 
+        
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
 
+        widths: A list of integers specifying the widths of the layers (including the 
+        dimensionality of the domain of each layer, as well as the co-domain of the final layer).
+        Suppose this list has N elements. Then the network will have N - 1 layers. The i'th layer 
+        maps from \mathbb{R}^{layer_sizes[i]} to \mathbb{R}^{layers_sizes[i]}. Thus, the i'th 
+        element of this list represents the domain of the i'th layer AND the co-domain of the 
+        i-1'th layer.
+
+        activation: A string specifying which activation function we want to use at the end of each 
+        layer (except the final one). We use the same activation for each layer. 
+
+        reshape_shape: This is a list of k integers specifying the final k dimensions of the shape
+        of the input to the first layer (if reshape_index == 0) or the output of the last layer 
+        (if reshape_index == -1). You must specify this argument if and only if you specify 
+        reshape_index. 
+
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        Nothing!
+        """
+
+        # Run the superclass initializer.
+        super(Autoencoder, self).__init__();
+        
+        # Store information (for return purposes).
+        self.widths         : list[int] = widths;
+        self.activation     : str       = activation;
+        self.reshape_shape  : list[int] = reshape_shape;
+
+        # Build the encoder, decoder.
+        self.encoder = MultiLayerPerceptron(
+                            widths              = widths, 
+                            activation          = activation,
+                            reshape_index       = 0,                    # We need to flatten the spatial dimensions of each fom frame.
+                            reshape_shape       = reshape_shape);
+
+        self.decoder = MultiLayerPerceptron(
+                            widths              = widths[::-1],         # Reverses the order of the the list.
+                            activation          = activation,
+                            reshape_index       = -1,               
+                            reshape_shape       = reshape_shape);       # We need to reshape the network output to a fom frame.
+
+
+        # All done!
+        return;
+
+
+
+    def forward(self, x : torch.Tensor) -> torch.Tensor:
+        """
+        This function passes x through the encoder, producing a latent state, z. It then passes 
+        z through the decoder; hopefully producing a vector that approximates x.
+        
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        x: A tensor holding a batch of inputs. We pass this tensor through the encoder + decoder 
+        and then return the result.
+
+        
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        The image of x under the encoder and decoder. 
+        """
+
+        # Encoder the input
+        z : torch.Tensor    = self.encoder(x);
+
+        # Now decode z.
+        y : torch.Tensor    = self.decoder(z);
+
+        # All done! Hopefully y \approx x.
+        return y;
+
+
+
+    def export(self) -> dict:
+        """
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        This function extracts everything we need to recreate self from scratch. Specifically, we 
+        extract the encoder/decoder state dictionaries, self's architecture, activation function 
+        and reshape_shape. We store and return this information in a dictionary.
+         
+        You can pass the returned dictionary to the load_Autoencoder method to generate an 
+        Autoencoder object that is identical to self.
+        """
+
+        # TO DO: deep export which includes all information needed to re-initialize self from 
+        # scratch. This would probably require changing the initializer.
+
+        dict_ = {   'encoder state'  : self.encoder.cpu().state_dict(),
+                    'decoder state'  : self.decoder.cpu().state_dict(),
+                    'widths'         : self.widths, 
+                    'activation'     : self.activation, 
+                    'reshape_shape'  : self.reshape_shape};
+        return dict_;
+
+
+
+def load_Autoencoder(dict_ : dict) -> Autoencoder:
+    """
+    This function builds an Autoencoder object using the information in dict_. dict_ should be 
+    the dictionary returned by the export method for some Autoencoder object (or a de-serialized 
+    version of one). The Autoencoder that we recreate should be an identical copy of the object 
+    that generated dict_.
+
+
+    
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+
+    dict_: This should be a dictionary returned by an Autoencoder's export method.
+
+    
+
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    An Autoencoder object that is identical to the one that created dict_!
+    """
+
+    # First, extract the parameters we need to initialize an Autoencoder object with the same 
+    # architecture as the one that created dict_.
+    widths          : list[int] = dict_['widths'];
+    activation      : list[int] = dict_['activation'];
+    reshape_shape   : list[int] = dict_['reshape_shape'];
+
+    # Now... initialize an Autoencoder object.
+    AE = Autoencoder(widths = widths, activation = activation, reshape_shape = reshape_shape);
+
+    # Now, update the encoder/decoder parameters.
+    AE.encoder.load_state_dict(dict_['encoder state']); 
+    AE.decoder.load_state_dict(dict_['decoder state']); 
+
+    # All done, AE is now identical to the Autoencoder object that created dict_.
+    return AE;
+
+
+
+# -------------------------------------------------------------------------------------------------
+# Displacement, Velocity Autoencoder
+# -------------------------------------------------------------------------------------------------
+
+class Autoencoder_Pair(torch.nn.Module):
+    """"
+    This class defines a pair of auto-encoders for displacement, velocity data. Specifically, each 
+    object consists of a pair of auto-encoders, one for processing displacement data and another 
+    for processing velocity data. 
+    """
+
+    def __init__(   self, 
+                    qgrid_size          : list[int],
+                    widths              : list[int],
+                    activation          : str       = "tanh") -> None:
+        """
+        The initializer for the Autoencoder_Pair class. We assume that each input is a tuple 
+        of data, (D, V), representing the displacement and velocity of some system at some point 
+        in time. We encode D and V separately; each gets its own autoencoder with distinct weights. 
+
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+        
         physics: A "Physics" object that holds the fom solution frames. We use this object to 
         determine the shape of each fom solution frame. Recall that each Physics object has a 
         corresponding PDE. We 
@@ -333,16 +500,7 @@ class Autoencoder(torch.nn.Module):
             the dimensionality of the co-domain of the encoder (i.e., the dimensionality of the 
             co-domain of the last layer of the encoder) and the domain of the decoder (i.e., the 
             dimensionality of the domain of the first layer of the decoder).
-            
-
-        -------------------------------------------------------------------------------------------
-        Returns
-        -------------------------------------------------------------------------------------------
-
-        Nothing!
         """
-
-        super(Autoencoder, self).__init__()
 
         # A Physics object's qgrid_size is a list of integers specifying the shape of each frame of 
         # the fom solution. If the solution is scalar valued, then this is just a list whose i'th 
@@ -350,78 +508,169 @@ class Autoencoder(torch.nn.Module):
         # is vector valued, however, we prepend the dimensionality of the vector field to the list 
         # from the scalar list (so the 0 element represents the dimension of the vector field at 
         # each point).
-        self.qgrid_size : list[int]     = physics.qgrid_size;
-
-        # The product of the elements of qgrid_size is the number of dimensions in each fom 
-        # solution frame. This number represents the dimensionality of the input to the encoder 
-        # (since we pass a flattened fom frame as input).
-        self.space_dim  : np.ndarray    = np.prod(self.qgrid_size);
+        self.qgrid_size : list[int]     = qgrid_size; 
+        
+        # Make sure qgrid_size and widths are compatible. The product of the elements of qgrid_size 
+        # is the number of dimensions in each fom solution frame. This number represents represents 
+        # the dimensionality of the input to the encoder (since we pass a flattened fom frame as 
+        # input).
+        assert(np.prod(self.qgrid_size) == widths[0]);
 
         # Fetch information about the domain/co-domain of each encoder layer.
-        hidden_units    : list[int]     = config['hidden_units'];
-        n_z             : int           = config['latent_dimension'];
-        self.n_z        : int           = n_z;
-
-        # Build the "layer_sizes" argument for the MLP class. This consists of the dimensions of 
-        # each layers' domain + the dimension of the co-domain of the final layer.
-        layer_sizes = [self.space_dim] + hidden_units + [n_z];
+        self.widths     : list[int]     = widths
+        self.n_z        : int           = widths[-1];
 
         # Use the settings to set up the activation information for the encoder.
-        act_type    = config['activation']  if 'activation' in config else 'sigmoid'
-        threshold   = config["threshold"]   if "threshold"  in config else 0.1
-        value       = config["value"]       if "value"      in config else 0.0
+        self.activation : str           =  activation;
 
-        # Now, build the encoder.
-        self.encoder = MultiLayerPerceptron(
-                            layer_sizes         = layer_sizes, 
-                            act_type            = act_type,
-                            reshape_index       = 0,                    # We need to flatten the spatial dimensions of each fom frame.
-                            reshape_shape       = self.qgrid_size,
-                            threshold           = threshold, 
-                            value               = value);
+        # Next, build the velocity and displacement auto-encoders.
+        self.Displacement_Autoencoder   = Autoencoder(  widths          = widths, 
+                                                        activation      = activation, 
+                                                        reshape_shape   = self.qgrid_size);
 
-        self.decoder = MultiLayerPerceptron(
-                            layer_sizes         = layer_sizes[::-1],    # Reverses the order of the the list.
-                            act_type            = act_type,
-                            reshape_index       = -1,               
-                            reshape_shape       = self.qgrid_size,      # We need to reshape the network output to a fom frame.
-                            threshold           = threshold, 
-                            value               = value)
-
-        # All done!
-        return
+        self.Velocity_Autoencoder       = Autoencoder(  widths          = widths, 
+                                                        activation      = activation,
+                                                        reshape_shape   = self.qgrid_size);
 
 
 
-    def forward(self, x : torch.Tensor) -> torch.Tensor:
+    def Encode(self,
+               Displacement_Frames  : torch.Tensor, 
+               Velocity_Frames      : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        This function defines the forward pass through self.
+        This function encodes a set of displacement and velocity frames.
 
         
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
 
-        x: A tensor holding a batch of inputs. We pass this tensor through the encoder + decoder 
-        and then return the result.
+        Displacement_Frames: A torch.Tensor object of shape N_Frames x self.qgrid_size, where 
+        N_Frames is the number of frames we want to encode and qgrid_size specifies the shape 
+        of each frame. Displacement_Frames[i, ...] represents the displacement portion of an fom 
+        solution at some time, t. 
 
+        Velocity_Frames: This is a torch.Tensor object of shape N_Frames x self.qgrid_size, where 
+        N_Frames is the number of frames we want to encode and qgrid_size specifies the shape of 
+        each frame. Velocity_Frames[i, ...] represents the velocity portion of an fom solution 
+        at some time, t. 
         
+
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        The image of x under the encoder + decoder. 
+        A two element tuple, [Latent_Displacement, Latent_Velocity]. Latent_Displacement and 
+        Latent_Velocity are torch.Tensor objects of shape N_Frames x self.n_z. 
+        Latent_Displacement[i, :] represents the encoding of the displacement portion of the i'th 
+        FOM frame while Latent_Velocity[i, :] represents the encoding of the velocity portion of 
+        the i'th FOM frame.
         """
 
-        # Encoder the input
-        z : torch.Tensor    = self.encoder(x)
-
-        # Now decode z.
-        y : torch.Tensor    = self.decoder(z)
-
-        # All done! Hopefully y \approx x.
-        return y
+        # Check that we have the same number of displacement, velocity frames.
+        assert(Displacement_Frames.shape[0]     ==  Velocity_Frames.shape[0]);
+        assert(Displacement_Frames.shape[1:]    ==  self.qgrid_size);
+        assert(Velocity_Frames.shape[1:]        ==  self.qgrid_size);
     
+        # Encode the displacement frames.
+        Latent_Displacement : torch.Tensor = self.Displacement_Autoencoder.encoder( Displacement_Frames);
+        Latent_Velocity     : torch.Tensor = self.Velocity_Autoencoder.encoder(     Velocity_Frames);
+
+        # All done!
+        return Latent_Displacement, Latent_Velocity;
+
+
+
+    def Decode(self,
+               Latent_Displacement  : torch.Tensor, 
+               Latent_Velocity      : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        This function decodes a set of displacement and velocity frames.
+
+        
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        Latent_Displacement: A torch.Tensor object of shape N_Frames x self.n_z. The i,j element of
+        this tensor represents the j'th component of the encoding of the displacement portion of 
+        the i'th FOM frame.
+
+        Latent_Velocity: A torch.Tensor object of shape N_Frames x self.n_z. The i,j element of
+        this tensor represents the j'th component of the encoding of the velocity portion of 
+        the i'th FOM frame.
+     
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        A two element tuple, [Reconstructed_Displacement, Reconstructed_Velocity]. Each is a 
+        torch.Tensor object of shape N_Frames x self.qgrid_size. 
+        Reconstructed_Displacement[i, ...] represents the reconstruction of the displacement 
+        portion of the i'th frame. Likewise, Reconstructed_Velocity[i, ...] represents the 
+        reconstruction of the velocity portion of the i'th frame.
+        """
+
+        # Check that we have the same number of displacement, velocity frames.
+        assert(len(Latent_Displacement.shape)   == 2);
+        assert(Latent_Velocity.shape            == Latent_Displacement.shape);
+    
+        # Encode the displacement frames.
+        Reconstructed_Displacement  : torch.Tensor  = self.Displacement_Autoencoder.decoder( Latent_Displacement);
+        Reconstructed_Velocity      : torch.Tensor  = self.Velocity_Autoencoder.decoder(     Latent_Velocity);
+
+        # All done!
+        return Reconstructed_Displacement, Reconstructed_Velocity;
+
+
+
+    def forward(self, Displacement_Frames : torch.Tensor, Velocity_Frames : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        The forward method for the Autoencoder_Pair class. It encodes and then decodes 
+        Displacement_Frames and Velocity_Frames.
+
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        Displacement_Frames: A torch.Tensor object of shape N_Frames x self.qgrid_size, where 
+        N_Frames is the number of frames we want to encode and qgrid_size specifies the shape 
+        of each frame. Displacement_Frames[i, ...] represents the displacement portion of an fom 
+        solution at some time, t. 
+
+        Velocity_Frames: This is a torch.Tensor object of shape N_Frames x self.qgrid_size, where 
+        N_Frames is the number of frames we want to encode and qgrid_size specifies the shape of 
+        each frame. Velocity_Frames[i, ...] represents the velocity portion of an fom solution 
+        at some time, t. 
+        
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        A two element tuple, [Reconstructed_Displacement, Reconstructed_Velocity]. Each is a 
+        torch.Tensor object of shape N_Frames x self.qgrid_size. 
+        Reconstructed_Displacement[i, ...] represents the reconstruction of the displacement 
+        portion of the i'th frame. Likewise, Reconstructed_Velocity[i, ...] represents the 
+        reconstruction of the velocity portion of the i'th frame.
+        """
+
+        # Encode the displacement, velocity frames
+        Latent_Displacement, Latent_Velocity = self.Encode(     Displacement_Frames   = Displacement_Frames, 
+                                                                Velocity_Frames       = Velocity_Frames);
+
+        # Now reconstruct displacement, velocity.
+        Reconstructed_Displacement, Reconstructed_Velocity = self.Decode(
+                                                                Latent_Displacement = Latent_Displacement, 
+                                                                Latent_Velocity    = Latent_Velocity);
+
+        # All done!
+        return Reconstructed_Displacement, Reconstructed_Velocity;
+
 
 
     def export(self) -> dict:
@@ -430,40 +679,61 @@ class Autoencoder(torch.nn.Module):
         Returns
         -------------------------------------------------------------------------------------------
 
-        This function extracts self's parameters and returns them in a dictionary. You can pass 
-        the dictionary returned by this function to the load method of another Autoencoder object 
-        (that you initialized to have the same architecture as self) to make the other autoencoder
-        identical to self.
+        This function extracts everything we need to recreate self from scratch. Specifically, we 
+        extract the encoder/decoder state dictionaries, self's architecture, activation function 
+        and reshape_shape. We store and return this information in a dictionary.
+         
+        You can pass the returned dictionary to the load_Autoencoder_Pair method to generate an 
+        Autoencoder object that is identical to self.
         """
 
-        # TO DO: deep export which includes all information needed to re-initialize self from 
-        # scratch. This would probably require changing the initializer.
-
-        dict_ = {   'autoencoder_param' : self.cpu().state_dict()}
-        return dict_
+        dict_ = {   'qgrid_size'        : self.qgrid_size,
+                    'widths'            : self.widths,
+                    'activation'        : self.activation,
+                    'Displacement dict' : self.cpu().Displacement_Autoencoder.export(),
+                    'Velocity dict'     : self.cpu().Velocity_Autoencoder.export()};
+        return dict_;
     
 
 
-    def load(self, dict_ : dict) -> None:
-        """
-        This function loads self's state dictionary.
+def load_Autoencoder_Pair(self, dict_ : dict) -> Autoencoder_Pair:
+    """
+    This function builds a Autoencoder_Pair object using the information in dict_. dict_ should be 
+    the dictionary returned by the export method for some Autoencoder_Pair object (or a 
+    de-serialized version of one). The Autoencoder_Pair that we recreate should be an identical 
+    copy of the object that generated dict_.
 
 
-        -------------------------------------------------------------------------------------------
-        Arguments
-        -------------------------------------------------------------------------------------------
+    
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
 
-        dict_: This should be a dictionary with the key "autoencoder_param" whose corresponding 
-        value is the state dictionary of an autoencoder which has the same architecture (i.e., 
-        layer sizes) as self.
+    dict_: This should be a dictionary returned by a Autoencoder_Pair's export method.
 
-        
-        -------------------------------------------------------------------------------------------
-        Returns
-        -------------------------------------------------------------------------------------------
+    
 
-        Nothing!
-        """
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
 
-        self.load_state_dict(dict_['autoencoder_param'])
-        return
+    A Autoencoder_Pair object that is identical to the one that created dict_!
+    """
+
+    # First, extract the information we need to initialize a Autoencoder_Pair object with the same 
+    # architecture as the one that created dict_.
+    qgrid_size  : list[int] = dict_['qgrid_size'];
+    widths      : list[int] = dict_['widths'];
+    activation  : str       = dict_['activation'];
+
+    # Now initialize the Autoencoder_Pair.
+    AEP                     = Autoencoder_Pair( qgrid_size  = qgrid_size,
+                                                widths      = widths, 
+                                                activation  = activation);
+    
+    # Now replace its auto-encoders.
+    AEP.Displacement_Autoencoder = load_Autoencoder(dict_['Displacement dict']);
+    AEP.Displacement_Autoencoder = load_Autoencoder(dict_['Velocity dict']);
+
+    # All done!
+    return AEP;
