@@ -10,6 +10,7 @@ Physics_Path    : str = os.path.abspath(os.path.join(os.path.dirname(__file__), 
 sys.path.append(LD_Path); 
 sys.path.append(Physics_Path); 
 
+import  numpy;
 import  torch; 
 
 from    SINDy               import  SINDy;
@@ -22,7 +23,7 @@ from    Burgers1d           import  Burgers1D;
 # Set up the dictionaries; we use this to allow the code to call different classes, functions 
 # depending on the settings.
 trainer_dict    = {'gplasdi'    : BayesianGLaSDI};
-latent_dict     = {'ae'         : Autoencoder};
+model_dict      = {'ae'         : Autoencoder};
 ld_dict         = {'sindy'      : SINDy};
 physics_dict    = {'burgers1d'  : Burgers1D};
 
@@ -119,7 +120,7 @@ def Initialize_Trainer(config, restart_dict : dict = None):
 
 
 def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
-    '''
+    """
     Initialize a Model (autoencoder) according to config file. 
     
 
@@ -136,7 +137,7 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
     settings we expect to use to generate the data and train the models. We expect this dictionary 
     to contain the following keys (if a key is within a dictionary that is specified by another 
     key, then we tab the sub-key relative to the dictionary key): 
-        - latent_space
+        - model
             - type
     
             
@@ -148,20 +149,36 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
     A torch.nn.Module object that acts as the trainable model in the gplasdi framework. This model 
     should have a latent space of some form. We learn a set of dynamics to describe how this latent
     space evolves over time. 
-    '''
+    """
 
     # First, determine what model we are using in the latent dynamics. Make sure the user 
     # included all the information that is necessary to initialize the corresponding dynamics.
-    latent_type : str = config['latent_space']['type']
-    assert(latent_type in config['latent_space'])
-    assert(latent_type in latent_dict)
+    model_type : str = config['model']['type'];
+    assert(model_type in config['model']);
+    assert(model_type in model_dict);
     
-    # Next, initialize the latent space.
-    latent_cfg      : dict              = config['latent_space'][latent_type]
-    latent_space    : torch.nn.Module   = latent_dict[latent_type](physics, latent_cfg)
+    # Autoencoder case.
+    if(model_type == "ae" or model_type == "autoencoder"):
 
-    # All done!
-    return latent_space
+        # Next, fetch the hidden widths, latent dimension (n_z), and activation for the model. 
+        model_config    : dict              = config['model'][model_type];
+        hidden_widths   : list[int]         = model_config['hidden_widths'];
+        n_z             : int               = model_config['latent_dimension'];
+        activation      : str               = model_config['activation']  if 'activation' in config else 'tanh';
+
+        # Now build the widths attribute + fetch qgrid_size from physics.
+        qgrid_size      : list[int]         = physics.qgrid_size;
+        space_dim       : int               = numpy.prod(qgrid_size);
+        widths          : list[int]         = [space_dim] + hidden_widths + [n_z];
+
+        # Now build the model!
+        model           : torch.nn.Module   = model_dict[model_type](
+                                                        widths          = widths, 
+                                                        activation      = activation, 
+                                                        reshape_shape   = qgrid_size);
+
+        # All done!
+        return model;
 
 
 
