@@ -81,12 +81,12 @@ def Initialize_Trainer(config, restart_dict : dict = None):
     # to try during testing and training. We load the set of possible parameters and their possible
     # values using the configuration file. If we are using a restart file, then load it's 
     # ParameterSpace object.
-    param_space = ParameterSpace(config)
+    param_space = ParameterSpace(config);
     if (restart_dict is not None):
-        param_space.load(restart_dict['parameter_space'])
+        param_space.load(restart_dict['parameter_space']);
     
     # Get the "physics" object we use to generate the fom dataset.
-    physics         = Initialize_Physics(config, param_space.param_name_list)
+    physics         = Initialize_Physics(config, param_space.param_name_list);
 
     # Get the Model (autoencoder). We try to learn dynamics that describe how the latent space of
     # this model evolve over time. If we are using a restart file, then load the saved model 
@@ -95,30 +95,30 @@ def Initialize_Trainer(config, restart_dict : dict = None):
         model_type : str    = config['model']['type'];
         Model               = model_load_dict[model_type](restart_dict['model']);
     else: 
-        Model               = Initialize_Model(physics, config)
+        Model               = Initialize_Model(physics, config);
 
     # Initialize the latent dynamics model. If we are using a restart file, then load the saved
     # latent dynamics from this file. 
-    ld_type = config['latent_dynamics']['type']
-    assert(ld_type in config['latent_dynamics'])
-    assert(ld_type in ld_dict)
-    latent_dynamics = ld_dict[ld_type](Model.n_z, physics.nt, config['latent_dynamics'])
+    ld_type = config['latent_dynamics']['type'];
+    assert(ld_type in config['latent_dynamics']);
+    assert(ld_type in ld_dict);
+    latent_dynamics = ld_dict[ld_type](Model.n_z, physics.nt, config['latent_dynamics']);
     if (restart_dict is not None):
-        latent_dynamics.load(restart_dict['latent_dynamics'])
+        latent_dynamics.load(restart_dict['latent_dynamics']);
 
     # Fetch the trainer type. Note that only "gplasdi" is allowed.
-    trainer_type = config['lasdi']['type']
-    assert(trainer_type in config['lasdi'])
-    assert(trainer_type in trainer_dict)
+    trainer_type = config['lasdi']['type'];
+    assert(trainer_type in config['lasdi']);
+    assert(trainer_type in trainer_dict);
 
     # Initialize the trainer object. If we are using a restart file, then load the 
     # trainer from that file.
-    trainer = trainer_dict[trainer_type](physics, Model, latent_dynamics, param_space, config['lasdi'][trainer_type])
+    trainer = trainer_dict[trainer_type](physics, Model, latent_dynamics, param_space, config['lasdi'][trainer_type]);
     if (restart_dict is not None):
-        trainer.load(restart_dict['trainer'])
+        trainer.load(restart_dict['trainer']);
 
     # All done!
-    return trainer, param_space, physics, Model, latent_dynamics
+    return trainer, param_space, physics, Model, latent_dynamics;
 
 
 
@@ -214,11 +214,11 @@ def Initialize_Physics(config: dict, param_name_list : list[str]) -> Physics:
     '''
 
     # First, determine what kind of "physics" object we want to load.
-    physics_cfg     : dict      = config['physics']
-    physics_type    : str       = physics_cfg['type']
+    physics_cfg     : dict      = config['physics'];
+    physics_type    : str       = physics_cfg['type'];
 
     # Next, initialize the "physics" object we are using to build the simulations.
-    physics         : Physics   = physics_dict[physics_type](physics_cfg, param_name_list)
+    physics         : Physics   = physics_dict[physics_type](physics_cfg, param_name_list);
 
     # All done!
-    return physics
+    return physics;

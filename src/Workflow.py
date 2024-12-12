@@ -48,12 +48,12 @@ def main():
 
     # Load the configuration file. 
     with open(args.config, 'r') as f:
-        config = yaml.safe_load(f)
-        cfg_parser = InputParser(config, name='main')
+        config      = yaml.safe_load(f)
+        cfg_parser  = InputParser(config, name = 'main')
 
     # Check if we are loading from a restart or not. If so, load it.
     use_restart : bool = cfg_parser.getInput(['workflow', 'use_restart'], fallback = False)
-    if (use_restart):
+    if (use_restart == True):
         restart_filename : str = cfg_parser.getInput(['workflow', 'restart_file'], datatype = str)
         from pathlib import Path
         Path(os.path.dirname(restart_filename)).mkdir(parents = True, exist_ok = True)
@@ -67,7 +67,7 @@ def main():
     # Determine what the next step is. If we are loading from a restart, then the restart should
     # have logged then next step. Otherwise, we set the next step step to "PickSample", which will 
     # prompt the code to set up the training set of parameters.
-    if (use_restart and (os.path.isfile(restart_filename))):
+    if ((use_restart == True) and (os.path.isfile(restart_filename))):
         # TODO(kevin): in long term, we should switch to hdf5 format.
         restart_dict    = np.load(restart_filename, allow_pickle = True).item()
         next_step       = restart_dict['next_step']
@@ -108,9 +108,9 @@ def main():
                                   hour      = date.tm_hour + 3, 
                                   minute    = date.tm_min)
     
-    if (use_restart):
+    if (use_restart == True):
         # rename old restart file if exists.
-        if (os.path.isfile(restart_filename)):
+        if (os.path.isfile(restart_filename) == True):
             old_timestamp = restart_dict['timestamp']
             os.rename(restart_filename, restart_filename + '.' + old_timestamp)
         restart_path : str = restart_filename
@@ -118,15 +118,14 @@ def main():
         restart_path : str = 'lasdi_' + date_str + '.npy'
     
     # Build the restart save dictionary and then save it.
-    restart_dict = {
-                'parameter_space'   : param_space.export(),
-                'physics'           : physics.export(),
-                'model'             : model.export(),
-                'latent_dynamics'   : latent_dynamics.export(),
-                'trainer'           : trainer.export(),
-                'timestamp'         : date_str,
-                'next_step'         : next_step,
-                'result'            : result};
+    restart_dict = {'parameter_space'   : param_space.export(),
+                    'physics'           : physics.export(),
+                    'model'             : model.export(),
+                    'latent_dynamics'   : latent_dynamics.export(),
+                    'trainer'           : trainer.export(),
+                    'timestamp'         : date_str,
+                    'next_step'         : next_step,
+                    'result'            : result};
     np.save(restart_path, restart_dict)
 
     # All done!
@@ -161,7 +160,7 @@ def step(trainer        : BayesianGLaSDI,
     config: This should be a dictionary that we loaded from a .yml file. It should house all the 
     settings we expect to use to generate the data and train the models.
 
-    use_restart: a boolean which, if true, will prompt us to return after a single step.
+    use_restart: a boolean which, if True, will prompt us to return after a single step.
 
     
 
@@ -238,7 +237,7 @@ def step(trainer        : BayesianGLaSDI,
         
     # Continue the workflow if not using restart.
     print("Next step is: %s" % next_step);
-    if (not use_restart):
+    if (use_restart == False):
         result, next_step = step(trainer, next_step, config)
 
     # All done!

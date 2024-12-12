@@ -123,7 +123,7 @@ class MultiLayerPerceptron(torch.nn.Module):
         widths: A list of integers specifying the widths of the layers (including the 
         dimensionality of the domain of each layer, as well as the co-domain of the final layer).
         Suppose this list has N elements. Then the network will have N - 1 layers. The i'th layer 
-        maps from \mathbb{R}^{layer_sizes[i]} to \mathbb{R}^{layers_sizes[i]}. Thus, the i'th 
+        maps from \mathbb{R}^{widths[i]} to \mathbb{R}^{widths[i + 1]}. Thus, the i'th 
         element of this list represents the domain of the i'th layer AND the co-domain of the 
         i-1'th layer.
 
@@ -170,10 +170,10 @@ class MultiLayerPerceptron(torch.nn.Module):
 
         super(MultiLayerPerceptron, self).__init__();
 
-        # Note that layer_sizes specifies the dimensionality of the domains and co-domains of each
-        # layer. Specifically, the i'th element specifies the input dimension of the i'th layer,
-        # while the final element specifies the dimensionality of the co-domain of the final layer.
-        # Thus, the number of layers is one less than the length of layer_sizes.
+        # Note that width specifies the dimensionality of the domains and co-domains of each layer.
+        # Specifically, the i'th element specifies the input dimension of the i'th layer, while 
+        # the final element specifies the dimensionality of the co-domain of the final layer. Thus, 
+        # the number of layers is one less than the length of widths.
         self.n_layers       : int                   = len(widths) - 1;
         self.widths         : list[int]             = widths;
 
@@ -191,14 +191,15 @@ class MultiLayerPerceptron(torch.nn.Module):
         self.reshape_shape : list[int]  = reshape_shape;
 
         # Set up the activation function. 
-        self.activation   : str               = activation;
+        self.activation     : str       = activation;
+        self.activation_fn  : callable  = act_dict[self.activation]();
 
         # All done!
         return
     
 
 
-    def forward(self, x : torch.Tensor) -> torch.Tensor:
+    def forward(self, X : torch.Tensor) -> torch.Tensor:
         """
         This function defines the forward pass through self.
 
@@ -207,59 +208,59 @@ class MultiLayerPerceptron(torch.nn.Module):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        x: A tensor holding a batch of inputs. We pass this tensor through the network's layers 
+        X: A tensor holding a batch of inputs. We pass this tensor through the network's layers 
         and then return the result. If self.reshape_index == 0 and self.reshape_shape has k
-        elements, then the final k elements of x's shape must match self.reshape_shape. 
+        elements, then the final k elements of X's shape must match self.reshape_shape. 
 
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        The image of x under the network's layers. If self.reshape_index == -1 and 
+        The image of X under the network's layers. If self.reshape_index == -1 and 
         self.reshape_shape has k elements, then we reshape the output so that the final k elements
         of its shape match those of self.reshape_shape.
         """
 
-        # If the reshape_index is 0, we need to reshape x before passing it through the first 
+        # If the reshape_index is 0, we need to reshape X before passing it through the first 
         # layer.
         if (self.reshape_index == 0):
             # Make sure the input has a proper shape. There is a lot going on in this line; let's
-            # break it down. If reshape_index == 0, then we need to reshape the input, x, before
+            # break it down. If reshape_index == 0, then we need to reshape the input, X, before
             # passing it through the layers. Let's assume that reshape_shape has k elements. Then,
-            # we need to squeeze the final k dimensions of the input, x, so that the resulting 
+            # we need to squeeze the final k dimensions of the input, X, so that the resulting 
             # tensor has a final dimension size that matches the input dimension size for the first
-            # layer. The check below makes sure that the final k dimensions of the input, x, match
+            # layer. The check below makes sure that the final k dimensions of the input, X, match
             # the stored reshape_shape.
-            assert(list(x.shape[-len(self.reshape_shape):]) == self.reshape_shape)
+            assert(list(X.shape[-len(self.reshape_shape):]) == self.reshape_shape)
             
-            # Now that we know the final k dimensions of x have the correct shape, let's squeeze 
+            # Now that we know the final k dimensions of X have the correct shape, let's squeeze 
             # them into 1 dimension (so that we can pass the squeezed tensor through the first 
-            # layer). To do this, we reshape x by keeping all but the last k dimensions of x, and 
+            # layer). To do this, we reshape X by keeping all but the last k dimensions of X, and 
             # replacing the last k with a single dimension whose size matches the dimensionality of
             # the domain of the first layer. Note that we use torch.Tensor.view instead of 
             # torch.Tensor.reshape in order to avoid data copying.
-            x = x.view(list(x.shape[:-len(self.reshape_shape)]) + [self.layer_sizes[self.reshape_index]])
+            X = X.view(list(X.shape[:-len(self.reshape_shape)]) + [self.widths[self.reshape_index]])
 
-        # Pass x through the network layers (except for the final one, which has no activation 
+        # Pass X through the network layers (except for the final one, which has no activation 
         # function).
         for i in range(self.n_layers - 1):
-            x : torch.Tensor = self.layers[i](x)   # apply linear layer
-            x : torch.Tensor = self.activation(x)      # apply activation
+            X : torch.Tensor = self.layers[i](X)            # apply linear layer
+            X : torch.Tensor = self.activation_fn(X)        # apply activation
 
         # Apply the final (output) layer.
-        x = self.layers[-1](x)
+        X = self.layers[-1](X)
 
         # If the reshape_index is -1, then we need to reshape the output before returning. 
         if (self.reshape_index == -1):
-            # In this case, we need to split the last dimension of x, the output of the final
+            # In this case, we need to split the last dimension of X, the output of the final
             # layer, to match the reshape_shape. This is precisely what the line below does. Note
             # that we use torch.Tensor.view instead of torch.Tensor.reshape in order to avoid data 
             # copying. 
-            x = x.view(list(x.shape[:-1]) + self.reshape_shape)
+            X = X.view(list(X.shape[:-1]) + self.reshape_shape)
 
         # All done!
-        return x
+        return X
     
 
 
@@ -286,7 +287,7 @@ class MultiLayerPerceptron(torch.nn.Module):
 class Autoencoder(torch.nn.Module):
     def __init__(   self, 
                     widths          : list[int], 
-                    activation      : str           = 'sigmoid',
+                    activation      : str           = 'tanh',
                     reshape_shape   : list[int]     = None) -> None:
         r"""
         Initializes an Autoencoder object. An Autoencoder consists of two networks, an encoder, 
@@ -309,7 +310,7 @@ class Autoencoder(torch.nn.Module):
         widths: A list of integers specifying the widths of the layers (including the 
         dimensionality of the domain of each layer, as well as the co-domain of the final layer).
         Suppose this list has N elements. Then the network will have N - 1 layers. The i'th layer 
-        maps from \mathbb{R}^{layer_sizes[i]} to \mathbb{R}^{layers_sizes[i]}. Thus, the i'th 
+        maps from \mathbb{R}^{widths[i]} to \mathbb{R}^{layers_sizes[i]}. Thus, the i'th 
         element of this list represents the domain of the i'th layer AND the co-domain of the 
         i-1'th layer.
 
@@ -335,6 +336,7 @@ class Autoencoder(torch.nn.Module):
         
         # Store information (for return purposes).
         self.widths         : list[int] = widths;
+        self.n_z            : int       = widths[-1];
         self.activation     : str       = activation;
         self.reshape_shape  : list[int] = reshape_shape;
 
