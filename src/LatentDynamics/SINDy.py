@@ -124,7 +124,7 @@ class SINDy(LatentDynamics):
                   numpy         : bool = False) -> (np.ndarray | torch.Tensor) | tuple[(np.ndarray | torch.Tensor), torch.Tensor, torch.Tensor]:
         r"""
         This function computes the optimal SINDy coefficients using the current latent time 
-        series'. Specifically, let us consider the case when Z has two dimensions (the case when 
+        series. Specifically, let us consider the case when Z has two dimensions (the case when 
         it has three is identical, just with different coefficients for each instance of the 
         leading dimension of Z). In this case, we assume that the rows of Z correspond to a 
         trajectory of latent states. Specifically, we assume the i'th row holds the latent state,
@@ -139,16 +139,16 @@ class SINDy(LatentDynamics):
         -------------------------------------------------------------------------------------------
 
         Z: A 2d or 3d tensor. If Z is a 2d tensor, then it has shape (Nt, Nz), where Nt specifies 
-        the number of time steps in each sequence of latent states and Nz is the dimension of the 
-        latent space. In this case, the i,j entry of Z holds the j'th component of the latent state 
-        at the time t_0 + i*dt. If it is a 3d tensor, then it has shape (Np, Nt, Nz). In this case, 
-        we assume there at Np different combinations of parameter values. The i, j, k entry of Z in 
-        this case holds the k'th component of the latent encoding at time t_0 + j*dt when we use 
-        he i'th combination of parameter values. 
+        the length of the sequence of latent states and Nz is the dimension of the latent space. In 
+        this case, the i,j entry of Z holds the j'th component of the latent state at the time 
+        t_0 + i*dt. If it is a 3d tensor, then it has shape (Np, Nt, Nz). In this case, we assume 
+        there are Np different combinations of parameter values. The i, j, k entry of Z in this 
+        case holds the k'th component of the latent encoding at time t_0 + j*dt when we use the 
+        i'th combination of parameter values. 
 
         dt: The time step between time steps. See the description of the "Z" argument. 
 
-        compute_loss: A boolean which, if true, will prompt us to calculate the SINDy and 
+        compute_loss: A boolean which, if True, will prompt us to calculate the SINDy and 
         coefficient losses, which we will then return with the optimal SINDy coefficients. If not, 
         we will only return the optimal SINDy coefficients.
 
@@ -230,7 +230,8 @@ class SINDy(LatentDynamics):
         dZdt = self.compute_time_derivative(Z, dt)
         time_dim, space_dim = dZdt.shape
 
-        # Concatenate a column of zeros. 
+        # Concatenate a column of ones. This will correspond to a constant term in the latent 
+        # dynamics.
         Z_i     : torch.Tensor  = torch.cat([torch.ones(time_dim, 1), Z], dim = 1)
         
         # For each j, solve the least squares problem 
