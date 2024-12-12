@@ -14,7 +14,7 @@ from    scipy.integrate     import  odeint
 
 from    LatentDynamics      import  LatentDynamics
 from    InputParser         import  InputParser
-from    FiniteDifference    import  FDdict
+from    Stencils            import  FDdict
 
 
 

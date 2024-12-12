@@ -17,7 +17,7 @@ import  torch
 
 from    InputParser         import  InputParser
 from    Physics             import  Physics
-from    FiniteDifference    import  FDdict
+from    Stencils            import  FDdict
 
 
 
