@@ -6,9 +6,11 @@
 import  os;
 import  sys;
 src_Path        : str   = os.path.dirname(os.path.dirname(__file__));
-LD_Path         : str   = os.path.join(os.path.dirname(os.path.dirname(__file__)), "LatentDynamics");
+LD_Path         : str   = os.path.join(src_Path, "LatentDynamics");
+util_Path       : str   = os.path.join(src_Path, "Utilities");
 sys.path.append(src_Path);
 sys.path.append(LD_Path);
+sys.path.append(util_Path);
 
 import  numpy               as      np
 from    scipy.sparse.linalg import  spsolve

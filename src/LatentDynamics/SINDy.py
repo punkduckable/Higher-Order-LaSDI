@@ -6,7 +6,9 @@
 import  os;
 import  sys;
 src_Path        : str   = os.path.dirname(os.path.dirname(__file__));
+util_Path       : str   = os.path.join(src_Path, "Utilities");
 sys.path.append(src_Path);
+sys.path.append(util_Path);
 
 import  numpy               as      np
 import  torch
