@@ -29,7 +29,7 @@ class Stencil:
     where c_k = interiorStencils[k] and i(k) = interiorIndexes[k]. Note that the indices may be 
     negative or positive. Thus, interiorStencils and interiorIndexes tell us how to construct the 
     finite difference scheme away from the boundary. 
-    x
+    
     For instance, the central difference scheme corresponds to interiorStencils = [-1/2, 1/2], 
     interiorIndexes = [-1, 1] and 
         z'(t_i) \approx (1/2)(-z(t_{i - 1}) + z_{t_{i + 1}}) 

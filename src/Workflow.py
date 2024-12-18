@@ -5,16 +5,15 @@
 # Add LatentDynamics, Physics directories to the search path.
 import  sys;
 import  os;
-LD_Path         : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
-Physics_Path    : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
+LD_Path         : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
+Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
 sys.path.append(LD_Path); 
 sys.path.append(Physics_Path); 
 
 import  yaml;
 import  argparse;
 
-
-import  numpy as np;
+import  numpy               as      np;
 
 from    Enums               import  NextStep, Result;
 from    GPLaSDI             import  BayesianGLaSDI;
