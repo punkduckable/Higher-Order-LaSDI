@@ -24,7 +24,7 @@ from    Stencils            import  FDdict
 # SINDy class
 # -------------------------------------------------------------------------------------------------
 
-class SINDy(LatentDynamics):
+class DamptedSpring(LatentDynamics):
     fd_type     = ''
     fd          = None
     fd_oper     = None
@@ -157,7 +157,7 @@ class SINDy(LatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------
 
-        We return three variables. 
+        If compute_loss is True, then we return three variables. 
         
         The first holds the coefficients. It is a matrix of shape (n_train, n_coef), where n_train 
         is the number of parameter combinations in the training set and n_coef is the number of 
@@ -195,20 +195,28 @@ class SINDy(LatentDynamics):
                 Get the optimal SINDy coefficients for the i'th combination of parameter values. 
                 Remember that Z is 3d tensor of shape (Np, Nt, Nz) whose (i, j, k) entry holds 
                 the k'th component of the j'th frame of the latent trajectory for the i'th 
-                combination of parameter values. Note that Result a 3 element tuple.
+                combination of parameter values. Note that Result is either a torch.Tensor
+                (if compute_loss = False and numpy = False), a numpy.ndarray (if numpy = True and 
+                compute_loss = True), or a 3 element tuple (if compute_loss = True).
                 """
                 result = self.calibrate(Z[i], dt, numpy)
 
                 # If we are computing losses, the 1 and 2 elements of return hold the sindy and 
                 # coefficient losses. Otherwise, the only return variable is the flattened 
                 # coefficient matrix from the i'th combination of parameter values.
-                coefs[i]    = result[0]
-                loss_sindy += result[1]
-                loss_coef  += result[2]
+                if (compute_loss):
+                    coefs[i]    = result[0]
+                    loss_sindy += result[1]
+                    loss_coef  += result[2]
+                else:
+                    coefs[i] = result
             
             # Package everything to return!
-            return coefs, loss_sindy, loss_coef
-            
+            if (compute_loss):
+                return coefs, loss_sindy, loss_coef
+            else:
+                return coefs
+
 
         # -----------------------------------------------------------------------------------------
         # evaluate for one training case.
@@ -231,10 +239,11 @@ class SINDy(LatentDynamics):
         # with shape (Nl, Nz).
         coefs   : torch.Tensor  = torch.linalg.lstsq(Z_i, dZdt).solution
 
-        # Compute the losses.
-        loss_sindy = self.MSE(dZdt, Z_i @ coefs)
-        # NOTE(kevin): by default, this will be L1 norm.
-        loss_coef = torch.norm(coefs, self.coef_norm_order)
+        # If we need to compute the loss, do so now. 
+        if (compute_loss):
+            loss_sindy = self.MSE(dZdt, Z_i @ coefs)
+            # NOTE(kevin): by default, this will be L1 norm.
+            loss_coef = torch.norm(coefs, self.coef_norm_order)
 
         # All done. Prepare coefs and the losses to return. Note that we flatten the coefficient 
         # matrix.
@@ -243,8 +252,10 @@ class SINDy(LatentDynamics):
         if (numpy):
             coefs = coefs.numpy()
 
-        # All done!
-        return coefs, loss_sindy, loss_coef
+        if (compute_loss):
+            return coefs, loss_sindy, loss_coef
+        else:
+            return coefs
 
 
 

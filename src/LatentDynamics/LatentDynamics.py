@@ -55,23 +55,23 @@ class LatentDynamics:
     
 
 
-    def calibrate(self, 
-                  Z             : torch.Tensor, 
-                  dt            : int, 
-                  compute_loss  : bool          = True, 
-                  numpy         : bool          = False) -> np.ndarray:
+    def calibrate(  self, 
+                    Z             : torch.Tensor, 
+                    dt            : int, 
+                    numpy         : bool          = False) -> tuple[(np.ndarray | torch.Tensor), torch.Tensor, torch.Tensor]:
         """
         The user must implement this class on any latent dynamics sub-class. Each latent dynamics 
-        object should parameterize a model for the dynamics in the latent space. Thus, to specify
-        the latent dynamics, we need to find a set of coefficients that parameterize the equations
-        in the latent dynamics model. The calibrate function is supposed to do that. 
+        object should implement a parameterized model for the dynamics in the latent space. A 
+        Latent_Dynamics object should pair each combination of parameter values with a set of 
+        coefficients in the latent space. Using those parameters, we compute loss functions (one 
+        characterizing how well the left and right hand side of the latent dynamics match, another
+        specifies the norm of the coefficient matrix). 
+
+        This function computes the optimal coefficients and the losses, which it returns.
 
         Specifically, this function should take in a sequence (or sequences) of latent states, a
         time step, dt, which specifies the time step between successive terms in the sequence(s) of
         latent states, and some optional booleans which control what information we return. 
-
-        The function should always return at least one argument: a numpy.ndarray object holding the
-        optimal coefficients in the latent dynamics model using the data contained in Z. 
 
 
         -------------------------------------------------------------------------------------------
@@ -87,10 +87,6 @@ class LatentDynamics:
         he i'th combination of parameter values. 
 
         dt: The time step between time steps. See the description of the "Z" argument. 
-
-        compute_loss: A boolean which, if True, this function should return the coefficients and 
-        additional losses based on the set of coefficients we learn. If False, this function should
-        only return the optimal coefficients for the latent dynamics model using the data in Z. 
 
         numpy: A boolean. If True, this function should return the coefficient matrix as a 
         numpy.ndarray object. If False, this function should return it as a torch.Tensor object.
@@ -109,10 +105,6 @@ class LatentDynamics:
         """
 
         raise RuntimeError('Abstract function LatentDynamics.calibrate!')
-        if (compute_loss):
-            return coefs, loss
-        else:
-            return coefs
     
 
 
@@ -157,7 +149,7 @@ class LatentDynamics:
 
     def sample(self, coefs_sample : np.ndarray, z0_sample : np.ndarray, t_grid : np.ndarray) -> np.ndarray:
         """
-        simulate's the latent dynamics for a set of coefficients/initial conditions.
+        Simulate's the latent dynamics for a set of coefficients/initial conditions.
 
 
         -------------------------------------------------------------------------------------------
@@ -207,15 +199,15 @@ class LatentDynamics:
 
         # All done!
         return Z_simulated
-    
+
 
 
     def export(self) -> dict:
         param_dict = {'dim': self.dim, 'ncoefs': self.ncoefs}
         return param_dict
-    
 
-    
+
+
     # SINDy does not need to load parameters.
     # Other latent dynamics might need to.
     def load(self, dict_ : dict) -> None:
