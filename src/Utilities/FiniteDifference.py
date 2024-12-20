@@ -93,7 +93,7 @@ def Derivative1_Order4(X : torch.Tensor, h : float) -> torch.Tensor:
 
     # Now... cycle through the time steps. Note that we use a different method for the first two
     # and final two steps. 
-    dX_dt[0, ...] = (1./h)*((-25./12.)*X[0, ...]    + 4*X[1, ...]           + (-3)*X[2, ...]    + (4./3.)*X[3, ...]     + (-1./4.)*X[4, ...]);
+    dX_dt[0, ...] = (1./h)*((-25./12.)*X[0, ...]    + (4)*X[1, ...]         + (-3)*X[2, ...]    + (4./3.)*X[3, ...]     + (-1./4.)*X[4, ...]);
     dX_dt[1, ...] = (1./h)*((-1./4.)*X[0, ...]      + (-5./6.)*X[1, ...]    + (3./2.)*X[2, ...] + (-1./2.)*X[3, ...]    + (1./12.)*X[4, ...]);
 
     for i in range(2, Nt - 2):

@@ -167,7 +167,7 @@ class DampedSpring(LatentDynamics):
                 Loss_Coef  += result[2];
             
             # All done!
-            return Coefs, Loss_LD, Loss_Coef;
+            return coefs, Loss_LD, Loss_Coef;
             
 
 
@@ -208,8 +208,8 @@ class DampedSpring(LatentDynamics):
 
     def simulate(   self,
                     coefs   : numpy.ndarray, 
-                    IC      : tuple[numpy.ndarray, numpy.ndarray],
-                    t_grid  : numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray]:
+                    IC      : list[numpy.ndarray],
+                    times   : numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray]:
         """
         Time integrates the latent dynamics when it uses the coefficients specified in coefs and 
         starts from the (single) initial condition in z0.
@@ -222,14 +222,14 @@ class DampedSpring(LatentDynamics):
         coefs: A one dimensional numpy.ndarray object representing the flattened copy of 
         hstack[-K, -C, b]. We extract K, C, and b from coefs.
 
-        IC: A two element tuple holding two numpy ndarray objects, each of shape nz, representing 
+        IC: A two element list holding two numpy ndarray objects, each of shape nz, representing 
         the initial displacement and position of the latent dynamics, respectively. Thus, the i'th 
         component of these arrays should hold the i'th component of the latent dynamics initial 
         displacement and velocity, respectively.
         
-        t_grid: A 1d numpy ndarray object whose i'th entry holds the value of the i'th time value 
+        times: A 1d numpy ndarray object whose i'th entry holds the value of the i'th time value 
         where we want to compute the latent solution. The elements of this array should be in 
-        ascending order. We assume uniform spacing (h = t_grid[i + 1] - t_grid[i] for each i).
+        ascending order. 
 
 
         -------------------------------------------------------------------------------------------
@@ -237,12 +237,16 @@ class DampedSpring(LatentDynamics):
         -------------------------------------------------------------------------------------------        
         
         A 2d numpy.ndarray object holding the solution to the latent dynamics at the time values 
-        specified in t_grid when we use the coefficients in coefs to characterize the latent 
+        specified in times when we use the coefficients in coefs to characterize the latent 
         dynamics model. Specifically, this is a 2d array of shape (nt, nz), where nt is the 
-        number of time steps (size of t_grid) and nz is the latent space dimension (self.dim). 
+        number of time steps (size of times) and nz is the latent space dimension (self.dim). 
         Thus, the i,j element of this matrix holds the j'th component of the latent solution at 
-        the time stored in the i'th element of t_grid. 
+        the time stored in the i'th element of times. 
         """
+
+        # Run checks.
+        assert(len(IC)              == 2);
+        assert(len(times.shape)    == 1);
 
         # First, we need to extract -K, -C, and b from coefs. We know that coefs is the least 
         # squares solution to d2Z_dt2 = hstack[Z, dZdt, 1] E^T. Thus, we expect that.
@@ -258,8 +262,7 @@ class DampedSpring(LatentDynamics):
         f    = lambda t, z, dz_dt : -numpy.matmul(K, z) - numpy.matmul(C, dz_dt) + b;
 
         # Solve the ODE forward in time.
-        h   : float   = t_grid[1] - t_grid[0];
-        Z, dZ_dt = RK4(f = f, y0 = IC[0], Dy0 = IC[1], h = h, N = t_grid.shape - 1);
+        Z, dZ_dt = RK4(f = f, y0 = IC[0], Dy0 = IC[1], times = times);
 
         # All done!
         return Z, dZ_dt;
