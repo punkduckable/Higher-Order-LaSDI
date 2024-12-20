@@ -199,9 +199,7 @@ class SINDy(LatentDynamics):
                 """
                 result = self.calibrate(Z[i], dt, numpy)
 
-                # If we are computing losses, the 1 and 2 elements of return hold the sindy and 
-                # coefficient losses. Otherwise, the only return variable is the flattened 
-                # coefficient matrix from the i'th combination of parameter values.
+                # Pacakage the results from this combination of parameter values.
                 coefs[i]    = result[0]
                 loss_sindy += result[1]
                 loss_coef  += result[2]

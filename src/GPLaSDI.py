@@ -343,10 +343,10 @@ class BayesianGLaSDI:
         -------------------------------------------------------------------------------------------
 
         physics: A "Physics" object that we use to fetch the fom initial conditions (which we 
-        encode into latent ICs). Each Physics object has
-        a corresponding PDE with parameters, and a way to generate a solution to that equation 
-        given a particular set of parameter values (and an IC, BCs). We use this object to generate
-        fom solutions which we then use to train the autoencoder/latent dynamics.
+        encode into latent ICs). Each Physics object has a corresponding PDE with parameters, and a 
+        way to generate a solution to that equation given a particular set of parameter values (and 
+        an IC, BCs). We use this object to generate fom solutions which we then use to train the
+        autoencoder/latent dynamics.
          
         Autoencoder: An autoencoder object that we use to compress the fom state to a reduced, 
         latent state.
@@ -368,9 +368,9 @@ class BayesianGLaSDI:
         Nothing!
         """
 
+        self.physics                        = physics
         self.autoencoder                    = autoencoder
         self.latent_dynamics                = latent_dynamics
-        self.physics                        = physics
         self.param_space                    = param_space
 
         # Initialize a timer object. We will use this while training.
@@ -497,7 +497,7 @@ class BayesianGLaSDI:
             # called "coefs" of shape (n_train, N_z, N_l), where N_{\mu} = n_train = number of 
             # training parameter combinations, N_z = latent space dimension, and N_l = number of 
             # terms in the SINDy library.
-            coefs, loss_ld, loss_coef       = ld.calibrate(Z, self.physics.dt, compute_loss = True, numpy = True)
+            coefs, loss_ld, loss_coef       = ld.calibrate(Z, self.physics.dt, numpy = True)
             max_coef        : np.float32    = np.abs(coefs).max()
 
             # Compute the final loss.

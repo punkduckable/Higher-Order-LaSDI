@@ -10,39 +10,33 @@ util_Path       : str   = os.path.join(src_Path, "Utilities");
 sys.path.append(src_Path);
 sys.path.append(util_Path);
 
-import  numpy               as      np
-import  torch
-from    scipy.integrate     import  odeint
+import  numpy;
+import  torch;
 
-from    LatentDynamics      import  LatentDynamics
-from    InputParser         import  InputParser
-from    Stencils            import  FDdict
+from    LatentDynamics      import  LatentDynamics;
+from    InputParser         import  InputParser;
+from    FiniteDifference    import  Derivative1_Order4, Derivative2_Order4;
+from    Solvers             import  RK4;
 
 
 
 # -------------------------------------------------------------------------------------------------
-# SINDy class
+# DampedSpring class
 # -------------------------------------------------------------------------------------------------
 
-class DamptedSpring(LatentDynamics):
-    fd_type     = ''
-    fd          = None
-    fd_oper     = None
-
-
+class DampedSpring(LatentDynamics):
     def __init__(self, 
                  dim        : int, 
                  nt         : int, 
                  config     : dict) -> None:
         r"""
-        Initializes a SINDy object. This is a subclass of the LatentDynamics class which uses the 
-        SINDy algorithm as its model for the ODE governing the latent state. Specifically, we 
-        assume there is a library of functions, f_1(z), ... , f_N(z), each one of which is a 
-        monomial of the components of the latent space, z, and a set of coefficients c_{i,j}, 
-        i = 1, 2, ... , dim and j = 1, 2, ... , N such that
-            z_i'(t) = \sum_{j = 1}^{N} c_{i,j} f_j(z)
-        In this case, we assume that f_1, ... , f_N consists of the set of order <= 1 monomials. 
-        That is, f_1(z), ... , f_N(z) = 1, z_1, ... , z_{dim}.
+        Initializes a DampedSpring object. This is a subclass of the LatentDynamics class which 
+        implements the following latent dynamics
+            z''(t) = -K z(t) - C z'(t) + b
+        Here, z is the latent state. K \in \mathbb{R}^{n x n} represents a generalized spring 
+        matrix, C represents a damping matrix, and b is an offset/constant forcing function. 
+        In this expression, K, C, and b are the model's coefficients. There is a separate set of
+        coefficients for each combination of parameter values. 
             
 
         -------------------------------------------------------------------------------------------
@@ -54,85 +48,50 @@ class DamptedSpring(LatentDynamics):
         nt: The number of time steps we want to generate when solving (numerically) the latent 
         space dynamics.
 
-        config: A dictionary housing the settings we need to set up a SINDy object. Specifically, 
-        this dictionary should have a key called "sindy" whose corresponding value is another 
-        dictionary with the following two keys:
-            - fd_type: A string specifying which finite-difference scheme we should use when
-            approximating the time derivative of the solution to the latent dynamics at a 
-            specific time. Currently, the following options are allowed:
-                - 'sbp12': summation-by-parts 1st/2nd (boundary/interior) order operator
-                - 'sbp24': summation-by-parts 2nd/4th order operator
-                - 'sbp36': summation-by-parts 3rd/6th order operator
-                - 'sbp48': summation-by-parts 4th/8th order operator
+        config: A dictionary housing the settings we need to set up a DampedSpring object. 
+        Specifically, this dictionary should have a key called "spring" whose corresponding value 
+        is another dictionary with the following key:
             - coef_norm_order: A string specifying which norm we want to use when computing
             the coefficient loss.
         """
 
         # Run the base class initializer. The only thing this does is set the dim and nt 
-        # attributes.
-        super().__init__(dim, nt)
+        # attributes.;
+        super().__init__(dim, nt);
 
-        # We only allow library terms of order <= 1. If we let z(t) \in \mathbb{R}^{dim} denote the 
-        # latent state at some time, t, then the possible library terms are 1, z_1(t), ... , 
-        # z_{dim}(t). Since each component function gets its own set of coefficients, there must 
-        # be dim*(dim + 1) total coefficients.
-        #TODO(kevin): generalize for high-order dynamics
-        self.ncoefs = self.dim * (self.dim + 1)
+        # store the dimension of the latent dynamics.
+        self.dim    : int   = dim;
 
-        # Now, set up an Input parser to process the contents of the config['sindy'] dictionary. 
-        assert('sindy' in config)
-        input_parser = InputParser(config['sindy'], name = 'sindy_input')
+        # Now, set up an Input parser to read in the coefficient norm order.
+        assert('spring' in config);
+        spring_parser           = InputParser(config['spring'], name = 'spring_input');
+        self.coef_norm_order    = spring_parser.getInput(['coef_norm_order'], fallback = 1);
 
-        """
-        Determine which finite difference scheme we should use to approximate the time derivative
-        of the latent space dynamics. Currently, we allow the following values for "fd_type":
-            - 'sbp12': summation-by-parts 1st/2nd (boundary/interior) order operator
-            - 'sbp24': summation-by-parts 2nd/4th order operator
-            - 'sbp36': summation-by-parts 3rd/6th order operator
-            - 'sbp48': summation-by-parts 4th/8th order operator
-        """
-        self.fd_type    : str       = input_parser.getInput(['fd_type'], fallback = 'sbp12')
-        self.fd         : callable  = FDdict[self.fd_type]
-
-        r"""
-        Fetch the operator matrix. What does this do? Suppose we have a time series with nt points, 
-        x(t_0), ... , x(t_{nt - 1}) \in \mathbb{R}^d. Further assume that for each j, 
-        t_j = t_0 + j \delta t, where \delta t is some positive constant. Let j \in {0, 1, ... , 
-        nt - 1}. Let xj be j'th vector whose k'th element is x_j(t_k). Then, the i'th element of 
-        M xj holds the approximation to x_j'(t_k) using the stencil we selected above. 
-
-        For instance, if we selected sdp12, corresponding to the central difference scheme, then 
-        we have (for j != 0, nt - 1)
-            [M xj]_i = (x_j(t_{i + 1}) - x(t_{j - 1}))/(2 \delta t).
-        """
-        self.fd_oper, _, _          = self.fd.getOperators(self.nt)
-
-        # Fetch the norm we are going to use on the sindy coefficients.
-        # NOTE(kevin): by default, this will be L1 norm.
-        self.coef_norm_order = input_parser.getInput(['coef_norm_order'], fallback = 1)
-
-        # TODO(kevin): other loss functions
-        self.MSE = torch.nn.MSELoss()
+        # Set up the loss function for the latent dynamics.
+        self.LD_LossFunction = torch.nn.MSELoss();
 
         # All done!
-        return
+        return;
     
 
 
     def calibrate(self, 
                   Z             : torch.Tensor,
                   dt            : float, 
-                  numpy         : bool = False) -> tuple[(np.ndarray | torch.Tensor), torch.Tensor, torch.Tensor]:
+                  numpy         : bool = False) -> tuple[(numpy.ndarray | torch.Tensor), torch.Tensor, torch.Tensor]:
         r"""
-        This function computes the optimal SINDy coefficients using the current latent time 
-        series. Specifically, let us consider the case when Z has two dimensions (the case when 
-        it has three is identical, just with different coefficients for each instance of the 
-        leading dimension of Z). In this case, we assume that the rows of Z correspond to a 
-        trajectory of latent states. Specifically, we assume the i'th row holds the latent state,
-        z, at time t_0 + i*dt. We use SINDy to find the coefficients in the dynamical system
-        z'(t) = C \Phi(z(t)), where C is a matrix of coefficients and \Phi(z(t)) represents a
-        library of terms. We find the matrix C corresponding to the dynamical system that best 
-        agrees with the data in the rows of Z. 
+        For each combination of parameter values, this function computes the optimal K, C, and b 
+        coefficients in the sequence of latent states for that combination of parameter values.
+        
+        Specifically, let us consider the case when Z has two axes (the case when it has three is 
+        identical, just with different coefficients for each instance of the leading dimension of 
+        Z). In this case, we assume the i'th row of Z holds the latent state t_0 + i*dt. We use 
+        We assume that the latent state is governed by an ODE of the form
+            z''(t) = -K z(t) - C z'(t) + b
+        We find K, C, and b corresponding to the dynamical system that best agrees with the 
+        snapshots in the rows of Z (the K, C, and b which minimize the mean square difference 
+        between the left and right hand side of this equation across the snapshots in the rows 
+        of Z).
 
 
         -------------------------------------------------------------------------------------------
@@ -157,16 +116,17 @@ class DamptedSpring(LatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------
 
-        If compute_loss is True, then we return three variables. 
+        We return three variables. 
         
-        The first holds the coefficients. It is a matrix of shape (n_train, n_coef), where n_train 
-        is the number of parameter combinations in the training set and n_coef is the number of 
-        coefficients in the latent dynamics. The i,j entry of this array holds the value of the 
-        j'th coefficient when we use the i'th combination of parameter values.
+        The first holds the coefficients. It is a matrix of shape (n_train, dim*(2*dim + 1)), 
+        where n_train is the number of parameter combinations in the training set and dim is the 
+        dimension of the latent space. The i'th row holds the flattened version of 
+        hstack(K, C, b), where K, C, and b are the optimal coefficients for the time series 
+        corresponding to the i'th combination of parameter values.
 
-        The second holds the total SINDy loss. It is a single element tensor whose lone entry holds
-        the sum of the SINDy losses across the set of combinations of parameters in the training 
-        set. 
+        The second holds the total Latent Dynamics loss. It is a single element tensor whose lone 
+        entry holds the sum of the Latent Dynamics (left minus right hand side of the ODE) across 
+        the set of combinations of parameters in the training set. 
 
         The third is a single element tensor whose lone element holds the sum of the L1 norms of 
         the coefficients across the set of combinations of parameters in the training set.
@@ -176,119 +136,80 @@ class DamptedSpring(LatentDynamics):
         # If Z has three dimensions, loop over all train cases.
         if (Z.dim() == 3):
             # Fetch the number of training cases.
-            n_train : int = Z.size(0)
+            n_train : int = Z.size(0);
 
             # Prepare an array to house the flattened coefficient matrices for each combination of
             # parameter values.
             if (numpy):
-                coefs = np.zeros([n_train, self.ncoefs])
+                coefs = numpy.zeros([n_train, self.dim*(2*self.dim + 1)]);
             else:
-                coefs = torch.Tensor([n_train, self.ncoefs])
+                coefs = torch.Tensor([n_train, self.dim*(2*self.dim + 1)]);
 
-            # Initialize the losses. Note that these are floats which we will replace with 
-            # tensors.
-            loss_sindy, loss_coef = 0.0, 0.0
+            # Initialize the losses.
+            Loss_LD     : torch.Tensor  = torch.tensor(0, dtype = torch.float32);
+            Loss_Coef   : torch.Tensor  = torch.tensor(0, dtype = torch.float32);
 
             # Cycle through the combinations of parameter values.
             for i in range(n_train):
                 """"
-                Get the optimal SINDy coefficients for the i'th combination of parameter values. 
-                Remember that Z is 3d tensor of shape (Np, Nt, Nz) whose (i, j, k) entry holds 
-                the k'th component of the j'th frame of the latent trajectory for the i'th 
-                combination of parameter values. Note that Result is either a torch.Tensor
-                (if compute_loss = False and numpy = False), a numpy.ndarray (if numpy = True and 
-                compute_loss = True), or a 3 element tuple (if compute_loss = True).
+                Get the optimal K, C, and b coefficients for the i'th combination of parameter 
+                values. 
+                
+                Remember that Z is 3d tensor of shape (Np, Nt, Nz) whose (i, j, k) entry holds the 
+                k'th component of the j'th frame of the latent trajectory for the i'th combination 
+                of parameter values. 
                 """
-                result = self.calibrate(Z[i], dt, numpy)
+                result : tuple = self.calibrate(Z[i], dt, numpy);
 
-                # If we are computing losses, the 1 and 2 elements of return hold the sindy and 
-                # coefficient losses. Otherwise, the only return variable is the flattened 
-                # coefficient matrix from the i'th combination of parameter values.
-                if (compute_loss):
-                    coefs[i]    = result[0]
-                    loss_sindy += result[1]
-                    loss_coef  += result[2]
-                else:
-                    coefs[i] = result
+                # Package everything from this combination of training values.
+                coefs[i]    = result[0];
+                Loss_LD    += result[1];
+                Loss_Coef  += result[2];
             
-            # Package everything to return!
-            if (compute_loss):
-                return coefs, loss_sindy, loss_coef
-            else:
-                return coefs
+            # All done!
+            return Coefs, Loss_LD, Loss_Coef;
+            
 
 
         # -----------------------------------------------------------------------------------------
         # evaluate for one training case.
         assert(Z.dim() == 2)
 
-        # First, compute the time derivatives. This yields a torch.Tensor object whose i,j entry 
-        # holds an approximation of (d/dt) Z_j(t_0 + i*dt)
-        dZdt = self.compute_time_derivative(Z, dt)
-        time_dim, space_dim = dZdt.shape
+        # First, compute the time derivatives. 
+        dZ_dt   : torch.Tensor  = Derivative1_Order4(X = Z, h = dt);
+        d2Z_dt2 : torch.Tensor  = Derivative2_Order4(X = Z, h = dt);
 
-        # Concatenate a column of ones. This will correspond to a constant term in the latent 
-        # dynamics.
-        Z_i     : torch.Tensor  = torch.cat([torch.ones(time_dim, 1), Z], dim = 1)
+        # Concatenate Z, dZ_dt and a column of 1's. We will solve for the matrix, E, which gives 
+        # the best fit for the system d2Z_dt2 = cat[Z, dZ_dt, 1] E. This matrix has the form 
+        # E^T = [-K, -C, b]. Thus, we can extract K, C, and b from W.
+        W       : torch.Tensor  = torch.cat([Z, dZ_dt, torch.ones(Z.shape[0], 1)], dim = 1);
         
         # For each j, solve the least squares problem 
-        #   min{ || dZdt[:, j] - Z_i c_j|| : C_j \in \mathbb{R}ˆNl }
-        # where Nl is the number of library terms (in this case, just Nz + 1, since we only allow
-        # constant and linear terms). We store the resulting solutions in a matrix, coefs, whose 
-        # j'th column holds the results for the j'th column of dZdt. Thus, coefs is a 2d tensor
-        # with shape (Nl, Nz).
-        coefs   : torch.Tensor  = torch.linalg.lstsq(Z_i, dZdt).solution
+        #   min{ || d2Z_dt2[:, j] - W E(j)|| : E(j) \in \mathbb{R}^(dim*(2*dim + 1)) }
+        # We store the resulting solutions in a matrix, coefs, whose j'th column holds the 
+        # results for the j'th column of dZdt. Thus, coefs is a 2d tensor with shape 
+        # (dim(2*dim + 1), Nz).
+        coefs   : torch.Tensor  = torch.linalg.lstsq(W, d2Z_dt2).solution;
 
-        # If we need to compute the loss, do so now. 
-        if (compute_loss):
-            loss_sindy = self.MSE(dZdt, Z_i @ coefs)
-            # NOTE(kevin): by default, this will be L1 norm.
-            loss_coef = torch.norm(coefs, self.coef_norm_order)
+        # Compute the losses
+        Loss_LD     = self.LD_LossFunction(d2Z_dt2, W @ coefs);
+        Loss_Coef   = torch.norm(coefs, self.coef_norm_order);
 
         # All done. Prepare coefs and the losses to return. Note that we flatten the coefficient 
         # matrix.
         # Note: output of lstsq is not contiguous in memory.
-        coefs = coefs.detach().flatten()
+        coefs = coefs.detach().flatten();
         if (numpy):
-            coefs = coefs.numpy()
+            coefs = coefs.numpy();
 
-        if (compute_loss):
-            return coefs, loss_sindy, loss_coef
-        else:
-            return coefs
+        return coefs, Loss_LD, Loss_Coef;
+    
 
 
-
-    def compute_time_derivative(self, Z : torch.Tensor, Dt : float) -> torch.Tensor:
-        """
-        This function builds the SINDy dataset, assuming only linear terms in the SINDy dataset. 
-        The time derivatives are computed through finite difference.
-
-
-        -------------------------------------------------------------------------------------------
-        Arguments
-        -------------------------------------------------------------------------------------------
-
-        Z: A 2d tensor of shape (Nt, Nz) whose i, j entry holds the j'th component of the i'th 
-        time step in the latent time series. We assume that Z[i, :] represents the latent state
-        at time t_0 + i*Dt
-
-        Dt: The time step between latent frames (the time between Z[:, i] and Z[:, i + 1])
-
-
-        -------------------------------------------------------------------------------------------
-        Returns 
-        -------------------------------------------------------------------------------------------
-
-        The output dZdt is a 2D tensor with the same shape as Z. It's i, j entry holds an 
-        approximation to (d/dt)Z_j(t_0 + j Dt). We compute this approximation using self's stencil.
-        """
-
-        return (1. / Dt) * torch.sparse.mm(self.fd_oper, Z)
-
-
-
-    def simulate(self, coefs : np.ndarray, z0 : np.ndarray, t_grid : np.ndarray) -> np.ndarray:
+    def simulate(   self,
+                    coefs   : numpy.ndarray, 
+                    IC      : tuple[numpy.ndarray, numpy.ndarray],
+                    t_grid  : numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray]:
         """
         Time integrates the latent dynamics when it uses the coefficients specified in coefs and 
         starts from the (single) initial condition in z0.
@@ -298,16 +219,17 @@ class DamptedSpring(LatentDynamics):
         Arguments
         -------------------------------------------------------------------------------------------
         
-        coefs: A one dimensional numpy.ndarray object representing the flattened copy of the array 
-        of latent dynamics coefficients that calibrate returns.
+        coefs: A one dimensional numpy.ndarray object representing the flattened copy of 
+        hstack[-K, -C, b]. We extract K, C, and b from coefs.
 
-        z0: A numpy ndarray object of shape nz representing the initial condition for the latent 
-        dynamics. Thus, the i'th component of this array should hold the i'th component of the 
-        latent dynamics initial condition.
-
+        IC: A two element tuple holding two numpy ndarray objects, each of shape nz, representing 
+        the initial displacement and position of the latent dynamics, respectively. Thus, the i'th 
+        component of these arrays should hold the i'th component of the latent dynamics initial 
+        displacement and velocity, respectively.
+        
         t_grid: A 1d numpy ndarray object whose i'th entry holds the value of the i'th time value 
         where we want to compute the latent solution. The elements of this array should be in 
-        ascending order.
+        ascending order. We assume uniform spacing (h = t_grid[i + 1] - t_grid[i] for each i).
 
 
         -------------------------------------------------------------------------------------------
@@ -322,30 +244,33 @@ class DamptedSpring(LatentDynamics):
         the time stored in the i'th element of t_grid. 
         """
 
-        # First, reshape coefs as a matrix. Since we only allow for linear terms, there are nz + 1
-        # library terms and nz equations, where nz = self.dim. 
-        # Note: copy is inevitable for numpy==1.26. removed copy=False temporarily.
-        c_i     = coefs.reshape([self.dim + 1, self.dim]).T
+        # First, we need to extract -K, -C, and b from coefs. We know that coefs is the least 
+        # squares solution to d2Z_dt2 = hstack[Z, dZdt, 1] E^T. Thus, we expect that.
+        # E = [-K, -C, b]. 
+        E   : numpy.ndarray = coefs.reshape([self.dim, 2*self.dim + 1]).T;
 
-        # Set up a lambda function to approximate dzdt. In SINDy, we learn a coefficient matrix 
-        # C such that the latent state evolves according to the dynamical system 
-        #   z'(t) = C \Phi(z(t)), 
-        # where \Phi(z(t)) is the library of terms. Note that the zero column of C corresponds 
-        # to the constant library term, 1. 
-        dzdt    = lambda z, t : c_i[:, 1:] @ z + c_i[:, 0]
+        # Extract K, C, and b.
+        K   : numpy.ndarray = -E[:, 0:self.dim];
+        C   : numpy.ndarray = -E[:, self.dim:(2*self.dim)];
+        b   : numpy.ndarray = E[:, 2*self.dim:(2*self.dim + 1)];
+
+        # Set up a lambda function to approximate (d^2/dt^2)z(t) \approx -K z(t) - C (d/dt)z(t) + b
+        f    = lambda t, z, dz_dt : -numpy.matmul(K, z) - numpy.matmul(C, dz_dt) + b;
 
         # Solve the ODE forward in time.
-        Z_i = odeint(dzdt, z0, t_grid)
+        h   : float   = t_grid[1] - t_grid[0];
+        Z, dZ_dt = RK4(f = f, y0 = IC[0], Dy0 = IC[1], h = h, N = t_grid.shape - 1);
 
         # All done!
-        return Z_i
+        return Z, dZ_dt;
     
 
 
     def export(self) -> dict:
         """
         This function packages self's contents into a dictionary which it then returns. We can use 
-        this dictionary to create a new SINDy object which has the same internal state as self. 
+        this dictionary to create a new DampedSpring object which has the same internal state as 
+        self. 
         
         
         -------------------------------------------------------------------------------------------
@@ -359,12 +284,12 @@ class DamptedSpring(LatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------
         
-        A dictionary with two keys: fd_type and coef_norm_order. The former specifies which finite
-        different scheme we use while the latter specifies which norm we want to use when computing
-        the coefficient loss. 
+        A dictionary with one key: coef_norm_order. It's value specifies which norm we want to use 
+        when computing the coefficient loss. 
         """
 
-        param_dict                      = super().export()
-        param_dict['fd_type']           = self.fd_type
-        param_dict['coef_norm_order']   = self.coef_norm_order
-        return param_dict
+        param_dict                      = super().export();
+        param_dict['coef_norm_order']   = self.coef_norm_order;
+
+        return param_dict;
+        

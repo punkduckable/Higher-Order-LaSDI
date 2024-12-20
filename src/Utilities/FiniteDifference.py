@@ -12,8 +12,8 @@ def Derivative1_Order2(X : torch.Tensor, h : float) -> torch.Tensor:
     in the rows of X. Specifically, we assume the i'th row of X represents a sample of a function, 
     x, at time t_0 + i*h. We return a new tensor whose i'th row holds an O(h^2) approximation of 
     (d/dt)x(t_0 + i*h)
-    
-    
+
+
 
     -----------------------------------------------------------------------------------------------
     Arguments
@@ -26,7 +26,7 @@ def Derivative1_Order2(X : torch.Tensor, h : float) -> torch.Tensor:
     h: The time step size.
 
 
-    
+
     -----------------------------------------------------------------------------------------------
     Arguments
     -----------------------------------------------------------------------------------------------
