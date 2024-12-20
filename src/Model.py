@@ -8,8 +8,8 @@ import  os;
 Physics_Path    : str  = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
 sys.path.append(Physics_Path);
 
-import  torch
-import  numpy       as      np
+import  torch;
+import  numpy;
 
 from    Physics     import  Physics
 
@@ -36,72 +36,6 @@ act_dict = {'ELU'           : torch.nn.ELU,
             'tanh'          : torch.nn.Tanh,
             'tanhshrink'    : torch.nn.Tanhshrink}
 
-
-
-# -------------------------------------------------------------------------------------------------
-# initial_conditions_latent function
-# -------------------------------------------------------------------------------------------------
-
-def initial_condition_latent(param_grid     : np.ndarray, 
-                             physics        : Physics, 
-                             autoencoder    : torch.nn.Module) -> list[np.ndarray]:
-    """
-    This function maps a set of initial conditions for the fom to initial conditions for the 
-    latent space dynamics. Specifically, we take in a set of possible parameter values. For each 
-    set of parameter values, we recover the fom IC (from physics), then map this fom IC to a 
-    latent space IC (by encoding it using the autoencoder). We do this for each parameter 
-    combination and then return a list housing the latent space ICs.
-
-    
-    -----------------------------------------------------------------------------------------------
-    Arguments
-    -----------------------------------------------------------------------------------------------
-
-    param_grid: A 2d numpy.ndarray object of shape (number of parameter combination) x (number of 
-    parameters). The i,j element of this array holds the value of the j'th parameter in the i'th 
-    combination of parameters.
-
-    physics: A "Physics" object that, among other things, stores the IC for each combination of 
-    parameters. 
-
-    autoencoder: The actual autoencoder object that we use to map the ICs into the latent space.
-
-
-    -----------------------------------------------------------------------------------------------
-    Returns
-    -----------------------------------------------------------------------------------------------
-    
-    A list of numpy ndarray objects whose i'th element holds the latent space initial condition 
-    for the i'th set of parameters in the param_grid. That is, if we let U0_i denote the fom IC for 
-    the i'th set of parameters, then the i'th element of the returned list is Z0_i = encoder(U0_i).
-    """
-
-    # Figure out how many combinations of parameter values there are.
-    n_param     : int               = param_grid.shape[0];
-    Z0          : list[np.ndarray]  = [];
-    sol_shape   : list[int]         = [1, 1] + physics.qgrid_size;
-    
-    # Cycle through the parameters.
-    for i in range(n_param):
-        # TODO(kevin): generalize parameter class.
-
-        # Fetch the IC for the i'th set of parameters. Then map it to a tensor.
-        u0 : np.ndarray = physics.initial_condition(param_grid[i]);
-        u0              = u0.reshape(sol_shape);
-        u0              = torch.Tensor(u0);
-
-        # Encode the IC, then map the encoding to a numpy array.
-        z0 : np.ndarray = autoencoder.encoder(u0);
-        z0              = z0[0, 0, :].detach().numpy();
-
-        # Append the new IC to the list of latent ICs
-        Z0.append(z0);
-
-    # Return the list of latent ICs.
-    return Z0;
-
-
-
 # -------------------------------------------------------------------------------------------------
 # MLP class
 # -------------------------------------------------------------------------------------------------
@@ -111,7 +45,7 @@ class MultiLayerPerceptron(torch.nn.Module):
                     widths          : list[int],
                     activation      : str           = 'sigmoid',
                     reshape_index   : int           = None, 
-                    reshape_shape   : list[int]    = None) -> None:
+                    reshape_shape   : list[int]     = None) -> None:
         r"""
         This class defines a standard multi-layer network network.
 
@@ -166,7 +100,7 @@ class MultiLayerPerceptron(torch.nn.Module):
         # both cases, we need the product of the components of reshape_shape to match a 
         # corresponding element of widths.
         assert((reshape_index is None) or (reshape_index in [0, -1]));
-        assert((reshape_shape is None) or (np.prod(reshape_shape) == widths[reshape_index]));
+        assert((reshape_shape is None) or (numpy.prod(reshape_shape) == widths[reshape_index]));
 
         super(MultiLayerPerceptron, self).__init__();
 
@@ -393,6 +327,61 @@ class Autoencoder(torch.nn.Module):
 
 
 
+    def latent_initial_conditions(  self,
+                                    param_grid     : numpy.ndarray, 
+                                    physics        : Physics) -> list[numpy.ndarray]:
+        """
+        This function maps a set of initial conditions for the fom to initial conditions for the 
+        latent space dynamics. Specifically, we take in a set of possible parameter values. For each 
+        set of parameter values, we recover the fom IC (from physics), then map this fom IC to a 
+        latent space IC (by encoding it). We do this for each parameter combination and then return a 
+        list housing the latent space ICs.
+
+        
+        -----------------------------------------------------------------------------------------------
+        Arguments
+        -----------------------------------------------------------------------------------------------
+
+        param_grid: A 2d numpy.ndarray object of shape (number of parameter combination) x (number of 
+        parameters). The i,j element of this array holds the value of the j'th parameter in the i'th 
+        combination of parameters.
+
+        physics: A "Physics" object that, among other things, stores the IC for each combination of 
+        parameters. 
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+        
+        A list of numpy ndarray objects whose i'th element is a numpy ndarray of shape (1, nz) 
+        whose 0, j element holds the j'th component of the encoding of the i'th fom initial 
+        condition. If we let U0_i denote the fom IC for the i'th set of parameters, then the i'th 
+        element of the returned list is Z0_i = self.encoder(U0_i).reshape(1, -1).
+        """
+
+        # Figure out how many combinations of parameter values there are.
+        n_param     : int                   = param_grid.shape[0];
+        Z0          : list[numpy.ndarray]   = [];
+
+        # Cycle through the parameters.
+        for i in range(n_param):
+            # Fetch the IC for the i'th set of parameters. Then map it to a tensor.
+            u0 : numpy.ndarray  = physics.initial_condition(param_grid[i]);
+            u0                  = torch.Tensor(u0);
+
+            # Encode the IC, then map the encoding to a numpy array.
+            z0 : torch.Tensor   = self.encoder(u0).reshape(1, -1);
+            z0 : numpy.ndarray  = z0.detach().numpy();
+
+            # Append the new IC to the list of latent ICs
+            Z0.append(z0);
+
+        # Return the list of latent ICs.
+        return Z0;
+
+
+
     def export(self) -> dict:
         """
         -------------------------------------------------------------------------------------------
@@ -516,7 +505,7 @@ class Autoencoder_Pair(torch.nn.Module):
         # is the number of dimensions in each fom solution frame. This number represents represents 
         # the dimensionality of the input to the encoder (since we pass a flattened fom frame as 
         # input).
-        assert(np.prod(self.qgrid_size) == widths[0]);
+        assert(numpy.prod(self.qgrid_size) == widths[0]);
 
         # Fetch information about the domain/co-domain of each encoder layer.
         self.widths     : list[int]     = widths
@@ -668,10 +657,73 @@ class Autoencoder_Pair(torch.nn.Module):
         # Now reconstruct displacement, velocity.
         Reconstructed_Displacement, Reconstructed_Velocity = self.Decode(
                                                                 Latent_Displacement = Latent_Displacement, 
-                                                                Latent_Velocity    = Latent_Velocity);
+                                                                Latent_Velocity     = Latent_Velocity);
 
         # All done!
         return Reconstructed_Displacement, Reconstructed_Velocity;
+
+
+
+    def latent_initial_conditions(  self,
+                                    param_grid     : numpy.ndarray, 
+                                    physics        : Physics) -> list[numpy.ndarray]:
+        """
+        This function maps a set of initial conditions for the fom to initial conditions for the 
+        latent space dynamics. Specifically, we take in a set of possible parameter values. For each 
+        set of parameter values, we recover the fom IC (from physics), then map this fom IC to a 
+        latent space IC (by encoding it). We do this for each parameter combination and then return a 
+        list housing the latent space ICs.
+
+        
+        -----------------------------------------------------------------------------------------------
+        Arguments
+        -----------------------------------------------------------------------------------------------
+
+        param_grid: A 2d numpy.ndarray object of shape (number of parameter combination) x (number of 
+        parameters). The i,j element of this array holds the value of the j'th parameter in the i'th 
+        combination of parameters.
+
+        physics: A "Physics" object that, among other things, stores the IC for each combination of 
+        parameters. 
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+        
+        A list of numpy ndarray objects whose i'th element is a numpy ndarray of shape (2, nz) 
+        whose 0, j and 1, j elements holds the j'th component of the encoding of the i'th fom 
+        initial displacement and velocity, respectively. If we let (U0_i, V0_i) denote the initial
+        fom displacement and velocity for the i'th set of parameters, then the i'th element of the 
+        returned list is the concatenation of the position and velocity portions of 
+        self.encoder(U0_i).
+        """
+
+        # Figure out how many combinations of parameter values there are.
+        n_param     : int                   = param_grid.shape[0];
+        Z0          : list[numpy.ndarray]   = [];
+
+        # Cycle through the parameters.
+        for i in range(n_param):
+            # Fetch the IC for the i'th set of parameters. Then map it to a tensor.
+            u0, v0  = physics.initial_condition(param_grid[i]);
+            u0      = torch.Tensor(u0).unsqueeze(0);
+            v0      = torch.Tensor(v0).unsqueeze(0);
+
+            # Encode the IC, then map the encoding to a numpy array.
+            z0, Dz0 = self.Encode(  Displacement_Frames = u0, 
+                                    Velocity_Frames     = v0);
+            z0      : numpy.ndarray = z0.detach().numpy();
+            Dz0     : numpy.ndarray = z0.detach().numpy();
+
+            print(z0.shape);
+            print(Dz0.shape);
+
+            # Concatenate the IC's and append them to the list.
+            Z0.append(numpy.concatenate((z0, Dz0), axis = 0));
+
+        # Return the list of latent ICs.
+        return Z0;
 
 
 

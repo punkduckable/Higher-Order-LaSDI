@@ -208,7 +208,7 @@ class DampedSpring(LatentDynamics):
 
     def simulate(   self,
                     coefs   : numpy.ndarray, 
-                    IC      : list[numpy.ndarray],
+                    IC      : numpy.ndarray,
                     times   : numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray]:
         """
         Time integrates the latent dynamics when it uses the coefficients specified in coefs and 
@@ -222,10 +222,10 @@ class DampedSpring(LatentDynamics):
         coefs: A one dimensional numpy.ndarray object representing the flattened copy of 
         hstack[-K, -C, b]. We extract K, C, and b from coefs.
 
-        IC: A two element list holding two numpy ndarray objects, each of shape nz, representing 
-        the initial displacement and position of the latent dynamics, respectively. Thus, the i'th 
-        component of these arrays should hold the i'th component of the latent dynamics initial 
-        displacement and velocity, respectively.
+        IC: A 2d numpy ndarray of shape 2 x dim. The two rows of this array represent the initial
+        displacement and position of the latent dynamics, respectively. Thus, the i'th component 
+        of these arrays should hold the i'th component of the latent dynamics initial displacement 
+        and velocity, respectively.
         
         times: A 1d numpy ndarray object whose i'th entry holds the value of the i'th time value 
         where we want to compute the latent solution. The elements of this array should be in 
@@ -236,17 +236,17 @@ class DampedSpring(LatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------        
         
-        A 2d numpy.ndarray object holding the solution to the latent dynamics at the time values 
-        specified in times when we use the coefficients in coefs to characterize the latent 
-        dynamics model. Specifically, this is a 2d array of shape (nt, nz), where nt is the 
-        number of time steps (size of times) and nz is the latent space dimension (self.dim). 
-        Thus, the i,j element of this matrix holds the j'th component of the latent solution at 
-        the time stored in the i'th element of times. 
+        A 3d numpy ndarray of shape (2, nt, dim) where nt is the number of time steps (size of 
+        times) and dim is the latent space dimension (self.dim). The 0,i,j and 1,i,j elements of 
+        this array hold the j'th components of the displacement and velocity at the i'th time step, 
+        respectively.
         """
 
         # Run checks.
-        assert(len(IC)              == 2);
-        assert(len(times.shape)    == 1);
+        assert(len(IC.shape)        == 2);
+        assert(IC.shape[0]          == 2);
+        assert(IC.shape[1]          == self.dim);
+        assert(len(times.shape)     == 1);
 
         # First, we need to extract -K, -C, and b from coefs. We know that coefs is the least 
         # squares solution to d2Z_dt2 = hstack[Z, dZdt, 1] E^T. Thus, we expect that.

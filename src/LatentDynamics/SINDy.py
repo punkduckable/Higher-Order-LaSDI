@@ -139,10 +139,10 @@ class SINDy(LatentDynamics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Z: A 2d or 3d tensor. If Z is a 2d tensor, then it has shape (Nt, Nz), where Nt specifies 
-        the length of the sequence of latent states and Nz is the dimension of the latent space. In 
+        Z: A 2d or 3d tensor. If Z is a 2d tensor, then it has shape (Nt, dim), where Nt specifies 
+        the length of the sequence of latent states and dim is the dimension of the latent space. In 
         this case, the i,j entry of Z holds the j'th component of the latent state at the time 
-        t_0 + i*dt. If it is a 3d tensor, then it has shape (Np, Nt, Nz). In this case, we assume 
+        t_0 + i*dt. If it is a 3d tensor, then it has shape (Np, Nt, dim). In this case, we assume 
         there are Np different combinations of parameter values. The i, j, k entry of Z in this 
         case holds the k'th component of the latent encoding at time t_0 + j*dt when we use the 
         i'th combination of parameter values. 
@@ -193,7 +193,7 @@ class SINDy(LatentDynamics):
             for i in range(n_train):
                 """"
                 Get the optimal SINDy coefficients for the i'th combination of parameter values. 
-                Remember that Z is 3d tensor of shape (Np, Nt, Nz) whose (i, j, k) entry holds 
+                Remember that Z is 3d tensor of shape (Np, Nt, dim) whose (i, j, k) entry holds 
                 the k'th component of the j'th frame of the latent trajectory for the i'th 
                 combination of parameter values. Note that Result a 3 element tuple.
                 """
@@ -223,10 +223,10 @@ class SINDy(LatentDynamics):
         
         # For each j, solve the least squares problem 
         #   min{ || dZdt[:, j] - Z_i c_j|| : C_j \in \mathbb{R}ˆNl }
-        # where Nl is the number of library terms (in this case, just Nz + 1, since we only allow
+        # where Nl is the number of library terms (in this case, just dim + 1, since we only allow
         # constant and linear terms). We store the resulting solutions in a matrix, coefs, whose 
         # j'th column holds the results for the j'th column of dZdt. Thus, coefs is a 2d tensor
-        # with shape (Nl, Nz).
+        # with shape (Nl, dim).
         coefs   : torch.Tensor  = torch.linalg.lstsq(Z_i, dZdt).solution
 
         # Compute the losses.
@@ -256,7 +256,7 @@ class SINDy(LatentDynamics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Z: A 2d tensor of shape (Nt, Nz) whose i, j entry holds the j'th component of the i'th 
+        Z: A 2d tensor of shape (Nt, dim) whose i, j entry holds the j'th component of the i'th 
         time step in the latent time series. We assume that Z[i, :] represents the latent state
         at time t_0 + i*Dt
 
@@ -275,7 +275,10 @@ class SINDy(LatentDynamics):
 
 
 
-    def simulate(self, coefs : np.ndarray, z0 : np.ndarray, t_grid : np.ndarray) -> np.ndarray:
+    def simulate(self, 
+                 coefs  : np.ndarray, 
+                 IC     : np.ndarray, 
+                 times  : np.ndarray) -> np.ndarray:
         """
         Time integrates the latent dynamics when it uses the coefficients specified in coefs and 
         starts from the (single) initial condition in z0.
@@ -288,11 +291,10 @@ class SINDy(LatentDynamics):
         coefs: A one dimensional numpy.ndarray object representing the flattened copy of the array 
         of latent dynamics coefficients that calibrate returns.
 
-        z0: A numpy ndarray object of shape nz representing the initial condition for the latent 
-        dynamics. Thus, the i'th component of this array should hold the i'th component of the 
-        latent dynamics initial condition.
+        IC: A 2D numpy.ndarray object of shape 1 x dim. The 0, j element of this list 
+        should hold the j'th component of the initial displacement.
 
-        t_grid: A 1d numpy ndarray object whose i'th entry holds the value of the i'th time value 
+        times: A 1d numpy ndarray object whose i'th entry holds the value of the i'th time value 
         where we want to compute the latent solution. The elements of this array should be in 
         ascending order.
 
@@ -301,28 +303,34 @@ class SINDy(LatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------        
         
-        A 2d numpy.ndarray object holding the solution to the latent dynamics at the time values 
-        specified in t_grid when we use the coefficients in coefs to characterize the latent 
-        dynamics model. Specifically, this is a 2d array of shape (nt, nz), where nt is the 
-        number of time steps (size of t_grid) and nz is the latent space dimension (self.dim). 
-        Thus, the i,j element of this matrix holds the j'th component of the latent solution at 
-        the time stored in the i'th element of t_grid. 
+        A 3d numpy ndarray of shape (1, nt, dim), where nt = times.size and dim is the latent 
+        space dimension (self.dim). Thus, the 0,i,j element of this matrix holds the j'th component 
+        of the latent solution at the time stored in the i'th element of times. 
         """
 
-        # First, reshape coefs as a matrix. Since we only allow for linear terms, there are nz + 1
-        # library terms and nz equations, where nz = self.dim. 
+        # Run checks.
+        assert(len(IC.shape)    == 2);
+        assert(IC.shape[0]      == 1);
+        assert(IC.shape[1]      == self.dim);
+        assert(len(times.shape) == 1);
+
+        # Extract IC.
+        z0  : np.ndarray = IC[0];
+
+        # First, reshape coefs as a matrix. Since we only allow for linear terms, there are dim + 1
+        # library terms and dim equations, where dim = self.dim.
         # Note: copy is inevitable for numpy==1.26. removed copy=False temporarily.
         c_i     = coefs.reshape([self.dim + 1, self.dim]).T
 
-        # Set up a lambda function to approximate dzdt. In SINDy, we learn a coefficient matrix 
+        # Set up a lambda function to approximate dz_dt. In SINDy, we learn a coefficient matrix 
         # C such that the latent state evolves according to the dynamical system 
         #   z'(t) = C \Phi(z(t)), 
         # where \Phi(z(t)) is the library of terms. Note that the zero column of C corresponds 
         # to the constant library term, 1. 
-        dzdt    = lambda z, t : c_i[:, 1:] @ z + c_i[:, 0]
+        dz_dt               = lambda z, t : c_i[:, 1:] @ z + c_i[:, 0]
 
         # Solve the ODE forward in time.
-        Z_i = odeint(dzdt, z0, t_grid)
+        Z_i : np.ndarray    = odeint(dz_dt, z0, times)
 
         # All done!
         return Z_i

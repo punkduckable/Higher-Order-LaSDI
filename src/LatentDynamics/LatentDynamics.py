@@ -108,7 +108,10 @@ class LatentDynamics:
     
 
 
-    def simulate(self, coefs : np.ndarray, z0 : np.ndarray, t_grid : np.ndarray) -> np.ndarray:
+    def simulate(self, 
+                 coefs  : np.ndarray, 
+                 IC     : np.ndarray, 
+                 times  : np.ndarray) -> np.ndarray:
         """
         Time integrates the latent dynamics when it uses the coefficients specified in coefs and 
         starts from the (single) initial condition in z0.
@@ -120,12 +123,14 @@ class LatentDynamics:
         
         coefs: A one dimensional numpy.ndarray object holding the coefficients we want to use 
         to solve the latent dynamics forward in time. 
+        
+        IC: A 2D numpy.ndarray object of shape n_IC x dim, where n_IC is the number of initial 
+        conditions we need to specify the initial state of the system and dim is the dimension of 
+        the latent space (the space where the dynamics take place). The i,j element of this list 
+        should hold the j'th component of the initial condition for the i'th derivative of the 
+        initial condition. 
 
-        z0: A numpy ndarray object of shape nz representing the initial condition for the latent 
-        dynamics. Thus, the i'th component of this array should hold the i'th component of the 
-        latent dynamics initial condition.
-
-        t_grid: A 1d numpy ndarray object whose i'th entry holds the value of the i'th time value 
+        times: A 1d numpy ndarray object whose i'th entry holds the value of the i'th time value 
         where we want to compute the latent solution. The elements of this array should be in 
         ascending order.
 
@@ -135,11 +140,11 @@ class LatentDynamics:
         -------------------------------------------------------------------------------------------        
         
         A 2d numpy.ndarray object holding the solution to the latent dynamics at the time values 
-        specified in t_grid when we use the coefficients in coefs to characterize the latent 
+        specified in times when we use the coefficients in coefs to characterize the latent 
         dynamics model. Specifically, this is a 2d array of shape (nt, nz), where nt is the 
-        number of time steps (size of t_grid) and nz is the latent space dimension (self.dim). 
+        number of time steps (size of times) and nz is the latent space dimension (self.dim). 
         Thus, the i,j element of this matrix holds the j'th component of the latent solution at 
-        the time stored in the i'th element of t_grid. 
+        the time stored in the i'th element of times. 
         """
 
         raise RuntimeError('Abstract function LatentDynamics.simulate!')
@@ -147,7 +152,10 @@ class LatentDynamics:
     
 
 
-    def sample(self, coefs_sample : np.ndarray, z0_sample : np.ndarray, t_grid : np.ndarray) -> np.ndarray:
+    def sample( self, 
+                coefs_sample    : np.ndarray, 
+                IC_samples      : np.ndarray, 
+                times           : np.ndarray) -> np.ndarray:
         """
         Simulate's the latent dynamics for a set of coefficients/initial conditions.
 
@@ -159,11 +167,13 @@ class LatentDynamics:
         coefs_sample: A numpy.ndarray object whose leading dimension has size ns (the number of 
         sets of coefficients/initial conditions/simulations we run).
 
-        z0_sample: A 2d numpy.ndarray object of shape (ns, nz) (where ns is the number of samples
-        and nz is the dimensionality of the latent space). The i,j entry of z0_sample should hold 
-        the j'th component of the i'th initial condition.
+        IC_sample: A 3d numpy.ndarray object of shape (ns, n_IC, nz) (where ns is the number of 
+        samples, n_IC is the number of initial conditions we need to specify the initial state of
+        the system, and nz is the dimensionality of the latent space). The i,j,k entry holds the
+        k'th component of the initial condition for the j'th derivative of the state for the i'th 
+        state.
 
-        t_grid: A 1d numpy ndarray object whose i'th entry holds the value of the i'th time value 
+        times: A 1d numpy ndarray object whose i'th entry holds the value of the i'th time value 
         where we want to compute each latent solution. The elements of this array should be in 
         ascending order. We use the same array for each set of coefficients.
 
@@ -173,29 +183,38 @@ class LatentDynamics:
         -------------------------------------------------------------------------------------------
 
 
-        A 3d numpy ndarray object of shape (ns, nt, nz), where ns = the number of samples (the 
-        leading dimension of z0_sample and coefs_sample), nt = the number of time steps (size of 
-        t_grid) and nz is the dimension of the latent space. The i, j, k element of this array 
-        holds the k'th component of the solution of the latent dynamics at the j'th time step (j'th
-        element of t_grid) when we use the i'th set of coefficients/initial conditions. 
+        A 3d numpy ndarray object of shape (n_IC, ns, nt, nz), where n_IC = the number of 
+        derivatives of the initial state we need to specify in the initial conditions, ns = the 
+        number of samples (the leading dimension of z0_sample and coefs_sample), nt = the number of 
+        time steps (size of times) and nz is the dimension of the latent space. The i, j, k, l 
+        element of this array holds the l'th component of the solution of the latent dynamics at 
+        the j'th time step (j'th element of times) when we use the i'th set of coefficients/initial conditions. 
         """
 
         # There needs to be as many initial conditions as sets of coefficients.
-        assert(len(coefs_sample) == len(z0_sample))
+        assert(len(IC_samples)          == 3);
+        assert(coefs_sample.shape[0]    == IC_samples.shape[0]);
+        assert(IC_samples.shape[2]      == self.dim);
+
+        # Fetch ns, n_IC.
+        ns      : int   = IC_samples.shape[0];
+        n_IC    : int   = IC_samples.shape[1];
 
         # Cycle through the set of coefficients
         for i in range(len(coefs_sample)):
             # Simulate the latent dynamics when we use the i'th set of coefficients + ICs
-            Z_i : np.ndarray = self.simulate(coefs_sample[i], z0_sample[i], t_grid)
+            Z_i : np.ndarray = self.simulate(coefs  = coefs_sample[i], 
+                                             IC     = IC_samples[i], 
+                                             times  = times);
 
             # Append a leading dimension of size 1.
-            Z_i = Z_i.reshape(1, Z_i.shape[0], Z_i.shape[1])
+            Z_i = Z_i.reshape(n_IC, 1, Z_i.shape[0], Z_i.shape[1]);
 
             # Append the latest trajectory onto the Z_simulated array.
             if (i == 0):
-                Z_simulated = Z_i
+                Z_simulated = Z_i;
             else:
-                Z_simulated = np.concatenate((Z_simulated, Z_i), axis = 0)
+                Z_simulated = np.concatenate((Z_simulated, Z_i), axis = 1);
 
         # All done!
         return Z_simulated

@@ -10,12 +10,12 @@ sys.path.append(Physics_Path);
 sys.path.append(LD_Path);
 
 import  torch;
-import  numpy                       as      np;
+import  numpy;
 from    torch.optim                 import  Optimizer;
 from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 
 from    GaussianProcess             import  eval_gp, sample_coefs, fit_gps;
-from    Model                       import  initial_condition_latent, Autoencoder;
+from    Model                       import  Autoencoder, Autoencoder_Pair;
 from    Timing                      import  Timer;
 from    ParameterSpace              import  ParameterSpace;
 from    Physics                     import  Physics;
@@ -30,7 +30,7 @@ def average_rom(autoencoder     : Autoencoder,
                 physics         : Physics, 
                 latent_dynamics : LatentDynamics, 
                 gp_list         : list[GaussianProcessRegressor], 
-                param_grid      : np.ndarray):
+                param_grid      : numpy.ndarray):
     """
     This function simulates the latent dynamics for a collection of testing parameters by using
     the mean of the posterior distribution for each coefficient's posterior distribution. 
@@ -80,7 +80,7 @@ def average_rom(autoencoder     : Autoencoder,
 
     # For each parameter in param_grid, fetch the corresponding initial condition and then encode
     # it. This gives us a list whose i'th element holds the encoding of the i'th initial condition.
-    Z0      : list[np.ndarray] = initial_condition_latent(param_grid, physics, autoencoder)
+    Z0      : list[numpy.ndarray] = autoencoder.latent_initial_conditions(param_grid, physics);
 
     # Evaluate each GP at each combination of parameter values. This returns two arrays, the 
     # first of which is a 2d array whose i,j element specifies the mean of the posterior 
@@ -93,7 +93,9 @@ def average_rom(autoencoder     : Autoencoder,
     # resulting solution frames in Zis, a 3d array whose i, j, k element holds the k'th component 
     # of the j'th time step fo the latent solution when we use the coefficients from the posterior 
     # distribution for the i'th combination of parameter values.
-    Zis : np.ndarray = np.zeros([n_param, physics.nt, autoencoder.n_z])
+    nz  : int           = autoencoder.n_z;
+    Zis : numpy.ndarray = numpy.zeros([n_param, physics.nt, nz])
+
     for i in range(n_param):
         Zis[i] = latent_dynamics.simulate(pred_mean[i], Z0[i], physics.t_grid)
 
@@ -106,9 +108,9 @@ def sample_roms(autoencoder     : Autoencoder,
                 physics         : Physics, 
                 latent_dynamics : LatentDynamics, 
                 gp_list         : list[GaussianProcessRegressor], 
-                param_grid      : np.ndarray, 
-                n_samples       : int) ->           np.ndarray:
-    '''
+                param_grid      : numpy.ndarray, 
+                n_samples       : int) ->           numpy.ndarray:
+    """
     This function samples the latent coefficients, solves the corresponding latent dynamics, and 
     then returns the resulting latent solutions. 
     
@@ -150,11 +152,11 @@ def sample_roms(autoencoder     : Autoencoder,
     Returns
     -----------------------------------------------------------------------------------------------
     
-    A np.array of size [n_test, n_samples, physics.nt, autoencoder.n_z]. The i, j, k, l element 
-    holds the l'th component of the k'th frame of the solution to the latent dynamics when we use 
-    the j'th sample of latent coefficients drawn from the posterior distribution for the i'th 
-    combination of parameter values (i'th row of param_grid).
-    '''
+    A numpy.ndarray of size [n_test, n_samples, physics.nt, autoencoder.n_z]. The i, j, k, l 
+    element holds the l'th component of the k'th frame of the solution to the latent dynamics when 
+    we use the j'th sample of latent coefficients drawn from the posterior distribution for the 
+    i'th combination of parameter values (i'th row of param_grid).
+    """
 
     # The param grid needs to be two dimensional, with the first axis corresponding to which 
     # instance of the parameter values we are using. If there is only one parameter, it may be 1d. 
@@ -167,14 +169,14 @@ def sample_roms(autoencoder     : Autoencoder,
 
     # For each parameter in param_grid, fetch the corresponding initial condition and then encode
     # it. This gives us a list whose i'th element holds the encoding of the i'th initial condition.
-    Z0      : list[np.ndarray] = initial_condition_latent(param_grid, physics, autoencoder)
+    Z0      : list[numpy.ndarray] = autoencoder.latent_initial_conditions(param_grid, physics)
 
     # Now, for each combination of parameters, draw n_samples samples from the posterior
     # distributions for each coefficient at that combination of parameters. We store these samples 
     # in a list of numpy arrays. The k'th list element is a (n_sample, n_coef) array whose i, j 
     # element stores the i'th sample from the posterior distribution for the j'th coefficient at 
     # the k'th combination of parameter values.
-    coef_samples : list[np.ndarray] = [sample_coefs(gp_list, param_grid[i], n_samples) for i in range(n_param)]
+    coef_samples : list[numpy.ndarray] = [sample_coefs(gp_list, param_grid[i], n_samples) for i in range(n_param)]
 
     # For each testing parameter, cycle through the samples of the coefficients for that 
     # combination of parameter values. For each set of coefficients, solve the corresponding latent 
@@ -182,7 +184,7 @@ def sample_roms(autoencoder     : Autoencoder,
     # j, k, l element holds the l'th component of the k'th frame of the solution to the latent 
     # dynamics when we use the j'th sample of latent coefficients drawn from the posterior 
     # distribution for the i'th combination of parameter values.
-    Zis = np.zeros([n_param, n_samples, physics.nt, autoencoder.n_z])
+    Zis = numpy.zeros([n_param, n_samples, physics.nt, autoencoder.n_z])
     for i, Zi in enumerate(Zis):
         z_ic = Z0[i]
         for j, coef_sample in enumerate(coef_samples[i]):
@@ -193,7 +195,7 @@ def sample_roms(autoencoder     : Autoencoder,
 
 
 
-def get_fom_max_std(autoencoder : Autoencoder, Zis : np.ndarray) -> int:
+def get_fom_max_std(autoencoder : Autoencoder, Zis : numpy.ndarray) -> int:
     r"""
     Computes the maximum standard deviation across the trajectories in Zis and returns the
     corresponding parameter index. Specifically, Zis is a 4d tensor of shape (n_test, n_samples, 
@@ -255,17 +257,17 @@ def get_fom_max_std(autoencoder : Autoencoder, Zis : np.ndarray) -> int:
         Z_m             : torch.Tensor  = torch.Tensor(Zi)
 
         # Now decode the frames.
-        X_pred_m        : np.ndarray    = autoencoder.decoder(Z_m).detach().numpy()
+        X_pred_m        : numpy.ndarray = autoencoder.decoder(Z_m).detach().numpy()
 
         # Compute the standard deviation across the sample axis. This gives us an array of shape 
         # (n_t, n_fom) whose i,j element holds the (sample) standard deviation of the j'th component 
         # of the i'th frame of the fom solution. In this case, the sample distribution consists of 
         # the set of j'th components of i'th frames of fom solutions (one for each sample of the 
         # coefficient posterior distributions).
-        X_pred_m_std    : np.ndarray    = X_pred_m.std(0)
+        X_pred_m_std    : numpy.ndarray = X_pred_m.std(0)
 
         # Now compute the maximum standard deviation across frames/fom components.
-        max_std_m       : np.float32    = X_pred_m_std.max()
+        max_std_m       : numpy.float32 = X_pred_m_std.max()
 
         # If this is bigger than the biggest std we have seen so far, update the maximum.
         if max_std_m > max_std:
@@ -411,8 +413,8 @@ class BayesianGLaSDI:
             self.device = 'cpu'
 
         # Set up variables to aide checkpointing.
-        self.best_loss      : float         = np.inf            # The lowest testing loss we have found so far
-        self.best_coefs     : np.ndarray    = None              # The best coefficients from the iteration with lowest testing loss
+        self.best_loss      : float         = numpy.inf         # The lowest testing loss we have found so far
+        self.best_coefs     : numpy.ndarray = None              # The best coefficients from the iteration with lowest testing loss
         self.restart_iter   : int           = 0                 # Iteration number at the end of the last training period
         
         # Set placeholder tensors to hold the testing and training data. We expect to set up 
@@ -498,7 +500,7 @@ class BayesianGLaSDI:
             # training parameter combinations, N_z = latent space dimension, and N_l = number of 
             # terms in the SINDy library.
             coefs, loss_ld, loss_coef       = ld.calibrate(Z, self.physics.dt, numpy = True)
-            max_coef        : np.float32    = np.abs(coefs).max()
+            max_coef        : numpy.float32 = numpy.abs(coefs).max()
 
             # Compute the final loss.
             loss = loss_ae + self.ld_weight * loss_ld / n_train + self.coef_weight * loss_coef / n_train
@@ -516,7 +518,7 @@ class BayesianGLaSDI:
             if loss.item() < self.best_loss:
                 torch.save(autoencoder_device.cpu().state_dict(), self.path_checkpoint + '/' + 'checkpoint.pt')
                 autoencoder_device  : Autoencoder   = self.autoencoder.to(device)
-                self.best_coefs     : np.ndarray    = coefs
+                self.best_coefs     : numpy.ndarray = coefs
                 self.best_loss      : float         = loss.item()
 
             # -------------------------------------------------------------------------------------
@@ -529,18 +531,18 @@ class BayesianGLaSDI:
 
             # If there are fewer than 6 training examples, report the set of parameter combinations.
             if n_train < 6:
-                print('Param: ' + str(np.round(ps.train_space[0, :], 4)), end = '')
+                print('Param: ' + str(numpy.round(ps.train_space[0, :], 4)), end = '')
 
                 for i in range(1, n_train - 1):
-                    print(', ' + str(np.round(ps.train_space[i, :], 4)), end = '')
-                print(', ' + str(np.round(ps.train_space[-1, :], 4)))
+                    print(', ' + str(numpy.round(ps.train_space[i, :], 4)), end = '')
+                print(', ' + str(numpy.round(ps.train_space[-1, :], 4)))
 
             # Otherwise, report the final 6 parameter combinations.
             else:
                 print('Param: ...', end = '')
                 for i in range(5):
-                    print(', ' + str(np.round(ps.train_space[-6 + i, :], 4)), end = '')
-                print(', ' + str(np.round(ps.train_space[-1, :], 4)))
+                    print(', ' + str(numpy.round(ps.train_space[-6 + i, :], 4)), end = '')
+                print(', ' + str(numpy.round(ps.train_space[-1, :], 4)))
 
             # We have finished a training step, stop the timer.
             self.timer.end("train_step")
@@ -559,7 +561,7 @@ class BayesianGLaSDI:
             state_dict  = torch.load(self.path_checkpoint + '/' + 'checkpoint.pt')
             self.autoencoder.load_state_dict(state_dict)
         else:
-            self.best_coefs : np.ndarray = coefs
+            self.best_coefs : numpy.ndarray = coefs
             torch.save(autoencoder_device.cpu().state_dict(), self.path_checkpoint + '/' + 'checkpoint.pt')
 
         # Report timing information.
@@ -571,7 +573,7 @@ class BayesianGLaSDI:
 
 
 
-    def get_new_sample_point(self) -> np.ndarray:
+    def get_new_sample_point(self) -> numpy.ndarray:
         """
         This function uses a greedy process to sample a new parameter value. Specifically, it runs 
         through each combination of parameters in in self.param_space. For the i'th combination of 
@@ -603,7 +605,7 @@ class BayesianGLaSDI:
         assert(self.X_test.size(0)      >  0)
         assert(self.X_test.size(0)      == self.param_space.n_test())
         assert(self.best_coefs.shape[0] == self.param_space.n_train())
-        coefs : np.ndarray = self.best_coefs
+        coefs : numpy.ndarray = self.best_coefs
 
         print('\n~~~~~~~ Finding New Point ~~~~~~~')
         # TODO(kevin): william, this might be the place for new sampling routine.
@@ -617,7 +619,7 @@ class BayesianGLaSDI:
         ae.load_state_dict(torch.load(self.path_checkpoint + '/' + 'checkpoint.pt'))
 
         # Map the initial conditions for the fom to initial conditions in the latent space.
-        Z0 : list[np.ndarray] = initial_condition_latent(ps.test_space, self.physics, ae)
+        Z0 : list[numpy.ndarray] = ae.latent_initial_conditions(ps.test_space, self.physics);
 
         # Train the GPs on the training data, get one GP per latent space coefficient.
         gp_list : list[GaussianProcessRegressor] = fit_gps(ps.train_space, coefs)
@@ -628,7 +630,7 @@ class BayesianGLaSDI:
         # values in a 2d numpy.ndarray of shape (n_sample, n_coef), whose i, j element holds the 
         # i'th sample of the j'th coefficient. We store the arrays for different parameter values 
         # in a list of length (number of combinations of parameters in the testing set). 
-        coef_samples : list[np.ndarray] = [sample_coefs(gp_list, ps.test_space[i], self.n_samples) for i in range(n_test)]
+        coef_samples : list[numpy.ndarray] = [sample_coefs(gp_list, ps.test_space[i], self.n_samples) for i in range(n_test)]
 
         # Now, solve the latent dynamics forward in time for each set of coefficients in 
         # coef_samples. There are n_test combinations of parameter values, and we have n_samples 
@@ -639,7 +641,7 @@ class BayesianGLaSDI:
         # component of the k'th frame of the solution to the latent dynamics when we use the 
         # j'th sample of the coefficients for the i'th testing parameter value and when the latent
         # dynamics uses the encoding of the i'th fom IC as its IC. 
-        Zis : np.ndarray = np.zeros([n_test, self.n_samples, self.physics.nt, ae.n_z])
+        Zis : numpy.ndarray = numpy.zeros([n_test, self.n_samples, self.physics.nt, ae.n_z])
         for i, Zi in enumerate(Zis):
             z_ic = Z0[i]
             for j, coef_sample in enumerate(coef_samples[i]):
@@ -650,8 +652,8 @@ class BayesianGLaSDI:
 
         # We have found the testing parameter we want to add to the training set. Fetch it, then
         # stop the timer and return the parameter. 
-        new_sample : np.ndarray = ps.test_space[m_index, :].reshape(1, -1)
-        print('New param: ' + str(np.round(new_sample, 4)) + '\n')
+        new_sample : numpy.ndarray = ps.test_space[m_index, :].reshape(1, -1)
+        print('New param: ' + str(numpy.round(new_sample, 4)) + '\n')
         self.timer.end("new_sample")
 
         # All done!
@@ -712,7 +714,7 @@ class BayesianGLaSDI:
         # Extract instance variables from dict_.
         self.X_train        : torch.Tensor  = dict_['X_train']
         self.X_test         : torch.Tensor  = dict_['X_test']
-        self.best_coefs     : np.ndarray    = dict_['best_coefs']
+        self.best_coefs     : numpy.ndarray = dict_['best_coefs']
         self.restart_iter   : int           = dict_['restart_iter']
 
         # Load the timer / optimizer. 
