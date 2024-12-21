@@ -322,8 +322,8 @@ def optimizer_to(optim : Optimizer, device : str) -> None:
 
 
 class BayesianGLaSDI:
-    X_train : torch.Tensor = list[torch.Tensor([])];
-    X_test  : torch.Tensor = list[torch.Tensor([])];
+    X_Train : list[torch.Tensor]    = [];
+    X_Test  : list[torch.Tensor]    = [];
 
     def __init__(self, 
                  physics            : Physics, 
@@ -417,13 +417,13 @@ class BayesianGLaSDI:
         self.restart_iter   : int           = 0                 # Iteration number at the end of the last training period
         
         # Set placeholder tensors to hold the testing and training data. We expect to set up 
-        # X_train to be a list of tensors of shape (Np, Nt, Nx[0], ... , Nx[Nd - 1]), where Np 
+        # X_Train to be a list of tensors of shape (Np, Nt, Nx[0], ... , Nx[Nd - 1]), where Np 
         # is the number of parameter combinations in the training set, Nt is the number of time 
         # steps per FOM solution, and Nx[0], ... , Nx[Nd - 1] represent the number of steps along 
-        # the spatial axes. X_test has an analogous shape, but it's leading dimension has a size 
+        # the spatial axes. X_Test has an analogous shape, but it's leading dimension has a size 
         # matching the number of combinations of parameters in the testing set.
-        self.X_train        : list[torch.Tensor]  = [];
-        self.X_test         : list[torch.Tensor]  = [];
+        self.X_Train        : list[torch.Tensor]  = [];
+        self.X_Test         : list[torch.Tensor]  = [];
 
         # All done!
         return
@@ -450,15 +450,15 @@ class BayesianGLaSDI:
 
         # Make sure we have at least one training data point (the 0 axis of X_Train[0] corresponds 
         # to which combination of training parameters we use).
-        assert(self.X_train[0].shape[0] > 0)
-        assert(self.X_train[0].shape[0] == self.param_space.n_train())
+        assert(self.X_Train[0].shape[0] > 0)
+        assert(self.X_Train[0].shape[0] == self.param_space.n_train())
 
         # Map everything to self's device.
         device              : str                   = self.device
         model_device        : torch.nn.Module       = self.model.to(device)
-        X_train_device      : list[torch.Tensor]    = [];
-        for i in range(len(self.X_train)):
-            X_train_device.append(self.X_train[i].to(device));
+        X_Train_device      : list[torch.Tensor]    = [];
+        for i in range(len(self.X_Train)):
+            X_Train_device.append(self.X_Train[i].to(device));
 
         # Make sure the checkpoints and results directories exist.
         from pathlib import Path
@@ -489,28 +489,39 @@ class BayesianGLaSDI:
                 # the number of parameters, Nt is the number of time steps in the time series, and 
                 # Nz is the latent space dimension. X_Pred, should have the same shape as X_Train, 
                 # (Np, Nt, Nx[0], .... , Nx[Nd - 1]). 
-                Z               : torch.Tensor  = model_device.Encode(X_train_device[0]);
-                X_pred          : torch.Tensor  = model_device.Decode(Z);
-                Z               : torch.Tensor  = Z.cpu();
-            
+                Z               : torch.Tensor          = model_device.Encode(X_Train_device[0]);
+                X_pred          : torch.Tensor          = model_device.Decode(Z);
+                Z               : torch.Tensor          = Z.cpu();
+                
+                # Compute the reconstruction loss. 
+                loss_recon      : torch.Tensor          = self.MSE(X_Train_device[0], X_pred);
+
+                # Build the Latent States for calibration.
+                Latent_States   : list[torch.Tensor]    = [Z];
+
+
             elif(isinstance(model_device, Autoencoder_Pair)):
                 # Run the forward pass. This results in two tensors of shape (Np, Nt, Nz), where Np 
                 # is the number of parameters, Nt is the number of time steps in the time series, 
                 # and Nz is the latent space dimension.  
-                Z, DZ           = model_device.Encode(Displacement_Frames = X_train_device[0], Velocity_Frames = X_train_device[1]);
-                X_pred, V_Pred  = model_device.Decode(Z, DZ);
-                Z               = Z.cpu();
+                Z, dZ_dt                                = model_device.Encode(Displacement_Frames = X_Train_device[0], Velocity_Frames = X_Train_device[1]);
+                X_pred, V_Pred                          = model_device.Decode(Z, dZ_dt);
+                Z                   : torch.Tensor      = Z.cpu();
+                dZ_dt               : torch.tensor      = dZ_dt.cpu();
 
-            # Compute the reconstruction loss. 
-            loss_recon         : torch.Tensor  = self.MSE(X_train_device[0], X_pred) + self.MSE(X_train_device[1], V_Pred);
+                # Compute the reconstruction loss. 
+                loss_recon         : torch.Tensor       = self.MSE(X_Train_device[0], X_pred) + self.MSE(X_Train_device[1], V_Pred);
+            
+                # Build the Latent States for calibration.
+                Latent_States   : list[torch.Tensor]    = [Z, dZ_dt];
 
             # Compute the latent dynamics and coefficient losses. Also fetch the current latent
             # dynamics coefficients for each training point. The latter is stored in a 3d array 
             # called "coefs" of shape (n_train, N_z, N_l), where N_{\mu} = n_train = number of 
             # training parameter combinations, N_z = latent space dimension, and N_l = number of 
             # terms in the SINDy library.
-            coefs, loss_ld, loss_coef       = ld.calibrate(Z, self.physics.dt, numpy = True)
-            max_coef        : numpy.float32 = numpy.abs(coefs).max()
+            coefs, loss_ld, loss_coef       = ld.calibrate(Latent_States = Latent_States, dt = self.physics.dt, numpy = True);
+            max_coef        : numpy.float32 = numpy.abs(coefs).max();
 
             # Compute the final loss.
             loss = loss_recon + self.ld_weight * loss_ld / n_train + self.coef_weight * loss_coef / n_train
@@ -520,16 +531,16 @@ class BayesianGLaSDI:
             # Backward Pass
 
             #  Run back propagation and update the model parameters. 
-            loss.backward()
-            self.optimizer.step()
+            loss.backward();
+            self.optimizer.step();
 
             # Check if we hit a new minimum loss. If so, make a checkpoint, record the loss and 
             # the iteration number. 
             if loss.item() < self.best_loss:
-                torch.save(model_device.cpu().state_dict(), self.path_checkpoint + '/' + 'checkpoint.pt')
-                model_device        : torch.nn.Module   = self.model.to(device)
-                self.best_coefs     : numpy.ndarray     = coefs
-                self.best_loss      : float             = loss.item()
+                torch.save(model_device.cpu().state_dict(), self.path_checkpoint + '/' + 'checkpoint.pt');
+                model_device        : torch.nn.Module   = self.model.to(device);
+                self.best_coefs     : numpy.ndarray     = coefs;
+                self.best_loss      : float             = loss.item();
 
             # -------------------------------------------------------------------------------------
             # Report Results from this iteration 
@@ -564,19 +575,19 @@ class BayesianGLaSDI:
         self.restart_iter += self.n_iter
 
         # Recover the model + coefficients which attained the lowest loss. If we recorded 
-        # our bess loss in this round of training, then we replace the model's parameters 
+        # our best loss in this round of training, then we replace the model's parameters 
         # with those from the iteration that got the best loss. Otherwise, we use the current 
         # set of coefficients and serialize the current model.
         if ((self.best_coefs is not None) and (self.best_coefs.shape[0] == n_train)):
             state_dict  = torch.load(self.path_checkpoint + '/' + 'checkpoint.pt')
-            self.__module__.load_state_dict(state_dict)
+            self.model.load_state_dict(state_dict)
         else:
             self.best_coefs : numpy.ndarray = coefs
             torch.save(model_device.cpu().state_dict(), self.path_checkpoint + '/' + 'checkpoint.pt')
 
         # Report timing information.
-        self.timer.end("finalize")
-        self.timer.print()
+        self.timer.end("finalize");
+        self.timer.print();
 
         # All done!
         return
@@ -612,8 +623,8 @@ class BayesianGLaSDI:
 
 
         self.timer.start("new_sample")
-        assert(self.X_test[0].size(0)       >  0)
-        assert(self.X_test[0].size(0)       == self.param_space.n_test())
+        assert(self.X_Test[0].size(0)       >  0)
+        assert(self.X_Test[0].size(0)       == self.param_space.n_test())
         assert(self.best_coefs.shape[0]     == self.param_space.n_train())
         coefs : numpy.ndarray = self.best_coefs
 
@@ -626,10 +637,10 @@ class BayesianGLaSDI:
         model       : torch.nn.Module   = self.model.cpu()
         ps          : ParameterSpace    = self.param_space
         n_test      : int               = ps.n_test()
-        ae.load_state_dict(torch.load(self.path_checkpoint + '/' + 'checkpoint.pt'))
+        model.load_state_dict(torch.load(self.path_checkpoint + '/' + 'checkpoint.pt'))
 
         # Map the initial conditions for the FOM to initial conditions in the latent space.
-        Z0 : list[numpy.ndarray] = ae.latent_initial_conditions(ps.test_space, self.physics);
+        Z0 : list[numpy.ndarray] = model.latent_initial_conditions(ps.test_space, self.physics);
 
         # Train the GPs on the training data, get one GP per latent space coefficient.
         gp_list : list[GaussianProcessRegressor] = fit_gps(ps.train_space, coefs)
@@ -651,14 +662,14 @@ class BayesianGLaSDI:
         # component of the k'th frame of the solution to the latent dynamics when we use the 
         # j'th sample of the coefficients for the i'th testing parameter value and when the latent
         # dynamics uses the encoding of the i'th FOM IC as its IC. 
-        Zis : numpy.ndarray = numpy.zeros([n_test, self.n_samples, self.physics.nt, ae.n_z])
+        Zis : numpy.ndarray = numpy.zeros([n_test, self.n_samples, self.physics.nt, model.n_z])
         for i, Zi in enumerate(Zis):
             z_ic = Z0[i]
             for j, coef_sample in enumerate(coef_samples[i]):
                 Zi[j] = self.latent_dynamics.simulate(coef_sample, z_ic, self.physics.t_grid)
 
         # Find the index of the parameter with the largest std.
-        m_index : int = get_FOM_max_std(ae, Zis)
+        m_index : int = get_FOM_max_std(model, Zis)
 
         # We have found the testing parameter we want to add to the training set. Fetch it, then
         # stop the timer and return the parameter. 
@@ -682,8 +693,8 @@ class BayesianGLaSDI:
         objects) to make a GLaSDI object whose internal state matches that of self.
         """
 
-        dict_ = {'X_train'          : self.X_train, 
-                 'X_test'           : self.X_test, 
+        dict_ = {'X_Train'          : self.X_Train, 
+                 'X_Test'           : self.X_Test, 
                  'lr'               : self.lr, 
                  'n_iter'           : self.n_iter,
                  'n_samples'        : self.n_samples, 
@@ -722,8 +733,8 @@ class BayesianGLaSDI:
         """
 
         # Extract instance variables from dict_.
-        self.X_train        : list[torch.Tensor]    = dict_['X_train']
-        self.X_test         : list[torch.Tensor]    = dict_['X_test']
+        self.X_Train        : list[torch.Tensor]    = dict_['X_Train']
+        self.X_Test         : list[torch.Tensor]    = dict_['X_Test']
         self.best_coefs     : numpy.ndarray         = dict_['best_coefs']
         self.restart_iter   : int                   = dict_['restart_iter']
 

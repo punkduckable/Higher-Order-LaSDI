@@ -122,12 +122,10 @@ class InputParser:
         # Check if the fallback and final val have the same type.
         if (fallback != None):
             if (type(val) != type(fallback)):
-                warn("%s does not match the type with the fallback value %s!" % (str(type(val)), str(type(fallback))))
-                print(fallback);
-                print(val);
-                print(keys, flush = True);
+                warn(message = "%s does not match the type with the fallback value %s!" % (str(type(val)), str(type(fallback))));
+                warn(message = "fallback is %s, val = %s, and keys = %s" % (str(fallback), str(val), str(keys)));
         
-        # Check thast the final val matches the desired datatype
+        # Check that the final val matches the desired datatype
         if (datatype != None):
             if (type(val) != datatype):
                 raise RuntimeError("%s does not match the specified datatype %s!" % (str(type(val)), str(datatype)))

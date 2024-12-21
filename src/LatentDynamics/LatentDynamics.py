@@ -56,7 +56,7 @@ class LatentDynamics:
 
 
     def calibrate(  self, 
-                    Z             : torch.Tensor, 
+                    Latent_States : list[torch.Tensor], 
                     dt            : int, 
                     numpy         : bool          = False) -> tuple[(np.ndarray | torch.Tensor), torch.Tensor, torch.Tensor]:
         """
@@ -78,13 +78,15 @@ class LatentDynamics:
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Z: A 2d or 3d tensor. If Z is a 2d tensor, then it has shape (Nt, Nz), where Nt specifies 
-        the number of time steps in each sequence of latent states and Nz is the dimension of the 
-        latent space. In this case, the i,j entry of Z holds the j'th component of the latent state 
-        at the time t_0 + i*dt. If it is a 3d tensor, then it has shape (Np, Nt, Nz). In this case, 
-        we assume there at Np different combinations of parameter values. The i, j, k entry of Z in 
-        this case holds the k'th component of the latent encoding at time t_0 + j*dt when we use 
-        he i'th combination of parameter values. 
+        Latent_States: A list of 2d or 3d tensor holding the latent position, velocity, etc. Here, 
+        we will consider the case when len(Latent_Sates) = 1 and will let Z = Latent_States[0]. If 
+        Z has two dimensions, it has shape (Nt, Nz), where Nt specifies the number of time steps in 
+        each sequence of latent states and Nz is the dimension of the latent space. In this case, 
+        the i,j entry of Z holds the j'th component of the latent state  at the time t_0 + i*dt. If 
+        it is a 3d tensor, then it has shape (Np, Nt, Nz). In this case, we assume there at Np 
+        different combinations of parameter values. The i, j, k entry of Z in this case holds the 
+        k'th component of the latent encoding at time t_0 + j*dt when we use the i'th combination 
+        of parameter values. 
 
         dt: The time step between time steps. See the description of the "Z" argument. 
 
@@ -110,7 +112,7 @@ class LatentDynamics:
 
     def simulate(self, 
                  coefs  : np.ndarray, 
-                 IC     : np.ndarray, 
+                 IC     : list[np.ndarray], 
                  times  : np.ndarray) -> np.ndarray:
         """
         Time integrates the latent dynamics when it uses the coefficients specified in coefs and 
@@ -124,11 +126,11 @@ class LatentDynamics:
         coefs: A one dimensional numpy.ndarray object holding the coefficients we want to use 
         to solve the latent dynamics forward in time. 
         
-        IC: A 2D numpy.ndarray object of shape n_IC x dim, where n_IC is the number of initial 
-        conditions we need to specify the initial state of the system and dim is the dimension of 
-        the latent space (the space where the dynamics take place). The i,j element of this list 
-        should hold the j'th component of the initial condition for the i'th derivative of the 
-        initial condition. 
+        IC: An n_IC element list of numpy.ndarray objects of shape n_IC x dim, where n_IC is the 
+        number of initial conditions we need to specify the initial state of the system and dim 
+        is the dimension of the latent space (the space where the dynamics take place). The 
+        j'th element of the i'th element of this list should hold the j'th component of the 
+        initial condition for the i'th derivative of the initial condition. 
 
         times: A 1d numpy ndarray object whose i'th entry holds the value of the i'th time value 
         where we want to compute the latent solution. The elements of this array should be in 

@@ -44,26 +44,26 @@ def Pick_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Res
     """
 
     # First, figure out which samples we need to run simulations for. 
-    if (trainer.X_train.size(0) == 0):
+    if(len(trainer.X_Train) == 0):
         # If this is the initial step then trainer.X_Train will be empty, meaning that we need to 
         # run a simulation for every combination of parameters in the train_space. 
-        new_sample  : np.ndarray    = trainer.param_space.train_space
+        new_sample  : np.ndarray    = trainer.param_space.train_space;
     else:
         # If this is not the initial step, then we need to use greedy sampling to pick the new 
         # combination of parameter values.
-        new_sample  : np.ndarray    = trainer.get_new_sample_point()
-        trainer.param_space.appendTrainSpace(new_sample)
+        new_sample  : np.ndarray    = trainer.get_new_sample_point();
+        trainer.param_space.appendTrainSpace(new_sample);
 
     # Now that we know the new points we need to generate simulations for, we need to get ready to
     # actually run those simulations.
-    next_step, result = NextStep.RunSample, Result.Success
-    return result, next_step
+    next_step, result = NextStep.RunSample, Result.Success;
+    return result, next_step;
 
     """
     This is code that uses the offline stuff (which I disabled). I kept it here for reference.
     
     # First, figure out which samples we need to run simulations for. 
-    if (trainer.X_train.size(0) == 0):
+    if (trainer.X_Train.size(0) == 0):
         # If this is the initial step then trainer.X_Train will be empty, meaning that we need to 
         # run a simulation for every combination of parameters in the train_space. 
         new_sample  : np.ndarray    = trainer.param_space.train_space
@@ -75,7 +75,7 @@ def Pick_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Res
 
     # If this is the initial step, we also need to fetch the number of testing points.
     new_tests : int = 0
-    if (trainer.X_test.size(0) == 0):
+    if (trainer.X_Test.size(0) == 0):
         new_test_params     = trainer.param_space.test_space
         new_tests           = new_test_params.shape[0]
     # TODO(kevin): greedy sampling for a new test parameter?
@@ -129,7 +129,7 @@ def Pick_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Res
 
 def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Result]:
     """
-    This function updates trainer.X_train and trainer.X_test based on param_space.train_space and 
+    This function updates trainer.X_Train and trainer.X_Test based on param_space.train_space and 
     param_space.test_space.
 
 
@@ -156,11 +156,15 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     generate the fom solution without running into any problems. 
     """
     
+
+    # ---------------------------------------------------------------------------------------------
+    # Determine how many testing, training samples we need to add
+
     # Figure out how many new training examples there are. Note: we require there is at least one.
     if(len(trainer.X_Train) == 0):
         new_trains      : int                   = trainer.param_space.n_train();
     else:
-        new_trains      : int                   = trainer.param_space.n_train() - trainer.X_train[0].size(0);
+        new_trains      : int                   = trainer.param_space.n_train() - trainer.X_Train[0].size(0);
     assert(new_trains > 0);
 
     # Fetch the parameters. The i'th row of this matrix gives the i'th combination of parameter
@@ -172,34 +176,42 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     if(len(trainer.X_Test) == 0):
         new_tests       : int                   = trainer.param_space.n_test();
     else:
-        new_tests       : int                   = trainer.param_space.n_test() - trainer.X_test[0].size(0)
+        new_tests       : int                   = trainer.param_space.n_test() - trainer.X_Test[0].size(0)
     if (new_tests > 0):
         new_test_params : np.ndarray            = trainer.param_space.test_space[-new_tests:, :]
+
+
+    # ---------------------------------------------------------------------------------------------
+    # Generate new testing, training solutions.
 
     # Generate the fom solutions for the new training points. After we have generated them, we
     # append them to trainer's X_Train variable.
     new_X               : list[torch.Tensor]    = trainer.physics.generate_solutions(new_train_params);
-    if(len(trainer.X_train) == 0):
-        trainer.X_train     = new_X;
+    if(len(trainer.X_Train) == 0):
+        trainer.X_Train     = new_X;
     else:
-        assert(len(new_X) == len(trainer.X_train));
+        assert(len(new_X) == len(trainer.X_Train));
         for i in range(len(new_X)):
-            trainer.X_train[i]                  = torch.cat([trainer.X_train[i], new_X[i]], dim = 0)
-    
-    assert(trainer.X_train[0].size(0) == trainer.param_space.n_train())
+            trainer.X_Train[i]                  = torch.cat([trainer.X_Train[i], new_X[i]], dim = 0)
+
+    assert(trainer.X_Train[0].shape[0] == trainer.param_space.n_train())
     
     # Do the same thing for the testing points.
     if (new_tests > 0):
         new_X           : list[torch.Tensor]    = trainer.physics.generate_solutions(new_test_params);
 
-        if(len(trainer.X_test) == 0):
-            trainer.X_test = new_X;
+        if(len(trainer.X_Test) == 0):
+            trainer.X_Test = new_X;
         else:
-            assert(len(new_X) == len(trainer.X_test));
+            assert(len(new_X) == len(trainer.X_Test));
             for i in range(len(new_X)):
-                trainer.X_test[i]               = torch.cat([trainer.X_test[i], new_X[i]], dim = 0)
+                trainer.X_Test[i]               = torch.cat([trainer.X_Test[i], new_X[i]], dim = 0)
             
-        assert(trainer.X_test[0].size(0) == trainer.param_space.n_test())
+        assert(trainer.X_Test[0].size(0) == trainer.param_space.n_test())
+
+
+    # ---------------------------------------------------------------------------------------------
+    # Wrap up
 
     # We are now done. Since we now have the new fom solutions, the next step is training.
     next_step, result = NextStep.Train, Result.Success
@@ -224,9 +236,9 @@ def Collect_Samples(trainer : BayesianGLaSDI, config : dict):
         assert(new_X.shape[0] == new_trains)
         assert(new_X.shape[1] == trainer.physics.nt)
         assert(list(new_X.shape[2:]) == trainer.physics.qgrid_size)
-        trainer.X_train = torch.cat([trainer.X_train, new_X], dim = 0)
+        trainer.X_Train = torch.cat([trainer.X_Train, new_X], dim = 0)
 
-    assert(trainer.X_train.size(0) == trainer.param_space.n_train())
+    assert(trainer.X_Train.size(0) == trainer.param_space.n_train())
 
     test_param_file = cfg_parser.getInput(['workflow', 'offline_greedy_sampling', 'test_param_file'], fallback="new_test.h5")
     test_sol_file = cfg_parser.getInput(['workflow', 'offline_greedy_sampling', 'test_sol_file'], fallback="new_Xtest.h5")
@@ -240,9 +252,9 @@ def Collect_Samples(trainer : BayesianGLaSDI, config : dict):
             assert(new_X.shape[0] == new_tests)
             assert(new_X.shape[1] == trainer.physics.nt)
             assert(list(new_X.shape[2:]) == trainer.physics.qgrid_size)
-            trainer.X_test = torch.cat([trainer.X_test, new_X], dim = 0)
+            trainer.X_Test = torch.cat([trainer.X_Test, new_X], dim = 0)
         
-        assert(trainer.X_test.size(0) == trainer.param_space.n_test())
+        assert(trainer.X_Test.size(0) == trainer.param_space.n_test())
 
     next_step, result = NextStep.Train, Result.Success
     return result, next_step

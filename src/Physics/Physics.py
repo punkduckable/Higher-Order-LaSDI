@@ -180,23 +180,23 @@ class Physics:
         print("Generating %d samples" % n_param)
 
         # Cycle through the parameters.
-        X_train : list[torch.Tensor] = None
+        X_Train : list[torch.Tensor] = [];
         for k, param in enumerate(params):
             # Solve the underlying equation using the current set of parameter values.
-            new_X : list[torch.Tensor] = self.solve(param)
+            new_X : list[torch.Tensor] = self.solve(param);
 
             # Now, add this solution to the set of solutions.
             assert(new_X[0].shape[0] == 1) # should contain one parameter case.
-            if (X_train is None):
-                X_train = new_X
+            if (len(X_Train) == 0):
+                X_Train = new_X;
             else:
                 for i in range(len(new_X)):
-                    X_train[i] = torch.cat([X_train[i], new_X[i]], dim = 0);
+                    X_Train[i] = torch.cat([X_Train[i], new_X[i]], dim = 0);
 
-            print("%d/%d complete" % (k + 1, n_param))    
-        
+            print("%d/%d complete" % (k + 1, n_param));
+
         # All done!
-        return X_train;
+        return X_Train;
 
 
 

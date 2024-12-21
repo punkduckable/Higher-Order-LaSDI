@@ -76,7 +76,7 @@ class DampedSpring(LatentDynamics):
 
 
     def calibrate(self, 
-                  Z             : torch.Tensor,
+                  Latent_States : list[torch.Tensor],
                   dt            : float, 
                   numpy         : bool = False) -> tuple[(numpy.ndarray | torch.Tensor), torch.Tensor, torch.Tensor]:
         r"""
@@ -98,15 +98,18 @@ class DampedSpring(LatentDynamics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Z: A 2d or 3d tensor. If Z is a 2d tensor, then it has shape (Nt, Nz), where Nt specifies 
-        the length of the sequence of latent states and Nz is the dimension of the latent space. In 
-        this case, the i,j entry of Z holds the j'th component of the latent state at the time 
-        t_0 + i*dt. If it is a 3d tensor, then it has shape (Np, Nt, Nz). In this case, we assume 
-        there are Np different combinations of parameter values. The i, j, k entry of Z in this 
-        case holds the k'th component of the latent encoding at time t_0 + j*dt when we use the 
-        i'th combination of parameter values. 
+        Latent_States: A two element list whose elements hold the latent positions and velocities, 
+        respectively. Each list element is a 2d or 3d tensor. If they are 2d tensors, then each 
+        has shape (Nt, Nz), where Nt specifies the length of the sequence of latent states and Nz 
+        is the dimension of the latent space. In this case, the i,j entry of Latent_States[0], 
+        Latent_States[1] holds the j'th component of the latent state and the latent velocity, 
+        respectively, at the i'th time. If they are is a 3d tensors, then each has shape (Np, Nt, 
+        Nz). In this case, we assume there are Np different combinations of parameter values. The 
+        i, j, k entry of Latent_States[0], Latent_States[1] hold the k'th component of the latent 
+        encoding and the latent velocity at the j'th time when we use the i'th combination of 
+        parameter values. 
 
-        dt: The time step between time steps. See the description of the "Z" argument. 
+        dt: The time step between time steps. See the description of the "Latent_States" argument. 
 
         numpy: A boolean. If True, we return the coefficient matrix as a numpy.ndarray object. If 
         False, we return it as a torch.Tensor object.
@@ -132,11 +135,20 @@ class DampedSpring(LatentDynamics):
         the coefficients across the set of combinations of parameters in the training set.
         """
 
+        # Run checks.
+        assert(len(Latent_States)       == 2);
+        assert(Latent_States[0].shape   == Latent_States[1].shape);
+
+        # Extract the latent states and their velocities.
+        Z       : torch.Tensor  = Latent_States[0];
+        dZ_dt   : torch.Tensor  = Latent_States[1];
+
+
         # -----------------------------------------------------------------------------------------
         # If Z has three dimensions, loop over all train cases.
-        if (Z.dim() == 3):
+        if (len(Z.shape) == 3):
             # Fetch the number of training cases.
-            n_train : int = Z.size(0);
+            n_train : int = Z.shape[0];
 
             # Prepare an array to house the flattened coefficient matrices for each combination of
             # parameter values.
@@ -159,7 +171,7 @@ class DampedSpring(LatentDynamics):
                 k'th component of the j'th frame of the latent trajectory for the i'th combination 
                 of parameter values. 
                 """
-                result : tuple = self.calibrate(Z[i], dt, numpy);
+                result : tuple = self.calibrate([Z[i], dZ_dt[i]], dt, numpy);
 
                 # Package everything from this combination of training values.
                 coefs[i]    = result[0];
@@ -173,10 +185,9 @@ class DampedSpring(LatentDynamics):
 
         # -----------------------------------------------------------------------------------------
         # evaluate for one training case.
-        assert(Z.dim() == 2)
+        assert(len(Z.shape) == 2)
 
         # First, compute the time derivatives. 
-        dZ_dt   : torch.Tensor  = Derivative1_Order4(X = Z, h = dt);
         d2Z_dt2 : torch.Tensor  = Derivative2_Order4(X = Z, h = dt);
 
         # Concatenate Z, dZ_dt and a column of 1's. We will solve for the matrix, E, which gives 
@@ -222,7 +233,7 @@ class DampedSpring(LatentDynamics):
 
     def simulate(   self,
                     coefs   : numpy.ndarray, 
-                    IC      : numpy.ndarray,
+                    IC      : list[numpy.ndarray],
                     times   : numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray]:
         """
         Time integrates the latent dynamics when it uses the coefficients specified in coefs and 
@@ -236,10 +247,8 @@ class DampedSpring(LatentDynamics):
         coefs: A one dimensional numpy.ndarray object representing the flattened copy of 
         hstack[-K, -C, b]. We extract K, C, and b from coefs.
 
-        IC: A 2d numpy ndarray of shape 2 x dim. The two rows of this array represent the initial
-        displacement and position of the latent dynamics, respectively. Thus, the i'th component 
-        of these arrays should hold the i'th component of the latent dynamics initial displacement 
-        and velocity, respectively.
+        IC: A 2 element list of numpy ndarrays of shape dim. The j'th element of the two arrays 
+        should hold the j'th component of the position and velocity of the initial latent state.
         
         times: A 1d numpy ndarray object whose i'th entry holds the value of the i'th time value 
         where we want to compute the latent solution. The elements of this array should be in 
@@ -257,10 +266,14 @@ class DampedSpring(LatentDynamics):
         """
 
         # Run checks.
-        assert(len(IC.shape)        == 2);
-        assert(IC.shape[0]          == 2);
-        assert(IC.shape[1]          == self.dim);
+        assert(len(IC)              == 2);
+        assert(IC[0].size           == self.dim);
+        assert(IC[1].size           == self.dim);
         assert(len(times.shape)     == 1);
+
+        # Extract ICs
+        Z0      : numpy.ndarray     = IC[0]; 
+        dZ0_dt  : numpy.ndarray     = IC[1];
 
         # First, we need to extract -K, -C, and b from coefs. We know that coefs is the least 
         # squares solution to d2Z_dt2 = hstack[Z, dZdt, 1] E^T. Thus, we expect that.
@@ -276,7 +289,7 @@ class DampedSpring(LatentDynamics):
         f    = lambda t, z, dz_dt : -numpy.matmul(K, z) - numpy.matmul(C, dz_dt) + b;
 
         # Solve the ODE forward in time.
-        Z, dZ_dt = RK4(f = f, y0 = IC[0], Dy0 = IC[1], times = times);
+        Z, dZ_dt = RK4(f = f, y0 = Z0, Dy0 = dZ0_dt, times = times);
 
         # All done!
         return Z, dZ_dt;
