@@ -15,18 +15,22 @@ import  torch;
 
 from    SINDy               import  SINDy;
 from    Physics             import  Physics;
+from    DampedSpring        import  DampedSpring;
 from    ParameterSpace      import  ParameterSpace;
 from    GPLaSDI             import  BayesianGLaSDI;
-from    Model               import  Autoencoder, load_Autoencoder;
+from    Model               import  Autoencoder, load_Autoencoder, Autoencoder_Pair, load_Autoencoder_Pair;
 from    Burgers1d           import  Burgers1D;
 
 # Set up the dictionaries; we use this to allow the code to call different classes, functions 
 # depending on the settings.
-trainer_dict    = {'gplasdi'    : BayesianGLaSDI};
-model_dict      = {'ae'         : Autoencoder};
-model_load_dict = {'ae'         : load_Autoencoder};
-ld_dict         = {'sindy'      : SINDy};
-physics_dict    = {'burgers1d'  : Burgers1D};
+trainer_dict    =  {'gplasdi'   : BayesianGLaSDI};
+model_dict      =  {'ae'        : Autoencoder,
+                    'pair'      : Autoencoder_Pair};
+model_load_dict =  {'ae'        : load_Autoencoder,
+                    'pair'      : load_Autoencoder_Pair};
+ld_dict         =  {'sindy'     : SINDy, 
+                    'spring'    : DampedSpring};
+physics_dict    =  {'burgers1d' : Burgers1D};
 
 
 
@@ -143,7 +147,7 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
         - model
             - type
     
-            
+       
     
     -----------------------------------------------------------------------------------------------
     Returns
@@ -160,8 +164,8 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
     assert(model_type in config['model']);
     assert(model_type in model_dict);
     
-    # Autoencoder case.
-    if(model_type == "ae" or model_type == "autoencoder"):
+    # Autoencoder, autoencoder pair case.
+    if(model_type == "ae" or model_type == "pair"):
 
         # Next, fetch the hidden widths, latent dimension (n_z), and activation for the model. 
         model_config    : dict              = config['model'][model_type];

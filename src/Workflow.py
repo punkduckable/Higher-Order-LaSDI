@@ -212,10 +212,10 @@ def step(trainer        : BayesianGLaSDI,
         result, next_step = Run_Samples(trainer, config)
 
 
-
     elif (next_step is NextStep.CollectSample):
         # Note: We should only reach here if we are using the offline stuff... since I disabled 
         # that, we should never reach this step.
+        raise RuntimeError("Encountered CollectSample, which is disabled");
         print("NextStep = Collect_Samples. Has something gone wrong? We should only be here if running offline (which should be disabled).");
         result, next_step = Collect_Samples(trainer, config)
 

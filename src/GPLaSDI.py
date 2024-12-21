@@ -26,7 +26,7 @@ from    LatentDynamics              import  LatentDynamics;
 # Simulate latent dynamics
 # -------------------------------------------------------------------------------------------------
 
-def average_rom(autoencoder     : Autoencoder, 
+def average_rom(model           : torch.nn.Module, 
                 physics         : Physics, 
                 latent_dynamics : LatentDynamics, 
                 gp_list         : list[GaussianProcessRegressor], 
@@ -36,7 +36,7 @@ def average_rom(autoencoder     : Autoencoder,
     the mean of the posterior distribution for each coefficient's posterior distribution. 
     Specifically, for each parameter combination, we determine the mean of the posterior 
     distribution for each coefficient. We then use this mean to simulate the latent dynamics 
-    forward in time (starting from the latent encoding of the fom initial condition for that 
+    forward in time (starting from the latent encoding of the FOM initial condition for that 
     combination of coefficients).
 
     
@@ -44,18 +44,18 @@ def average_rom(autoencoder     : Autoencoder,
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    autoencoder: The actual autoencoder object that we use to map the ICs into the latent space.
+    model: The actual model object that we use to map the ICs into the latent space.
 
     physics: A "Physics" object that stores the datasets for each parameter combination. 
     
     latent_dynamics: A LatentDynamics object which describes how we specify the dynamics in the
-    Autoencoder's latent space.    
+    model's latent space.    
 
     gp_list: a list of trained GP regressor objects. The number of elements in this list should 
     match the number of columns in param_grid. The i'th element of this list is a GP regressor 
     object that predicts the i'th coefficient. 
 
-    param_grid: A 2d numpy.ndarray object of shape (number of parameter combination) x (number of 
+    param_grid: A 2d numpy.ndarray object of shape (number of parameter combination, number of 
     parameters). The i,j element of this array holds the value of the j'th parameter in the i'th 
     combination of parameters. 
 
@@ -80,7 +80,7 @@ def average_rom(autoencoder     : Autoencoder,
 
     # For each parameter in param_grid, fetch the corresponding initial condition and then encode
     # it. This gives us a list whose i'th element holds the encoding of the i'th initial condition.
-    Z0      : list[numpy.ndarray] = autoencoder.latent_initial_conditions(param_grid, physics);
+    Z0      : list[numpy.ndarray] = model.latent_initial_conditions(param_grid, physics);
 
     # Evaluate each GP at each combination of parameter values. This returns two arrays, the 
     # first of which is a 2d array whose i,j element specifies the mean of the posterior 
@@ -93,7 +93,7 @@ def average_rom(autoencoder     : Autoencoder,
     # resulting solution frames in Zis, a 3d array whose i, j, k element holds the k'th component 
     # of the j'th time step fo the latent solution when we use the coefficients from the posterior 
     # distribution for the i'th combination of parameter values.
-    nz  : int           = autoencoder.n_z;
+    nz  : int           = model.n_z;
     Zis : numpy.ndarray = numpy.zeros([n_param, physics.nt, nz])
 
     for i in range(n_param):
@@ -104,7 +104,7 @@ def average_rom(autoencoder     : Autoencoder,
 
 
 
-def sample_roms(autoencoder     : Autoencoder, 
+def sample_roms(model           : torch.nn.Module, 
                 physics         : Physics, 
                 latent_dynamics : LatentDynamics, 
                 gp_list         : list[GaussianProcessRegressor], 
@@ -127,19 +127,19 @@ def sample_roms(autoencoder     : Autoencoder,
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    autoencoder: An autoencoder. We use this to map the fom IC's (stored in Physics) to the 
-    latent space using the autoencoder's encoder.
+    model: A model (i.e., autoencoder). We use this to map the FOM IC's (stored in Physics) to the 
+    latent space using the model's encoder.
 
     physics: A "Physics" object that stores the ICs for each parameter combination. 
     
     latent_dynamics: A LatentDynamics object which describes how we specify the dynamics in the
-    Autoencoder's latent space. We use this to simulate the latent dynamics forward in time.
+    model's latent space. We use this to simulate the latent dynamics forward in time.
 
     gp_list: a list of trained GP regressor objects. The number of elements in this list should 
     match the number of columns in param_grid. The i'th element of this list is a GP regressor 
     object that predicts the i'th coefficient. 
 
-    param_grid: A 2d numpy.ndarray object of shape (number of parameter combination) x (number of 
+    param_grid: A 2d numpy.ndarray object of shape (number of parameter combination, number of 
     parameters). The i,j element of this array holds the value of the j'th parameter in the i'th 
     combination of parameters. 
 
@@ -152,7 +152,7 @@ def sample_roms(autoencoder     : Autoencoder,
     Returns
     -----------------------------------------------------------------------------------------------
     
-    A numpy.ndarray of size [n_test, n_samples, physics.nt, autoencoder.n_z]. The i, j, k, l 
+    A numpy.ndarray of size [n_test, n_samples, physics.nt, model.n_z]. The i, j, k, l 
     element holds the l'th component of the k'th frame of the solution to the latent dynamics when 
     we use the j'th sample of latent coefficients drawn from the posterior distribution for the 
     i'th combination of parameter values (i'th row of param_grid).
@@ -169,7 +169,7 @@ def sample_roms(autoencoder     : Autoencoder,
 
     # For each parameter in param_grid, fetch the corresponding initial condition and then encode
     # it. This gives us a list whose i'th element holds the encoding of the i'th initial condition.
-    Z0      : list[numpy.ndarray] = autoencoder.latent_initial_conditions(param_grid, physics)
+    Z0      : list[numpy.ndarray] = model.latent_initial_conditions(param_grid, physics)
 
     # Now, for each combination of parameters, draw n_samples samples from the posterior
     # distributions for each coefficient at that combination of parameters. We store these samples 
@@ -184,7 +184,7 @@ def sample_roms(autoencoder     : Autoencoder,
     # j, k, l element holds the l'th component of the k'th frame of the solution to the latent 
     # dynamics when we use the j'th sample of latent coefficients drawn from the posterior 
     # distribution for the i'th combination of parameter values.
-    Zis = numpy.zeros([n_param, n_samples, physics.nt, autoencoder.n_z])
+    Zis = numpy.zeros([n_param, n_samples, physics.nt, model.n_z])
     for i, Zi in enumerate(Zis):
         z_ic = Z0[i]
         for j, coef_sample in enumerate(coef_samples[i]):
@@ -195,7 +195,7 @@ def sample_roms(autoencoder     : Autoencoder,
 
 
 
-def get_fom_max_std(autoencoder : Autoencoder, Zis : numpy.ndarray) -> int:
+def get_FOM_max_std(model : torch.nn.Module, Zis : numpy.ndarray) -> int:
     r"""
     Computes the maximum standard deviation across the trajectories in Zis and returns the
     corresponding parameter index. Specifically, Zis is a 4d tensor of shape (n_test, n_samples, 
@@ -207,11 +207,11 @@ def get_fom_max_std(autoencoder : Autoencoder, Zis : numpy.ndarray) -> int:
     sample of the posterior distribution for the i'th set of parameters. 
     
     Let i \in {1, 2, ... , n_test} and k \in {1, 2, ... , n_t}. For each j, we map the k'th frame
-    of the j'th solution trajectory for the i'th parameter combination (Zi[i, j, k, :]) to a fom
+    of the j'th solution trajectory for the i'th parameter combination (Zi[i, j, k, :]) to a FOM
     frame. We do this for each j (the set of samples), which gives us a collection of n_sample 
-    fom frames, representing samples of the distribution of fom frames at the k'th time step 
+    FOM frames, representing samples of the distribution of FOM frames at the k'th time step 
     when we use the posterior distribution for the i'th set of parameters. For each l \in {1, 2, 
-    ... , n_fom}, we compute the STD of the set of l'th components of these n_sample fom frames.
+    ... , n_FOM}, we compute the STD of the set of l'th components of these n_sample FOM frames.
     We do this for each i and k and then figure out which i, k, l combination gives the largest
     STD. We return the corresponding i index. 
     
@@ -220,8 +220,8 @@ def get_fom_max_std(autoencoder : Autoencoder, Zis : numpy.ndarray) -> int:
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    autoencoder: The autoencoder. We assume the solved dynamics (whose frames are stored in Zis) 
-    take place in the autoencoder's latent space. We use this to decode the solution frames.
+    model: The model. We assume the solved dynamics (whose frames are stored in Zis) 
+    take place in the model's latent space. We use this to decode the solution frames.
 
     Zis: A 4d numpy array of shape (n_test, n_samples, n_t, n_z) whose i, j, k, l element holds 
     the l'th component of the k'th frame of the solution to the latent dynamics when we use the 
@@ -235,7 +235,7 @@ def get_fom_max_std(autoencoder : Autoencoder, Zis : numpy.ndarray) -> int:
     -----------------------------------------------------------------------------------------------
 
     An integer. The index of the testing parameter that gives the largest standard deviation. 
-    Specifically, for each testing parameter, we compute the STD of each component of the fom 
+    Specifically, for each testing parameter, we compute the STD of each component of the FOM 
     solution at each frame generated by samples from the posterior coefficient distribution for 
     that parameter. We compute the maximum of these STDs and pair that number with the parameter. 
     We then return the index of the parameter whose corresponding maximum std (the number we pair
@@ -257,16 +257,16 @@ def get_fom_max_std(autoencoder : Autoencoder, Zis : numpy.ndarray) -> int:
         Z_m             : torch.Tensor  = torch.Tensor(Zi)
 
         # Now decode the frames.
-        X_pred_m        : numpy.ndarray = autoencoder.decoder(Z_m).detach().numpy()
+        X_pred_m        : numpy.ndarray = model.Decode(Z_m).detach().numpy()
 
         # Compute the standard deviation across the sample axis. This gives us an array of shape 
-        # (n_t, n_fom) whose i,j element holds the (sample) standard deviation of the j'th component 
-        # of the i'th frame of the fom solution. In this case, the sample distribution consists of 
-        # the set of j'th components of i'th frames of fom solutions (one for each sample of the 
+        # (n_t, n_FOM) whose i,j element holds the (sample) standard deviation of the j'th component 
+        # of the i'th frame of the FOM solution. In this case, the sample distribution consists of 
+        # the set of j'th components of i'th frames of FOM solutions (one for each sample of the 
         # coefficient posterior distributions).
         X_pred_m_std    : numpy.ndarray = X_pred_m.std(0)
 
-        # Now compute the maximum standard deviation across frames/fom components.
+        # Now compute the maximum standard deviation across frames/FOM components.
         max_std_m       : numpy.float32 = X_pred_m_std.max()
 
         # If this is bigger than the biggest std we have seen so far, update the maximum.
@@ -322,18 +322,18 @@ def optimizer_to(optim : Optimizer, device : str) -> None:
 
 
 class BayesianGLaSDI:
-    X_train : torch.Tensor = torch.Tensor([])
-    X_test  : torch.Tensor = torch.Tensor([])
+    X_train : torch.Tensor = list[torch.Tensor([])];
+    X_test  : torch.Tensor = list[torch.Tensor([])];
 
     def __init__(self, 
                  physics            : Physics, 
-                 autoencoder        : Autoencoder, 
+                 model              : torch.nn.Module, 
                  latent_dynamics    : LatentDynamics, 
                  param_space        : ParameterSpace, 
                  config             : dict):
         """
-        This class runs a full GPLaSDI training. As input, it takes the autoencoder defined as a 
-        torch.nn.Module object, a Physics object to recover fom ICs + information on the time 
+        This class runs a full GPLaSDI training. As input, it takes the model defined as a 
+        torch.nn.Module object, a Physics object to recover FOM ICs + information on the time 
         discretization, a 
 
         The "train" method runs the active learning training loop, computes the reconstruction and 
@@ -344,17 +344,16 @@ class BayesianGLaSDI:
         Arguments
         -------------------------------------------------------------------------------------------
 
-        physics: A "Physics" object that we use to fetch the fom initial conditions (which we 
+        physics: A "Physics" object that we use to fetch the FOM initial conditions (which we 
         encode into latent ICs). Each Physics object has a corresponding PDE with parameters, and a 
         way to generate a solution to that equation given a particular set of parameter values (and 
-        an IC, BCs). We use this object to generate fom solutions which we then use to train the
-        autoencoder/latent dynamics.
+        an IC, BCs). We use this object to generate FOM solutions which we then use to train the
+        model/latent dynamics.
          
-        Autoencoder: An autoencoder object that we use to compress the fom state to a reduced, 
-        latent state.
+        model: An model object that we use to compress the FOM state to a reduced, latent state.
 
         latent_dynamics: A LatentDynamics object which describes how we specify the dynamics in the
-        Autoencoder's latent space.
+        model's latent space.
 
         param_space: A Parameter space object which holds the set of testing and training 
         parameters. 
@@ -371,7 +370,7 @@ class BayesianGLaSDI:
         """
 
         self.physics                        = physics
-        self.autoencoder                    = autoencoder
+        self.model                          = model
         self.latent_dynamics                = latent_dynamics
         self.param_space                    = param_space
 
@@ -388,7 +387,7 @@ class BayesianGLaSDI:
         self.coef_weight        : float     = config['coef_weight']     # Weight of the norm of matrix of latent dynamics coefficients. \beta_3 in the paper.
 
         # Set up the optimizer and loss function.
-        self.optimizer          : Optimizer = torch.optim.Adam(autoencoder.parameters(), lr = self.lr)
+        self.optimizer          : Optimizer = torch.optim.Adam(model.parameters(), lr = self.lr)
         self.MSE                            = torch.nn.MSELoss()
 
         # Set paths for checkpointing. 
@@ -418,13 +417,13 @@ class BayesianGLaSDI:
         self.restart_iter   : int           = 0                 # Iteration number at the end of the last training period
         
         # Set placeholder tensors to hold the testing and training data. We expect to set up 
-        # X_train to be a tensor of shape (Np, Nt, Nx[0], ... , Nx[Nd - 1]), where Np is the number 
-        # of parameter combinations in the training set, Nt is the number of time steps per fom 
-        # solution, and Nx[0], ... , Nx[Nd - 1] represent the number of steps along the spatial 
-        # axes. X_test has an analogous shape, but it's leading dimension has a size matching the 
-        # number of combinations of parameters in the testing set.
-        self.X_train        : torch.Tensor  = torch.Tensor([])  
-        self.X_test         : torch.Tensor  = torch.Tensor([])
+        # X_train to be a list of tensors of shape (Np, Nt, Nx[0], ... , Nx[Nd - 1]), where Np 
+        # is the number of parameter combinations in the training set, Nt is the number of time 
+        # steps per FOM solution, and Nx[0], ... , Nx[Nd - 1] represent the number of steps along 
+        # the spatial axes. X_test has an analogous shape, but it's leading dimension has a size 
+        # matching the number of combinations of parameters in the testing set.
+        self.X_train        : list[torch.Tensor]  = [];
+        self.X_test         : list[torch.Tensor]  = [];
 
         # All done!
         return
@@ -433,7 +432,7 @@ class BayesianGLaSDI:
 
     def train(self) -> None:
         """
-        Runs a round of training on the autoencoder.
+        Runs a round of training on the model.
 
         -------------------------------------------------------------------------------------------
         Arguments
@@ -449,15 +448,17 @@ class BayesianGLaSDI:
         Nothing!
         """
 
-        # Make sure we have at least one training data point (the 0 axis of X_Train corresponds 
-        # which combination of training parameters we use).
-        assert(self.X_train.size(0) > 0)
-        assert(self.X_train.size(0) == self.param_space.n_train())
+        # Make sure we have at least one training data point (the 0 axis of X_Train[0] corresponds 
+        # to which combination of training parameters we use).
+        assert(self.X_train[0].shape[0] > 0)
+        assert(self.X_train[0].shape[0] == self.param_space.n_train())
 
         # Map everything to self's device.
-        device              : str               = self.device
-        autoencoder_device  : Autoencoder       = self.autoencoder.to(device)
-        X_train_device      : torch.Tensor      = self.X_train.to(device)
+        device              : str                   = self.device
+        model_device        : torch.nn.Module       = self.model.to(device)
+        X_train_device      : list[torch.Tensor]    = [];
+        for i in range(len(self.X_train)):
+            X_train_device.append(self.X_train[i].to(device));
 
         # Make sure the checkpoints and results directories exist.
         from pathlib import Path
@@ -483,16 +484,25 @@ class BayesianGLaSDI:
             # -------------------------------------------------------------------------------------
             # Forward pass
 
-            # Run the forward pass. This results in a tensor of shape (Np, Nt, Nz), where Np is the 
-            # number of parameters, Nt is the number of time steps in the time series, and Nz is 
-            # the latent space dimension. X_Pred, should have the same shape as X_Train, (Np, Nt, 
-            # Nx[0], .... , Nx[Nd - 1]). 
-            Z               : torch.Tensor  = autoencoder_device.encoder(X_train_device)
-            X_pred          : torch.Tensor  = autoencoder_device.decoder(Z)
-            Z               : torch.Tensor  = Z.cpu()
+            if(isinstance(model_device, Autoencoder)):
+                # Run the forward pass. This results in a tensor of shape (Np, Nt, Nz), where Np is 
+                # the number of parameters, Nt is the number of time steps in the time series, and 
+                # Nz is the latent space dimension. X_Pred, should have the same shape as X_Train, 
+                # (Np, Nt, Nx[0], .... , Nx[Nd - 1]). 
+                Z               : torch.Tensor  = model_device.Encode(X_train_device[0]);
+                X_pred          : torch.Tensor  = model_device.Decode(Z);
+                Z               : torch.Tensor  = Z.cpu();
             
-            # Compute the autoencoder loss. 
-            loss_ae         : torch.Tensor  = self.MSE(X_train_device, X_pred)
+            elif(isinstance(model_device, Autoencoder_Pair)):
+                # Run the forward pass. This results in two tensors of shape (Np, Nt, Nz), where Np 
+                # is the number of parameters, Nt is the number of time steps in the time series, 
+                # and Nz is the latent space dimension.  
+                Z, DZ           = model_device.Encode(Displacement_Frames = X_train_device[0], Velocity_Frames = X_train_device[1]);
+                X_pred, V_Pred  = model_device.Decode(Z, DZ);
+                Z               = Z.cpu();
+
+            # Compute the reconstruction loss. 
+            loss_recon         : torch.Tensor  = self.MSE(X_train_device[0], X_pred) + self.MSE(X_train_device[1], V_Pred);
 
             # Compute the latent dynamics and coefficient losses. Also fetch the current latent
             # dynamics coefficients for each training point. The latter is stored in a 3d array 
@@ -503,7 +513,7 @@ class BayesianGLaSDI:
             max_coef        : numpy.float32 = numpy.abs(coefs).max()
 
             # Compute the final loss.
-            loss = loss_ae + self.ld_weight * loss_ld / n_train + self.coef_weight * loss_coef / n_train
+            loss = loss_recon + self.ld_weight * loss_ld / n_train + self.coef_weight * loss_coef / n_train
 
 
             # -------------------------------------------------------------------------------------
@@ -516,17 +526,17 @@ class BayesianGLaSDI:
             # Check if we hit a new minimum loss. If so, make a checkpoint, record the loss and 
             # the iteration number. 
             if loss.item() < self.best_loss:
-                torch.save(autoencoder_device.cpu().state_dict(), self.path_checkpoint + '/' + 'checkpoint.pt')
-                autoencoder_device  : Autoencoder   = self.autoencoder.to(device)
-                self.best_coefs     : numpy.ndarray = coefs
-                self.best_loss      : float         = loss.item()
+                torch.save(model_device.cpu().state_dict(), self.path_checkpoint + '/' + 'checkpoint.pt')
+                model_device        : torch.nn.Module   = self.model.to(device)
+                self.best_coefs     : numpy.ndarray     = coefs
+                self.best_loss      : float             = loss.item()
 
             # -------------------------------------------------------------------------------------
             # Report Results from this iteration 
 
             # Report the current iteration number and losses
             print("Iter: %05d/%d, Loss: %3.10f, Loss AE: %3.10f, Loss LD: %3.10f, Loss COEF: %3.10f, max|c|: %04.1f, "
-                  % (iter + 1, self.max_iter, loss.item(), loss_ae.item(), loss_ld.item(), loss_coef.item(), max_coef),
+                  % (iter + 1, self.max_iter, loss.item(), loss_recon.item(), loss_ld.item(), loss_coef.item(), max_coef),
                   end = '')
 
             # If there are fewer than 6 training examples, report the set of parameter combinations.
@@ -553,16 +563,16 @@ class BayesianGLaSDI:
         # Now that we have completed another round of training, update the restart iteration.
         self.restart_iter += self.n_iter
 
-        # Recover the autoencoder + coefficients which attained the lowest loss. If we recorded 
-        # our bess loss in this round of training, then we replace the autoencoder's parameters 
+        # Recover the model + coefficients which attained the lowest loss. If we recorded 
+        # our bess loss in this round of training, then we replace the model's parameters 
         # with those from the iteration that got the best loss. Otherwise, we use the current 
         # set of coefficients and serialize the current model.
         if ((self.best_coefs is not None) and (self.best_coefs.shape[0] == n_train)):
             state_dict  = torch.load(self.path_checkpoint + '/' + 'checkpoint.pt')
-            self.autoencoder.load_state_dict(state_dict)
+            self.__module__.load_state_dict(state_dict)
         else:
             self.best_coefs : numpy.ndarray = coefs
-            torch.save(autoencoder_device.cpu().state_dict(), self.path_checkpoint + '/' + 'checkpoint.pt')
+            torch.save(model_device.cpu().state_dict(), self.path_checkpoint + '/' + 'checkpoint.pt')
 
         # Report timing information.
         self.timer.end("finalize")
@@ -580,9 +590,9 @@ class BayesianGLaSDI:
         parameters, we generate a collection of samples of the coefficients in the latent dynamics.
         We draw the k'th sample of the j'th coefficient from the posterior distribution for the 
         j'th coefficient at the i'th combination of parameters. We map the resulting solution back 
-        into the real space and evaluate the standard deviation of the fom frames. We return the 
+        into the real space and evaluate the standard deviation of the FOM frames. We return the 
         combination of parameters which engenders the largest standard deviation (see the function
-        get_fom_max_std).
+        get_FOM_max_std).
 
 
         -------------------------------------------------------------------------------------------
@@ -602,9 +612,9 @@ class BayesianGLaSDI:
 
 
         self.timer.start("new_sample")
-        assert(self.X_test.size(0)      >  0)
-        assert(self.X_test.size(0)      == self.param_space.n_test())
-        assert(self.best_coefs.shape[0] == self.param_space.n_train())
+        assert(self.X_test[0].size(0)       >  0)
+        assert(self.X_test[0].size(0)       == self.param_space.n_test())
+        assert(self.best_coefs.shape[0]     == self.param_space.n_train())
         coefs : numpy.ndarray = self.best_coefs
 
         print('\n~~~~~~~ Finding New Point ~~~~~~~')
@@ -618,7 +628,7 @@ class BayesianGLaSDI:
         n_test      : int               = ps.n_test()
         ae.load_state_dict(torch.load(self.path_checkpoint + '/' + 'checkpoint.pt'))
 
-        # Map the initial conditions for the fom to initial conditions in the latent space.
+        # Map the initial conditions for the FOM to initial conditions in the latent space.
         Z0 : list[numpy.ndarray] = ae.latent_initial_conditions(ps.test_space, self.physics);
 
         # Train the GPs on the training data, get one GP per latent space coefficient.
@@ -640,7 +650,7 @@ class BayesianGLaSDI:
         # array of shape (n_test, n_samples, n_t, n_z) whose i, j, k, l element holds the l'th 
         # component of the k'th frame of the solution to the latent dynamics when we use the 
         # j'th sample of the coefficients for the i'th testing parameter value and when the latent
-        # dynamics uses the encoding of the i'th fom IC as its IC. 
+        # dynamics uses the encoding of the i'th FOM IC as its IC. 
         Zis : numpy.ndarray = numpy.zeros([n_test, self.n_samples, self.physics.nt, ae.n_z])
         for i, Zi in enumerate(Zis):
             z_ic = Z0[i]
@@ -648,7 +658,7 @@ class BayesianGLaSDI:
                 Zi[j] = self.latent_dynamics.simulate(coef_sample, z_ic, self.physics.t_grid)
 
         # Find the index of the parameter with the largest std.
-        m_index : int = get_fom_max_std(ae, Zis)
+        m_index : int = get_FOM_max_std(ae, Zis)
 
         # We have found the testing parameter we want to add to the training set. Fetch it, then
         # stop the timer and return the parameter. 
@@ -712,10 +722,10 @@ class BayesianGLaSDI:
         """
 
         # Extract instance variables from dict_.
-        self.X_train        : torch.Tensor  = dict_['X_train']
-        self.X_test         : torch.Tensor  = dict_['X_test']
-        self.best_coefs     : numpy.ndarray = dict_['best_coefs']
-        self.restart_iter   : int           = dict_['restart_iter']
+        self.X_train        : list[torch.Tensor]    = dict_['X_train']
+        self.X_test         : list[torch.Tensor]    = dict_['X_test']
+        self.best_coefs     : numpy.ndarray         = dict_['best_coefs']
+        self.restart_iter   : int                   = dict_['restart_iter']
 
         # Load the timer / optimizer. 
         self.timer.load(dict_['timer'])
@@ -724,5 +734,5 @@ class BayesianGLaSDI:
             optimizer_to(self.optimizer, self.device)
 
         # All done!
-        return
+        return;
     

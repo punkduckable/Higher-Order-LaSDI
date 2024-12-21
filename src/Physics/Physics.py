@@ -109,7 +109,7 @@ class Physics:
     
 
 
-    def solve(self, param : np.ndarray) -> torch.Tensor:
+    def solve(self, param : np.ndarray) -> list[torch.Tensor]:
         """
         The user should write an instance of this method for their specific Physics sub-class.
         This function should solve the underlying equation when the IC uses the parameters in 
@@ -128,9 +128,9 @@ class Physics:
         Returns 
         -------------------------------------------------------------------------------------------
 
-        A (ns + 2)-dimensional torch.Tensor object of shape (1, nt, nx[0], .. , nx[ns - 1]), 
-        where nt is the number of points along the temporal grid and nx = self.grid_size specifies 
-        the number of grid points along the axes in the spatial grid.
+        A list of (ns + 2)-dimensional torch.Tensor objects of shape (1, nt, nx[0], .. , 
+        nx[ns - 1]), where nt is the number of points along the temporal grid and nx = 
+        self.grid_size specifies the number of grid points along the axes in the spatial grid.
         """
 
         raise RuntimeError("Abstract method Physics.solve!")
@@ -147,7 +147,7 @@ class Physics:
     
 
 
-    def generate_solutions(self, params : np.ndarray) -> torch.Tensor:
+    def generate_solutions(self, params : np.ndarray) -> list[torch.Tensor]:
         """
         Given 2d-array of params, generate solutions of size params.shape[0]. params.shape[1] must 
         match the required size of parameters for the specific physics.
@@ -166,9 +166,10 @@ class Physics:
         Returns
         -------------------------------------------------------------------------------------------
         
-        A torch.Tensor object of shape (np, nt, nx[0], .. , nx[ns - 1]), where nt is the number of 
-        points along the temporal grid and nx = self.grid_size specifies the number of grid points 
-        along the axes in the spatial grid.
+        A list of torch.Tensor objects of shape (np, nt, nx[0], .. , nx[ns - 1]), where nt is the 
+        number of points along the temporal grid and nx = self.grid_size specifies the number of 
+        grid points along the axes in the spatial grid. The list elements could represent 
+        displacement, velocity, etc.  
         """
 
         # Make sure we have a 2d grid of parameter values.
@@ -179,22 +180,23 @@ class Physics:
         print("Generating %d samples" % n_param)
 
         # Cycle through the parameters.
-        X_train = None
+        X_train : list[torch.Tensor] = None
         for k, param in enumerate(params):
             # Solve the underlying equation using the current set of parameter values.
-            new_X : torch.Tensor = self.solve(param)
+            new_X : list[torch.Tensor] = self.solve(param)
 
             # Now, add this solution to the set of solutions.
-            assert(new_X.size(0) == 1) # should contain one parameter case.
+            assert(new_X[0].shape[0] == 1) # should contain one parameter case.
             if (X_train is None):
                 X_train = new_X
             else:
-                X_train = torch.cat([X_train, new_X], dim = 0)
+                for i in range(len(new_X)):
+                    X_train[i] = torch.cat([X_train[i], new_X[i]], dim = 0);
 
-            print("%d/%d complete" % (k+1, n_param))    
+            print("%d/%d complete" % (k + 1, n_param))    
         
         # All done!
-        return X_train
+        return X_train;
 
 
 

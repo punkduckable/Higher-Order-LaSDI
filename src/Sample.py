@@ -156,33 +156,50 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     generate the fom solution without running into any problems. 
     """
     
-    cfg_parser          : InputParser   = InputParser(config)
-
     # Figure out how many new training examples there are. Note: we require there is at least one.
-    new_trains          : int           = trainer.param_space.n_train() - trainer.X_train.size(0)
-    assert(new_trains > 0)
+    if(len(trainer.X_Train) == 0):
+        new_trains      : int                   = trainer.param_space.n_train();
+    else:
+        new_trains      : int                   = trainer.param_space.n_train() - trainer.X_train[0].size(0);
+    assert(new_trains > 0);
 
     # Fetch the parameters. The i'th row of this matrix gives the i'th combination of parameter
     # values for which we have not generated a fom solution.
-    new_train_params    : np.ndarray    = trainer.param_space.train_space[-new_trains:, :]
+    new_train_params    : np.ndarray            = trainer.param_space.train_space[-new_trains:, :]
 
     # Figure out how many new testing parameter combinations there are. If there are any, fetch 
     # them from the param space.
-    new_tests           : int           = trainer.param_space.n_test() - trainer.X_test.size(0)
+    if(len(trainer.X_Test) == 0):
+        new_tests       : int                   = trainer.param_space.n_test();
+    else:
+        new_tests       : int                   = trainer.param_space.n_test() - trainer.X_test[0].size(0)
     if (new_tests > 0):
-        new_test_params     : np.ndarray    = trainer.param_space.test_space[-new_tests:, :]
+        new_test_params : np.ndarray            = trainer.param_space.test_space[-new_tests:, :]
 
     # Generate the fom solutions for the new training points. After we have generated them, we
     # append them to trainer's X_Train variable.
-    new_X           : torch.Tensor      = trainer.physics.generate_solutions(new_train_params)
-    trainer.X_train                     = torch.cat([trainer.X_train, new_X], dim = 0)
-    assert(trainer.X_train.size(0) == trainer.param_space.n_train())
+    new_X               : list[torch.Tensor]    = trainer.physics.generate_solutions(new_train_params);
+    if(len(trainer.X_train) == 0):
+        trainer.X_train     = new_X;
+    else:
+        assert(len(new_X) == len(trainer.X_train));
+        for i in range(len(new_X)):
+            trainer.X_train[i]                  = torch.cat([trainer.X_train[i], new_X[i]], dim = 0)
     
-    # Do the same thins for the testing points.
+    assert(trainer.X_train[0].size(0) == trainer.param_space.n_train())
+    
+    # Do the same thing for the testing points.
     if (new_tests > 0):
-        new_X = trainer.physics.generate_solutions(new_test_params)
-        trainer.X_test = torch.cat([trainer.X_test, new_X], dim = 0)
-        assert(trainer.X_test.size(0) == trainer.param_space.n_test())
+        new_X           : list[torch.Tensor]    = trainer.physics.generate_solutions(new_test_params);
+
+        if(len(trainer.X_test) == 0):
+            trainer.X_test = new_X;
+        else:
+            assert(len(new_X) == len(trainer.X_test));
+            for i in range(len(new_X)):
+                trainer.X_test[i]               = torch.cat([trainer.X_test[i], new_X[i]], dim = 0)
+            
+        assert(trainer.X_test[0].size(0) == trainer.param_space.n_test())
 
     # We are now done. Since we now have the new fom solutions, the next step is training.
     next_step, result = NextStep.Train, Result.Success
@@ -191,6 +208,7 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
 
 
 # Note: This code is for offline stuff... I did not document it.
+"""
 def Collect_Samples(trainer : BayesianGLaSDI, config : dict):
     cfg_parser = InputParser(config)
     assert(trainer.physics.offline)
@@ -228,3 +246,4 @@ def Collect_Samples(trainer : BayesianGLaSDI, config : dict):
 
     next_step, result = NextStep.Train, Result.Success
     return result, next_step
+"""

@@ -148,7 +148,7 @@ class Burgers1D(Physics):
     
 
 
-    def solve(self, param : np.ndarray) -> torch.Tensor:
+    def solve(self, param : np.ndarray) -> list[torch.Tensor]:
         """
         Solves the 1d burgers equation when the IC uses the parameters in the param array.
 
@@ -166,8 +166,8 @@ class Burgers1D(Physics):
         Returns 
         -------------------------------------------------------------------------------------------
 
-        A 3d torch.Tensor object of shape (1, nt, nx), where nt is the number of points along the 
-        temporal grid and nx is the number along the spatial grid.
+        A single element list holding a 3d torch.Tensor object of shape (1, nt, nx), where nt is 
+        the number of points along the temporal grid and nx is the number along the spatial grid.
         """
         
         # Fetch the initial condition.
@@ -179,7 +179,7 @@ class Burgers1D(Physics):
         new_X = new_X.reshape(1, self.nt, self.grid_size[0])
 
         # All done!
-        return torch.Tensor(new_X)
+        return [torch.Tensor(new_X)];
     
 
 

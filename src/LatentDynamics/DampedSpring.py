@@ -190,10 +190,24 @@ class DampedSpring(LatentDynamics):
         # results for the j'th column of dZdt. Thus, coefs is a 2d tensor with shape 
         # (dim(2*dim + 1), Nz).
         coefs   : torch.Tensor  = torch.linalg.lstsq(W, d2Z_dt2).solution;
+        print(coefs.shape);
 
         # Compute the losses
-        Loss_LD     = self.LD_LossFunction(d2Z_dt2, W @ coefs);
+        Loss_LD     = self.LD_LossFunction(d2Z_dt2, torch.matmul(W, coefs));
         Loss_Coef   = torch.norm(coefs, self.coef_norm_order);
+
+        E = coefs.T;
+        K   : numpy.ndarray = -E[:, 0:self.dim];
+        C   : numpy.ndarray = -E[:, self.dim:(2*self.dim)];
+        b   : numpy.ndarray = E[:, 2*self.dim:(2*self.dim + 1)];
+        
+        RHS_coefs   = torch.matmul(W, coefs);
+        RHS_manual  = (-1)*torch.matmul(K, Z) - torch.matmul(C, dZ_dt) + b;
+        print(RHS_coefs[0, :]);
+        print(RHS_manual[0, :]);
+        print(torch.max(torch.abs(RHS_coefs - RHS_manual)));
+        exit();
+
 
         # All done. Prepare coefs and the losses to return. Note that we flatten the coefficient 
         # matrix.
