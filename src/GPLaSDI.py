@@ -623,7 +623,7 @@ class BayesianGLaSDI:
         # Move the model to the cpu (this is where all the GP stuff happens) and load the model 
         # from the last checkpoint. This should be the one that obtained the best loss so far. 
         # Remember that coefs should specify the coefficients from that iteration. 
-        ae          : Autoencoder       = self.autoencoder.cpu()
+        model       : torch.nn.Module   = self.model.cpu()
         ps          : ParameterSpace    = self.param_space
         n_test      : int               = ps.n_test()
         ae.load_state_dict(torch.load(self.path_checkpoint + '/' + 'checkpoint.pt'))
@@ -678,7 +678,7 @@ class BayesianGLaSDI:
         -------------------------------------------------------------------------------------------
 
         A dictionary housing most of the internal variables in self. You can pass this dictionary 
-        to self (after initializing it using ParameterSpace, Autoencoder, and LatentDynamics 
+        to self (after initializing it using ParameterSpace, model, and LatentDynamics 
         objects) to make a GLaSDI object whose internal state matches that of self.
         """
 
