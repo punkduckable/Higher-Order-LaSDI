@@ -314,9 +314,6 @@ class Autoencoder(torch.nn.Module):
         of the encoding of the i'th FOM frame.
         """
 
-        print(X.shape);
-        print(self.reshape_shape);
-        print(X.shape[2:]);
         # Check that we have the same number of displacement, velocity frames.
         assert(len(X.shape)         ==  len(self.reshape_shape) + 2);
         assert(list(X.shape[2:])    ==  self.reshape_shape);
