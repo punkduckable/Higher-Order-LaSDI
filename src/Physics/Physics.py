@@ -2,7 +2,7 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-import  numpy   as np
+import  numpy;
 import  torch
 
 
@@ -13,18 +13,18 @@ import  torch
 
 class Physics:
     # Physical space dimension
-    dim : int= -1
+    dim         : int           = -1;
 
     # The fom solution can be vector valued. If it is, then qdim specifies the dimensionality of 
     # the fom solution at each point. If the solution is scalar valued, then qdim = -1. 
-    qdim : int = -1
+    qdim        : int           = -1;
     
     # grid_size is the shape of the grid nd-array.
-    grid_size : list[int] = []
+    grid_size   : list[int]     = [];
     
     # the shape of the solution nd-array. This is just the qgrid_size with the qdim prepended onto 
     # it.
-    qgrid_size : list[int] = []
+    qgrid_size  : list[int]     = [];
     
     '''
         numpy nd-array, assuming the shape of:
@@ -33,19 +33,19 @@ class Physics:
         - 3d: (3, space_dim[0], space_dim[1], space_dim[2])
         - higher dimension...
     '''
-    x_grid : np.ndarray = np.array([])
+    x_grid      : numpy.ndarray = numpy.array([]);
 
     # the number of time steps, as a positive integer.
-    nt : int = -1
+    nt          : int           = -1;
 
     # time step size. assume constant for now. 
-    dt : float = -1.
+    dt          : float         = -1.;
 
     # time grid in numpy 1d array. 
-    t_grid : np.ndarray = np.array([])
+    t_grid      : numpy.ndarray = numpy.array([]);
     
     # list of parameter names to parse parameters.
-    param_name_list : list[str] = None
+    param_name_list : list[str] = None;
 
 
 
@@ -81,7 +81,7 @@ class Physics:
     
 
 
-    def initial_condition(self, param : np.ndarray) -> np.ndarray:
+    def initial_condition(self, param : numpy.ndarray) -> list[numpy.ndarray]:
         """
         The user should write an instance of this method for their specific Physics sub-class.
         It should evaluate and return the initial condition along the spatial grid.
@@ -99,17 +99,16 @@ class Physics:
         Returns 
         -------------------------------------------------------------------------------------------
 
-        A d-dimensional numpy.ndarray object of shape self.grid_size, where 
-        d = len(self.grid_size). This should hold the IC evaluated on self's spatial grid 
-        (self.x_grid)
+        A list of d-dimensional numpy.ndarray objects of shape self.grid_size. Here, 
+        d = len(self.grid_size). The i'th element of this list holds the initial state of the i'th 
+        time derivative of the FOM state.
         """
 
         raise RuntimeError("Abstract method Physics.initial_condition!")
-        return np.array
     
 
 
-    def solve(self, param : np.ndarray) -> list[torch.Tensor]:
+    def solve(self, param : numpy.ndarray) -> list[torch.Tensor]:
         """
         The user should write an instance of this method for their specific Physics sub-class.
         This function should solve the underlying equation when the IC uses the parameters in 
@@ -134,7 +133,6 @@ class Physics:
         """
 
         raise RuntimeError("Abstract method Physics.solve!")
-        return torch.Tensor
     
 
 
@@ -143,11 +141,10 @@ class Physics:
         This function should return a dictionary that houses self's state. I
         """
         raise RuntimeError("Abstract method Physics.export!")
-        return dict
     
 
 
-    def generate_solutions(self, params : np.ndarray) -> list[torch.Tensor]:
+    def generate_solutions(self, params : numpy.ndarray) -> list[torch.Tensor]:
         """
         Given 2d-array of params, generate solutions of size params.shape[0]. params.shape[1] must 
         match the required size of parameters for the specific physics.
@@ -168,8 +165,8 @@ class Physics:
         
         A list of torch.Tensor objects of shape (np, nt, nx[0], .. , nx[ns - 1]), where nt is the 
         number of points along the temporal grid and nx = self.grid_size specifies the number of 
-        grid points along the axes in the spatial grid. The list elements could represent 
-        displacement, velocity, etc.  
+        grid points along the axes in the spatial grid. The i'th element of this list should hold
+        the i'th time derivative of the FOM solutions.
         """
 
         # Make sure we have a 2d grid of parameter values.
@@ -200,7 +197,7 @@ class Physics:
 
 
 
-    def residual(self, Xhist : np.ndarray) -> tuple[np.ndarray, float]:
+    def residual(self, Xhist : numpy.ndarray) -> tuple[numpy.ndarray, float]:
         """
         The user should write an instance of this method for their specific Physics sub-class.
         This function should compute the PDE residual (difference between the left and right hand 
@@ -227,4 +224,3 @@ class Physics:
         """
 
         raise RuntimeError("Abstract method Physics.residual!")
-        return res, res_norm

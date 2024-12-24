@@ -67,8 +67,8 @@ def optimizer_to(optim : Optimizer, device : str) -> None:
 
 
 class BayesianGLaSDI:
-    X_Train : list[torch.Tensor]    = [];
-    X_Test  : list[torch.Tensor]    = [];
+    X_Train : list[torch.Tensor]    = [];   # An n_IC element list of ndarrays of shape (Np, Nt, ...), each holding sequences of some derivative of FOM states
+    X_Test  : list[torch.Tensor]    = [];   # Same as X_Test, but used for the test set (X_train holds sequences for the training set).
 
     def __init__(self, 
                  physics            : Physics, 
@@ -265,7 +265,8 @@ class BayesianGLaSDI:
             # called "coefs" of shape (n_train, N_z, N_l), where N_{\mu} = n_train = number of 
             # training parameter combinations, N_z = latent space dimension, and N_l = number of 
             # terms in the SINDy library.
-            coefs, loss_ld, loss_coef       = ld.calibrate(Latent_States = Latent_States, dt = self.physics.dt, numpy = True);
+            coefs, loss_ld, loss_coef       = ld.calibrate(Latent_States = Latent_States, dt = self.physics.dt);
+            coefs           : numpy.ndarray = coefs.numpy();
             max_coef        : numpy.float32 = numpy.abs(coefs).max();
 
             # Compute the final loss.
@@ -385,7 +386,7 @@ class BayesianGLaSDI:
         model.load_state_dict(torch.load(self.path_checkpoint + '/' + 'checkpoint.pt'))
 
         # Map the initial conditions for the FOM to initial conditions in the latent space.
-        Z0 : list[numpy.ndarray] = model.latent_initial_conditions(ps.test_space, self.physics);
+        Z0 : list[list[numpy.ndarray]]  = model.latent_initial_conditions(ps.test_space, self.physics);
 
         # Train the GPs on the training data, get one GP per latent space coefficient.
         gp_list : list[GaussianProcessRegressor] = fit_gps(ps.train_space, coefs)
@@ -407,23 +408,33 @@ class BayesianGLaSDI:
         # component of the k'th frame of the solution to the latent dynamics when we use the 
         # j'th sample of the coefficients for the i'th testing parameter value and when the latent
         # dynamics uses the encoding of the i'th FOM IC as its IC. 
-        Zis : numpy.ndarray = numpy.zeros([n_test, self.n_samples, self.physics.nt, model.n_z])
-        for i, Zi in enumerate(Zis):
-            z_ic = Z0[i]
-            for j, coef_sample in enumerate(coef_samples[i]):
-                Zi[j] = self.latent_dynamics.simulate(coef_sample, z_ic, self.physics.t_grid)
+        # 
+        # In general, we may need to store n_IC derivatives of the latent solution to get the 
+        # full latent state, so we store the results in a list of length n_IC, where n_IC - 1 
+        # is the number of derivatives of the latent state we need to fully define the latent 
+        # state's initial condition.
+        LatentStates    : list[numpy.ndarray]   = [];
+        n_IC            : int                   = len(Z0[0]);
+        for i in range(n_IC):
+            LatentStates.append(numpy.ndarray([n_test, self.n_samples, self.physics.nt, model.n_z]));
+        
+        for i in range(n_test):
+            for j in range(self.n_samples):
+                LatentState_ij : list[numpy.ndarray] = self.latent_dynamics.simulate(coef_samples[i][j], Z0[i], self.physics.t_grid);
+                for k in range(n_IC):
+                    LatentStates[k][i, j, :, :] = LatentState_ij[k];
 
         # Find the index of the parameter with the largest std.
-        m_index : int = get_FOM_max_std(model, Zis)
+        m_index : int = get_FOM_max_std(model, LatentStates);
 
         # We have found the testing parameter we want to add to the training set. Fetch it, then
         # stop the timer and return the parameter. 
-        new_sample : numpy.ndarray = ps.test_space[m_index, :].reshape(1, -1)
-        print('New param: ' + str(numpy.round(new_sample, 4)) + '\n')
-        self.timer.end("new_sample")
+        new_sample : numpy.ndarray = ps.test_space[m_index, :].reshape(1, -1);
+        print('New param: ' + str(numpy.round(new_sample, 4)) + '\n');
+        self.timer.end("new_sample");
 
         # All done!
-        return new_sample
+        return new_sample;
 
 
 

@@ -77,8 +77,7 @@ class DampedSpring(LatentDynamics):
 
     def calibrate(self, 
                   Latent_States : list[torch.Tensor],
-                  dt            : float, 
-                  numpy         : bool = False) -> tuple[(numpy.ndarray | torch.Tensor), torch.Tensor, torch.Tensor]:
+                  dt            : float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         r"""
         For each combination of parameter values, this function computes the optimal K, C, and b 
         coefficients in the sequence of latent states for that combination of parameter values.
@@ -110,9 +109,6 @@ class DampedSpring(LatentDynamics):
         parameter values. 
 
         dt: The time step between time steps. See the description of the "Latent_States" argument. 
-
-        numpy: A boolean. If True, we return the coefficient matrix as a numpy.ndarray object. If 
-        False, we return it as a torch.Tensor object.
         
 
         -------------------------------------------------------------------------------------------
@@ -121,7 +117,7 @@ class DampedSpring(LatentDynamics):
 
         We return three variables. 
         
-        The first holds the coefficients. It is a matrix of shape (n_train, dim*(2*dim + 1)), 
+        The first holds the coefficients. It is a torch.Tensor of shape (n_train, dim*(2*dim + 1)), 
         where n_train is the number of parameter combinations in the training set and dim is the 
         dimension of the latent space. The i'th row holds the flattened version of 
         hstack(K, C, b), where K, C, and b are the optimal coefficients for the time series 
@@ -152,10 +148,7 @@ class DampedSpring(LatentDynamics):
 
             # Prepare an array to house the flattened coefficient matrices for each combination of
             # parameter values.
-            if (numpy):
-                coefs = numpy.zeros([n_train, self.dim*(2*self.dim + 1)]);
-            else:
-                coefs = torch.Tensor([n_train, self.dim*(2*self.dim + 1)]);
+            coefs = torch.empty([n_train, self.dim*(2*self.dim + 1)], dtype = torch.float32);
 
             # Initialize the losses.
             Loss_LD     : torch.Tensor  = torch.tensor(0, dtype = torch.float32);
@@ -171,10 +164,10 @@ class DampedSpring(LatentDynamics):
                 k'th component of the j'th frame of the latent trajectory for the i'th combination 
                 of parameter values. 
                 """
-                result : tuple = self.calibrate([Z[i], dZ_dt[i]], dt, numpy);
+                result : tuple[torch.Tensor] = self.calibrate([Z[i], dZ_dt[i]], dt);
 
                 # Package everything from this combination of training values.
-                coefs[i]    = result[0];
+                coefs[i, :] = result[0];
                 Loss_LD    += result[1];
                 Loss_Coef  += result[2];
             
@@ -193,40 +186,41 @@ class DampedSpring(LatentDynamics):
         # Concatenate Z, dZ_dt and a column of 1's. We will solve for the matrix, E, which gives 
         # the best fit for the system d2Z_dt2 = cat[Z, dZ_dt, 1] E. This matrix has the form 
         # E^T = [-K, -C, b]. Thus, we can extract K, C, and b from W.
-        W       : torch.Tensor  = torch.cat([Z, dZ_dt, torch.ones(Z.shape[0], 1)], dim = 1);
+        W       : torch.Tensor  = torch.cat([Z, dZ_dt, torch.ones((Z.shape[0], 1))], dim = 1);
         
         # For each j, solve the least squares problem 
         #   min{ || d2Z_dt2[:, j] - W E(j)|| : E(j) \in \mathbb{R}^(dim*(2*dim + 1)) }
         # We store the resulting solutions in a matrix, coefs, whose j'th column holds the 
         # results for the j'th column of dZdt. Thus, coefs is a 2d tensor with shape 
-        # (dim(2*dim + 1), Nz).
+        # (2*dim + 1, dim).
         coefs   : torch.Tensor  = torch.linalg.lstsq(W, d2Z_dt2).solution;
-        print(coefs.shape);
 
         # Compute the losses
         Loss_LD     = self.LD_LossFunction(d2Z_dt2, torch.matmul(W, coefs));
         Loss_Coef   = torch.norm(coefs, self.coef_norm_order);
 
-        E = coefs.T;
-        K   : numpy.ndarray = -E[:, 0:self.dim];
-        C   : numpy.ndarray = -E[:, self.dim:(2*self.dim)];
-        b   : numpy.ndarray = E[:, 2*self.dim:(2*self.dim + 1)];
-        
-        RHS_coefs   = torch.matmul(W, coefs);
-        RHS_manual  = (-1)*torch.matmul(K, Z) - torch.matmul(C, dZ_dt) + b;
-        print(RHS_coefs[0, :]);
-        print(RHS_manual[0, :]);
-        print(torch.max(torch.abs(RHS_coefs - RHS_manual)));
-        exit();
+        if(False):
+            # Extract K, C, and b from coefs.
+            E   : torch.Tensor  = coefs.T;
+            K   : torch.Tensor  = -E[:, 0:self.dim];
+            C   : torch.Tensor  = -E[:, self.dim:(2*self.dim)];
+            b   : torch.Tensor  = E[:, 2*self.dim:(2*self.dim + 1)];
+            
+            # Compute the RHS of the diff eq using coefs and the matrices we found.
+            RHS_coefs           = torch.matmul(W, coefs);
+            RHS_Manual          = torch.matmul(torch.ones((Z.shape[0], 1)), b.T) - torch.matmul(dZ_dt, C.T) - torch.matmul(Z, K.T);
 
+            # Select a random row to sample.
+            import random;
+            row : int           = random.randint(a = 0, b = Z.shape[0]);
 
-        # All done. Prepare coefs and the losses to return. Note that we flatten the coefficient 
-        # matrix.
+            print("Row %d of RHS using coefs:                   %s" % (row, str(RHS_coefs[row, :])));
+            print("Row %d of RHS using K, C, and b:             %s" % (row, str(RHS_Manual[row, :])));
+            print("Max diff between RHS with coefs and K/C/b:   %f" % torch.max(torch.abs(RHS_coefs - RHS_Manual)));
+
+        # Prepare coefs and the losses to return. Note: we flatten the coefficient matrix.
         # Note: output of lstsq is not contiguous in memory.
-        coefs = coefs.detach().flatten();
-        if (numpy):
-            coefs = coefs.numpy();
-
+        coefs   : torch.Tensor  = coefs.detach().flatten();
         return coefs, Loss_LD, Loss_Coef;
     
 
@@ -234,7 +228,7 @@ class DampedSpring(LatentDynamics):
     def simulate(   self,
                     coefs   : numpy.ndarray, 
                     IC      : list[numpy.ndarray],
-                    times   : numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray]:
+                    times   : numpy.ndarray) -> list[numpy.ndarray]:
         """
         Time integrates the latent dynamics when it uses the coefficients specified in coefs and 
         starts from the (single) initial condition in z0.
@@ -278,21 +272,21 @@ class DampedSpring(LatentDynamics):
         # First, we need to extract -K, -C, and b from coefs. We know that coefs is the least 
         # squares solution to d2Z_dt2 = hstack[Z, dZdt, 1] E^T. Thus, we expect that.
         # E = [-K, -C, b]. 
-        E   : numpy.ndarray = coefs.reshape([self.dim, 2*self.dim + 1]).T;
+        E   : numpy.ndarray = coefs.reshape([2*self.dim + 1, self.dim]).T;
 
         # Extract K, C, and b.
         K   : numpy.ndarray = -E[:, 0:self.dim];
         C   : numpy.ndarray = -E[:, self.dim:(2*self.dim)];
-        b   : numpy.ndarray = E[:, 2*self.dim:(2*self.dim + 1)];
+        b   : numpy.ndarray = E[:, 2*self.dim];
 
         # Set up a lambda function to approximate (d^2/dt^2)z(t) \approx -K z(t) - C (d/dt)z(t) + b
-        f    = lambda t, z, dz_dt : -numpy.matmul(K, z) - numpy.matmul(C, dz_dt) + b;
+        f    = lambda t, z, dz_dt: b - numpy.dot(C, dz_dt)  - numpy.dot(K, z);
 
         # Solve the ODE forward in time.
         Z, dZ_dt = RK4(f = f, y0 = Z0, Dy0 = dZ0_dt, times = times);
 
         # All done!
-        return Z, dZ_dt;
+        return [Z, dZ_dt];
     
 
 

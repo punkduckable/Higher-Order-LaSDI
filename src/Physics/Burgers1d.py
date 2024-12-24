@@ -12,7 +12,7 @@ sys.path.append(src_Path);
 sys.path.append(LD_Path);
 sys.path.append(util_Path);
 
-import  numpy               as      np
+import  numpy;
 from    scipy.sparse.linalg import  spsolve
 from    scipy.sparse        import  spdiags
 import  torch
@@ -21,6 +21,24 @@ from    InputParser         import  InputParser
 from    Physics             import  Physics
 from    Stencils            import  FDdict
 
+
+######## REMOVE ME   ||
+######## REMOVE ME   ||
+######## REMOVE ME   ||
+######## REMOVE ME  \  /
+######## REMOVE ME   \/
+
+import  sys;
+import  os;
+Utilities_Path  : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
+sys.path.append(Utilities_Path);
+from    FiniteDifference    import  Derivative1_Order4;
+
+######## REMOVE ME   /\
+######## REMOVE ME  /  \
+######## REMOVE ME   ||
+######## REMOVE ME   ||
+######## REMOVE ME   ||
 
 
 # -------------------------------------------------------------------------------------------------
@@ -91,8 +109,8 @@ class Burgers1D(Physics):
         self.dt     : float     = self.tmax / (self.nt - 1)             # step size between successive time steps/the time step we use when solving.
 
         # Set up the spatial, temporal grid.
-        self.x_grid : np.ndarray    = np.linspace(self.xmin, self.xmax, self.grid_size[0])
-        self.t_grid : np.ndarray    = np.linspace(0, self.tmax, self.nt)
+        self.x_grid : numpy.ndarray = numpy.linspace(self.xmin, self.xmax, self.grid_size[0])
+        self.t_grid : numpy.ndarray = numpy.linspace(0, self.tmax, self.nt)
 
         self.maxk                   : int   = input_parser.getInput(['maxk'],                   fallback = 10)      # TODO: ??? What is this ???
         self.convergence_threshold  : float = input_parser.getInput(['convergence_threshold'],  fallback = 1.e-8)
@@ -110,7 +128,7 @@ class Burgers1D(Physics):
     
 
 
-    def initial_condition(self, param : np.ndarray) -> np.ndarray:
+    def initial_condition(self, param : numpy.ndarray) -> list[numpy.ndarray]:
         """
         Evaluates the initial condition along the spatial grid. For this class, we use the 
         following initial condition:
@@ -131,8 +149,9 @@ class Burgers1D(Physics):
         Returns 
         -------------------------------------------------------------------------------------------
 
-        A 1d numpy.ndarray object of length self.grid_size[0] (the number of grid points along the 
-        spatial axis).
+        A list of 1d numpy.ndarray objects of length self.grid_size[0] (the number of grid points 
+        along the spatial axis). The i'th element holds the initial state of the i'th time 
+        derivative of the FOM state.
         """
 
         # Fetch the parameter values.
@@ -144,11 +163,11 @@ class Burgers1D(Physics):
             w = param[self.w_idx]  
 
         # Compute the initial condition and return!
-        return a * np.exp(- self.x_grid ** 2 / 2 / w / w)
+        return a * numpy.exp(- self.x_grid ** 2 / 2 / w / w)
     
 
 
-    def solve(self, param : np.ndarray) -> list[torch.Tensor]:
+    def solve(self, param : numpy.ndarray) -> list[torch.Tensor]:
         """
         Solves the 1d burgers equation when the IC uses the parameters in the param array.
 
@@ -171,15 +190,32 @@ class Burgers1D(Physics):
         """
         
         # Fetch the initial condition.
-        u0 : np.ndarray = self.initial_condition(param)
+        u0 : numpy.ndarray = self.initial_condition(param);
 
+        ######## REMOVE ME   ||
+        ######## REMOVE ME   ||
+        ######## REMOVE ME   ||
+        ######## REMOVE ME  \  /
+        ######## REMOVE ME   \/
+    
         # Solve the PDE and then reshape the result to be a 3d tensor with a leading dimension of 
         # size 1.
-        new_X = solver(u0, self.maxk, self.convergence_threshold, self.nt - 1, self.grid_size[0], self.dt, self.dx)
-        new_X = new_X.reshape(1, self.nt, self.grid_size[0])
+        X       : torch.Tensor  = torch.Tensor(solver(u0, self.maxk, self.convergence_threshold, self.nt - 1, self.grid_size[0], self.dt, self.dx));
+        V       : torch.Tensor  = Derivative1_Order4(X, h = self.dt);
+        
+        X       : torch.Tensor  = X.reshape(1, self.nt, self.grid_size[0]);
+        V       : torch.Tensor  = V.reshape(1, self.nt, self.grid_size[0]);
+
+        new_X   : list[torch.Tensor]    = [X, V];
+
+        ######## REMOVE ME   /\
+        ######## REMOVE ME  /  \
+        ######## REMOVE ME   ||
+        ######## REMOVE ME   ||
+        ######## REMOVE ME   ||
 
         # All done!
-        return [torch.Tensor(new_X)];
+        return new_X;
     
 
 
@@ -194,7 +230,7 @@ class Burgers1D(Physics):
     
 
     
-    def residual(self, Xhist : np.ndarray) -> tuple[np.ndarray, float]:
+    def residual(self, Xhist : numpy.ndarray) -> tuple[numpy.ndarray, float]:
         """
         This function computes the PDE residual (difference between the left and right hand side
         of Burgers' equation when we substitute in the solution in Xhist).
@@ -224,8 +260,8 @@ class Burgers1D(Physics):
         dUdt = (Xhist[1:, :] - Xhist[:-1, :]) / self.dt
 
         # compute the residual + the norm of the residual.
-        r   : np.ndarray    = dUdt[:, :-1] - Xhist[:-1, :-1] * dUdx[:-1, :]
-        e   : float         = np.linalg.norm(r)
+        r   : numpy.ndarray = dUdt[:, :-1] - Xhist[:-1, :-1] * dUdx[:-1, :]
+        e   : float         = numpy.linalg.norm(r)
 
         # All done!
         return r, e
@@ -261,12 +297,12 @@ def jacobian(u, c, idxn1, nx):
 
     '''
 
-    diag_comp = 1.0 + c * (2 * u - u[idxn1])
-    subdiag_comp = np.ones(nx - 1)
-    subdiag_comp[:-1] = -c * u[1:]
-    data = np.array([diag_comp, subdiag_comp])
-    J = spdiags(data, [0, -1], nx - 1, nx - 1, format = 'csr')
-    J[0, -1] = -c * u[0]
+    diag_comp           = 1.0 + c * (2 * u - u[idxn1])
+    subdiag_comp        = numpy.ones(nx - 1)
+    subdiag_comp[:-1]   = -c * u[1:]
+    data                = numpy.array([diag_comp, subdiag_comp])
+    J                   = spdiags(data, [0, -1], nx - 1, nx - 1, format = 'csr')
+    J[0, -1]            = -c * u[0]
 
     return J
 
@@ -282,12 +318,12 @@ def solver(u0, maxk, convergence_threshold, nt, nx, Dt, Dx):
 
     c = Dt / Dx
 
-    idxn1 = np.zeros(nx - 1, dtype = 'int')
-    idxn1[1:] = np.arange(nx - 2)
-    idxn1[0] = nx - 2
+    idxn1       = numpy.zeros(nx - 1, dtype = 'int')
+    idxn1[1:]   = numpy.arange(nx - 2)
+    idxn1[0]    = nx - 2
 
-    u = np.zeros((nt + 1, nx))
-    u[0] = u0
+    u           = numpy.zeros((nt + 1, nx))
+    u[0]        = u0
 
     for n in range(nt):
         uw = u[n, :-1].copy()
@@ -299,7 +335,7 @@ def solver(u0, maxk, convergence_threshold, nt, nx, Dt, Dx):
             uw = uw + duw
             r = residual_burgers(u[n, :-1], uw, c, idxn1)
 
-            rel_residual = np.linalg.norm(r) / np.linalg.norm(u[n, :-1])
+            rel_residual = numpy.linalg.norm(r) / numpy.linalg.norm(u[n, :-1])
             if rel_residual < convergence_threshold:
                 u[n + 1, :-1] = uw.copy()
                 u[n + 1, -1] = u[n + 1, 0]

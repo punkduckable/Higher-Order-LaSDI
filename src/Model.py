@@ -11,7 +11,7 @@ sys.path.append(Physics_Path);
 import  torch;
 import  numpy;
 
-from    Physics     import  Physics
+from    Physics     import  Physics;
 
 # activation dict
 act_dict = {'ELU'           : torch.nn.ELU,
@@ -35,6 +35,29 @@ act_dict = {'ELU'           : torch.nn.ELU,
             'softshrink'    : torch.nn.Softshrink,
             'tanh'          : torch.nn.Tanh,
             'tanhshrink'    : torch.nn.Tanhshrink}
+
+
+
+######## REMOVE ME   ||
+######## REMOVE ME   ||
+######## REMOVE ME   ||
+######## REMOVE ME  \  /
+######## REMOVE ME   \/
+
+Utils_Path    : str  = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
+sys.path.append(Utils_Path);
+
+from    Solvers             import  RK4;
+from    Burgers1d           import  solver;
+from    FiniteDifference    import  Derivative1_Order4;
+
+######## REMOVE ME   /\
+######## REMOVE ME  /  \
+######## REMOVE ME   ||
+######## REMOVE ME   ||
+######## REMOVE ME   ||
+
+
 
 # -------------------------------------------------------------------------------------------------
 # MLP class
@@ -102,7 +125,7 @@ class MultiLayerPerceptron(torch.nn.Module):
         assert((reshape_index is None) or (reshape_index in [0, -1]));
         assert((reshape_shape is None) or (numpy.prod(reshape_shape) == widths[reshape_index]));
 
-        super(MultiLayerPerceptron, self).__init__();
+        super().__init__();
 
         # Note that width specifies the dimensionality of the domains and co-domains of each layer.
         # Specifically, the i'th element specifies the input dimension of the i'th layer, while 
@@ -263,7 +286,7 @@ class Autoencoder(torch.nn.Module):
         """
 
         # Run the superclass initializer.
-        super(Autoencoder, self).__init__();
+        super().__init__();
         
         # Store information (for return purposes).
         self.widths         : list[int] = widths;
@@ -550,6 +573,9 @@ class Autoencoder_Pair(torch.nn.Module):
         layer. 
         """
 
+        # Call the super class initializer.
+        super().__init__();
+
         # In general, the FOM solution may be vector valued and have multiple spatial dimensions. 
         # We need to know the shape of each FOM frame. 
         self.reshape_shape : list[int]     = reshape_shape; 
@@ -764,10 +790,30 @@ class Autoencoder_Pair(torch.nn.Module):
 
         # Cycle through the parameters.
         for i in range(n_param):
+            ######## REMOVE ME   ||
+            ######## REMOVE ME   ||
+            ######## REMOVE ME   ||
+            ######## REMOVE ME  \  /
+            ######## REMOVE ME   \/
+
+            u0      : numpy.ndarray         = physics.initial_condition(param_grid[i]);
+            X       : numpy.ndarray         = solver(u0, physics.maxk, physics.convergence_threshold, 5, physics.grid_size[0], physics.dt, physics.dx);
+            V       : numpy.ndarray         = Derivative1_Order4(torch.Tensor(X), h = physics.dt);
+            
+            u0                              = X[0, :]
+            v0                              = V[0, :];
+            
+            ######## REMOVE ME   /\
+            ######## REMOVE ME  /  \
+            ######## REMOVE ME   ||
+            ######## REMOVE ME   ||
+            ######## REMOVE ME   ||
+
+
             # Fetch the IC for the i'th set of parameters. Then map it to a tensor.
-            u0, v0  = physics.initial_condition(param_grid[i]);
+            # u0, v0  = physics.initial_condition(param_grid[i]);
             u0      = torch.Tensor(u0).reshape((1, 1) + u0.shape);
-            v0      = torch.Tensor(v0).unsqueeze((1, 1) + v0.shape);
+            v0      = torch.Tensor(v0).reshape((1, 1) + v0.shape);
 
             # Encode the IC, then map the encoding to a numpy array.
             z0, Dz0 = self.Encode(  Displacement_Frames = u0, 

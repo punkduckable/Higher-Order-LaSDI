@@ -121,8 +121,7 @@ class SINDy(LatentDynamics):
 
     def calibrate(self, 
                   Latent_States : list[torch.Tensor],
-                  dt            : float, 
-                  numpy         : bool = False) -> tuple[(np.ndarray | torch.Tensor), torch.Tensor, torch.Tensor]:
+                  dt            : float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         r"""
         This function computes the optimal SINDy coefficients using the current latent time 
         series. Specifically, let us consider the case when Z has two dimensions (the case when 
@@ -149,9 +148,6 @@ class SINDy(LatentDynamics):
         combination of parameter values. 
 
         dt: The time step between time steps. See the description of the "Z" argument. 
-
-        numpy: A boolean. If True, we return the coefficient matrix as a numpy.ndarray object. If 
-        False, we return it as a torch.Tensor object.
         
 
         -------------------------------------------------------------------------------------------
@@ -188,10 +184,7 @@ class SINDy(LatentDynamics):
 
             # Prepare an array to house the flattened coefficient matrices for each combination of
             # parameter values.
-            if (numpy):
-                coefs = np.zeros([n_train, self.ncoefs])
-            else:
-                coefs = torch.Tensor([n_train, self.ncoefs])
+            coefs = torch.empty([n_train, self.ncoefs], dtype = torch.float32)
 
             # Initialize the losses. Note that these are floats which we will replace with 
             # tensors.
@@ -205,10 +198,10 @@ class SINDy(LatentDynamics):
                 the k'th component of the j'th frame of the latent trajectory for the i'th 
                 combination of parameter values. Note that Result a 3 element tuple.
                 """
-                result = self.calibrate([Z[i]], dt, numpy)
+                result : tuple[torch.Tensor] = self.calibrate([Z[i]], dt)
 
-                # Pacakage the results from this combination of parameter values.
-                coefs[i]    = result[0]
+                # Package the results from this combination of parameter values.
+                coefs[i, :] = result[0]
                 loss_sindy += result[1]
                 loss_coef  += result[2]
             
@@ -242,14 +235,9 @@ class SINDy(LatentDynamics):
         # NOTE(kevin): by default, this will be L1 norm.
         loss_coef = torch.norm(coefs, self.coef_norm_order)
 
-        # All done. Prepare coefs and the losses to return. Note that we flatten the coefficient 
-        # matrix.
+        # Prepare coefs and the losses to return. Note that we flatten the coefficient matrix.
         # Note: output of lstsq is not contiguous in memory.
-        coefs = coefs.detach().flatten()
-        if (numpy):
-            coefs = coefs.numpy()
-
-        # All done!
+        coefs   : torch.Tensor  = coefs.detach().flatten()
         return coefs, loss_sindy, loss_coef
 
 
@@ -286,7 +274,7 @@ class SINDy(LatentDynamics):
     def simulate(self, 
                  coefs  : np.ndarray, 
                  IC     : list[np.ndarray], 
-                 times  : np.ndarray) -> np.ndarray:
+                 times  : np.ndarray) -> list[np.ndarray]:
         """
         Time integrates the latent dynamics when it uses the coefficients specified in coefs and 
         starts from the (single) initial condition in z0.
@@ -311,9 +299,14 @@ class SINDy(LatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------        
         
-        A 3d numpy ndarray of shape (1, nt, dim), where nt = times.size and dim is the latent 
-        space dimension (self.dim). Thus, the 0,i,j element of this matrix holds the j'th component 
-        of the latent solution at the time stored in the i'th element of times. 
+        A single element list whose lone element is a 2d numpy.ndarray object holding the solution 
+        to the latent dynamics at the time values specified in times when we use the coefficients 
+        in coefs to characterize the latent dynamics model. 
+        
+        Specifically, it is a 2d array of shape (nt, dim), where nt is the number of time steps 
+        (size of times) and dim is the latent space dimension (self.dim). Thus, the i,j element of 
+        this matrix holds the j'th component of the latent solution at the time stored in the i'th 
+        element of times. 
         """
 
         # Run checks.
@@ -340,7 +333,7 @@ class SINDy(LatentDynamics):
         Z_i : np.ndarray    = odeint(dz_dt, z0, times)
 
         # All done!
-        return Z_i
+        return [Z_i];
     
 
 
