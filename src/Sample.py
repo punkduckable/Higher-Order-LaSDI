@@ -2,11 +2,9 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-import  h5py;
 import  torch;
-import  numpy               as      np; 
+import  numpy;
 
-from    InputParser         import  InputParser;
 from    Enums               import  NextStep, Result;  
 from    GPLaSDI             import  BayesianGLaSDI;
 
@@ -47,11 +45,11 @@ def Pick_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Res
     if(len(trainer.X_Train) == 0):
         # If this is the initial step then trainer.X_Train will be empty, meaning that we need to 
         # run a simulation for every combination of parameters in the train_space. 
-        new_sample  : np.ndarray    = trainer.param_space.train_space;
+        new_sample  : numpy.ndarray = trainer.param_space.train_space;
     else:
         # If this is not the initial step, then we need to use greedy sampling to pick the new 
         # combination of parameter values.
-        new_sample  : np.ndarray    = trainer.get_new_sample_point();
+        new_sample  : numpy.ndarray = trainer.get_new_sample_point();
         trainer.param_space.appendTrainSpace(new_sample);
 
     # Now that we know the new points we need to generate simulations for, we need to get ready to
@@ -103,7 +101,7 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
 
     # Fetch the parameters. The i'th row of this matrix gives the i'th combination of parameter
     # values for which we have not generated a fom solution.
-    new_train_params    : np.ndarray            = trainer.param_space.train_space[-new_trains:, :]
+    new_train_params    : numpy.ndarray         = trainer.param_space.train_space[-new_trains:, :]
 
     # Figure out how many new testing parameter combinations there are. If there are any, fetch 
     # them from the param space.
@@ -112,7 +110,7 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     else:
         new_tests       : int                   = trainer.param_space.n_test() - trainer.X_Test[0].size(0)
     if (new_tests > 0):
-        new_test_params : np.ndarray            = trainer.param_space.test_space[-new_tests:, :]
+        new_test_params : numpy.ndarray         = trainer.param_space.test_space[-new_tests:, :]
 
 
     # ---------------------------------------------------------------------------------------------
