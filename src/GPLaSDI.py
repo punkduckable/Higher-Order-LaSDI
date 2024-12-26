@@ -9,6 +9,8 @@ LD_Path         : str   = os.path.abspath(os.path.join(os.path.dirname(__file__)
 sys.path.append(Physics_Path);
 sys.path.append(LD_Path);
 
+import  logging;
+
 import  torch;
 import  numpy;
 from    torch.optim                 import  Optimizer;
@@ -21,6 +23,10 @@ from    ParameterSpace              import  ParameterSpace;
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
 from    Simulate                    import  get_FOM_max_std;
+
+
+# Setup Logger
+LOGGER : logging.Logger = logging.getLogger(__name__);
 
 
 
@@ -114,6 +120,8 @@ class BayesianGLaSDI:
         Nothing!
         """
 
+        LOGGER.info("Initializing a GPLaSDI object"); 
+
         self.physics                        = physics
         self.model                          = model
         self.latent_dynamics                = latent_dynamics
@@ -130,6 +138,9 @@ class BayesianGLaSDI:
         self.max_greedy_iter    : int       = config['max_greedy_iter'] # We stop performing greedy sampling if restart_iter goes above this number.
         self.ld_weight          : float     = config['ld_weight']       # Weight of the SINDy loss in the loss function. \beta_2 in the paper.
         self.coef_weight        : float     = config['coef_weight']     # Weight of the norm of matrix of latent dynamics coefficients. \beta_3 in the paper.
+
+        LOGGER.debug("  - n_samples = %d, lr = %f, n_iter = %d, ld_weight = %f, coef_weight = %f" \
+                     % (self.n_samples, self.lr, self.n_iter, self.ld_weight, self.coef_weight));
 
         # Set up the optimizer and loss function.
         self.optimizer          : Optimizer = torch.optim.Adam(model.parameters(), lr = self.lr)
@@ -218,6 +229,7 @@ class BayesianGLaSDI:
         next_iter   : int = min(self.restart_iter + self.n_iter, self.max_iter)
         
         # Run the iterations!
+        LOGGER.info("Training for %d epochs (starting at %d, going to %d)" % (next_iter - self.restart_iter, self.restart_iter, next_iter));
         for iter in range(self.restart_iter, next_iter):
             # Begin timing the current training step.            
             self.timer.start("train_step")
@@ -292,24 +304,27 @@ class BayesianGLaSDI:
             # Report Results from this iteration 
 
             # Report the current iteration number and losses
-            print("Iter: %05d/%d, Loss: %3.10f, Loss AE: %3.10f, Loss LD: %3.10f, Loss COEF: %3.10f, max|c|: %04.1f, "
-                  % (iter + 1, self.max_iter, loss.item(), loss_recon.item(), loss_ld.item(), loss_coef.item(), max_coef),
-                  end = '')
+            LOGGER.info("Iter: %05d/%d, Loss: %3.10f, Loss AE: %3.10f, Loss LD: %3.10f, Loss COEF: %3.10f, max|c|: %04.1f, "
+                        % (iter + 1, self.max_iter, loss.item(), loss_recon.item(), loss_ld.item(), loss_coef.item(), max_coef));
 
             # If there are fewer than 6 training examples, report the set of parameter combinations.
             if n_train < 6:
-                print('Param: ' + str(numpy.round(ps.train_space[0, :], 4)), end = '')
+                param_string : str = 'Param: ' + str(numpy.round(ps.train_space[0, :], 4));
 
                 for i in range(1, n_train - 1):
-                    print(', ' + str(numpy.round(ps.train_space[i, :], 4)), end = '')
-                print(', ' + str(numpy.round(ps.train_space[-1, :], 4)))
+                    param_string = param_string + ', ' + str(numpy.round(ps.train_space[i, :], 4));
+                param_string = param_string + ', ' + str(numpy.round(ps.train_space[-1, :], 4));
+
+                LOGGER.debug(param_string);
 
             # Otherwise, report the final 6 parameter combinations.
             else:
-                print('Param: ...', end = '')
+                param_string : str = 'Param: ...';
                 for i in range(5):
-                    print(', ' + str(numpy.round(ps.train_space[-6 + i, :], 4)), end = '')
-                print(', ' + str(numpy.round(ps.train_space[-1, :], 4)))
+                    param_string = param_string + ', ' + str(numpy.round(ps.train_space[-6 + i, :], 4));
+                param_string = param_string + ', ' + str(numpy.round(ps.train_space[-1, :], 4));
+            
+                LOGGER.debug(param_string);
 
             # We have finished a training step, stop the timer.
             self.timer.end("train_step")
@@ -374,7 +389,7 @@ class BayesianGLaSDI:
         assert(self.best_coefs.shape[0]     == self.param_space.n_train())
         coefs : numpy.ndarray = self.best_coefs
 
-        print('\n~~~~~~~ Finding New Point ~~~~~~~')
+        LOGGER.info('\n~~~~~~~ Finding New Point ~~~~~~~')
         # TODO(kevin): william, this might be the place for new sampling routine.
 
         # Move the model to the cpu (this is where all the GP stuff happens) and load the model 
@@ -430,7 +445,7 @@ class BayesianGLaSDI:
         # We have found the testing parameter we want to add to the training set. Fetch it, then
         # stop the timer and return the parameter. 
         new_sample : numpy.ndarray = ps.test_space[m_index, :].reshape(1, -1);
-        print('New param: ' + str(numpy.round(new_sample, 4)) + '\n');
+        LOGGER.info('New param: ' + str(numpy.round(new_sample, 4)) + '\n');
         self.timer.end("new_sample");
 
         # All done!

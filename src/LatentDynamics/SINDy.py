@@ -10,7 +10,7 @@ util_Path       : str   = os.path.join(src_Path, "Utilities");
 sys.path.append(src_Path);
 sys.path.append(util_Path);
 
-import  numpy               as      np
+import  numpy;
 import  torch
 from    scipy.integrate     import  odeint
 
@@ -272,9 +272,9 @@ class SINDy(LatentDynamics):
 
 
     def simulate(self, 
-                 coefs  : np.ndarray, 
-                 IC     : list[np.ndarray], 
-                 times  : np.ndarray) -> list[np.ndarray]:
+                 coefs  : numpy.ndarray, 
+                 IC     : list[numpy.ndarray], 
+                 times  : numpy.ndarray) -> list[numpy.ndarray]:
         """
         Time integrates the latent dynamics when it uses the coefficients specified in coefs and 
         starts from the (single) initial condition in z0.
@@ -315,12 +315,12 @@ class SINDy(LatentDynamics):
         assert(len(times.shape) == 1);
 
         # Extract IC.
-        z0  : np.ndarray = IC[0];
+        z0  : numpy.ndarray = IC[0];
 
         # First, reshape coefs as a matrix. Since we only allow for linear terms, there are dim + 1
         # library terms and dim equations, where dim = self.dim.
         # Note: copy is inevitable for numpy==1.26. removed copy=False temporarily.
-        c_i     = coefs.reshape([self.dim + 1, self.dim]).T
+        c_i : numpy.ndarray = coefs.reshape([self.dim + 1, self.dim]).T
 
         # Set up a lambda function to approximate dz_dt. In SINDy, we learn a coefficient matrix 
         # C such that the latent state evolves according to the dynamical system 
@@ -330,7 +330,7 @@ class SINDy(LatentDynamics):
         dz_dt               = lambda z, t : c_i[:, 1:] @ z + c_i[:, 0]
 
         # Solve the ODE forward in time.
-        Z_i : np.ndarray    = odeint(dz_dt, z0, times)
+        Z_i : numpy.ndarray = odeint(dz_dt, z0, times)
 
         # All done!
         return [Z_i];

@@ -2,9 +2,14 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
+import  logging;
+
 import  numpy;
 import  torch
 
+
+# Setup logger
+LOGGER : logging.Logger = logging.getLogger(__name__);
 
 
 # -------------------------------------------------------------------------------------------------
@@ -174,7 +179,7 @@ class Physics:
         n_param : int = len(params)
 
         # Report
-        print("Generating %d samples" % n_param)
+        LOGGER.info("Generating %d samples" % n_param)
 
         # Cycle through the parameters.
         X_Train : list[torch.Tensor] = [];
@@ -190,7 +195,7 @@ class Physics:
                 for i in range(len(new_X)):
                     X_Train[i] = torch.cat([X_Train[i], new_X[i]], dim = 0);
 
-            print("%d/%d complete" % (k + 1, n_param));
+            LOGGER.info("%d/%d complete" % (k + 1, n_param));
 
         # All done!
         return X_Train;

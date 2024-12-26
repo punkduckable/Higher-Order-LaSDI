@@ -2,7 +2,7 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-import  numpy                               as      np
+import  numpy;
 from    sklearn.gaussian_process.kernels    import  ConstantKernel, Matern, RBF
 from    sklearn.gaussian_process            import  GaussianProcessRegressor
 
@@ -13,7 +13,7 @@ from    sklearn.gaussian_process            import  GaussianProcessRegressor
 # Gaussian Process functions! 
 # -------------------------------------------------------------------------------------------------
 
-def fit_gps(X : np.ndarray, Y : np.ndarray) -> list[GaussianProcessRegressor]:
+def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegressor]:
     """
     Trains a GP for each column of Y. If Y has shape N x k, then we train k GP regressors. In this 
     case, we assume that X has shape N x M. Thus, the Input to the GP is in \mathbb{R}^M. For each
@@ -80,7 +80,7 @@ def fit_gps(X : np.ndarray, Y : np.ndarray) -> list[GaussianProcessRegressor]:
 
 
 
-def eval_gp(gp_list : list[GaussianProcessRegressor], param_grid : np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def eval_gp(gp_list : list[GaussianProcessRegressor], param_grid : numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray]:
     """
     Computes the GPs predictive mean and standard deviation for points of the parameter space grid
 
@@ -122,7 +122,7 @@ def eval_gp(gp_list : list[GaussianProcessRegressor], param_grid : np.ndarray) -
     n_points = param_grid.shape[0]
 
     # Initialize arrays to hold the mean, STD.
-    pred_mean, pred_std = np.zeros([n_points, n_coef]), np.zeros([n_points, n_coef])
+    pred_mean, pred_std = numpy.zeros([n_points, n_coef]), numpy.zeros([n_points, n_coef])
 
     # Cycle through the GPs (one for each coefficient in the SINDy coefficients!).
     for k, gp in enumerate(gp_list):
@@ -135,7 +135,7 @@ def eval_gp(gp_list : list[GaussianProcessRegressor], param_grid : np.ndarray) -
 
 
 def sample_coefs(   gp_list     : list[GaussianProcessRegressor], 
-                    param       : np.ndarray, 
+                    param       : numpy.ndarray, 
                     n_samples   : int):
     """
     Generates sets of ODE (SINDy) coefficients sampled from the predictive distribution for those 
@@ -173,7 +173,7 @@ def sample_coefs(   gp_list     : list[GaussianProcessRegressor],
     n_coef          : int           = len(gp_list)
 
     # Initialize an array to hold the coefficient samples.
-    coef_samples    : np.ndarray    = np.zeros([n_samples, n_coef])
+    coef_samples    : numpy.ndarray = numpy.zeros([n_samples, n_coef])
 
     # Make sure param is a 2d array with one row, we need this when evaluating the GP Regressor
     # object.
@@ -192,7 +192,7 @@ def sample_coefs(   gp_list     : list[GaussianProcessRegressor],
     # a sample from the normal distribution with mean pred_mean[k] and std pred_std[k].
     for s in range(n_samples):
         for k in range(n_coef):
-            coef_samples[s, k] = np.random.normal(pred_mean[k], pred_std[k])
+            coef_samples[s, k] = numpy.random.normal(pred_mean[k], pred_std[k])
 
     # All done!
     return coef_samples

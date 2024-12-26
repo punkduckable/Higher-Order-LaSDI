@@ -8,10 +8,17 @@ import  os;
 Physics_Path    : str  = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
 sys.path.append(Physics_Path);
 
+import  logging;
+
 import  torch;
 import  numpy;
 
 from    Physics     import  Physics;
+
+
+# Set up logging.
+LOGGER  : logging.Logger    = logging.getLogger(__name__);
+
 
 # activation dict
 act_dict = {'ELU'           : torch.nn.ELU,
@@ -47,7 +54,6 @@ act_dict = {'ELU'           : torch.nn.ELU,
 Utils_Path    : str  = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
 sys.path.append(Utils_Path);
 
-from    Solvers             import  RK4;
 from    Burgers1d           import  solver;
 from    FiniteDifference    import  Derivative1_Order4;
 
@@ -150,6 +156,8 @@ class MultiLayerPerceptron(torch.nn.Module):
         # Set up the activation function. 
         self.activation     : str       = activation;
         self.activation_fn  : callable  = act_dict[self.activation]();
+        LOGGER.info("Initializing a MultiLayerPerceptron with widths %s, activation %s, reshape_shape = %s (index %d)" \
+                    % (str(self.widths), self.activation, str(self.reshape_shape), self.reshape_index));
 
         # All done!
         return
@@ -293,14 +301,17 @@ class Autoencoder(torch.nn.Module):
         self.n_z            : int       = widths[-1];
         self.activation     : str       = activation;
         self.reshape_shape  : list[int] = reshape_shape;
+        LOGGER.info("Initializing an Autoencoder with latent space dimension %d" % self.n_z);
 
         # Build the encoder, decoder.
+        LOGGER.info("Initializing the encoder...");
         self.encoder = MultiLayerPerceptron(
                             widths              = widths, 
                             activation          = activation,
                             reshape_index       = 0,                    # We need to flatten the spatial dimensions of each FOM frame.
                             reshape_shape       = reshape_shape);
 
+        LOGGER.info("Initializing the decoder...");
         self.decoder = MultiLayerPerceptron(
                             widths              = widths[::-1],         # Reverses the order of the the list.
                             activation          = activation,
@@ -448,6 +459,7 @@ class Autoencoder(torch.nn.Module):
         # Figure out how many combinations of parameter values there are.
         n_param     : int                   = param_grid.shape[0];
         Z0          : list[numpy.ndarray]   = [];
+        LOGGER.debug("Encoding initial conditions for %d parameter values" % n_param);
 
         # Cycle through the parameters.
         for i in range(n_param):
@@ -517,6 +529,8 @@ def load_Autoencoder(dict_ : dict) -> Autoencoder:
     An Autoencoder object that is identical to the one that created dict_!
     """
 
+    LOGGER.info("De-serializing an Autoencoder..." );
+
     # First, extract the parameters we need to initialize an Autoencoder object with the same 
     # architecture as the one that created dict_.
     widths          : list[int] = dict_['widths'];
@@ -575,6 +589,7 @@ class Autoencoder_Pair(torch.nn.Module):
 
         # Call the super class initializer.
         super().__init__();
+        LOGGER.info("Initializing an Autoencoder_Pair...");
 
         # In general, the FOM solution may be vector valued and have multiple spatial dimensions. 
         # We need to know the shape of each FOM frame. 
@@ -594,10 +609,12 @@ class Autoencoder_Pair(torch.nn.Module):
         self.activation : str           =  activation;
 
         # Next, build the velocity and displacement auto-encoders.
+        LOGGER.info("Initializing the Displacement Autoencoder...");
         self.Displacement_Autoencoder   = Autoencoder(  widths          = widths, 
                                                         activation      = activation, 
                                                         reshape_shape   = self.reshape_shape);
 
+        LOGGER.info("Initializing the Velocity Autoencoder...");
         self.Velocity_Autoencoder       = Autoencoder(  widths          = widths, 
                                                         activation      = activation,
                                                         reshape_shape   = self.reshape_shape);
@@ -787,6 +804,7 @@ class Autoencoder_Pair(torch.nn.Module):
         # Figure out how many combinations of parameter values there are.
         n_param     : int                   = param_grid.shape[0];
         Z0          : list[numpy.ndarray]   = [];
+        LOGGER.debug("Encoding initial conditions for %d parameter values" % n_param);
 
         # Cycle through the parameters.
         for i in range(n_param):
@@ -875,6 +893,8 @@ def load_Autoencoder_Pair(self, dict_ : dict) -> Autoencoder_Pair:
 
     A Autoencoder_Pair object that is identical to the one that created dict_!
     """
+
+    LOGGER.info("De-serializing an Autoencoder_Pair..." );
 
     # First, extract the information we need to initialize a Autoencoder_Pair object with the same 
     # architecture as the one that created dict_.

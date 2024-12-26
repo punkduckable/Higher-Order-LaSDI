@@ -7,19 +7,29 @@ import  sys;
 import  os;
 LD_Path         : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
 Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
+Utils_Path      : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
 sys.path.append(LD_Path); 
 sys.path.append(Physics_Path); 
+sys.path.append(Utils_Path); 
 
 import  yaml;
 import  argparse;
+import  logging;
+import  time;
 
-import  numpy               as      np;
+import  numpy;
 
 from    Enums               import  NextStep, Result;
 from    GPLaSDI             import  BayesianGLaSDI;
 from    InputParser         import  InputParser;
 from    Initialize          import  Initialize_Trainer;
 from    Sample              import  Run_Samples, Pick_Samples, Collect_Samples;
+from    Logging             import  Initialize_Logger, Log_Dictionary;
+
+# Set up the logger.
+Initialize_Logger(level = logging.INFO);
+LOGGER : logging.Logger = logging.getLogger(__name__);
+
 
 # Set up the command line arguments
 parser = argparse.ArgumentParser(description        = "",
@@ -41,22 +51,32 @@ def main():
     # Setup
     # ---------------------------------------------------------------------------------------------
 
+    LOGGER.info("Setting up...");
+    timer     : float = time.perf_counter();
+
     # Load in the argument
     args : argparse.Namespace = parser.parse_args(sys.argv[1:]);
-    print("config file: %s" % args.config);
+    LOGGER.debug("config file: %s" % args.config);
 
     # Load the configuration file. 
     with open(args.config, 'r') as f:
-        config      = yaml.safe_load(f)
-        cfg_parser  = InputParser(config, name = 'main')
+        config      = yaml.safe_load(f);
+        cfg_parser  = InputParser(config, name = 'main');
+    
+    # Report the configuration settings.
+    Log_Dictionary(LOGGER = LOGGER, D = config, level = logging.DEBUG);
 
     # Check if we are loading from a restart or not. If so, load it.
     use_restart : bool = cfg_parser.getInput(['workflow', 'use_restart'], fallback = False)
     if (use_restart == True):
         restart_filename : str = cfg_parser.getInput(['workflow', 'restart_file'], datatype = str)
+        LOGGER.debug("Loading from restart (%s)" % restart_filename);
+
         from pathlib import Path
         Path(os.path.dirname(restart_filename)).mkdir(parents = True, exist_ok = True)
     
+    LOGGER.info("Done! Took %fs" % (time.perf_counter() - timer));
+
 
 
     # ---------------------------------------------------------------------------------------------
@@ -64,11 +84,11 @@ def main():
     # ---------------------------------------------------------------------------------------------
 
     # Determine what the next step is. If we are loading from a restart, then the restart should
-    # have logged then next step. Otherwise, we set the next step step to "PickSample", which will 
+    # have logged then next step. Otherwise, we set the next step to "PickSample", which will 
     # prompt the code to set up the training set of parameters.
     if ((use_restart == True) and (os.path.isfile(restart_filename))):
         # TODO(kevin): in long term, we should switch to hdf5 format.
-        restart_dict    = np.load(restart_filename, allow_pickle = True).item()
+        restart_dict    = numpy.load(restart_filename, allow_pickle = True).item()
         next_step       = restart_dict['next_step']
         result          = restart_dict['result']
     else:
@@ -86,10 +106,10 @@ def main():
     if (  result is Result.Fail):
         raise RuntimeError('Previous step has failed. Stopping the workflow.')
     elif (result is Result.Success):
-        print("Previous step succeeded. Preparing for the next step.")
+        LOGGER.info("Previous step succeeded. Preparing for the next step.")
         result = Result.Unexecuted
     elif (result is Result.Complete):
-        print("Workflow is finished.")
+        LOGGER.info("Workflow is finished.")
 
 
 
@@ -98,7 +118,6 @@ def main():
     # ---------------------------------------------------------------------------------------------
 
     # Save restart (or final) file.
-    import time
     date        = time.localtime()
     date_str    = "{month:02d}_{day:02d}_{year:04d}_{hour:02d}_{minute:02d}"
     date_str    = date_str.format(month     = date.tm_mon, 
@@ -125,7 +144,7 @@ def main():
                     'timestamp'         : date_str,
                     'next_step'         : next_step,
                     'result'            : result};
-    np.save(restart_path, restart_dict)
+    numpy.save(restart_path, restart_dict)
 
     # All done!
     return
@@ -175,7 +194,7 @@ def step(trainer        : BayesianGLaSDI,
     # Run the next step 
     # ---------------------------------------------------------------------------------------------
 
-    print("Running %s" % next_step);
+    LOGGER.info("Running %s" % next_step);
     if (next_step is NextStep.Train):
         # If our next step is to train, then let's train! This will set trainer.restart_iter to 
         # the iteration number of the last iterating training.
@@ -216,7 +235,7 @@ def step(trainer        : BayesianGLaSDI,
         # Note: We should only reach here if we are using the offline stuff... since I disabled 
         # that, we should never reach this step.
         raise RuntimeError("Encountered CollectSample, which is disabled");
-        print("NextStep = Collect_Samples. Has something gone wrong? We should only be here if running offline (which should be disabled).");
+        LOGGER.info("NextStep = Collect_Samples. Has something gone wrong? We should only be here if running offline (which should be disabled).");
         result, next_step = Collect_Samples(trainer, config)
 
 
@@ -235,7 +254,7 @@ def step(trainer        : BayesianGLaSDI,
         return result, next_step
         
     # Continue the workflow if not using restart.
-    print("Next step is: %s" % next_step);
+    LOGGER.info("Next step is: %s" % next_step);
     if (use_restart == False):
         result, next_step = step(trainer, next_step, config)
 

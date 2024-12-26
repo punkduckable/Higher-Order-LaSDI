@@ -10,6 +10,8 @@ Physics_Path    : str = os.path.abspath(os.path.join(os.path.dirname(__file__), 
 sys.path.append(LD_Path); 
 sys.path.append(Physics_Path); 
 
+import  logging;
+
 import  numpy;
 import  torch; 
 
@@ -20,6 +22,9 @@ from    ParameterSpace      import  ParameterSpace;
 from    GPLaSDI             import  BayesianGLaSDI;
 from    Model               import  Autoencoder, load_Autoencoder, Autoencoder_Pair, load_Autoencoder_Pair;
 from    Burgers1d           import  Burgers1D;
+
+# Set up logger.
+LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
 # Set up the dictionaries; we use this to allow the code to call different classes, functions 
 # depending on the settings.
@@ -76,6 +81,12 @@ def Initialize_Trainer(config : dict, restart_dict : dict = None):
     begin training.
     """
 
+    # Fetch the trainer type. Note that only "gplasdi" is allowed.
+    trainer_type            = config['lasdi']['type'];
+    assert(trainer_type in config['lasdi']);
+    assert(trainer_type in trainer_dict);
+    LOGGER.info("Initializing Trainer (%s)" % trainer_type);
+
     # Set up a ParameterSpace object. This will keep track of all parameter combinations we want
     # to try during testing and training. We load the set of possible parameters and their possible
     # values using the configuration file. If we are using a restart file, then load it's 
@@ -104,11 +115,6 @@ def Initialize_Trainer(config : dict, restart_dict : dict = None):
     latent_dynamics         = ld_dict[ld_type](Model.n_z, physics.nt, config['latent_dynamics']);
     if (restart_dict is not None):
         latent_dynamics.load(restart_dict['latent_dynamics']);
-
-    # Fetch the trainer type. Note that only "gplasdi" is allowed.
-    trainer_type            = config['lasdi']['type'];
-    assert(trainer_type in config['lasdi']);
-    assert(trainer_type in trainer_dict);
 
     # Initialize the trainer object. If we are using a restart file, then load the 
     # trainer from that file.
@@ -153,12 +159,14 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
     space evolves over time. 
     """
 
+
     # First, determine what model we are using in the latent dynamics. Make sure the user 
     # included all the information that is necessary to initialize the corresponding dynamics.
     model_type : str = config['model']['type'];
     assert(model_type in config['model']);
     assert(model_type in model_dict);
-    
+    LOGGER.info("Initializing Model (%s)" % model_type);
+
     # Autoencoder, autoencoder pair case.
     if(model_type == "ae" or model_type == "pair"):
 
@@ -215,6 +223,7 @@ def Initialize_Physics(config: dict, param_name_list : list[str]) -> Physics:
     # First, determine what kind of "physics" object we want to load.
     physics_cfg     : dict      = config['physics'];
     physics_type    : str       = physics_cfg['type'];
+    LOGGER.info("Initializing Physics (%s)" % physics_type);
 
     # Next, initialize the "physics" object we are using to build the simulations.
     physics         : Physics   = physics_dict[physics_type](physics_cfg, param_name_list);
