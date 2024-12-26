@@ -180,14 +180,20 @@ class DampedSpring(LatentDynamics):
         # evaluate for one training case.
         assert(len(Z.shape) == 2)
 
+        import time;
+        t_1 : float = time.perf_counter();
+        
         # First, compute the time derivatives. 
         d2Z_dt2 : torch.Tensor  = Derivative2_Order4(X = Z, h = dt);
+
+        t_2   : float = time.perf_counter();
 
         # Concatenate Z, dZ_dt and a column of 1's. We will solve for the matrix, E, which gives 
         # the best fit for the system d2Z_dt2 = cat[Z, dZ_dt, 1] E. This matrix has the form 
         # E^T = [-K, -C, b]. Thus, we can extract K, C, and b from W.
         W       : torch.Tensor  = torch.cat([Z, dZ_dt, torch.ones((Z.shape[0], 1))], dim = 1);
-        
+
+        t_3     : float = time.perf_counter();
         # For each j, solve the least squares problem 
         #   min{ || d2Z_dt2[:, j] - W E(j)|| : E(j) \in \mathbb{R}^(dim*(2*dim + 1)) }
         # We store the resulting solutions in a matrix, coefs, whose j'th column holds the 
@@ -195,9 +201,14 @@ class DampedSpring(LatentDynamics):
         # (2*dim + 1, dim).
         coefs   : torch.Tensor  = torch.linalg.lstsq(W, d2Z_dt2).solution;
 
+        t_4     : float = time.perf_counter();
+
         # Compute the losses
         Loss_LD     = self.LD_LossFunction(d2Z_dt2, torch.matmul(W, coefs));
         Loss_Coef   = torch.norm(coefs, self.coef_norm_order);
+
+        t_5     : float = time.perf_counter();
+        print("derivative = %f, cat = %f, lstsq = %f, loss = %f, total = %f" % (t_2 - t_1, t_3 - t_2, t_4 - t_3, t_5 - t_4, t_5 - t_1));
 
         if(False):
             # Extract K, C, and b from coefs.
