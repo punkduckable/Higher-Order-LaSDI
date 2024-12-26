@@ -181,7 +181,7 @@ class LatentDynamics:
         Returns
         -------------------------------------------------------------------------------------------
 
-        A 3d numpy ndarray object of shape (n_IC, ns, nt, dim), where n_IC = the number of 
+        A 4d numpy ndarray object of shape (n_IC, ns, nt, dim), where n_IC = the number of 
         derivatives of the initial state we need to specify in the initial conditions, ns = the 
         number of samples (the length of IC_Samples), nt = the number of time steps (size of times) 
         and dim is the dimension of the latent space. The i, j, k, l element of this array holds 

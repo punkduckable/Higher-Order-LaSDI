@@ -91,14 +91,18 @@ def Derivative1_Order4(X : torch.Tensor, h : float) -> torch.Tensor:
     dX_dt   : torch.Tensor  = torch.empty_like(X);
     Nt      : int           = X.shape[0];
 
-    # Now... cycle through the time steps. Note that we use a different method for the first two
-    # and final two steps. 
+    # Compute the derivative for the first two time steps.
     dX_dt[0, ...] = (1./h)*((-25./12.)*X[0, ...]    + (4)*X[1, ...]         + (-3)*X[2, ...]    + (4./3.)*X[3, ...]     + (-1./4.)*X[4, ...]);
     dX_dt[1, ...] = (1./h)*((-1./4.)*X[0, ...]      + (-5./6.)*X[1, ...]    + (3./2.)*X[2, ...] + (-1./2.)*X[3, ...]    + (1./12.)*X[4, ...]);
 
+    # Compute the derivative for all time steps for which we can use a central difference rule.
     for i in range(2, Nt - 2):
         dX_dt[i, ...] = (1./h)*((1./12.)*X[i - 2, ...]  + (-2./3.)*X[i - 1, ...]  + (2./3.)*X[i + 1, ...]  + (-1./12.)*X[i + 2, ...]);
 
+    # Alternative approach that is, unfortunately, no faster.
+    #dX_dt[2:(Nt - 2), ...] = (1./h)*((1./12.)*X[0:(Nt - 4), ...] + (-2./3.)*X[1:(Nt - 3), ...] + (2./3.)*X[3:(Nt - 1), ...] + (-1./12.)*X[4:Nt, ...]);
+
+    # Compute the derivative for the last teo time steps.
     dX_dt[-2, ...] = (1./h)*((1./4.)*X[-1, ...]     + (5./6.)*X[-2, ...]    + (-3./2.)*X[-3, ...]   + (1./2.)*X[-4, ...]    + (-1./12.)*X[-5, ...]);
     dX_dt[-1, ...] = (1./h)*((25./12.)*X[-1, ...]   + (-4.)*X[-2, ...]      + (3.)*X[-3, ...]       + (-4./3.)*X[-4, ...]   + (1./4.)*X[-5, ...]);
 
