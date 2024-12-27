@@ -17,8 +17,9 @@ def Initialize_Logger(level):
     sh.setLevel(level);
     
     # Setup a formatter for the handler. 
-    LOG_FMT : str = '%(asctime)s - %(name)s:%(funcName)s:%(lineno)s - %(levelname)s - %(message)s';
-    sh.setFormatter(logging.Formatter(LOG_FMT));
+    LOG_FMT         : str   = '%(asctime)s.%(msecs)03d - %(name)s:%(funcName)s:%(lineno)s - %(levelname)s - %(message)s';
+    sh.setFormatter(logging.Formatter(LOG_FMT, datefmt = "%H:%M:%S"));
+
     logger.addHandler(sh);
 
 

@@ -5,7 +5,7 @@
 import  logging;
 
 import  numpy;
-import  torch
+import  torch;
 
 
 # Setup logger
@@ -81,8 +81,8 @@ class Physics:
         Nothing!
         """
         
-        self.param_name_list = param_name_list
-        return
+        self.param_name_list = param_name_list;
+        return;
     
 
 
@@ -109,7 +109,7 @@ class Physics:
         time derivative of the FOM state.
         """
 
-        raise RuntimeError("Abstract method Physics.initial_condition!")
+        raise RuntimeError("Abstract method Physics.initial_condition!");
     
 
 
@@ -137,7 +137,7 @@ class Physics:
         self.grid_size specifies the number of grid points along the axes in the spatial grid.
         """
 
-        raise RuntimeError("Abstract method Physics.solve!")
+        raise RuntimeError("Abstract method Physics.solve!");
     
 
 
@@ -145,7 +145,7 @@ class Physics:
         """
         This function should return a dictionary that houses self's state. I
         """
-        raise RuntimeError("Abstract method Physics.export!")
+        raise RuntimeError("Abstract method Physics.export!");
     
 
 
@@ -175,11 +175,11 @@ class Physics:
         """
 
         # Make sure we have a 2d grid of parameter values.
-        assert(params.ndim == 2)
-        n_param : int = len(params)
+        assert(params.ndim == 2);
+        n_param : int = len(params);
 
         # Report
-        LOGGER.info("Generating %d samples" % n_param)
+        LOGGER.info("Generating solution for %d parameter combinations" % n_param);
 
         # Cycle through the parameters.
         X_Train : list[torch.Tensor] = [];
@@ -228,4 +228,4 @@ class Physics:
         spatial and temporal grid. The second should be a float holding the norm of the residual.
         """
 
-        raise RuntimeError("Abstract method Physics.residual!")
+        raise RuntimeError("Abstract method Physics.residual!");

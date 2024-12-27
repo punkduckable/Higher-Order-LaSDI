@@ -70,10 +70,10 @@ def average_rom(model           : torch.nn.Module,
     # instance of the parameter values we are using. If there is only one parameter, it may be 1d. 
     # We can fix that by adding on an axis with size 1. 
     if (param_grid.ndim == 1):
-        param_grid = param_grid.reshape(1, -1)
+        param_grid = param_grid.reshape(1, -1);
 
     # Now fetch the number of combinations of parameter values.
-    n_param : int = param_grid.shape[0]
+    n_param : int = param_grid.shape[0];
 
     # For each parameter in param_grid, fetch the corresponding initial condition and then encode
     # it. This gives us a list whose i'th element holds the encoding of the i'th initial condition.
@@ -82,7 +82,7 @@ def average_rom(model           : torch.nn.Module,
     # Evaluate each GP at each combination of parameter values. This returns two arrays, the 
     # first of which is a 2d array whose i,j element specifies the mean of the posterior 
     # distribution for the j'th coefficient at the i'th combination of parameter values.
-    pred_mean, _ = eval_gp(gp_list, param_grid)
+    pred_mean, _ = eval_gp(gp_list, param_grid);
 
     # For each testing parameter, cycle through the mean value of each coefficient from each 
     # posterior distribution. For each set of coefficients (combination of parameter values), solve
@@ -91,13 +91,13 @@ def average_rom(model           : torch.nn.Module,
     # of the j'th time step fo the latent solution when we use the coefficients from the posterior 
     # distribution for the i'th combination of parameter values.
     nz  : int           = model.n_z;
-    Zis : numpy.ndarray = numpy.zeros([n_param, physics.nt, nz])
+    Zis : numpy.ndarray = numpy.zeros([n_param, physics.nt, nz]);
 
     for i in range(n_param):
-        Zis[i] = latent_dynamics.simulate(pred_mean[i], Z0[i], physics.t_grid)
+        Zis[i] = latent_dynamics.simulate(pred_mean[i], Z0[i], physics.t_grid);
 
     # All done!
-    return Zis
+    return Zis;
 
 
 
@@ -159,21 +159,21 @@ def sample_roms(model           : torch.nn.Module,
     # instance of the parameter values we are using. If there is only one parameter, it may be 1d. 
     # We can fix that by adding on an axis with size 1. 
     if (param_grid.ndim == 1):
-        param_grid = param_grid.reshape(1, -1)
+        param_grid = param_grid.reshape(1, -1);
     
     # Now fetch the number of combinations of parameter values (rows of param_grid).
-    n_param : int = param_grid.shape[0]
+    n_param : int = param_grid.shape[0];
 
     # For each parameter in param_grid, fetch the corresponding initial condition and then encode
     # it. This gives us a list whose i'th element holds the encoding of the i'th initial condition.
-    Z0      : list[list[numpy.ndarray]] = model.latent_initial_conditions(param_grid, physics)
+    Z0      : list[list[numpy.ndarray]] = model.latent_initial_conditions(param_grid, physics);
 
     # Now, for each combination of parameters, draw n_samples samples from the posterior
     # distributions for each coefficient at that combination of parameters. We store these samples 
     # in a list of numpy arrays. The k'th list element is a (n_sample, n_coef) array whose i, j 
     # element stores the i'th sample from the posterior distribution for the j'th coefficient at 
     # the k'th combination of parameter values.
-    coef_samples : list[numpy.ndarray]  = [sample_coefs(gp_list, param_grid[i], n_samples) for i in range(n_param)]
+    coef_samples : list[numpy.ndarray]  = [sample_coefs(gp_list, param_grid[i], n_samples) for i in range(n_param)];
 
     # For each testing parameter, cycle through the samples of the coefficients for that 
     # combination of parameter values. For each set of coefficients, solve the corresponding latent 
@@ -181,31 +181,35 @@ def sample_roms(model           : torch.nn.Module,
     # j, k, l element holds the l'th component of the k'th frame of the solution to the latent 
     # dynamics when we use the j'th sample of latent coefficients drawn from the posterior 
     # distribution for the i'th combination of parameter values.
-    Zis = numpy.zeros([n_param, n_samples, physics.nt, model.n_z])
+    Zis = numpy.zeros([n_param, n_samples, physics.nt, model.n_z]);
     for i, Zi in enumerate(Zis):
-        z_ic = Z0[i]
+        z_ic = Z0[i];
         for j, coef_sample in enumerate(coef_samples[i]):
-            Zi[j] = latent_dynamics.simulate(coef_sample, z_ic, physics.t_grid)
+            Zi[j] = latent_dynamics.simulate(coef_sample, z_ic, physics.t_grid);
 
     # All done!
-    return Zis
+    return Zis;
 
 
 
 def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[numpy.ndarray]) -> int:
     r"""
-    Computes the maximum standard deviation across the trajectories in LatentStates and returns 
-    the corresponding parameter index. 
-    
-    Specifically, we assume that LatentStates is a list of 4d tensors of shape (n_test, n_samples, 
-    n_t, n_z). The first axis specifies which parameter combination we're using. For each 
-    combination of parameters, we assume that we drew n_samples of the posterior distribution of
-    the coefficients at that parameter value, simulated the corresponding dynamics for n_t time 
-    steps, and then recorded the results in LatentStates[:][i, ...]. LatentStates[d][i, j, k, :] 
-    represents the k'th time step of the solution to the d'th derivative of the latent state when 
-    we use the coefficients from the j'th sample of the posterior distribution for the i'th set 
-    of parameters. 
-    
+    Finds which parameter combination gives the maximum standard deviation of some component 
+    of the FOM solution at some time step across the corresponding samples of the coefficients
+    in the latent space. 
+
+    We assume that LatentStates is a list of 4d tensors of shape (n_test, n_samples, n_t, n_z). 
+    Here, n_test is the number of testing combinations, n_samples is the number of samples of the 
+    latent coefficients we draw per parameter combination, n_t is the number of time steps we 
+    generate in the latent space per set of coefficients, and n_z is the dimension of the latent 
+    space.
+
+    For each time step and parameter combination, we get a set of latent frames. We map that 
+    set to a set of FOM frames and then find the STD of each component of those FOM frames 
+    across the samples. This give us a number. We find the corresponding number for each time 
+    step and combination of parameter values and then return the parameter combination that 
+    gives the biggest number (for some time step).
+
     Let i \in {1, 2, ... , n_test} and k \in {1, 2, ... , n_t}. For each j, we map the k'th frame
     of the j'th solution trajectory for the i'th parameter combination 
     (LatentStates[:][i, j, k, :]) to a FOM frame. We do this for each j (the set of samples), which 

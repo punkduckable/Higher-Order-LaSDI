@@ -2,7 +2,7 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-from time import perf_counter
+from time import perf_counter;
 
 
 
@@ -13,10 +13,10 @@ from time import perf_counter
 class Timer:
     def __init__(self):
         # Set instance variables
-        self.names      : dict  = {}    # Dictionary of named timers. key = name, value = index 
-        self.calls      : list  = []    # k'th element = # of times we have called the k'th timer
-        self.times      : list  = []    # k'th element = total time recorded by the k'th timer
-        self.starts     : list  = []    # k'th element = start time for the k'th timer (if running)
+        self.names      : dict  = {};   # Dictionary of named timers. key = name, value = index 
+        self.calls      : list  = [];   # k'th element = # of times we have called the k'th timer
+        self.times      : list  = [];   # k'th element = total time recorded by the k'th timer
+        self.starts     : list  = [];   # k'th element = start time for the k'th timer (if running)
         return
         
     
@@ -47,10 +47,10 @@ class Timer:
             # self.names has k keys), then we store that information in the "names" dictionary. 
             # We then store other information about that timer (such as its current value) in the
             # k'th element of the calls/times/starts lists.
-            self.names[name] = len(self.names)
-            self.calls      += [0]
-            self.times      += [0.0]
-            self.starts     += [None]
+            self.names[name] = len(self.names);
+            self.calls      += [0];
+            self.times      += [0.0];
+            self.starts     += [None];
         
         # Fetch the current timer's number.
         idx : int = self.names[name]
@@ -58,13 +58,13 @@ class Timer:
         # Make sure the current timer has not already started. If so, it is already running and we
         # need to raise an exception.
         if (self.starts[idx] is not None):
-            raise RuntimeError("Timer.start: %s timer is already ticking!" % name)
+            raise RuntimeError("Timer.start: %s timer is already ticking!" % name);
         
         # Set the current timer's start element to the time when we started this timer.
-        self.starts[idx] = perf_counter()
+        self.starts[idx] = perf_counter();
 
         # All done!
-        return
+        return;
     
 
 
@@ -88,24 +88,24 @@ class Timer:
         """
 
         # Make sure the requested timer actually exists.
-        assert(name in self.names)
+        assert(name in self.names);
         
         # Fetch the requested timers' index.
-        idx = self.names[name]
+        idx = self.names[name];
         
         # Make sure the requested timer is actually running.
         if (self.starts[idx] is None):
-            raise RuntimeError("Timer.end: %s start time is not measured yet!" % name)
+            raise RuntimeError("Timer.end: %s start time is not measured yet!" % name);
 
         # Record the time since the current timer started, add it to the running total for this 
         # timer. Also increment the number of calls to this timer + reset it's start value to 
         # None (so we can start it again).
-        self.times[idx] += perf_counter() - self.starts[idx]
-        self.calls[idx] += 1
-        self.starts[idx] = None
+        self.times[idx] += perf_counter() - self.starts[idx];
+        self.calls[idx] += 1;
+        self.starts[idx] = None;
 
         # All done!
-        return
+        return;
     
 
 
@@ -116,14 +116,14 @@ class Timer:
         """
         
         # Header
-        print("Function name\tCalls\tTotal time\tTime/call\n")
+        print("Function name\tCalls\tTotal time\tTime/call\n");
 
         # Cycle through timers.
         for name, idx in self.names.items():
-            print("%s\t%d\t%.3e\t%.3e\n" % (name, self.calls[idx], self.times[idx], self.times[idx] / self.calls[idx]))
+            print("%s\t%d\t%.3e\t%.3e\n" % (name, self.calls[idx], self.times[idx], self.times[idx] / self.calls[idx]));
         
         # All done!
-        return
+        return;
     
 
 
@@ -163,18 +163,18 @@ class Timer:
         # Make sure that no timers are currently running.
         for start in self.starts:
             if (start is not None):
-                raise RuntimeError('Timer.export: cannot export while Timer is still ticking!')
+                raise RuntimeError('Timer.export: cannot export while Timer is still ticking!');
 
         # Set up a dictionary to house the timer information.
-        param_dict : dict = {}
+        param_dict : dict = {};
 
         # Store names, calls, and timers (but not starts... we don't need that) in the dictionary.
-        param_dict["names"] = self.names
-        param_dict["calls"] = self.calls
-        param_dict["times"] = self.times
+        param_dict["names"] = self.names;
+        param_dict["calls"] = self.calls;
+        param_dict["times"] = self.times;
 
         # All done!
-        return param_dict
+        return param_dict;
  
 
 
@@ -205,11 +205,11 @@ class Timer:
 
         Nothing!
         """
-        self.names = dict_['names']
-        self.calls = dict_['calls']
-        self.times = dict_['times']
+        self.names = dict_['names'];
+        self.calls = dict_['calls'];
+        self.times = dict_['times'];
 
-        assert(len(self.names) == len(self.calls))
-        assert(len(self.names) == len(self.times))
-        self.starts = [None] * len(self.names)
+        assert(len(self.names) == len(self.calls));
+        assert(len(self.names) == len(self.times));
+        self.starts = [None] * len(self.names);
         return

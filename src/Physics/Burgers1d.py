@@ -77,54 +77,54 @@ class Burgers1D(Physics):
         """
 
         # Call the super class initializer.
-        super().__init__(cfg, param_name_list)
+        super().__init__(cfg, param_name_list);
 
         # The solution to Burgers' equation is scalar valued, so the qdim is 1. Likewise, since 
         # there is only one spatial dimension in the 1D burgers example, dim is also 1.
-        self.qdim   : int   = 1
-        self.dim    : int   = 1
+        self.qdim   : int   = 1;
+        self.dim    : int   = 1;
 
         # Make sure the configuration dictionary is actually for Burgers' equation.
-        assert('burgers1d' in cfg)
+        assert('burgers1d' in cfg);
         
         # Now, get a parser for cfg.
-        input_parser : InputParser = InputParser(cfg['burgers1d'], name = "burgers1d_input")
+        input_parser : InputParser = InputParser(cfg['burgers1d'], name = "burgers1d_input");
 
         # Fetch variables from the configuration. 
-        self.nt         : int       = input_parser.getInput(['number_of_timesteps'],  datatype = int)     # number of time steps when solving 
-        self.grid_size  : list[int] = input_parser.getInput(['grid_size'],            datatype = list)    # number of grid points along each spatial axis
-        self.qgrid_size : list[int] = self.grid_size                
+        self.nt         : int       = input_parser.getInput(['number_of_timesteps'],  datatype = int);    # number of time steps when solving 
+        self.grid_size  : list[int] = input_parser.getInput(['grid_size'],            datatype = list);   # number of grid points along each spatial axis
+        self.qgrid_size : list[int] = self.grid_size;
         
         # If there are n spatial dimensions, then the grid needs to have n axes (one for each 
         # dimension). Make sure this is the case.
-        assert(self.dim == len(self.grid_size))
+        assert(self.dim == len(self.grid_size));
 
         # Fetch more variables from the 
-        self.xmin   = input_parser.getInput(['xmin'], datatype = float)     # Minimum value of the spatial variable in the problem domain
-        self.xmax   = input_parser.getInput(['xmax'], datatype = float)     # Maximum value of the spatial variable in the problem domain
-        self.dx     = (self.xmax - self.xmin) / (self.grid_size[0] - 1)     # Spacing between grid points along the spatial axis.
+        self.xmin   = input_parser.getInput(['xmin'], datatype = float);    # Minimum value of the spatial variable in the problem domain
+        self.xmax   = input_parser.getInput(['xmax'], datatype = float);    # Maximum value of the spatial variable in the problem domain
+        self.dx     = (self.xmax - self.xmin) / (self.grid_size[0] - 1);    # Spacing between grid points along the spatial axis.
         assert(self.dx > 0.)
 
-        self.tmax   : float     = input_parser.getInput(['simulation_time'])  # Final simulation time. We solve form t = 0 to t = tmax
-        self.dt     : float     = self.tmax / (self.nt - 1)             # step size between successive time steps/the time step we use when solving.
+        self.tmax   : float     = input_parser.getInput(['simulation_time']);  # Final simulation time. We solve form t = 0 to t = tmax
+        self.dt     : float     = self.tmax / (self.nt - 1);                # step size between successive time steps/the time step we use when solving.
 
         # Set up the spatial, temporal grid.
-        self.x_grid : numpy.ndarray = numpy.linspace(self.xmin, self.xmax, self.grid_size[0])
-        self.t_grid : numpy.ndarray = numpy.linspace(0, self.tmax, self.nt)
+        self.x_grid : numpy.ndarray = numpy.linspace(self.xmin, self.xmax, self.grid_size[0]);
+        self.t_grid : numpy.ndarray = numpy.linspace(0, self.tmax, self.nt);
 
-        self.maxk                   : int   = input_parser.getInput(['maxk'],                   fallback = 10)      # TODO: ??? What is this ???
-        self.convergence_threshold  : float = input_parser.getInput(['convergence_threshold'],  fallback = 1.e-8)
+        self.maxk                   : int   = input_parser.getInput(['maxk'],                   fallback = 10);     # TODO: ??? What is this ???
+        self.convergence_threshold  : float = input_parser.getInput(['convergence_threshold'],  fallback = 1.e-8);
 
         # Determine which index corresponds to 'a' and 'w' (we pass an array of parameter values, 
         # we need this information to figure out which element corresponds to which variable).
         if (self.param_name_list is not None):
             if 'a' in self.param_name_list:
-                self.a_idx = self.param_name_list.index('a')
+                self.a_idx = self.param_name_list.index('a');
             if 'w' in self.param_name_list:
-                self.w_idx = self.param_name_list.index('w')
+                self.w_idx = self.param_name_list.index('w');
         
         # All done!
-        return
+        return;
     
 
 
@@ -158,12 +158,12 @@ class Burgers1D(Physics):
         a, w = 1.0, 1.0
 
         if 'a' in self.param_name_list:
-            a = param[self.a_idx]
+            a = param[self.a_idx];
         if 'w' in self.param_name_list:
-            w = param[self.w_idx]  
+            w = param[self.w_idx];  
 
         # Compute the initial condition and return!
-        return a * numpy.exp(- self.x_grid ** 2 / 2 / w / w)
+        return a * numpy.exp(- self.x_grid ** 2 / 2 / w / w);
     
 
 
@@ -225,8 +225,8 @@ class Burgers1D(Physics):
         effectively serialize self.
         """
 
-        dict_ : dict = {'t_grid' : self.t_grid, 'x_grid' : self.x_grid, 'dt' : self.dt, 'dx' : self.dx}
-        return dict_
+        dict_ : dict = {'t_grid' : self.t_grid, 'x_grid' : self.x_grid, 'dt' : self.dt, 'dx' : self.dx};
+        return dict_;
     
 
     
@@ -256,15 +256,15 @@ class Burgers1D(Physics):
         
         # First, approximate the spatial and teporal derivatives.
         # first axis is time index, and second index is spatial index.
-        dUdx = (Xhist[:, 1:] - Xhist[:, :-1]) / self.dx
-        dUdt = (Xhist[1:, :] - Xhist[:-1, :]) / self.dt
+        dUdx = (Xhist[:, 1:] - Xhist[:, :-1]) / self.dx;
+        dUdt = (Xhist[1:, :] - Xhist[:-1, :]) / self.dt;
 
         # compute the residual + the norm of the residual.
-        r   : numpy.ndarray = dUdt[:, :-1] - Xhist[:-1, :-1] * dUdx[:-1, :]
-        e   : float         = numpy.linalg.norm(r)
+        r   : numpy.ndarray = dUdt[:, :-1] - Xhist[:-1, :-1] * dUdx[:-1, :];
+        e   : float         = numpy.linalg.norm(r);
 
         # All done!
-        return r, e
+        return r, e;
 
 
 
@@ -281,10 +281,10 @@ def residual_burgers(un, uw, c, idxn1):
 
     '''
 
-    f = c * (uw ** 2 - uw * uw[idxn1])
-    r = -un + uw + f
+    f = c * (uw ** 2 - uw * uw[idxn1]);
+    r = -un + uw + f;
 
-    return r
+    return r;
 
 
 
@@ -297,14 +297,14 @@ def jacobian(u, c, idxn1, nx):
 
     '''
 
-    diag_comp           = 1.0 + c * (2 * u - u[idxn1])
-    subdiag_comp        = numpy.ones(nx - 1)
-    subdiag_comp[:-1]   = -c * u[1:]
-    data                = numpy.array([diag_comp, subdiag_comp])
-    J                   = spdiags(data, [0, -1], nx - 1, nx - 1, format = 'csr')
-    J[0, -1]            = -c * u[0]
+    diag_comp           = 1.0 + c * (2 * u - u[idxn1]);
+    subdiag_comp        = numpy.ones(nx - 1);
+    subdiag_comp[:-1]   = -c * u[1:];
+    data                = numpy.array([diag_comp, subdiag_comp]);
+    J                   = spdiags(data, [0, -1], nx - 1, nx - 1, format = 'csr');
+    J[0, -1]            = -c * u[0];
 
-    return J
+    return J;
 
 
 
@@ -316,29 +316,29 @@ def solver(u0, maxk, convergence_threshold, nt, nx, Dt, Dx):
 
     '''
 
-    c = Dt / Dx
+    c = Dt / Dx;
 
-    idxn1       = numpy.zeros(nx - 1, dtype = 'int')
-    idxn1[1:]   = numpy.arange(nx - 2)
-    idxn1[0]    = nx - 2
+    idxn1       = numpy.zeros(nx - 1, dtype = 'int');
+    idxn1[1:]   = numpy.arange(nx - 2);
+    idxn1[0]    = nx - 2;
 
-    u           = numpy.zeros((nt + 1, nx))
-    u[0]        = u0
+    u           = numpy.zeros((nt + 1, nx));
+    u[0]        = u0;
 
     for n in range(nt):
-        uw = u[n, :-1].copy()
-        r = residual_burgers(u[n, :-1], uw, c, idxn1)
+        uw = u[n, :-1].copy();
+        r = residual_burgers(u[n, :-1], uw, c, idxn1);
 
         for k in range(maxk):
-            J = jacobian(uw, c, idxn1, nx)
-            duw = spsolve(J, -r)
-            uw = uw + duw
-            r = residual_burgers(u[n, :-1], uw, c, idxn1)
+            J = jacobian(uw, c, idxn1, nx);
+            duw = spsolve(J, -r);
+            uw = uw + duw;
+            r = residual_burgers(u[n, :-1], uw, c, idxn1);
 
-            rel_residual = numpy.linalg.norm(r) / numpy.linalg.norm(u[n, :-1])
+            rel_residual = numpy.linalg.norm(r) / numpy.linalg.norm(u[n, :-1]);
             if rel_residual < convergence_threshold:
-                u[n + 1, :-1] = uw.copy()
-                u[n + 1, -1] = u[n + 1, 0]
-                break
+                u[n + 1, :-1] = uw.copy();
+                u[n + 1, -1] = u[n + 1, 0];
+                break;
 
-    return u
+    return u;

@@ -2,10 +2,10 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-import  numpy           as      np
-import  scipy.sparse    as      sps
+import  numpy           as      np;
+import  scipy.sparse    as      sps;
 from    scipy.sparse    import  spmatrix;
-import  torch
+import  torch;
 
 
 
@@ -15,10 +15,10 @@ import  torch
 
 class Stencil:
     # Class variables
-    leftBdrDepth        : int               = 0         # Number of time steps (at the start/stop of the time series) we use a special stencil on.
-    leftBdrWidth        : list[int]         = []        # i'th element specifies the number of terms in the stencil for the i'th time step
-    leftBdrStencils     : list[list[float]] = [[]]      # i'th element is a list wit ki = len(leftBdrWidth[i]) specifying the stencil weights of the first ki time series terms in the stencil for x(t_i)
-    leftBdrNorm         : list[float]       = []        # ??? TODO: what is this?
+    leftBdrDepth        : int               = 0;        # Number of time steps (at the start/stop of the time series) we use a special stencil on.
+    leftBdrWidth        : list[int]         = [];       # i'th element specifies the number of terms in the stencil for the i'th time step
+    leftBdrStencils     : list[list[float]] = [[]];     # i'th element is a list wit ki = len(leftBdrWidth[i]) specifying the stencil weights of the first ki time series terms in the stencil for x(t_i)
+    leftBdrNorm         : list[float]       = [];       # ??? TODO: what is this?
 
     """
     Suppose that InteriorStencils is an array of length Ns and interiorIndexes is a list of 
@@ -36,8 +36,8 @@ class Stencil:
 
     Note: We assume that interiorIndexes is in ASCENDING order. 
     """
-    interiorStencils    : np.ndarray    = np.array([])  # Specify the weights of the terms in the stencil
-    interiorIndexes     : list[int]     = []            # Specify the relative indices of the terms in the stencil. Must be in ascending order.
+    interiorStencils    : np.ndarray    = np.array([]); # Specify the weights of the terms in the stencil
+    interiorIndexes     : list[int]     = [];           # Specify the relative indices of the terms in the stencil. Must be in ascending order.
 
 
     
@@ -87,14 +87,14 @@ class Stencil:
         TODO: what are the last two of these used for? And what are they?
         """
 
-        norm            = np.ones(Nx,)
-        periodicOffset  = np.zeros(Nx,)
+        norm            = np.ones(Nx,);
+        periodicOffset  = np.zeros(Nx,);
         
         # Start building the "Operator Matrix" (See docstring)
         Dxi : spmatrix  = sps.diags(self.interiorStencils,
                                     self.interiorIndexes,
                                     shape = (Nx, Nx), 
-                                    format = 'lil')
+                                    format = 'lil');
         
         """
         If we assume the time series is periodic, then we need to adjust the first/last few 
@@ -121,63 +121,63 @@ class Stencil:
             then the line below produces the list [0, 1, ... , k - 1, -j, -j + 1, ... , -1].
             """
             bdrIdxes : list[int] = ([k for k in range(-self.interiorIndexes[0])] +
-                                    [k for k in range(-self.interiorIndexes[-1], 0)])
+                                    [k for k in range(-self.interiorIndexes[-1], 0)]);
             
             # Cycle through the rows of Dxi that we need to correct.
             for idx in bdrIdxes:
                 # Determine which columns of Dxi we need to access to apply the stencil for the 
                 # idx'th row of Dxi (corresponding to time t_i). 
-                colIdx : list[int]  = [k + idx for k in self.interiorIndexes]
+                colIdx : list[int]  = [k + idx for k in self.interiorIndexes];
 
                 # Now set the corresponding elements with appropriate wrap around (note that if 
                 # one index is negative, then numpy's indexing rules will automatically wrap it
                 # since x[-k] = x[x.len - k]).
-                Dxi[idx, colIdx]    = self.interiorStencils
+                Dxi[idx, colIdx]    = self.interiorStencils;
                 
                 # Set up the periodicOffset. If idx is negative, we are fixing one of the last
                 # few rows of Dxi. In this case, periodicOffset holds the sum of the weights 
                 # of the indices at and to the right of the current index in the interiorStencil.
                 # Otherwise, we set it to the sum of the weights of the indices to the left.
                 if (idx < 0):
-                    temp = [k >= 0 for k in colIdx]
-                    periodicOffset[idx] = np.sum(self.interiorStencils[temp])
+                    temp = [k >= 0 for k in colIdx];
+                    periodicOffset[idx] = np.sum(self.interiorStencils[temp]);
                 else:
-                    temp = [k < 0 for k in colIdx]
-                    periodicOffset[idx] = -np.sum(self.interiorStencils[temp])
+                    temp = [k < 0 for k in colIdx];
+                    periodicOffset[idx] = -np.sum(self.interiorStencils[temp]);
         
         # Otherwise, we need use special stencils for the left and right boundary terms.
         else:
             # If leftBrdDepth = k, then we use a special stencil to approximate x'(t_0), ... , 
             # x'(t_{k - 1}) and for x'(t_{Nx - k}), ... , x'(t_{Nx - 1}). We begin by zeroing out
             # the first/last k rows of Dxi.
-            Dxi[:self.leftBdrDepth,:]   = 0.
-            Dxi[-self.leftBdrDepth:,:]  = 0.
+            Dxi[:self.leftBdrDepth,:]   = 0.;
+            Dxi[-self.leftBdrDepth:,:]  = 0.;
 
             # Now, populate the first/last few rows of Dxi to implement the boundary stencil. 
             for depth in range(self.leftBdrDepth):
                 # leftBdrWidth[depth] = k means that the stencil for x(t_{depth}) depends on 
                 # x(t_0), ... , x(t_{k - 1}).
-                width   : int  = self.leftBdrWidth[depth]
+                width   : int  = self.leftBdrWidth[depth];
                 
                 # Update the first width elements of the depth'th row of Dxi using the depth'th 
                 # elements of leftBdrStencils (which holds the stencil weights for this row's 
                 # stencil)
-                Dxi[depth,:width] = self.leftBdrStencils[depth]
+                Dxi[depth,:width] = self.leftBdrStencils[depth];
 
                 # Update the (depth - 1)'th to last row of Dxi using the reversed stencil (which 
                 # gives us an equivalent stencil for right boundaries).
                 # NOTE: Currently only consider skew-symmetric operators.
-                Dxi[-1-depth,-width:] = -Dxi[depth,(width-1)::-1]
+                Dxi[-1-depth,-width:] = -Dxi[depth,(width-1)::-1];
             
             # TODO: what is going on here?
-            norm[:self.leftBdrDepth]    = self.leftBdrNorm
-            norm[-self.leftBdrDepth:]   = norm[(self.leftBdrDepth-1)::-1]
+            norm[:self.leftBdrDepth]    = self.leftBdrNorm;
+            norm[-self.leftBdrDepth:]   = norm[(self.leftBdrDepth-1)::-1];
 
         # Convert Dxi to a tensor. 
-        Dxi : torch.Tensor = self.convert(sps.coo_matrix(Dxi))
+        Dxi : torch.Tensor = self.convert(sps.coo_matrix(Dxi));
 
         # All done!
-        return Dxi, torch.Tensor(norm), torch.Tensor(periodicOffset)
+        return Dxi, torch.Tensor(norm), torch.Tensor(periodicOffset);
     
 
 
@@ -201,28 +201,28 @@ class Stencil:
         """
         
         if (type(scipy_coo) is not sps._coo.coo_matrix):
-            raise RuntimeError("The input sparse matrix must be in scipy COO format!")
+            raise RuntimeError("The input sparse matrix must be in scipy COO format!");
 
 
         # Fetch the values of the non-zero entries of scipy_coo.  
-        values : np.ndarray = scipy_coo.data
+        values : np.ndarray = scipy_coo.data;
 
         # Get the row, column numbers of the non-zero entries of scipy_coo. vertically stack them 
         # into a 2 x N matrix (N being the number of non-zero entries in scipy_coo) whose j'th 
         # column holds the row and column number of the j'th non-zero cell in scipy_coo.
-        indices : np.ndarray = np.vstack((scipy_coo.row, scipy_coo.col))
+        indices : np.ndarray = np.vstack((scipy_coo.row, scipy_coo.col));
 
         # Convert indices to a tensor
-        i : torch.Tensor = torch.LongTensor(indices)
+        i : torch.Tensor = torch.LongTensor(indices);
 
         # Convert the list of non-zero values in scipy_coo to a tensor.
-        v : torch.Tensor = torch.FloatTensor(values)
+        v : torch.Tensor = torch.FloatTensor(values);
 
         # Get the shape of scipy.coo
-        shape = scipy_coo.shape
+        shape = scipy_coo.shape;
 
         # Convert scipy_coo to a tensor and return!
-        return torch.sparse_coo_tensor(i, v, torch.Size(shape))
+        return torch.sparse_coo_tensor(i, v, torch.Size(shape));
 
 
 
