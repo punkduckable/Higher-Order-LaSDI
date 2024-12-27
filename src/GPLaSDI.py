@@ -85,7 +85,8 @@ class BayesianGLaSDI:
         """
         This class runs a full GPLaSDI training. As input, it takes the model defined as a 
         torch.nn.Module object, a Physics object to recover FOM ICs + information on the time 
-        discretization, a 
+        discretization, a latent dynamics object, and a parameter space object (which holds the 
+        testing and training sets of parameters).
 
         The "train" method runs the active learning training loop, computes the reconstruction and 
         SINDy loss, trains the GPs, and samples a new FOM data point.
@@ -126,6 +127,23 @@ class BayesianGLaSDI:
         self.model                          = model;
         self.latent_dynamics                = latent_dynamics;
         self.param_space                    = param_space;
+        
+        # Set placeholder tensors to hold the testing and training data. We expect to set up 
+        # X_Train to be an n_IC element list of tensors of shape (Np, Nt, Nx[0], ... , Nx[Nd - 1]), 
+        # where Np is the number of parameter combinations in the training set, Nt is the number of 
+        # time steps per FOM solution, and Nx[0], ... , Nx[Nd - 1] represent the number of steps 
+        # along the qgrid (spatial axes + vector dimension). X_Test has an analogous shape, but 
+        # it's leading dimension has a size matching the number of combinations of parameters 
+        # in the testing set.
+        # 
+        # the latent_dynamics object specifies n_IC while the physics object specifies nt and the 
+        # shape of each fom frame. Using this, we can initialize X_Train and X_Test to hold 
+        # tensors whose leading dimension is 0 (indicating that we currently have no testing/
+        # training data).
+        for i in range(self.latent_dynamics.n_IC):
+            FOM_sequence_shape : tuple[int] = (0, self.physics.nt) + tuple(self.physics.qgrid_size);
+            self.X_Train.append(torch.empty(FOM_sequence_shape, dtype = torch.float32));
+            self.X_Test.append( torch.empty(FOM_sequence_shape, dtype = torch.float32));
 
         # Initialize a timer object. We will use this while training.
         self.timer                          = Timer();
@@ -171,15 +189,6 @@ class BayesianGLaSDI:
         self.best_coefs     : numpy.ndarray = None;             # The best coefficients from the iteration with lowest testing loss
         self.restart_iter   : int           = 0;                # Iteration number at the end of the last training period
         
-        # Set placeholder tensors to hold the testing and training data. We expect to set up 
-        # X_Train to be a list of tensors of shape (Np, Nt, Nx[0], ... , Nx[Nd - 1]), where Np 
-        # is the number of parameter combinations in the training set, Nt is the number of time 
-        # steps per FOM solution, and Nx[0], ... , Nx[Nd - 1] represent the number of steps along 
-        # the spatial axes. X_Test has an analogous shape, but it's leading dimension has a size 
-        # matching the number of combinations of parameters in the testing set.
-        self.X_Train        : list[torch.Tensor]  = [];
-        self.X_Test         : list[torch.Tensor]  = [];
-
         # All done!
         return;
 
@@ -358,14 +367,28 @@ class BayesianGLaSDI:
 
     def get_new_sample_point(self) -> numpy.ndarray:
         """
-        This function uses a greedy process to sample a new parameter value. Specifically, it runs 
-        through each combination of parameters in in self.param_space. For the i'th combination of 
-        parameters, we generate a collection of samples of the coefficients in the latent dynamics.
-        We draw the k'th sample of the j'th coefficient from the posterior distribution for the 
-        j'th coefficient at the i'th combination of parameters. We map the resulting solution back 
-        into the real space and evaluate the standard deviation of the FOM frames. We return the 
-        combination of parameters which engenders the largest standard deviation (see the function
-        get_FOM_max_std).
+        This function finds the element of the testing set whose corresponding latent dynamics 
+        gives the highest variance FOM time series. 
+
+        How does this work? The latent space coefficients change with parameter values. For each 
+        coefficient, we fit a gaussian process whose input is the parameter values. Thus, for each 
+        potential parameter value and coefficient, we can find a distribution for that coefficient 
+        when we use that parameter value.
+
+        With this in mind, for each combination of parameters in self.param_space's test space, 
+        we draw a set of samples of the coefficients at that combination of parameter values. For
+        each combination, we solve the latent dynamics forward in time (using the sampled set of
+        coefficient values to define the latent dynamics). This gives us a time series of latent 
+        states. We do this for each sample, for each testing parameter. 
+
+        For each time step and parameter combination, we get a set of latent frames. We map that 
+        set to a set of FOM frames and then find the STD of each component of those FOM frames 
+        across the samples. This give us a number. We find the corresponding number for each time 
+        step and combination of parameter values and then return the parameter combination that 
+        gives the biggest number (for some time step). This becomes the new sample point.
+
+        Thus, the sample point is ALWAYS an element of the testing set. 
+
 
 
         -------------------------------------------------------------------------------------------
@@ -375,6 +398,7 @@ class BayesianGLaSDI:
         None!
 
         
+
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
@@ -383,28 +407,26 @@ class BayesianGLaSDI:
         the j'th parameter in the new sample.
         """
 
+        self.timer.start("new_sample");
+        assert(self.X_Test[0].size(0)       >  0);
+        assert(self.X_Test[0].size(0)       == self.param_space.n_test());
+        assert(self.best_coefs.shape[0]     == self.param_space.n_train());
 
-        self.timer.start("new_sample")
-        assert(self.X_Test[0].size(0)       >  0)
-        assert(self.X_Test[0].size(0)       == self.param_space.n_test())
-        assert(self.best_coefs.shape[0]     == self.param_space.n_train())
-        coefs : numpy.ndarray = self.best_coefs
-
-        LOGGER.info('\n~~~~~~~ Finding New Point ~~~~~~~')
-        # TODO(kevin): william, this might be the place for new sampling routine.
+        coefs : numpy.ndarray = self.best_coefs;
+        LOGGER.info('\n~~~~~~~ Finding New Point ~~~~~~~');
 
         # Move the model to the cpu (this is where all the GP stuff happens) and load the model 
         # from the last checkpoint. This should be the one that obtained the best loss so far. 
         # Remember that coefs should specify the coefficients from that iteration. 
         model       : torch.nn.Module   = self.model.cpu();
         n_test      : int               = self.param_space.n_test();
-        model.load_state_dict(torch.load(self.path_checkpoint + '/' + 'checkpoint.pt'))
+        model.load_state_dict(torch.load(self.path_checkpoint + '/' + 'checkpoint.pt'));
 
         # Map the initial conditions for the FOM to initial conditions in the latent space.
         Z0 : list[list[numpy.ndarray]]  = model.latent_initial_conditions(self.param_space.test_space, self.physics);
 
         # Train the GPs on the training data, get one GP per latent space coefficient.
-        gp_list : list[GaussianProcessRegressor] = fit_gps(self.param_space.train_space, coefs)
+        gp_list : list[GaussianProcessRegressor] = fit_gps(self.param_space.train_space, coefs);
 
         # For each combination of parameter values in the testing set, for each coefficient, 
         # draw a set of samples from the posterior distribution for that coefficient evaluated at
@@ -412,7 +434,7 @@ class BayesianGLaSDI:
         # values in a 2d numpy.ndarray of shape (n_sample, n_coef), whose i, j element holds the 
         # i'th sample of the j'th coefficient. We store the arrays for different parameter values 
         # in a list of length (number of combinations of parameters in the testing set). 
-        coef_samples : list[numpy.ndarray] = [sample_coefs(gp_list, self.param_space.test_space[i], self.n_samples) for i in range(n_test)]
+        coef_samples : list[numpy.ndarray] = [sample_coefs(gp_list, self.param_space.test_space[i], self.n_samples) for i in range(n_test)];
 
         # Now, solve the latent dynamics forward in time for each set of coefficients in 
         # coef_samples. There are n_test combinations of parameter values, and we have n_samples 
@@ -429,14 +451,13 @@ class BayesianGLaSDI:
         # is the number of derivatives of the latent state we need to fully define the latent 
         # state's initial condition.
         LatentStates    : list[numpy.ndarray]   = [];
-        n_IC            : int                   = len(Z0[0]);
-        for i in range(n_IC):
+        for i in range(self.latent_dynamics.n_IC):
             LatentStates.append(numpy.ndarray([n_test, self.n_samples, self.physics.nt, model.n_z]));
         
         for i in range(n_test):
             for j in range(self.n_samples):
                 LatentState_ij : list[numpy.ndarray] = self.latent_dynamics.simulate(coef_samples[i][j], Z0[i], self.physics.t_grid);
-                for k in range(n_IC):
+                for k in range(self.latent_dynamics.n_IC):
                     LatentStates[k][i, j, :, :] = LatentState_ij[k];
 
         # Find the index of the parameter with the largest std.

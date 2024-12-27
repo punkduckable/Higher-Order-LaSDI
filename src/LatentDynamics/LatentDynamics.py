@@ -21,7 +21,8 @@ class LatentDynamics:
     # Class variables
     dim     : int           = -1;       # Dimensionality of the latent space
     nt      : int           = -1;       # Number of time steps when solving the latent dynamics
-    ncoefs  : int           = -1;       # Number of coefficients in the latent space dynamics
+    n_coefs : int           = -1;       # Number of coefficients in the latent space dynamics
+    n_IC    : int           = -1;       # Number of initial conditions to define the initial latent state.
 
     # TODO(kevin): do we want to store coefficients as an instance variable?
     coefs   : torch.Tensor  = torch.Tensor([]);
@@ -198,9 +199,8 @@ class LatentDynamics:
         # There needs to be as many initial conditions as sets of coefficients.
         assert(len(IC_Samples)          == coefs_Sample.shape[0]);
 
-        # Fetch n_samples, n_IC.
+        # Fetch n_samples.
         n_samples   : int   = len(IC_Samples);
-        n_IC        : int   = IC_Samples.shape[1];
         LOGGER.debug("Simulating the latent dynamics for %d samples of the coefficients" % n_samples);
 
         # Cycle through the set of coefficients
@@ -211,7 +211,7 @@ class LatentDynamics:
                                                 times  = times);
 
             # Append a leading dimension of size 1.
-            Z_i = Z_i.reshape(n_IC, 1, Z_i.shape[0], Z_i.shape[1]);
+            Z_i = Z_i.reshape(self.n_IC, 1, Z_i.shape[0], Z_i.shape[1]);
 
             # Append the latest trajectory onto the Z_simulated array.
             if (i == 0):
@@ -225,7 +225,7 @@ class LatentDynamics:
 
 
     def export(self) -> dict:
-        param_dict = {'dim': self.dim, 'ncoefs': self.ncoefs};
+        param_dict = {'dim': self.dim, 'n_coefs': self.n_coefs};
         return param_dict;
 
 
@@ -234,6 +234,6 @@ class LatentDynamics:
     # Other latent dynamics might need to.
     def load(self, dict_ : dict) -> None:
         assert(self.dim == dict_['dim']);
-        assert(self.ncoefs == dict_['ncoefs']);
+        assert(self.n_coefs == dict_['n_coefs']);
         return;
     

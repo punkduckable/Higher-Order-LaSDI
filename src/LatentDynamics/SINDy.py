@@ -79,12 +79,15 @@ class SINDy(LatentDynamics):
         super().__init__(dim, nt);
         LOGGER.info("Initializing a SINDY object with dim = %d, nt = %d" % (self.dim, self.nt));
 
+        # Set n_IC and n_coefs.
         # We only allow library terms of order <= 1. If we let z(t) \in \mathbb{R}^{dim} denote the 
         # latent state at some time, t, then the possible library terms are 1, z_1(t), ... , 
         # z_{dim}(t). Since each component function gets its own set of coefficients, there must 
         # be dim*(dim + 1) total coefficients.
         #TODO(kevin): generalize for high-order dynamics
-        self.ncoefs = self.dim * (self.dim + 1);
+        self.n_coefs    : int   = self.dim*(self.dim + 1);
+        self.n_IC       : int   = 1;
+
 
         # Now, set up an Input parser to process the contents of the config['sindy'] dictionary. 
         assert('sindy' in config)
@@ -191,7 +194,7 @@ class SINDy(LatentDynamics):
 
             # Prepare an array to house the flattened coefficient matrices for each combination of
             # parameter values.
-            coefs = torch.empty([n_train, self.ncoefs], dtype = torch.float32)
+            coefs = torch.empty([n_train, self.n_coefs], dtype = torch.float32)
 
             # Initialize the losses. Note that these are floats which we will replace with 
             # tensors.

@@ -2,11 +2,17 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
+import  logging;
+
 import  torch;
 import  numpy;
 
 from    Enums               import  NextStep, Result;  
 from    GPLaSDI             import  BayesianGLaSDI;
+
+
+# Setup logger.
+LOGGER : logging.Logger = logging.getLogger(__name__);
 
 
 
@@ -42,7 +48,7 @@ def Pick_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Res
     """
 
     # First, figure out which samples we need to run simulations for. 
-    if(len(trainer.X_Train) == 0):
+    if(trainer.X_Train[0].shape[0] == 0):
         # If this is the initial step then trainer.X_Train will be empty, meaning that we need to 
         # run a simulation for every combination of parameters in the train_space. 
         new_sample  : numpy.ndarray = trainer.param_space.train_space;
@@ -93,24 +99,31 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     # Determine how many testing, training samples we need to add
 
     # Figure out how many new training examples there are. Note: we require there is at least one.
-    if(len(trainer.X_Train) == 0):
+    if(trainer.X_Train[0].shape[0] == 0):
         new_trains      : int                   = trainer.param_space.n_train();
     else:
         new_trains      : int                   = trainer.param_space.n_train() - trainer.X_Train[0].size(0);
     assert(new_trains > 0);
+    LOGGER.info("Adding %d new parameter combinations to the training set (currently has %d)" % (new_trains, trainer.X_Train[0].shape[0]));
 
     # Fetch the parameters. The i'th row of this matrix gives the i'th combination of parameter
     # values for which we have not generated a fom solution.
     new_train_params    : numpy.ndarray         = trainer.param_space.train_space[-new_trains:, :]
+    for i in range(new_train_params.shape[0]):
+        LOGGER.debug("new training combination %d is %s" % (i, str(new_train_params[i])));
 
     # Figure out how many new testing parameter combinations there are. If there are any, fetch 
     # them from the param space.
-    if(len(trainer.X_Test) == 0):
+    if(trainer.X_Test[0].shape[0] == 0):
         new_tests       : int                   = trainer.param_space.n_test();
     else:
         new_tests       : int                   = trainer.param_space.n_test() - trainer.X_Test[0].size(0)
+    LOGGER.info("Adding %d new parameter combinations to the testing set (currently has %d)" % (new_tests, trainer.X_Test[0].size(0)));
+
     if (new_tests > 0):
         new_test_params : numpy.ndarray         = trainer.param_space.test_space[-new_tests:, :]
+        for i in range(new_test_params.shape[0]):
+            LOGGER.debug("new training combination %d is %s" % (i, str(new_test_params[i])));
 
 
     # ---------------------------------------------------------------------------------------------
@@ -119,7 +132,7 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     # Generate the fom solutions for the new training points. After we have generated them, we
     # append them to trainer's X_Train variable.
     new_X               : list[torch.Tensor]    = trainer.physics.generate_solutions(new_train_params);
-    if(len(trainer.X_Train) == 0):
+    if(trainer.X_Train[0].shape[0] == 0):
         trainer.X_Train     = new_X;
     else:
         assert(len(new_X) == len(trainer.X_Train));
@@ -127,12 +140,13 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
             trainer.X_Train[i]                  = torch.cat([trainer.X_Train[i], new_X[i]], dim = 0)
 
     assert(trainer.X_Train[0].shape[0] == trainer.param_space.n_train())
+
     
     # Do the same thing for the testing points.
     if (new_tests > 0):
         new_X           : list[torch.Tensor]    = trainer.physics.generate_solutions(new_test_params);
 
-        if(len(trainer.X_Test) == 0):
+        if(trainer.X_Test[0].shape[0] == 0):
             trainer.X_Test = new_X;
         else:
             assert(len(new_X) == len(trainer.X_Test));
