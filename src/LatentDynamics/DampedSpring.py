@@ -10,6 +10,8 @@ util_Path       : str   = os.path.join(src_Path, "Utilities");
 sys.path.append(src_Path);
 sys.path.append(util_Path);
 
+import  logging;
+
 import  numpy;
 import  torch;
 
@@ -17,6 +19,10 @@ from    LatentDynamics      import  LatentDynamics;
 from    InputParser         import  InputParser;
 from    FiniteDifference    import  Derivative1_Order4, Derivative2_Order4;
 from    Solvers             import  RK4;
+
+
+# Setup Logger.
+LOGGER : logging.Logger = logging.getLogger(__name__);
 
 
 
@@ -58,9 +64,7 @@ class DampedSpring(LatentDynamics):
         # Run the base class initializer. The only thing this does is set the dim and nt 
         # attributes.;
         super().__init__(dim, nt);
-
-        # store the dimension of the latent dynamics.
-        self.dim    : int   = dim;
+        LOGGER.info("Initializing a DampedSpring object with dim = %d, nt = %d" % (self.dim, self.nt));
 
         # Now, set up an Input parser to read in the coefficient norm order.
         assert('spring' in config);
@@ -138,13 +142,14 @@ class DampedSpring(LatentDynamics):
         # Extract the latent states and their velocities.
         Z       : torch.Tensor  = Latent_States[0];
         dZ_dt   : torch.Tensor  = Latent_States[1];
-
+        
 
         # -----------------------------------------------------------------------------------------
         # If Z has three dimensions, loop over all train cases.
         if (len(Z.shape) == 3):
             # Fetch the number of training cases.
             n_train : int = Z.shape[0];
+            LOGGER.debug("Finding the optimal coefficients for %d parameter values" % n_train);
 
             # Prepare an array to house the flattened coefficient matrices for each combination of
             # parameter values.
@@ -178,7 +183,7 @@ class DampedSpring(LatentDynamics):
 
         # -----------------------------------------------------------------------------------------
         # evaluate for one training case.
-        assert(len(Z.shape) == 2)
+        assert(len(Z.shape) == 2);
 
         import time;
         t_1 : float = time.perf_counter();

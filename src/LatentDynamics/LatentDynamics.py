@@ -2,8 +2,15 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
+import  logging;
+
 import  numpy;
 import  torch;
+
+
+# Logger setup.
+LOGGER : logging.Logger = logging.getLogger(__name__);
+
 
 
 # -------------------------------------------------------------------------------------------------
@@ -12,12 +19,12 @@ import  torch;
 
 class LatentDynamics:
     # Class variables
-    dim     : int           = -1        # Dimensionality of the latent space
-    nt      : int           = -1        # Number of time steps when solving the latent dynamics
-    ncoefs  : int           = -1        # Number of coefficients in the latent space dynamics
+    dim     : int           = -1;       # Dimensionality of the latent space
+    nt      : int           = -1;       # Number of time steps when solving the latent dynamics
+    ncoefs  : int           = -1;       # Number of coefficients in the latent space dynamics
 
     # TODO(kevin): do we want to store coefficients as an instance variable?
-    coefs   : torch.Tensor  = torch.Tensor([])
+    coefs   : torch.Tensor  = torch.Tensor([]);
 
 
 
@@ -42,15 +49,15 @@ class LatentDynamics:
         """
 
         # Set class variables.
-        self.dim    : int   = dim_
-        self.nt     : int   = nt_
+        self.dim    : int   = dim_;
+        self.nt     : int   = nt_;
 
         # There must be at least one latent dimension and there must be at least 1 time step.
-        assert(self.dim > 0)
-        assert(self.nt  > 0)
+        assert(self.dim > 0);
+        assert(self.nt  > 0);
 
         # All done!
-        return
+        return;
     
 
 
@@ -101,7 +108,7 @@ class LatentDynamics:
         Z[:, ...].
         """
 
-        raise RuntimeError('Abstract function LatentDynamics.calibrate!')
+        raise RuntimeError('Abstract function LatentDynamics.calibrate!');
     
 
 
@@ -146,7 +153,7 @@ class LatentDynamics:
         latent solution at the time stored in the j'th element of times. 
         """
 
-        raise RuntimeError('Abstract function LatentDynamics.simulate!')
+        raise RuntimeError('Abstract function LatentDynamics.simulate!');
     
 
 
@@ -162,14 +169,14 @@ class LatentDynamics:
         Arguments
         -------------------------------------------------------------------------------------------
 
-        coefs_Sample: A numpy.ndarray object whose leading dimension has size ns (the number of 
-        sets of coefficients/initial conditions/simulations we run).
+        coefs_Sample: A numpy.ndarray object whose leading dimension has size n_samples (the number 
+        of sets of coefficients/initial conditions/simulations we run).
 
         IC_Samples: A list of lists list of numpy arrays. The i'th element of this list should be 
         a list of length n_IC whose j'th element is a 1d numpy ndarray object of shape dim, where 
         dim is the dimension of the latent space (the space where the dynamics takes place). Here, 
-        ns is the number of samples we want to process and n_IC is the number of initial conditions
-        we need to specify to define the initial state of the latent dynamics.
+        n_samples is the number of samples we want to process and n_IC is the number of initial 
+        conditions we need to specify to define the initial state of the latent dynamics.
 
         times: A 1d numpy ndarray object whose i'th entry holds the value of the i'th time value 
         where we want to compute each latent solution. The elements of this array should be in 
@@ -180,23 +187,24 @@ class LatentDynamics:
         Returns
         -------------------------------------------------------------------------------------------
 
-        A 4d numpy ndarray object of shape (n_IC, ns, nt, dim), where n_IC = the number of 
-        derivatives of the initial state we need to specify in the initial conditions, ns = the 
-        number of samples (the length of IC_Samples), nt = the number of time steps (size of times) 
-        and dim is the dimension of the latent space. The i, j, k, l element of this array holds 
-        the l'th component of the solution of the latent dynamics at the j'th time step (j'th 
-        element of times) when we use the i'th set of coefficients/initial conditions. 
+        A 4d numpy ndarray object of shape (n_IC, n_samples, nt, dim), where n_IC = the number of 
+        derivatives of the initial state we need to specify in the initial conditions, n_samples = 
+        the number of samples (the length of IC_Samples), nt = the number of time steps (size of 
+        times) and dim is the dimension of the latent space. The i, j, k, l element of this array 
+        holds the l'th component of the solution of the latent dynamics at the j'th time step 
+        (j'th element of times) when we use the i'th set of coefficients/initial conditions. 
         """
 
         # There needs to be as many initial conditions as sets of coefficients.
         assert(len(IC_Samples)          == coefs_Sample.shape[0]);
 
-        # Fetch ns, n_IC.
-        ns      : int   = len(IC_Samples)
-        n_IC    : int   = IC_Samples.shape[1];
+        # Fetch n_samples, n_IC.
+        n_samples   : int   = len(IC_Samples);
+        n_IC        : int   = IC_Samples.shape[1];
+        LOGGER.debug("Simulating the latent dynamics for %d samples of the coefficients" % n_samples);
 
         # Cycle through the set of coefficients
-        for i in range(ns):
+        for i in range(n_samples):
             # Simulate the latent dynamics when we use the i'th set of coefficients + ICs
             Z_i : numpy.ndarray = self.simulate(coefs  = coefs_Sample[i], 
                                                 IC     = IC_Samples[i], 
@@ -212,20 +220,20 @@ class LatentDynamics:
                 Z_simulated = numpy.concatenate((Z_simulated, Z_i), axis = 1);
 
         # All done!
-        return Z_simulated
+        return Z_simulated;
 
 
 
     def export(self) -> dict:
-        param_dict = {'dim': self.dim, 'ncoefs': self.ncoefs}
-        return param_dict
+        param_dict = {'dim': self.dim, 'ncoefs': self.ncoefs};
+        return param_dict;
 
 
 
     # SINDy does not need to load parameters.
     # Other latent dynamics might need to.
     def load(self, dict_ : dict) -> None:
-        assert(self.dim == dict_['dim'])
-        assert(self.ncoefs == dict_['ncoefs'])
-        return
+        assert(self.dim == dict_['dim']);
+        assert(self.ncoefs == dict_['ncoefs']);
+        return;
     

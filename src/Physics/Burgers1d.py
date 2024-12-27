@@ -13,13 +13,13 @@ sys.path.append(LD_Path);
 sys.path.append(util_Path);
 
 import  numpy;
-from    scipy.sparse.linalg import  spsolve
-from    scipy.sparse        import  spdiags
-import  torch
+from    scipy.sparse.linalg import  spsolve;
+from    scipy.sparse        import  spdiags;
+import  torch;
 
-from    InputParser         import  InputParser
-from    Physics             import  Physics
-from    Stencils            import  FDdict
+from    InputParser         import  InputParser;
+from    Physics             import  Physics;
+from    Stencils            import  FDdict;
 
 
 ######## REMOVE ME   ||
@@ -47,8 +47,8 @@ from    FiniteDifference    import  Derivative1_Order4;
 
 class Burgers1D(Physics):
     # Class variables
-    a_idx = None # parameter index for a
-    w_idx = None # parameter index for w
+    a_idx = None; # parameter index for a
+    w_idx = None; # parameter index for w
 
 
     

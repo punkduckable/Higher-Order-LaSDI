@@ -60,15 +60,15 @@ def optimizer_to(optim : Optimizer, device : str) -> None:
     for param in optim.state.values():
         # Not sure there are any global tensors in the state dict
         if isinstance(param, torch.Tensor):
-            param.data = param.data.to(device)
+            param.data = param.data.to(device);
             if param._grad is not None:
-                param._grad.data = param._grad.data.to(device)
+                param._grad.data = param._grad.data.to(device);
         elif isinstance(param, dict):
             for subparam in param.values():
                 if isinstance(subparam, torch.Tensor):
-                    subparam.data = subparam.data.to(device)
+                    subparam.data = subparam.data.to(device);
                     if subparam._grad is not None:
-                        subparam._grad.data = subparam._grad.data.to(device)
+                        subparam._grad.data = subparam._grad.data.to(device);
 
 
 
@@ -122,55 +122,54 @@ class BayesianGLaSDI:
 
         LOGGER.info("Initializing a GPLaSDI object"); 
 
-        self.physics                        = physics
-        self.model                          = model
-        self.latent_dynamics                = latent_dynamics
-        self.param_space                    = param_space
+        self.physics                        = physics;
+        self.model                          = model;
+        self.latent_dynamics                = latent_dynamics;
+        self.param_space                    = param_space;
 
         # Initialize a timer object. We will use this while training.
-        self.timer                          = Timer()
+        self.timer                          = Timer();
 
         # Extract training/loss hyperparameters from the configuration file. 
-        self.n_samples          : int       = config['n_samples']       # Number of samples to draw per coefficient per combination of parameters
-        self.lr                 : float     = config['lr']              # Learning rate for the optimizer.
-        self.n_iter             : int       = config['n_iter']          # Number of iterations for one train and greedy sampling
-        self.max_iter           : int       = config['max_iter']        # We stop training if restart_iter goes above this number. 
-        self.max_greedy_iter    : int       = config['max_greedy_iter'] # We stop performing greedy sampling if restart_iter goes above this number.
-        self.ld_weight          : float     = config['ld_weight']       # Weight of the SINDy loss in the loss function. \beta_2 in the paper.
-        self.coef_weight        : float     = config['coef_weight']     # Weight of the norm of matrix of latent dynamics coefficients. \beta_3 in the paper.
+        self.n_samples          : int       = config['n_samples'];      # Number of samples to draw per coefficient per combination of parameters
+        self.lr                 : float     = config['lr'];             # Learning rate for the optimizer.
+        self.n_iter             : int       = config['n_iter'];         # Number of iterations for one train and greedy sampling
+        self.max_iter           : int       = config['max_iter'];       # We stop training if restart_iter goes above this number. 
+        self.max_greedy_iter    : int       = config['max_greedy_iter'];# We stop performing greedy sampling if restart_iter goes above this number.
+        self.ld_weight          : float     = config['ld_weight'];      # Weight of the SINDy loss in the loss function. \beta_2 in the paper.
+        self.coef_weight        : float     = config['coef_weight'];    # Weight of the norm of matrix of latent dynamics coefficients. \beta_3 in the paper.
 
         LOGGER.debug("  - n_samples = %d, lr = %f, n_iter = %d, ld_weight = %f, coef_weight = %f" \
                      % (self.n_samples, self.lr, self.n_iter, self.ld_weight, self.coef_weight));
 
         # Set up the optimizer and loss function.
-        self.optimizer          : Optimizer = torch.optim.Adam(model.parameters(), lr = self.lr)
-        self.MSE                            = torch.nn.MSELoss()
+        self.optimizer          : Optimizer = torch.optim.Adam(model.parameters(), lr = self.lr);
+        self.MSE                            = torch.nn.MSELoss();
 
         # Set paths for checkpointing. 
-        self.path_checkpoint    : str       = config['path_checkpoint']
-        self.path_results       : str       = config['path_results']
+        self.path_checkpoint    : str       = config['path_checkpoint'];
+        self.path_results       : str       = config['path_results'];
 
         # Make sure the checkpoints and results directories exist.
-        from os.path import dirname
-        from pathlib import Path
-        Path(dirname(self.path_checkpoint)).mkdir(  parents = True, exist_ok = True)
-        Path(dirname(self.path_results)).mkdir(     parents = True, exist_ok = True)
+        from os.path import dirname;
+        from pathlib import Path;
+        Path(dirname(self.path_checkpoint)).mkdir(  parents = True, exist_ok = True);
+        Path(dirname(self.path_results)).mkdir(     parents = True, exist_ok = True);
 
         # Set the device to train on. We default to cpu.
-        device = config['device'] if 'device' in config else 'cpu'
+        device = config['device'] if 'device' in config else 'cpu';
         if (device == 'cuda'):
-            assert(torch.cuda.is_available())
-            self.device = device
+            assert(torch.cuda.is_available());
+            self.device = device;
         elif (device == 'mps'):
-            assert(torch.backends.mps.is_available())
-            self.device = device
+            assert(torch.backends.mps.is_available());
+            self.device = device;
         else:
-            self.device = 'cpu'
+            self.device = 'cpu';
 
         # Set up variables to aide checkpointing.
-        self.best_loss      : float         = numpy.inf         # The lowest testing loss we have found so far
-        self.best_coefs     : numpy.ndarray = None              # The best coefficients from the iteration with lowest testing loss
-        self.restart_iter   : int           = 0                 # Iteration number at the end of the last training period
+        self.best_coefs     : numpy.ndarray = None;             # The best coefficients from the iteration with lowest testing loss
+        self.restart_iter   : int           = 0;                # Iteration number at the end of the last training period
         
         # Set placeholder tensors to hold the testing and training data. We expect to set up 
         # X_Train to be a list of tensors of shape (Np, Nt, Nx[0], ... , Nx[Nd - 1]), where Np 
@@ -182,7 +181,7 @@ class BayesianGLaSDI:
         self.X_Test         : list[torch.Tensor]  = [];
 
         # All done!
-        return
+        return;
 
 
 
@@ -206,36 +205,37 @@ class BayesianGLaSDI:
 
         # Make sure we have at least one training data point (the 0 axis of X_Train[0] corresponds 
         # to which combination of training parameters we use).
-        assert(self.X_Train[0].shape[0] > 0)
-        assert(self.X_Train[0].shape[0] == self.param_space.n_train())
+        assert(self.X_Train[0].shape[0] > 0);
+        assert(self.X_Train[0].shape[0] == self.param_space.n_train());
 
         # Map everything to self's device.
-        device              : str                   = self.device
-        model_device        : torch.nn.Module       = self.model.to(device)
+        device              : str                   = self.device;
+        model_device        : torch.nn.Module       = self.model.to(device);
         X_Train_device      : list[torch.Tensor]    = [];
         for i in range(len(self.X_Train)):
             X_Train_device.append(self.X_Train[i].to(device));
 
         # Make sure the checkpoints and results directories exist.
         from pathlib import Path
-        Path(self.path_checkpoint).mkdir(   parents = True, exist_ok = True)
-        Path(self.path_results).mkdir(      parents = True, exist_ok = True)
-
-        ps                  : ParameterSpace    = self.param_space
-        n_train             : int               = ps.n_train()
-        ld                  : LatentDynamics    = self.latent_dynamics
+        Path(self.path_checkpoint).mkdir(   parents = True, exist_ok = True);
+        Path(self.path_results).mkdir(      parents = True, exist_ok = True);
+        
+        # Final setup.
+        n_train             : int               = self.param_space.n_train();
+        ld                  : LatentDynamics    = self.latent_dynamics;
+        best_loss           : float             = numpy.Inf;                    # Stores the lowest loss we get in this round of training.
 
         # Determine number of iterations we should run in this round of training.
-        next_iter   : int = min(self.restart_iter + self.n_iter, self.max_iter)
+        next_iter   : int = min(self.restart_iter + self.n_iter, self.max_iter);
         
         # Run the iterations!
-        LOGGER.info("Training for %d epochs (starting at %d, going to %d)" % (next_iter - self.restart_iter, self.restart_iter, next_iter));
+        LOGGER.info("Training for %d epochs (starting at %d, going to %d) with %d parameters" % (next_iter - self.restart_iter, self.restart_iter, next_iter, n_train));
         for iter in range(self.restart_iter, next_iter):
             # Begin timing the current training step.            
-            self.timer.start("train_step")
+            self.timer.start("train_step");
 
             # Zero out the gradients. 
-            self.optimizer.zero_grad()
+            self.optimizer.zero_grad();
 
 
             # -------------------------------------------------------------------------------------
@@ -264,7 +264,7 @@ class BayesianGLaSDI:
                 Z, dZ_dt                                = model_device.Encode(Displacement_Frames = X_Train_device[0], Velocity_Frames = X_Train_device[1]);
                 X_pred, V_Pred                          = model_device.Decode(Z, dZ_dt);
                 Z                   : torch.Tensor      = Z.cpu();
-                dZ_dt               : torch.tensor      = dZ_dt.cpu();
+                dZ_dt               : torch.Tensor      = dZ_dt.cpu();
 
                 # Compute the reconstruction loss. 
                 loss_recon         : torch.Tensor       = self.MSE(X_Train_device[0], X_pred) + self.MSE(X_Train_device[1], V_Pred);
@@ -282,7 +282,7 @@ class BayesianGLaSDI:
             max_coef        : numpy.float32 = numpy.abs(coefs).max();
 
             # Compute the final loss.
-            loss = loss_recon + self.ld_weight * loss_ld / n_train + self.coef_weight * loss_coef / n_train
+            loss = loss_recon + self.ld_weight * loss_ld / n_train + self.coef_weight * loss_coef / n_train;
 
 
             # -------------------------------------------------------------------------------------
@@ -294,11 +294,13 @@ class BayesianGLaSDI:
 
             # Check if we hit a new minimum loss. If so, make a checkpoint, record the loss and 
             # the iteration number. 
-            if loss.item() < self.best_loss:
+            if loss.item() < best_loss:
+                LOGGER.debug("Got a new lowest loss (%f) on epoch %d" % (loss.item(), iter));
                 torch.save(model_device.cpu().state_dict(), self.path_checkpoint + '/' + 'checkpoint.pt');
-                model_device        : torch.nn.Module   = self.model.to(device);
-                self.best_coefs     : numpy.ndarray     = coefs;
-                self.best_loss      : float             = loss.item();
+                
+                # Update the best set of parameters. 
+                self.best_coefs : numpy.ndarray = coefs;
+                best_loss       : float         = loss.item();
 
             # -------------------------------------------------------------------------------------
             # Report Results from this iteration 
@@ -309,49 +311,48 @@ class BayesianGLaSDI:
 
             # If there are fewer than 6 training examples, report the set of parameter combinations.
             if n_train < 6:
-                param_string : str = 'Param: ' + str(numpy.round(ps.train_space[0, :], 4));
-
+                param_string : str  = 'Param: ' + str(numpy.round(self.param_space.train_space[0, :], 4));
                 for i in range(1, n_train - 1):
-                    param_string = param_string + ', ' + str(numpy.round(ps.train_space[i, :], 4));
-                param_string = param_string + ', ' + str(numpy.round(ps.train_space[-1, :], 4));
+                    param_string    = param_string + ', ' + str(numpy.round(self.param_space.train_space[i, :], 4));
+                param_string        = param_string + ', ' + str(numpy.round(self.param_space.train_space[-1, :], 4));
 
                 LOGGER.debug(param_string);
 
             # Otherwise, report the final 6 parameter combinations.
             else:
-                param_string : str = 'Param: ...';
+                param_string : str  = 'Param: ...';
                 for i in range(5):
-                    param_string = param_string + ', ' + str(numpy.round(ps.train_space[-6 + i, :], 4));
-                param_string = param_string + ', ' + str(numpy.round(ps.train_space[-1, :], 4));
+                    param_string    = param_string + ', ' + str(numpy.round(self.param_space.train_space[-6 + i, :], 4));
+                param_string        = param_string + ', ' + str(numpy.round(self.param_space.train_space[-1, :], 4));
             
                 LOGGER.debug(param_string);
 
             # We have finished a training step, stop the timer.
-            self.timer.end("train_step")
+            self.timer.end("train_step");
         
         # We are ready to wrap up the training procedure.
-        self.timer.start("finalize")
+        self.timer.start("finalize");
 
         # Now that we have completed another round of training, update the restart iteration.
-        self.restart_iter += self.n_iter
+        self.restart_iter += self.n_iter;
 
         # Recover the model + coefficients which attained the lowest loss. If we recorded 
         # our best loss in this round of training, then we replace the model's parameters 
         # with those from the iteration that got the best loss. Otherwise, we use the current 
         # set of coefficients and serialize the current model.
         if ((self.best_coefs is not None) and (self.best_coefs.shape[0] == n_train)):
-            state_dict  = torch.load(self.path_checkpoint + '/' + 'checkpoint.pt')
-            self.model.load_state_dict(state_dict)
+            state_dict  = torch.load(self.path_checkpoint + '/' + 'checkpoint.pt');
+            self.model.load_state_dict(state_dict);
         else:
-            self.best_coefs : numpy.ndarray = coefs
-            torch.save(model_device.cpu().state_dict(), self.path_checkpoint + '/' + 'checkpoint.pt')
+            self.best_coefs : numpy.ndarray = coefs;
+            torch.save(model_device.cpu().state_dict(), self.path_checkpoint + '/' + 'checkpoint.pt');
 
         # Report timing information.
         self.timer.end("finalize");
         self.timer.print();
 
         # All done!
-        return
+        return;
 
 
 
@@ -395,16 +396,15 @@ class BayesianGLaSDI:
         # Move the model to the cpu (this is where all the GP stuff happens) and load the model 
         # from the last checkpoint. This should be the one that obtained the best loss so far. 
         # Remember that coefs should specify the coefficients from that iteration. 
-        model       : torch.nn.Module   = self.model.cpu()
-        ps          : ParameterSpace    = self.param_space
-        n_test      : int               = ps.n_test()
+        model       : torch.nn.Module   = self.model.cpu();
+        n_test      : int               = self.param_space.n_test();
         model.load_state_dict(torch.load(self.path_checkpoint + '/' + 'checkpoint.pt'))
 
         # Map the initial conditions for the FOM to initial conditions in the latent space.
-        Z0 : list[list[numpy.ndarray]]  = model.latent_initial_conditions(ps.test_space, self.physics);
+        Z0 : list[list[numpy.ndarray]]  = model.latent_initial_conditions(self.param_space.test_space, self.physics);
 
         # Train the GPs on the training data, get one GP per latent space coefficient.
-        gp_list : list[GaussianProcessRegressor] = fit_gps(ps.train_space, coefs)
+        gp_list : list[GaussianProcessRegressor] = fit_gps(self.param_space.train_space, coefs)
 
         # For each combination of parameter values in the testing set, for each coefficient, 
         # draw a set of samples from the posterior distribution for that coefficient evaluated at
@@ -412,7 +412,7 @@ class BayesianGLaSDI:
         # values in a 2d numpy.ndarray of shape (n_sample, n_coef), whose i, j element holds the 
         # i'th sample of the j'th coefficient. We store the arrays for different parameter values 
         # in a list of length (number of combinations of parameters in the testing set). 
-        coef_samples : list[numpy.ndarray] = [sample_coefs(gp_list, ps.test_space[i], self.n_samples) for i in range(n_test)]
+        coef_samples : list[numpy.ndarray] = [sample_coefs(gp_list, self.param_space.test_space[i], self.n_samples) for i in range(n_test)]
 
         # Now, solve the latent dynamics forward in time for each set of coefficients in 
         # coef_samples. There are n_test combinations of parameter values, and we have n_samples 
@@ -444,7 +444,7 @@ class BayesianGLaSDI:
 
         # We have found the testing parameter we want to add to the training set. Fetch it, then
         # stop the timer and return the parameter. 
-        new_sample : numpy.ndarray = ps.test_space[m_index, :].reshape(1, -1);
+        new_sample : numpy.ndarray = self.param_space.test_space[m_index, :].reshape(1, -1);
         LOGGER.info('New param: ' + str(numpy.round(new_sample, 4)) + '\n');
         self.timer.end("new_sample");
 
@@ -476,8 +476,8 @@ class BayesianGLaSDI:
                  'coef_weight'      : self.coef_weight,
                  'restart_iter'     : self.restart_iter, 
                  'timer'            : self.timer.export(), 
-                 'optimizer'        : self.optimizer.state_dict()}
-        return dict_
+                 'optimizer'        : self.optimizer.state_dict()};
+        return dict_;
 
 
 
@@ -504,16 +504,16 @@ class BayesianGLaSDI:
         """
 
         # Extract instance variables from dict_.
-        self.X_Train        : list[torch.Tensor]    = dict_['X_Train']
-        self.X_Test         : list[torch.Tensor]    = dict_['X_Test']
-        self.best_coefs     : numpy.ndarray         = dict_['best_coefs']
-        self.restart_iter   : int                   = dict_['restart_iter']
+        self.X_Train        : list[torch.Tensor]    = dict_['X_Train'];
+        self.X_Test         : list[torch.Tensor]    = dict_['X_Test'];
+        self.best_coefs     : numpy.ndarray         = dict_['best_coefs'];
+        self.restart_iter   : int                   = dict_['restart_iter'];
 
         # Load the timer / optimizer. 
-        self.timer.load(dict_['timer'])
-        self.optimizer.load_state_dict(dict_['optimizer'])
+        self.timer.load(dict_['timer']);
+        self.optimizer.load_state_dict(dict_['optimizer']);
         if (self.device != 'cpu'):
-            optimizer_to(self.optimizer, self.device)
+            optimizer_to(self.optimizer, self.device);
 
         # All done!
         return;

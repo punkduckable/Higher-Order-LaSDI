@@ -10,13 +10,19 @@ util_Path       : str   = os.path.join(src_Path, "Utilities");
 sys.path.append(src_Path);
 sys.path.append(util_Path);
 
-import  numpy;
-import  torch
-from    scipy.integrate     import  odeint
+import  logging;
 
-from    LatentDynamics      import  LatentDynamics
-from    InputParser         import  InputParser
-from    Stencils            import  FDdict
+import  numpy;
+import  torch;
+from    scipy.integrate     import  odeint;
+
+from    LatentDynamics      import  LatentDynamics;
+from    InputParser         import  InputParser;
+from    Stencils            import  FDdict;
+
+
+# Setup logger.
+LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
 
 
@@ -70,7 +76,8 @@ class SINDy(LatentDynamics):
 
         # Run the base class initializer. The only thing this does is set the dim and nt 
         # attributes.
-        super().__init__(dim, nt)
+        super().__init__(dim, nt);
+        LOGGER.info("Initializing a SINDY object with dim = %d, nt = %d" % (self.dim, self.nt));
 
         # We only allow library terms of order <= 1. If we let z(t) \in \mathbb{R}^{dim} denote the 
         # latent state at some time, t, then the possible library terms are 1, z_1(t), ... , 
@@ -81,7 +88,7 @@ class SINDy(LatentDynamics):
 
         # Now, set up an Input parser to process the contents of the config['sindy'] dictionary. 
         assert('sindy' in config)
-        input_parser = InputParser(config['sindy'], name = 'sindy_input')
+        input_parser = InputParser(config['sindy'], name = 'sindy_input');
 
         """
         Determine which finite difference scheme we should use to approximate the time derivative
@@ -91,8 +98,8 @@ class SINDy(LatentDynamics):
             - 'sbp36': summation-by-parts 3rd/6th order operator
             - 'sbp48': summation-by-parts 4th/8th order operator
         """
-        self.fd_type    : str       = input_parser.getInput(['fd_type'], fallback = 'sbp12')
-        self.fd         : callable  = FDdict[self.fd_type]
+        self.fd_type    : str       = input_parser.getInput(['fd_type'], fallback = 'sbp12');
+        self.fd         : callable  = FDdict[self.fd_type];
 
         r"""
         Fetch the operator matrix. What does this do? Suppose we have a time series with nt points, 
@@ -105,17 +112,17 @@ class SINDy(LatentDynamics):
         we have (for j != 0, nt - 1)
             [M xj]_i = (x_j(t_{i + 1}) - x(t_{j - 1}))/(2 \delta t).
         """
-        self.fd_oper, _, _          = self.fd.getOperators(self.nt)
+        self.fd_oper, _, _          = self.fd.getOperators(self.nt);
 
         # Fetch the norm we are going to use on the sindy coefficients.
         # NOTE(kevin): by default, this will be L1 norm.
         self.coef_norm_order = input_parser.getInput(['coef_norm_order'], fallback = 1);
 
         # TODO(kevin): other loss functions
-        self.MSE = torch.nn.MSELoss()
+        self.MSE = torch.nn.MSELoss();
 
         # All done!
-        return
+        return;
     
 
 
