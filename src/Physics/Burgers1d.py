@@ -91,25 +91,25 @@ class Burgers1D(Physics):
         input_parser : InputParser = InputParser(cfg['burgers1d'], name = "burgers1d_input");
 
         # Fetch variables from the configuration. 
-        self.nt         : int       = input_parser.getInput(['number_of_timesteps'],  datatype = int);    # number of time steps when solving 
-        self.grid_size  : list[int] = input_parser.getInput(['grid_size'],            datatype = list);   # number of grid points along each spatial axis
-        self.qgrid_size : list[int] = self.grid_size;
+        self.nt                     : int       = input_parser.getInput(['number_of_timesteps'],  datatype = int);      # number of time steps when solving 
+        self.spatial_grid_shape     : list[int] = input_parser.getInput(['grid_shape'],            datatype = list);    # number of grid points along each spatial axis
+        self.spatial_qgrid_shape    : list[int] = self.spatial_grid_shape;
         
         # If there are n spatial dimensions, then the grid needs to have n axes (one for each 
         # dimension). Make sure this is the case.
-        assert(self.dim == len(self.grid_size));
+        assert(self.dim == len(self.spatial_grid_shape));
 
         # Fetch more variables from the 
         self.xmin   = input_parser.getInput(['xmin'], datatype = float);    # Minimum value of the spatial variable in the problem domain
         self.xmax   = input_parser.getInput(['xmax'], datatype = float);    # Maximum value of the spatial variable in the problem domain
-        self.dx     = (self.xmax - self.xmin) / (self.grid_size[0] - 1);    # Spacing between grid points along the spatial axis.
+        self.dx     = (self.xmax - self.xmin) / (self.spatial_grid_shape[0] - 1);    # Spacing between grid points along the spatial axis.
         assert(self.dx > 0.)
 
         self.tmax   : float     = input_parser.getInput(['simulation_time']);  # Final simulation time. We solve form t = 0 to t = tmax
         self.dt     : float     = self.tmax / (self.nt - 1);                # step size between successive time steps/the time step we use when solving.
 
         # Set up the spatial, temporal grid.
-        self.x_grid : numpy.ndarray = numpy.linspace(self.xmin, self.xmax, self.grid_size[0]);
+        self.x_grid : numpy.ndarray = numpy.linspace(self.xmin, self.xmax, self.spatial_grid_shape[0]);
         self.t_grid : numpy.ndarray = numpy.linspace(0, self.tmax, self.nt);
 
         self.maxk                   : int   = input_parser.getInput(['maxk'],                   fallback = 10);     # TODO: ??? What is this ???
@@ -149,9 +149,9 @@ class Burgers1D(Physics):
         Returns 
         -------------------------------------------------------------------------------------------
 
-        A list of 1d numpy.ndarray objects of length self.grid_size[0] (the number of grid points 
-        along the spatial axis). The i'th element holds the initial state of the i'th time 
-        derivative of the FOM state.
+        A list of 1d numpy.ndarray objects, each of shape length self.spatial_grid_shape[0] (the 
+        number of grid points along the spatial axis). The i'th element holds the initial state of 
+        the i'th time derivative of the FOM state.
         """
 
         # Fetch the parameter values.
@@ -163,7 +163,7 @@ class Burgers1D(Physics):
             w = param[self.w_idx];  
 
         # Compute the initial condition and return!
-        return a * numpy.exp(- self.x_grid ** 2 / 2 / w / w);
+        return [a * numpy.exp(- self.x_grid ** 2 / 2 / w / w)];
     
 
 
@@ -190,7 +190,14 @@ class Burgers1D(Physics):
         """
         
         # Fetch the initial condition.
-        u0 : numpy.ndarray = self.initial_condition(param);
+        u0 : numpy.ndarray = self.initial_condition(param)[0];
+
+        """
+        # Solve the PDE and then reshape the result to be a 3d tensor with a leading dimension of 
+        # size 1.
+        X       : torch.Tensor          = torch.Tensor(solver(u0, self.maxk, self.convergence_threshold, self.nt - 1, self.spatial_grid_shape[0], self.dt, self.dx));        
+        new_X   : list[torch.Tensor]    = [X.reshape(1, self.nt, self.spatial_grid_shape[0])];
+        """
 
         ######## REMOVE ME   ||
         ######## REMOVE ME   ||
@@ -200,11 +207,11 @@ class Burgers1D(Physics):
     
         # Solve the PDE and then reshape the result to be a 3d tensor with a leading dimension of 
         # size 1.
-        X       : torch.Tensor  = torch.Tensor(solver(u0, self.maxk, self.convergence_threshold, self.nt - 1, self.grid_size[0], self.dt, self.dx));
+        X       : torch.Tensor  = torch.Tensor(solver(u0, self.maxk, self.convergence_threshold, self.nt - 1, self.spatial_grid_shape[0], self.dt, self.dx));
         V       : torch.Tensor  = Derivative1_Order4(X, h = self.dt);
         
-        X       : torch.Tensor  = X.reshape(1, self.nt, self.grid_size[0]);
-        V       : torch.Tensor  = V.reshape(1, self.nt, self.grid_size[0]);
+        X       : torch.Tensor  = X.reshape(1, self.nt, self.spatial_grid_shape[0]);
+        V       : torch.Tensor  = V.reshape(1, self.nt, self.spatial_grid_shape[0]);
 
         new_X   : list[torch.Tensor]    = [X, V];
 

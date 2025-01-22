@@ -18,18 +18,17 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 
 class Physics:
     # Physical space dimension
-    dim         : int           = -1;
+    dim                 : int       = -1;
 
     # The fom solution can be vector valued. If it is, then qdim specifies the dimensionality of 
     # the fom solution at each point. If the solution is scalar valued, then qdim = -1. 
-    qdim        : int           = -1;
+    qdim                : int       = -1;
     
-    # grid_size is the shape of the grid nd-array.
-    grid_size   : list[int]     = [];
+    # The shape of the spatial portion of the grid of points at which we evaluate the solution.
+    spatial_grid_shape  : list[int] = [];
     
-    # the shape of the solution nd-array. This is just the qgrid_size with the qdim prepended onto 
-    # it.
-    qgrid_size  : list[int]     = [];
+    # the shape of each time step of the fom solution. 
+    spatial_qgrid_shape : list[int]     = [];
     
     '''
         numpy nd-array, assuming the shape of:
@@ -104,8 +103,8 @@ class Physics:
         Returns 
         -------------------------------------------------------------------------------------------
 
-        A list of d-dimensional numpy.ndarray objects of shape self.grid_size. Here, 
-        d = len(self.grid_size). The i'th element of this list holds the initial state of the i'th 
+        A list of d-dimensional numpy.ndarray objects of shape self.spatial_grid_shape. Here, 
+        d = len(self.spatial_grid_shape). The i'th element of this list holds the initial state of the i'th 
         time derivative of the FOM state.
         """
 
@@ -134,7 +133,7 @@ class Physics:
 
         A list of (ns + 2)-dimensional torch.Tensor objects of shape (1, nt, nx[0], .. , 
         nx[ns - 1]), where nt is the number of points along the temporal grid and nx = 
-        self.grid_size specifies the number of grid points along the axes in the spatial grid.
+        self.spatial_grid_shape specifies the number of grid points along the axes in the spatial grid.
         """
 
         raise RuntimeError("Abstract method Physics.solve!");
@@ -169,9 +168,9 @@ class Physics:
         -------------------------------------------------------------------------------------------
         
         A list of torch.Tensor objects of shape (np, nt, nx[0], .. , nx[ns - 1]), where nt is the 
-        number of points along the temporal grid and nx = self.grid_size specifies the number of 
-        grid points along the axes in the spatial grid. The i'th element of this list should hold
-        the i'th time derivative of the FOM solutions.
+        number of points along the temporal grid and nx = self.spatial_grid_shape specifies the 
+        number of grid points along the axes in the spatial grid. The i'th element of this list 
+        should hold the i'th time derivative of the FOM solutions.
         """
 
         # Make sure we have a 2d grid of parameter values.
@@ -213,11 +212,12 @@ class Physics:
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Xhist: A (ns + 1)-dimensional numpy.ndarray object of shape self.grid_size  = (nt, nx[0], 
-        ... , nx[ns - 1]), where nt is the number of points along the temporal grid and nx = 
-        self.grid_size specifies the number of grid points along the axes in the spatial grid. 
-        The i,j(0), ... , j(ns - 1) element of this array should hold the value of the solution at 
-        the i'th time step and the spatial grid point with index (j(0), ... , j(ns - 1)).
+        Xhist: A (ns + 1)-dimensional numpy.ndarray object of shape self.spatial_grid_shape  = 
+        (nt, nx[0], ... , nx[ns - 1]), where nt is the number of points along the temporal grid and 
+        nx = self.spatial_grid_shape specifies the number of grid points along the axes in the 
+        spatial grid. The i,j(0), ... , j(ns - 1) element of this array should hold the value of 
+        the solution at the i'th time step and the spatial grid point with index 
+        (j(0), ... , j(ns - 1)).
 
 
         -------------------------------------------------------------------------------------------

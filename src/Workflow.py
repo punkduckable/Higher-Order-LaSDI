@@ -67,13 +67,13 @@ def main():
     Log_Dictionary(LOGGER = LOGGER, D = config, level = logging.DEBUG);
 
     # Check if we are loading from a restart or not. If so, load it.
-    use_restart : bool = cfg_parser.getInput(['workflow', 'use_restart'], fallback = False)
+    use_restart : bool = cfg_parser.getInput(['workflow', 'use_restart'], fallback = False);
     if (use_restart == True):
-        restart_filename : str = cfg_parser.getInput(['workflow', 'restart_file'], datatype = str)
+        restart_filename : str = cfg_parser.getInput(['workflow', 'restart_file'], datatype = str);
         LOGGER.debug("Loading from restart (%s)" % restart_filename);
 
         from pathlib import Path
-        Path(os.path.dirname(restart_filename)).mkdir(parents = True, exist_ok = True)
+        Path(os.path.dirname(restart_filename)).mkdir(parents = True, exist_ok = True);
     
     LOGGER.info("Done! Took %fs" % (time.perf_counter() - timer));
 
@@ -88,28 +88,28 @@ def main():
     # prompt the code to set up the training set of parameters.
     if ((use_restart == True) and (os.path.isfile(restart_filename))):
         # TODO(kevin): in long term, we should switch to hdf5 format.
-        restart_dict    = numpy.load(restart_filename, allow_pickle = True).item()
-        next_step       = restart_dict['next_step']
-        result          = restart_dict['result']
+        restart_dict    = numpy.load(restart_filename, allow_pickle = True).item();
+        next_step       = restart_dict['next_step'];
+        result          = restart_dict['result'];
     else:
-        restart_dict    = None
-        next_step       = NextStep.PickSample
-        result          = Result.Unexecuted
+        restart_dict    = None;
+        next_step       = NextStep.PickSample;
+        result          = Result.Unexecuted;
     
     # Initialize the trainer.
-    trainer, param_space, physics, model, latent_dynamics = Initialize_Trainer(config, restart_dict)
+    trainer, param_space, physics, model, latent_dynamics = Initialize_Trainer(config, restart_dict);
 
     # Run the next step.
-    result, next_step = step(trainer, next_step, config, use_restart)
+    result, next_step = step(trainer, next_step, config, use_restart);
 
     # Report the result
     if (  result is Result.Fail):
-        raise RuntimeError('Previous step has failed. Stopping the workflow.')
+        raise RuntimeError('Previous step has failed. Stopping the workflow.');
     elif (result is Result.Success):
-        LOGGER.info("Previous step succeeded. Preparing for the next step.")
-        result = Result.Unexecuted
+        LOGGER.info("Previous step succeeded. Preparing for the next step.");
+        result = Result.Unexecuted;
     elif (result is Result.Complete):
-        LOGGER.info("Workflow is finished.")
+        LOGGER.info("Workflow is finished.");
 
 
 
@@ -118,22 +118,22 @@ def main():
     # ---------------------------------------------------------------------------------------------
 
     # Save restart (or final) file.
-    date        = time.localtime()
-    date_str    = "{month:02d}_{day:02d}_{year:04d}_{hour:02d}_{minute:02d}"
+    date        = time.localtime();
+    date_str    = "{month:02d}_{day:02d}_{year:04d}_{hour:02d}_{minute:02d}";
     date_str    = date_str.format(month     = date.tm_mon, 
                                   day       = date.tm_mday, 
                                   year      = date.tm_year, 
                                   hour      = date.tm_hour + 3, 
-                                  minute    = date.tm_min)
+                                  minute    = date.tm_min);
     
     if (use_restart == True):
         # rename old restart file if exists.
         if (os.path.isfile(restart_filename) == True):
-            old_timestamp = restart_dict['timestamp']
-            os.rename(restart_filename, restart_filename + '.' + old_timestamp)
-        restart_path : str = restart_filename
+            old_timestamp = restart_dict['timestamp'];
+            os.rename(restart_filename, restart_filename + '.' + old_timestamp);
+        restart_path : str = restart_filename;
     else:
-        restart_path : str = 'lasdi_' + date_str + '.npy'
+        restart_path : str = 'lasdi_' + date_str + '.npy';
     
     # Build the restart save dictionary and then save it.
     restart_dict = {'parameter_space'   : param_space.export(),
@@ -144,10 +144,10 @@ def main():
                     'timestamp'         : date_str,
                     'next_step'         : next_step,
                     'result'            : result};
-    numpy.save(restart_path, restart_dict)
+    numpy.save(restart_path, restart_dict);
 
     # All done!
-    return
+    return;
 
 
 
@@ -198,7 +198,7 @@ def step(trainer        : BayesianGLaSDI,
     if (next_step is NextStep.Train):
         # If our next step is to train, then let's train! This will set trainer.restart_iter to 
         # the iteration number of the last iterating training.
-        trainer.train()
+        trainer.train();
 
         # Check if we should stop running steps.
         # Recall that a trainer object's restart_iter member holds the iteration number of the last
@@ -207,28 +207,29 @@ def step(trainer        : BayesianGLaSDI,
         # max_iter, then it is time to stop running steps. Otherwise, we can mark the current step
         # as a success and move onto the next one.
         if (trainer.restart_iter >= trainer.max_iter):
-            result  = Result.Complete
+            result  = Result.Complete;
         else:
-            result  = Result.Success
+            result  = Result.Success;
 
         # Next, check if the restart_iter falls below the "max_greedy_iter". The later is the last
         # iteration at which we want to run greedy sampling. If the restart_iter is below the 
         # max_greedy_iter, then we should pick a new sample (perform greedy sampling). Otherwise, 
         # we should continue training.
         if (trainer.restart_iter <= trainer.max_greedy_iter):
-            next_step = NextStep.PickSample
+            next_step = NextStep.PickSample;
         else:
-            next_step = NextStep.Train
+            next_step = NextStep.Train;
 
 
 
     elif (next_step is NextStep.PickSample):
-        result, next_step = Pick_Samples(trainer, config)
+        result, next_step = Pick_Samples(trainer, config);
 
 
 
     elif (next_step is NextStep.RunSample):
-        result, next_step = Run_Samples(trainer, config)
+        result, next_step = Run_Samples(trainer, config);
+
 
 
     elif (next_step is NextStep.CollectSample):
@@ -236,12 +237,12 @@ def step(trainer        : BayesianGLaSDI,
         # that, we should never reach this step.
         raise RuntimeError("Encountered CollectSample, which is disabled");
         LOGGER.info("NextStep = Collect_Samples. Has something gone wrong? We should only be here if running offline (which should be disabled).");
-        result, next_step = Collect_Samples(trainer, config)
+        result, next_step = Collect_Samples(trainer, config);
 
 
 
     else:
-        raise RuntimeError("Unknown next step!")
+        raise RuntimeError("Unknown next step!");
     
 
 
@@ -251,18 +252,18 @@ def step(trainer        : BayesianGLaSDI,
 
     # If fail or complete, break the loop regardless of use_restart.
     if ((result is Result.Fail) or (result is Result.Complete)):
-        return result, next_step
+        return result, next_step;
         
     # Continue the workflow if not using restart.
     LOGGER.info("Next step is: %s" % next_step);
     if (use_restart == False):
-        result, next_step = step(trainer, next_step, config)
+        result, next_step = step(trainer, next_step, config);
 
     # All done!
-    return result, next_step
+    return result, next_step;
 
 
 
 
 if __name__ == "__main__":
-    main()
+    main();
