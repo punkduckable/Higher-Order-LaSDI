@@ -141,7 +141,7 @@ class BayesianGLaSDI:
         # tensors whose leading dimension is 0 (indicating that we currently have no testing/
         # training data).
         for i in range(self.latent_dynamics.n_IC):
-            FOM_sequence_shape : tuple[int] = (0, self.physics.nt) + tuple(self.physics.qgrid_size);
+            FOM_sequence_shape : tuple[int] = (0, self.physics.nt) + tuple(self.physics.spatial_qgrid_shape);
             self.X_Train.append(torch.empty(FOM_sequence_shape, dtype = torch.float32));
             self.X_Test.append( torch.empty(FOM_sequence_shape, dtype = torch.float32));
 
@@ -198,6 +198,7 @@ class BayesianGLaSDI:
         """
         Runs a round of training on the model.
 
+        
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
@@ -276,7 +277,9 @@ class BayesianGLaSDI:
                 dZ_dt               : torch.Tensor      = dZ_dt.cpu();
 
                 # Compute the reconstruction loss. 
-                loss_recon         : torch.Tensor       = self.MSE(X_Train_device[0], X_pred) + self.MSE(X_Train_device[1], V_Pred);
+                loss_recon_disp     : torch.Tensor      = self.MSE(X_Train_device[0], X_pred);
+                loss_recon_vel      : torch.Tensor      = self.MSE(X_Train_device[1], V_Pred);
+                loss_recon          : torch.Tensor      = loss_recon_disp + loss_recon_vel;
             
                 # Build the Latent States for calibration.
                 Latent_States   : list[torch.Tensor]    = [Z, dZ_dt];
@@ -315,8 +318,12 @@ class BayesianGLaSDI:
             # Report Results from this iteration 
 
             # Report the current iteration number and losses
-            LOGGER.info("Iter: %05d/%d, Loss: %3.10f, Loss AE: %3.10f, Loss LD: %3.10f, Loss COEF: %3.10f, max|c|: %04.1f, "
-                        % (iter + 1, self.max_iter, loss.item(), loss_recon.item(), loss_ld.item(), loss_coef.item(), max_coef));
+            if(isinstance(model_device, Autoencoder)):
+                LOGGER.info("Iter: %05d/%d, Loss: %3.10f, Loss AE: %3.10f, Loss LD: %3.10f, Loss COEF: %3.10f, max|c|: %04.1f, "
+                            % (iter + 1, self.max_iter, loss.item(), loss_recon.item(), loss_ld.item(), loss_coef.item(), max_coef));
+            elif(isinstance(model_device, Autoencoder_Pair)):
+                LOGGER.info("Iter: %05d/%d, Loss: %3.10f, Loss Disp: %3.10f, Loss Vel: %3.10f, Loss LD: %3.10f, Loss COEF: %3.10f, max|c|: %04.1f, "
+                            % (iter + 1, self.max_iter, loss.item(), loss_recon_disp.item(), loss_recon_vel.item(), loss_ld.item(), loss_coef.item(), max_coef)); 
 
             # If there are fewer than 6 training examples, report the set of parameter combinations.
             if n_train < 6:
