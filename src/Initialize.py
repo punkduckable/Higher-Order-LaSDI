@@ -171,21 +171,21 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
     if(model_type == "ae" or model_type == "pair"):
 
         # Next, fetch the hidden widths, latent dimension (n_z), and activation for the model. 
-        model_config    : dict              = config['model'][model_type];
-        hidden_widths   : list[int]         = model_config['hidden_widths'];
-        n_z             : int               = model_config['latent_dimension'];
-        activation      : str               = model_config['activation']  if 'activation' in config else 'tanh';
+        model_config        : dict              = config['model'][model_type];
+        hidden_widths       : list[int]         = model_config['hidden_widths'];
+        n_z                 : int               = model_config['latent_dimension'];
+        activation          : str               = model_config['activation']  if 'activation' in config else 'tanh';
 
-        # Now build the widths attribute + fetch qgrid_size from physics.
-        qgrid_size      : list[int]         = physics.qgrid_size;
-        space_dim       : int               = numpy.prod(qgrid_size);
-        widths          : list[int]         = [space_dim] + hidden_widths + [n_z];
+        # Now build the widths attribute + fetch spatial_qgrid_shape from physics.
+        spatial_qgrid_shape : list[int]         = physics.spatial_qgrid_shape;
+        space_dim           : int               = numpy.prod(spatial_qgrid_shape);
+        widths              : list[int]         = [space_dim] + hidden_widths + [n_z];
 
         # Now build the model!
         model           : torch.nn.Module   = model_dict[model_type](
                                                         widths          = widths, 
                                                         activation      = activation, 
-                                                        reshape_shape   = qgrid_size);
+                                                        reshape_shape   = spatial_qgrid_shape);
 
         # All done!
         return model;

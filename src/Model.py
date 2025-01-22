@@ -464,7 +464,7 @@ class Autoencoder(torch.nn.Module):
         # Cycle through the parameters.
         for i in range(n_param):
             # Fetch the IC for the i'th set of parameters. Then map it to a tensor.
-            u0 : numpy.ndarray  = physics.initial_condition(param_grid[i]);
+            u0 : numpy.ndarray  = physics.initial_condition(param_grid[i])[0];
             u0                  = torch.Tensor(u0).reshape((1, 1) + u0.shape);
 
             # Encode the IC, then map the encoding to a numpy array.
@@ -640,9 +640,9 @@ class Autoencoder_Pair(torch.nn.Module):
 
         Velocity_Frames: This is a torch.Tensor object of shape (np, N_Frames, self.reshape_shape), 
         where np is the number of parameter values, N_Frames is the number of frames we want to 
-        encode and reshape_shape specifies the shape of each frame. Velocity_Frames[i, j, ...] 
-        represents the velocity portion of the j'th FOM frame for the i'th combination of parameter 
-        values.
+        encode for each parameter combination and reshape_shape specifies the shape of each frame. 
+        Velocity_Frames[i, j, ...] represents the velocity portion of the j'th FOM frame for the 
+        i'th combination of parameter values.
         
 
         -------------------------------------------------------------------------------------------
@@ -728,15 +728,15 @@ class Autoencoder_Pair(torch.nn.Module):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Displacement_Frames: A torch.Tensor object of shape (N_Frames, self.reshape_shape), where 
-        N_Frames is the number of frames we want to encode and reshape_shape specifies the shape 
-        of each frame. Displacement_Frames[i, ...] represents the displacement portion of an FOM 
-        solution at some time, t. 
+        Displacement_Frames: A torch.Tensor object of shape (np, N_Frames, self.reshape_shape), 
+        where np is the number of parameter values, N_Frames is the number of frames we want to 
+        encode and reshape_shape specifies the shape of each frame. Displacement_Frames[i, ...] 
+        represents the displacement portion of an FOM solution at some time, t. 
 
-        Velocity_Frames: This is a torch.Tensor object of shape (N_Frames, self.reshape_shape), where 
-        N_Frames is the number of frames we want to encode and reshape_shape specifies the shape of 
-        each frame. Velocity_Frames[i, ...] represents the velocity portion of an FOM solution 
-        at some time, t. 
+        Velocity_Frames: This is a torch.Tensor object of shape (np, N_Frames, self.reshape_shape), 
+        where np is the number of parameter values, N_Frames is the number of frames we want to 
+        encode and reshape_shape specifies the shape of each frame. Velocity_Frames[i, ...] 
+        represents the velocity portion of an FOM solution at some time, t. 
         
 
 
@@ -814,11 +814,11 @@ class Autoencoder_Pair(torch.nn.Module):
             ######## REMOVE ME  \  /
             ######## REMOVE ME   \/
 
-            u0      : numpy.ndarray         = physics.initial_condition(param_grid[i]);
-            X       : numpy.ndarray         = solver(u0, physics.maxk, physics.convergence_threshold, 5, physics.grid_size[0], physics.dt, physics.dx);
+            u0      : numpy.ndarray         = physics.initial_condition(param_grid[i])[0];
+            X       : numpy.ndarray         = solver(u0, physics.maxk, physics.convergence_threshold, 5, physics.spatial_grid_shape[0], physics.dt, physics.dx);
             V       : numpy.ndarray         = Derivative1_Order4(torch.Tensor(X), h = physics.dt);
             
-            u0                              = X[0, :]
+            u0                              = X[0, :];
             v0                              = V[0, :];
             
             ######## REMOVE ME   /\
