@@ -67,8 +67,16 @@ def Pick_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Res
 
 def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Result]:
     """
-    This function updates trainer.X_Train and trainer.X_Test based on param_space.train_space and 
-    param_space.test_space.
+    This function updates trainer.X_Train and trainer.X_Test by adding solutions generated from 
+    parameter combinations in trainer.param_space.train_space and trainer.param_space.test_space.
+
+    We assume that the user has added at least one testing or training point to trainer.param_space
+    which has not yet been added into trainer's X_Train or X_Test attributes. We assume that any 
+    new training or testing points have been appended onto THe END of the param_space. 
+
+    This function first determines how many testing/training parameter combinations are new (we 
+    have not found the corresponding trajectories). We generate the trajectory for each of these
+    parameter combinations, then append those trajectories onto trainer.X_Train/X_Test. 
 
 
     
@@ -87,7 +95,6 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     Returns
     -----------------------------------------------------------------------------------------------
 
-
     A tuple: (NextStep.Train, Result.Success). The first returned value, NextStep.Train, 
     indicates that we have generated the fom solution for the new training point and need to 
     resume training. The second return value, Result.Success, indicates that we were able to 
@@ -96,9 +103,9 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     
 
     # ---------------------------------------------------------------------------------------------
-    # Determine how many testing, training samples we need to add
+    # Determine how many testing, training samples we need to add to X_Train/X_Test
 
-    # Figure out how many new training examples there are. Note: we require there is at least one.
+    # Figure out how many training parameters we have not generated solution trajectories for. 
     if(trainer.X_Train[0].shape[0] == 0):
         new_trains      : int                   = trainer.param_space.n_train();
     else:
@@ -106,29 +113,32 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     assert(new_trains > 0);
     LOGGER.info("Adding %d new parameter combinations to the training set (currently has %d)" % (new_trains, trainer.X_Train[0].shape[0]));
 
-    # Fetch the parameters. The i'th row of this matrix gives the i'th combination of parameter
-    # values for which we have not generated a fom solution.
-    new_train_params    : numpy.ndarray         = trainer.param_space.train_space[-new_trains:, :]
+    # Fetch the parameters. We assume that if the user has added new training parameter 
+    # combinations, that they appended these new parameters onto the end of param_space's 
+    # train_space attribute.
+    new_train_params    : numpy.ndarray         = trainer.param_space.train_space[-new_trains:, :];
     for i in range(new_train_params.shape[0]):
         LOGGER.debug("new training combination %d is %s" % (i, str(new_train_params[i])));
 
-    # Figure out how many new testing parameter combinations there are. If there are any, fetch 
-    # them from the param space.
+
+    # Now do the same thing for testing parameters. Once again we assume that if the user added new
+    # testing parameters, that they appended those parameters to the END of param_space's 
+    # test_space attribute. 
     if(trainer.X_Test[0].shape[0] == 0):
         new_tests       : int                   = trainer.param_space.n_test();
     else:
-        new_tests       : int                   = trainer.param_space.n_test() - trainer.X_Test[0].size(0)
+        new_tests       : int                   = trainer.param_space.n_test() - trainer.X_Test[0].size(0);
     LOGGER.info("Adding %d new parameter combinations to the testing set (currently has %d)" % (new_tests, trainer.X_Test[0].size(0)));
 
     if (new_tests > 0):
-        new_test_params : numpy.ndarray         = trainer.param_space.test_space[-new_tests:, :]
+        new_test_params : numpy.ndarray         = trainer.param_space.test_space[-new_tests:, :];
         for i in range(new_test_params.shape[0]):
             LOGGER.debug("new training combination %d is %s" % (i, str(new_test_params[i])));
 
 
     # ---------------------------------------------------------------------------------------------
     # Generate new testing, training solutions.
-
+    
     # Generate the fom solutions for the new training points. After we have generated them, we
     # append them to trainer's X_Train variable.
     new_X               : list[torch.Tensor]    = trainer.physics.generate_solutions(new_train_params);
@@ -137,9 +147,9 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     else:
         assert(len(new_X) == len(trainer.X_Train));
         for i in range(len(new_X)):
-            trainer.X_Train[i]                  = torch.cat([trainer.X_Train[i], new_X[i]], dim = 0)
+            trainer.X_Train[i]                  = torch.cat([trainer.X_Train[i], new_X[i]], dim = 0);
 
-    assert(trainer.X_Train[0].shape[0] == trainer.param_space.n_train())
+    assert(trainer.X_Train[0].shape[0] == trainer.param_space.n_train());
 
     
     # Do the same thing for the testing points.
@@ -151,14 +161,14 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
         else:
             assert(len(new_X) == len(trainer.X_Test));
             for i in range(len(new_X)):
-                trainer.X_Test[i]               = torch.cat([trainer.X_Test[i], new_X[i]], dim = 0)
+                trainer.X_Test[i]               = torch.cat([trainer.X_Test[i], new_X[i]], dim = 0);
             
-        assert(trainer.X_Test[0].size(0) == trainer.param_space.n_test())
+        assert(trainer.X_Test[0].size(0) == trainer.param_space.n_test());
 
 
     # ---------------------------------------------------------------------------------------------
     # Wrap up
 
     # We are now done. Since we now have the new fom solutions, the next step is training.
-    next_step, result = NextStep.Train, Result.Success
-    return result, next_step
+    next_step, result = NextStep.Train, Result.Success;
+    return result, next_step;
