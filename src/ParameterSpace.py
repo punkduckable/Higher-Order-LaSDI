@@ -2,12 +2,16 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
+import  sys;
+import  os;
+Util_Path       : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
+sys.path.append(Util_Path);
+
 import  logging;
 
 import  numpy;
 
 from    InputParser     import  InputParser;
-
 
 # Setup the logger
 LOGGER : logging.Logger = logging.getLogger(__name__);
