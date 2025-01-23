@@ -5,12 +5,15 @@ lasdi:
     n_samples:        20
     lr:               0.001
     max_iter:         28000
-    n_iter:           50
+    n_iter:           4000
     max_greedy_iter:  28000
-    ld_weight:        0.1
-    coef_weight:      1.e-6
     path_checkpoint:  checkpoint
     path_results:     results
+    loss_weights:
+      recon:          1.0
+      ld:             0.1
+      coef:           0.000001
+      consistency:    1.0
 
 workflow:
   use_restart:        false
@@ -59,6 +62,6 @@ physics:
   burgers1d:
     number_of_timesteps:  1001
     simulation_time:      1.
-    grid_size:            [1001]
+    grid_shape:           [1001]
     xmin:                 -3.
     xmax:                 3.

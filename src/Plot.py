@@ -74,15 +74,15 @@ def Plot_Frame_2d(  fom_frame   : list[torch.Tensor],
         plt.figure();
 
         plt.subplot(1, 3, 1);
-        plt.contourf(t_matrix, x_matrix, X_True, levels = numpy.linspace(X_min, X_max, 500));
+        plt.contourf(t_matrix, x_matrix, X_True, levels = numpy.linspace(X_min, X_max, 200));
         plt.title("True");
 
         plt.subplot(1, 3, 2);
-        plt.contourf(t_matrix, x_matrix, X_Pred, levels = numpy.linspace(X_min, X_max, 500));
+        plt.contourf(t_matrix, x_matrix, X_Pred, levels = numpy.linspace(X_min, X_max, 200));
         plt.title("Prediction");
 
         plt.subplot(1, 3, 3);
-        plt.contourf(t_matrix, x_matrix, Diff_X, levels = numpy.linspace(Diff_X_min, Diff_X_max, 500));
+        plt.contourf(t_matrix, x_matrix, Diff_X, levels = numpy.linspace(Diff_X_min, Diff_X_max, 200));
         plt.title("Difference");
 
 
@@ -95,7 +95,6 @@ def Plot_Frame_2d(  fom_frame   : list[torch.Tensor],
 
         X_Pred, V_Pred          = model.forward(Displacement_Frames = X_True.reshape((1,) + X_True.shape), 
                                                 Velocity_Frames     = V_True.reshape((1,) + V_True.shape));
-
 
         # Map everything to numpy arrays.
         X_True  : numpy.ndarray = X_True.numpy();
@@ -126,15 +125,15 @@ def Plot_Frame_2d(  fom_frame   : list[torch.Tensor],
         plt.figure();
 
         plt.subplot(1, 3, 1);
-        plt.contourf(t_matrix, x_matrix, X_True, levels = numpy.linspace(X_min, X_max, 500));
+        plt.contourf(t_matrix, x_matrix, X_True, levels = numpy.linspace(X_min, X_max, 200));
         plt.title("True");
 
         plt.subplot(1, 3, 2);
-        plt.contourf(t_matrix, x_matrix, X_Pred, levels = numpy.linspace(X_min, X_max, 500));
+        plt.contourf(t_matrix, x_matrix, X_Pred, levels = numpy.linspace(X_min, X_max, 200));
         plt.title("Prediction");
 
         plt.subplot(1, 3, 3);
-        plt.contourf(t_matrix, x_matrix, Diff_X, levels = numpy.linspace(Diff_X_min, Diff_X_max, 500));
+        plt.contourf(t_matrix, x_matrix, Diff_X, levels = numpy.linspace(Diff_X_min, Diff_X_max, 200));
         plt.title("Difference");
     
         
@@ -142,15 +141,15 @@ def Plot_Frame_2d(  fom_frame   : list[torch.Tensor],
         plt.figure();
 
         plt.subplot(1, 3, 1);
-        plt.contourf(t_matrix, x_matrix, V_True, levels = numpy.linspace(V_min, V_max, 500));
+        plt.contourf(t_matrix, x_matrix, V_True, levels = numpy.linspace(V_min, V_max, 200));
         plt.title("True");
 
         plt.subplot(1, 3, 2);
-        plt.contourf(t_matrix, x_matrix, V_Pred, levels = numpy.linspace(V_min, V_max, 500));
+        plt.contourf(t_matrix, x_matrix, V_Pred, levels = numpy.linspace(V_min, V_max, 200));
         plt.title("Prediction");
 
         plt.subplot(1, 3, 3);
-        plt.contourf(t_matrix, x_matrix, Diff_V, levels = numpy.linspace(Diff_V_min, Diff_V_max, 500));
+        plt.contourf(t_matrix, x_matrix, Diff_V, levels = numpy.linspace(Diff_V_min, Diff_V_max, 200));
         plt.title("Difference");
 
     # All done!
