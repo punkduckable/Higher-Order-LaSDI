@@ -2,11 +2,33 @@
 # Import and Setup
 # -------------------------------------------------------------------------------------------------
 
+import  logging;
+
 import  torch;
 import  numpy;
 import  matplotlib.pyplot   as      plt;
+import  matplotlib          as      mpl;
 
 from    Model               import  Autoencoder, Autoencoder_Pair;
+
+
+# Set up the logger
+LOGGER : logging.Logger = logging.getLogger(__name__);
+
+# Set plot settings. 
+mpl.rcParams['lines.linewidth'] = 2;
+mpl.rcParams['axes.linewidth']  = 1.5;
+mpl.rcParams['axes.edgecolor']  = "black";
+mpl.rcParams['grid.color']      = "gray";
+mpl.rcParams['grid.linestyle']  = "dotted";
+mpl.rcParams['grid.linewidth']  = .67;
+mpl.rcParams['xtick.labelsize'] = 10;
+mpl.rcParams['ytick.labelsize'] = 10;
+mpl.rcParams['axes.labelsize']  = 11;
+mpl.rcParams['axes.titlesize']  = 11;
+mpl.rcParams['xtick.direction'] = 'in';
+mpl.rcParams['ytick.direction'] = 'in';
+
 
 
 # -------------------------------------------------------------------------------------------------
@@ -16,7 +38,8 @@ from    Model               import  Autoencoder, Autoencoder_Pair;
 def Plot_Frame_2d(  fom_frame   : list[torch.Tensor], 
                     model       : torch.nn.Module, 
                     t_grid      : numpy.ndarray, 
-                    x_grid      : numpy.ndarray):
+                    x_grid      : numpy.ndarray, 
+                    figsize     : tuple[int]        = (15, 4)):
     """
     TODO 
 
@@ -71,7 +94,7 @@ def Plot_Frame_2d(  fom_frame   : list[torch.Tensor],
 
 
         # X Plot
-        plt.figure();
+        plt.figure(figsize = figsize);
 
         plt.subplot(1, 3, 1);
         plt.contourf(t_matrix, x_matrix, X_True, levels = numpy.linspace(X_min, X_max, 200));
@@ -80,10 +103,12 @@ def Plot_Frame_2d(  fom_frame   : list[torch.Tensor],
         plt.subplot(1, 3, 2);
         plt.contourf(t_matrix, x_matrix, X_Pred, levels = numpy.linspace(X_min, X_max, 200));
         plt.title("Prediction");
+        plt.colorbar(fraction = 0.1, format = "%0.2f", location = "left");
 
         plt.subplot(1, 3, 3);
         plt.contourf(t_matrix, x_matrix, Diff_X, levels = numpy.linspace(Diff_X_min, Diff_X_max, 200));
         plt.title("Difference");
+        plt.colorbar(fraction = 0.1, format = "%0.2f");
 
 
     elif(isinstance(model, Autoencoder_Pair)):
@@ -122,35 +147,39 @@ def Plot_Frame_2d(  fom_frame   : list[torch.Tensor],
         Diff_V_max  : float = numpy.max(Diff_V) + epsilon;
 
         # X Plot
-        plt.figure();
+        fig, ax  = plt.subplots(1, 5, width_ratios = [1, 0.05, 1, 1, 0.05], figsize = figsize);
+        fig.tight_layout();
 
-        plt.subplot(1, 3, 1);
-        plt.contourf(t_matrix, x_matrix, X_True, levels = numpy.linspace(X_min, X_max, 200));
-        plt.title("True");
+        im0 = ax[0].contourf(t_matrix, x_matrix, X_True, levels = numpy.linspace(X_min, X_max, 200));
+        ax[0].set_title("True");
 
-        plt.subplot(1, 3, 2);
-        plt.contourf(t_matrix, x_matrix, X_Pred, levels = numpy.linspace(X_min, X_max, 200));
-        plt.title("Prediction");
+        fig.colorbar(im0, cax = ax[1], format = "%0.2f", location = "left");
 
-        plt.subplot(1, 3, 3);
-        plt.contourf(t_matrix, x_matrix, Diff_X, levels = numpy.linspace(Diff_X_min, Diff_X_max, 200));
-        plt.title("Difference");
+        ax[2].contourf(t_matrix, x_matrix, X_Pred, levels = numpy.linspace(X_min, X_max, 200));
+        ax[2].set_title("Prediction");
+
+        im3 = ax[3].contourf(t_matrix, x_matrix, Diff_X, levels = numpy.linspace(Diff_X_min, Diff_X_max, 200));
+        ax[3].set_title("Difference");
+
+        fig.colorbar(im3, cax = ax[4], format = "%0.2f", location = "left");
     
         
         # V Plot
-        plt.figure();
+        fig, ax  = plt.subplots(1, 5, width_ratios = [1, 0.05, 1, 1, 0.05], figsize = figsize);
+        fig.tight_layout();
 
-        plt.subplot(1, 3, 1);
-        plt.contourf(t_matrix, x_matrix, V_True, levels = numpy.linspace(V_min, V_max, 200));
-        plt.title("True");
+        im0 = ax[0].contourf(t_matrix, x_matrix, V_True, levels = numpy.linspace(V_min, V_max, 200));
+        ax[0].set_title("True");
 
-        plt.subplot(1, 3, 2);
-        plt.contourf(t_matrix, x_matrix, V_Pred, levels = numpy.linspace(V_min, V_max, 200));
-        plt.title("Prediction");
+        fig.colorbar(im0, cax = ax[1], format = "%0.2f", location = "left");
 
-        plt.subplot(1, 3, 3);
-        plt.contourf(t_matrix, x_matrix, Diff_V, levels = numpy.linspace(Diff_V_min, Diff_V_max, 200));
-        plt.title("Difference");
+        ax[2].contourf(t_matrix, x_matrix, V_Pred, levels = numpy.linspace(V_min, V_max, 200));
+        ax[2].set_title("Prediction");
+
+        im3 = ax[3].contourf(t_matrix, x_matrix, Diff_V, levels = numpy.linspace(Diff_V_min, Diff_V_max, 200));
+        ax[3].set_title("Difference");
+        
+        fig.colorbar(im3, cax = ax[4], format = "%0.2f", location = "left");
 
     # All done!
     plt.show();
