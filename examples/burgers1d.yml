@@ -1,67 +1,70 @@
 lasdi:
-  type: gplasdi
+  type:                     gplasdi
   gplasdi:
-    # device:           mps
-    n_samples:        20
-    lr:               0.001
-    max_iter:         28000
-    n_iter:           4000
-    max_greedy_iter:  28000
-    path_checkpoint:  checkpoint
-    path_results:     results
+    # device:                 mps
+    n_samples:              20
+    lr:                     0.001
+    max_iter:               28000
+    n_iter:                 4000
+    max_greedy_iter:        28000
+    path_checkpoint:        checkpoint
+    path_results:           results
     loss_weights:
-      recon:          1.0
-      ld:             0.1
-      coef:           0.000001
-      consistency:    1.0
+      recon:                1.0
+      ld:                   0.5
+      coef:                 0.000001
+      consistency:          1.0
 
 workflow:
-  use_restart:        false
-  restart_file:       restarts/burgers1d.restart.npy
+  use_restart:              false
+  restart_file:             restarts/burgers1d.restart.npy
 
 parameter_space:
   parameters:
-    - name:             a
-      min:              0.7
-      max:              0.9
-      test_space_type:  uniform
-      sample_size:      5
-      log_scale:        false
-    - name:             w
-      min:              0.9
-      max:              1.1
+    - name:                 a
+      min:                  0.7
+      max:                  0.9
+      test_space_type:      uniform
+      sample_size:          5
+      log_scale:            false
+    - name:                 w
+      min:                  0.9
+      max:                  1.1
       # another way of specifying test space.
-      test_space_type:  list
-      list: [0.9, 0.95, 1.0, 1.05, 1.1]
-      #list: [0.9, 0.91, 0.92, 0.93, 0.94,
-      #       0.95, 0.96, 0.97, 0.98, 0.99,
-      #       1.0, 1.01, 1.02, 1.03, 1.04,
-      #       1.05, 1.06, 1.07, 1.08, 1.09, 1.1]
+      test_space_type:      list
+      list:                 [0.9, 0.95, 1.0, 1.05, 1.1]
+      #list:                 [0.9, 0.91, 0.92, 0.93, 0.94,
+      #                       0.95, 0.96, 0.97, 0.98, 0.99,
+      #                       1.0, 1.01, 1.02, 1.03, 1.04,
+      #                       1.05, 1.06, 1.07, 1.08, 1.09, 1.1]
   test_space:
-    type: grid
+    type:                   grid
 
 model:
-  type:                   pair
+  type:                     pair
   ae:
-    hidden_widths:       [100]
-    latent_dimension:     5
+    hidden_widths:          [100]
+    latent_dimension:       5
   pair:
-    hidden_widths:       [100]
-    latent_dimension:     5  
+    hidden_widths:          [100]
+    latent_dimension:       5  
 
 latent_dynamics:
-  type:                   spring
+  type:                     spring
   sindy:
-    fd_type:              sbp12
-    coef_norm_order:      fro
+    fd_type:                sbp12
+    coef_norm_order:        fro
   spring: 
-    coef_norm_order:      fro
+    coef_norm_order:        fro
 
 physics:
-  type:                   burgers1d
+  type:                     burgers1d
   burgers1d:
-    number_of_timesteps:  1001
-    simulation_time:      1.
-    grid_shape:           [1001]
-    xmin:                 -3.
-    xmax:                 3.
+    number_of_timesteps:    1001
+    simulation_time:        1.
+    grid_shape:             [1001]
+    xmin:                   -3.
+    xmax:                   3.
+    maxk:                   10
+    convergence_threshold:  0.00000001
+

@@ -21,7 +21,6 @@ import  numpy;
 
 from    Enums               import  NextStep, Result;
 from    GPLaSDI             import  BayesianGLaSDI;
-from    InputParser         import  InputParser;
 from    Initialize          import  Initialize_Trainer;
 from    Sample              import  Run_Samples, Pick_Samples, Collect_Samples;
 from    Logging             import  Initialize_Logger, Log_Dictionary;
@@ -61,15 +60,14 @@ def main():
     # Load the configuration file. 
     with open(args.config, 'r') as f:
         config      = yaml.safe_load(f);
-        cfg_parser  = InputParser(config, name = 'main');
     
     # Report the configuration settings.
     Log_Dictionary(LOGGER = LOGGER, D = config, level = logging.DEBUG);
 
     # Check if we are loading from a restart or not. If so, load it.
-    use_restart : bool = cfg_parser.getInput(['workflow', 'use_restart'], fallback = False);
+    use_restart : bool = config['workflow']['use_restart'];
     if (use_restart == True):
-        restart_filename : str = cfg_parser.getInput(['workflow', 'restart_file'], datatype = str);
+        restart_filename : str = config['workflow']['restart_file'];
         LOGGER.debug("Loading from restart (%s)" % restart_filename);
 
         from pathlib import Path

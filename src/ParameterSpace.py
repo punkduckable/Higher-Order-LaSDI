@@ -11,8 +11,6 @@ import  logging;
 
 import  numpy;
 
-from    InputParser     import  InputParser;
-
 # Setup the logger
 LOGGER : logging.Logger = logging.getLogger(__name__);
 
@@ -164,11 +162,9 @@ class ParameterSpace:
         # the various possible parameter values. 
         assert('parameter_space' in config);
 
-        # Load the parameter_space settings into an InputParser object (which makes it easy to 
-        # fetch setting values). We then fetch the list of parameters. Each parameters has a name, 
-        # min and max, and information on how many instances we want. 
-        parser                          = InputParser(config['parameter_space'],    name        = "param_space_input");
-        self.param_list : list[dict]    = parser.getInput(['parameters'],           datatype    = list);
+        # Load the parameter_space settings. Each parameters has a name, min and max, and 
+        # information on how many instances we want. 
+        self.param_list : list[dict]    = config['parameter_space']['parameters'];
 
         # Fetch the parameter names.
         self.param_name_list : list[str]    = [];
@@ -185,7 +181,7 @@ class ParameterSpace:
         LOGGER.info("The training set has %d parameter combinations" % (self.n_init_train));
 
         # Next, let's make a set of parameter combinations to test at.
-        test_space_type : str = parser.getInput(['test_space', 'type'], datatype = str);
+        test_space_type : str = config['parameter_space']['test_space']['type']
         if (test_space_type == 'grid'):
             # Generate the set possible parameter combinations. See the docstring for 
             # "createTestGridSpace" for details.

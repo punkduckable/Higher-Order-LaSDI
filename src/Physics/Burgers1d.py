@@ -17,7 +17,6 @@ from    scipy.sparse.linalg import  spsolve;
 from    scipy.sparse        import  spdiags;
 import  torch;
 
-from    InputParser         import  InputParser;
 from    Physics             import  Physics;
 from    Stencils            import  FDdict;
 
@@ -52,7 +51,7 @@ class Burgers1D(Physics):
 
 
     
-    def __init__(self, cfg : dict, param_name_list : list[str] = None) -> None:
+    def __init__(self, config : dict, param_name_list : list[str] = None) -> None:
         """
         This is the initializer for the Burgers Physics class. This class essentially acts as a 
         wrapper around a 1D Burgers solver.
@@ -62,8 +61,8 @@ class Burgers1D(Physics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        cfg: A dictionary housing the settings for the Burgers object. This should be the "physics"
-        sub-dictionary of the configuration file. 
+        config: A dictionary housing the settings for the Burgers object. This should be the 
+        "physics" sub-dictionary of the configuration file. 
 
         param_name_list: A list of strings. There should be one list item for each parameter. The 
         i'th element of this list should be a string housing the name of the i'th parameter.
@@ -77,22 +76,19 @@ class Burgers1D(Physics):
         """
 
         # Call the super class initializer.
-        super().__init__(cfg, param_name_list);
+        super().__init__(config, param_name_list);
 
         # The solution to Burgers' equation is scalar valued, so the qdim is 1. Likewise, since 
         # there is only one spatial dimension in the 1D burgers example, dim is also 1.
         self.qdim   : int   = 1;
         self.dim    : int   = 1;
 
-        # Make sure the configuration dictionary is actually for Burgers' equation.
-        assert('burgers1d' in cfg);
+        # Make sure the config dictionary is actually for Burgers' equation.
+        assert('burgers1d' in config);
         
-        # Now, get a parser for cfg.
-        input_parser : InputParser = InputParser(cfg['burgers1d'], name = "burgers1d_input");
-
-        # Fetch variables from the configuration. 
-        self.nt                     : int       = input_parser.getInput(['number_of_timesteps'],  datatype = int);      # number of time steps when solving 
-        self.spatial_grid_shape     : list[int] = input_parser.getInput(['grid_shape'],            datatype = list);    # number of grid points along each spatial axis
+        # Fetch variables from config.. 
+        self.nt                     : int       = config['burgers1d']['number_of_timesteps'];   # number of time steps when solving 
+        self.spatial_grid_shape     : list[int] = config['burgers1d']['grid_shape'];            # number of grid points along each spatial axis
         self.spatial_qgrid_shape    : list[int] = self.spatial_grid_shape;
         
         # If there are n spatial dimensions, then the grid needs to have n axes (one for each 
@@ -100,20 +96,20 @@ class Burgers1D(Physics):
         assert(self.dim == len(self.spatial_grid_shape));
 
         # Fetch more variables from the 
-        self.xmin   = input_parser.getInput(['xmin'], datatype = float);    # Minimum value of the spatial variable in the problem domain
-        self.xmax   = input_parser.getInput(['xmax'], datatype = float);    # Maximum value of the spatial variable in the problem domain
+        self.xmin   = config['burgers1d']['xmin'];   # Minimum value of the spatial variable in the problem domain
+        self.xmax   = config['burgers1d']['xmax'];   # Maximum value of the spatial variable in the problem domain
         self.dx     = (self.xmax - self.xmin) / (self.spatial_grid_shape[0] - 1);    # Spacing between grid points along the spatial axis.
         assert(self.dx > 0.)
 
-        self.tmax   : float     = input_parser.getInput(['simulation_time']);  # Final simulation time. We solve form t = 0 to t = tmax
+        self.tmax   : float     = config['burgers1d']['simulation_time'];    # Final simulation time. We solve form t = 0 to t = tmax
         self.dt     : float     = self.tmax / (self.nt - 1);                # step size between successive time steps/the time step we use when solving.
 
         # Set up the spatial, temporal grid.
         self.x_grid : numpy.ndarray = numpy.linspace(self.xmin, self.xmax, self.spatial_grid_shape[0]);
         self.t_grid : numpy.ndarray = numpy.linspace(0, self.tmax, self.nt);
 
-        self.maxk                   : int   = input_parser.getInput(['maxk'],                   fallback = 10);     # TODO: ??? What is this ???
-        self.convergence_threshold  : float = input_parser.getInput(['convergence_threshold'],  fallback = 1.e-8);
+        self.maxk                   : int   = config['burgers1d']['maxk'];                  # TODO: ??? What is this ???
+        self.convergence_threshold  : float = config['burgers1d']['convergence_threshold'];
 
         # Determine which index corresponds to 'a' and 'w' (we pass an array of parameter values, 
         # we need this information to figure out which element corresponds to which variable).

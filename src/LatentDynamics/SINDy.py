@@ -17,7 +17,6 @@ import  torch;
 from    scipy.integrate     import  odeint;
 
 from    LatentDynamics      import  LatentDynamics;
-from    InputParser         import  InputParser;
 from    Stencils            import  FDdict;
 
 
@@ -89,9 +88,8 @@ class SINDy(LatentDynamics):
         self.n_IC       : int   = 1;
 
 
-        # Now, set up an Input parser to process the contents of the config['sindy'] dictionary. 
+        # Make sure config is actually a dictionary for a SINDY type latent dynamics.
         assert('sindy' in config)
-        input_parser = InputParser(config['sindy'], name = 'sindy_input');
 
         """
         Determine which finite difference scheme we should use to approximate the time derivative
@@ -101,7 +99,7 @@ class SINDy(LatentDynamics):
             - 'sbp36': summation-by-parts 3rd/6th order operator
             - 'sbp48': summation-by-parts 4th/8th order operator
         """
-        self.fd_type    : str       = input_parser.getInput(['fd_type'], fallback = 'sbp12');
+        self.fd_type    : str       = config['sindy']['fd_type'];
         self.fd         : callable  = FDdict[self.fd_type];
 
         r"""
@@ -119,7 +117,7 @@ class SINDy(LatentDynamics):
 
         # Fetch the norm we are going to use on the sindy coefficients.
         # NOTE(kevin): by default, this will be L1 norm.
-        self.coef_norm_order = input_parser.getInput(['coef_norm_order'], fallback = 1);
+        self.coef_norm_order = config['sindy']['coef_norm_order'];
 
         # TODO(kevin): other loss functions
         self.MSE = torch.nn.MSELoss();

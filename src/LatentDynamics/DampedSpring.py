@@ -16,7 +16,6 @@ import  numpy;
 import  torch;
 
 from    LatentDynamics      import  LatentDynamics;
-from    InputParser         import  InputParser;
 from    FiniteDifference    import  Derivative1_Order4, Derivative2_Order4;
 from    Solvers             import  RK4;
 
@@ -72,10 +71,9 @@ class DampedSpring(LatentDynamics):
         self.n_IC       : int   = 2;
         self.n_coefs    : int   = dim*(2*dim + 1);
 
-        # Now, set up an Input parser to read the coefficient norm order.
+        # Now, read the coefficient norm order.
         assert('spring' in config);
-        spring_parser           = InputParser(config['spring'], name = 'spring_input');
-        self.coef_norm_order    = spring_parser.getInput(['coef_norm_order'], fallback = 1);
+        self.coef_norm_order    = config['spring']['coef_norm_order'];
 
         # Set up the loss function for the latent dynamics.
         self.LD_LossFunction = torch.nn.MSELoss();
