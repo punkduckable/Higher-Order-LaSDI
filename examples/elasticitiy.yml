@@ -1,0 +1,55 @@
+lasdi:
+  type:                     gplasdi
+  gplasdi:
+    # device:                 mps
+    n_samples:              20
+    lr:                     0.001
+    max_iter:               28000
+    n_iter:                 4000
+    max_greedy_iter:        28000
+    path_checkpoint:        checkpoint
+    path_results:           results
+    loss_weights:
+      recon:                1.0
+      ld:                   0.5
+      coef:                 0.000001
+      consistency:          1.0
+
+workflow:
+  use_restart:              false
+  restart_file:             restarts/burgers1d.restart.npy
+
+parameter_space:
+  parameters:
+    - name:                 s
+      min:                  3.9
+      max:                  4.0
+      test_space_type:      list
+      list:                 [3.90, 3.92, 3.94, 3.96, 3.98, 4.00, 4.02, 4.04, 4.06, 4.08, 4.10]
+  test_space:
+    type:                   grid
+
+model:
+  type:                     pair
+  ae:
+    hidden_widths:          [100]
+    latent_dimension:       5
+  pair:
+    hidden_widths:          [100]
+    latent_dimension:       5  
+
+latent_dynamics:
+  type:                     spring
+  sindy:
+    fd_type:                sbp12
+    coef_norm_order:        fro
+  spring: 
+    coef_norm_order:        fro
+
+physics:
+  type:                     elasticity
+  elasticity:
+    final_time:             5.0
+    number_of_timesteps:    501
+
+
