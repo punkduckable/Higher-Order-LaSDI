@@ -102,11 +102,11 @@ class LatentDynamics:
         -------------------------------------------------------------------------------------------
      
         A torch.Tensor holding the optimal coefficients for the latent space dynamics given the 
-        data stored in Z. If Z is 2d, then the returned tensor will only contain one set of 
-        coefficients. If Z is 3d, with a leading dimension size of Np (number of combinations of 
-        parameter values) then we will return an array/tensor with a leading dimension of size Np 
-        whose i'th entry holds the coefficients for the sequence of latent states stored in 
-        Z[:, ...].
+        data stored in Z. If Z is 2d, then the returned tensor will be a 1d tensor of shape 
+        (self.n_coefs). If Z is 3d, with a leading dimension size of Np (number of combinations of 
+        parameter values) then we will return a 2d tensor of shape (Np, self.n_coefs) whose i, j 
+        entry holds the value of the j'th coefficient when we use the i'th combination of parameter
+        values. 
         """
 
         raise RuntimeError('Abstract function LatentDynamics.calibrate!');
@@ -225,7 +225,9 @@ class LatentDynamics:
 
 
     def export(self) -> dict:
-        param_dict = {'dim': self.dim, 'n_coefs': self.n_coefs};
+        param_dict = {'dim'     : self.dim, 
+                      'n_coefs' : self.n_coefs, 
+                      'n_IC'    : self.n_IC};
         return param_dict;
 
 
@@ -233,7 +235,8 @@ class LatentDynamics:
     # SINDy does not need to load parameters.
     # Other latent dynamics might need to.
     def load(self, dict_ : dict) -> None:
-        assert(self.dim == dict_['dim']);
-        assert(self.n_coefs == dict_['n_coefs']);
+        assert(self.dim         == dict_['dim']);
+        assert(self.n_coefs     == dict_['n_coefs']);
+        assert(self.n_IC        == dict_['n_IC']);
         return;
     

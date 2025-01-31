@@ -132,7 +132,7 @@ class ParameterSpace:
     test_space      : numpy.ndarray         = None; # A 2D array of shape (n_test, n_param) whose i,j element is the j'th parameter value in the i'th combination of testing parameters.
     n_init_train    : int                   = 0;    # The initial number of combinations of parameters in the training set.
     test_grid_sizes : list[int]             = [];   # A list whose i'th element is the number of different values of the i'th parameter in the test instances.
-    test_meshgrid   : tuple[numpy.ndarray]  = None;
+    test_meshgrid   : tuple[numpy.ndarray]  = None; # A tuple of n_param ndarray objects whose i'th element holds the meshgrid of values for the i'th parameter.
 
 
 
@@ -165,6 +165,7 @@ class ParameterSpace:
         # Load the parameter_space settings. Each parameters has a name, min and max, and 
         # information on how many instances we want. 
         self.param_list : list[dict]    = config['parameter_space']['parameters'];
+        self.n_param    : int           = len(self.param_list);
 
         # Fetch the parameter names.
         self.param_name_list : list[str]    = [];
@@ -469,7 +470,8 @@ class ParameterSpace:
         """
 
         # Build the dictionary
-        dict_ = {'train_space'      : self.train_space,
+        dict_ = {'n_param'          : self.n_param, 
+                 'train_space'      : self.train_space,
                  'test_space'       : self.test_space,
                  'test_grid_sizes'  : self.test_grid_sizes,
                  'test_meshgrid'    : self.test_meshgrid,
@@ -509,6 +511,7 @@ class ParameterSpace:
         """
 
         # Extract information from the dictionary.
+        sefl.n_param            : int                   = dict_['n_param'];
         self.train_space        : numpy.ndarray         = dict_['train_space'];
         self.test_space         : numpy.ndarray         = dict_['test_space'];
         self.test_grid_sizes    : list[int]             = dict_['test_grid_sizes'];

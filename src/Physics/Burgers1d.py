@@ -232,7 +232,10 @@ class Burgers1D(Physics):
         effectively serialize self.
         """
 
-        dict_ : dict = {'t_grid' : self.t_grid, 'x_grid' : self.x_grid, 'dt' : self.dt, 'dx' : self.dx};
+        dict_ : dict = {'t_grid'    : self.t_grid, 
+                        'x_grid'    : self.x_grid, 
+                        'dt'        : self.dt, 
+                        'dx'        : self.dx};
         return dict_;
     
 

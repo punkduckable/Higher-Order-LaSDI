@@ -196,7 +196,7 @@ def Plot_Prediction(model           : torch.nn.Module,
                     X_True          : list[numpy.ndarray], 
                     scale           : int               = 1)            -> None:
     """
-    This function makes 
+    TODO
 
 
     -----------------------------------------------------------------------------------------------
@@ -353,7 +353,36 @@ def Plot_Prediction(model           : torch.nn.Module,
 
 
 
-def plot_gp2d(p1_mesh, p2_mesh, gp_mean, gp_std, param_train, param_labels=['p1', 'p2'], plot_shape=[6, 5], figsize=(15, 13), refine=10, cm=plt.cm.jet, margin=0.05):
+def plot_gp2d(  p1_mesh, 
+                p2_mesh, 
+                gp_mean, 
+                gp_std, 
+                param_train, 
+                param_labels    : list[str]     = ['p1', 'p2'], 
+                plot_shape      : list[int]     = [6, 5], 
+                figsize         : tuple[int]    = (15, 13), 
+                refine                          = 10, 
+                cm                              = plt.cm.jet, 
+                margin          : float         = 0.05) -> None:
+    """
+    TODO
+
+
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+
+
+
+
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    Nothing!
+    """
+    
+    # Checks
     assert(p1_mesh.ndim == 2)
     assert(p2_mesh.ndim == 2)
     assert(gp_mean.ndim == 3)
@@ -361,13 +390,16 @@ def plot_gp2d(p1_mesh, p2_mesh, gp_mean, gp_std, param_train, param_labels=['p1'
     assert(param_train.ndim == 2)
     assert(gp_mean.shape == gp_std.shape)
 
+    # ???
     plot_shape_ = [gp_mean.shape[-1] // plot_shape[-1], plot_shape[-1]]
     if (gp_mean.shape[-1] % plot_shape[-1] > 0):
         plot_shape_[0] += 1
 
+    # ???
     p1_range = [p1_mesh.min() * (1. - margin), p1_mesh.max() * (1. + margin)]
     p2_range = [p2_mesh.min() * (1. - margin), p2_mesh.max() * (1. + margin)]
 
+    # ???
     fig1, axs1 = plt.subplots(plot_shape_[0], plot_shape_[1], figsize = figsize)
     fig2, axs2 = plt.subplots(plot_shape_[0], plot_shape_[1], figsize = figsize)
 
@@ -427,6 +459,8 @@ def plot_gp2d(p1_mesh, p2_mesh, gp_mean, gp_std, param_train, param_labels=['p1'
                 axs2[i, j].get_xaxis().set_visible(True)
 
     return
+
+
 
 def heatmap2d(values, p1_grid, p2_grid, param_train, n_init, figsize=(10, 10), param_labels=['p1', 'p2'], title=''):
     assert(p1_grid.ndim == 1)
