@@ -61,7 +61,7 @@ physics:
   type:                     burgers1d
   burgers1d:
     number_of_timesteps:    1001
-    simulation_time:        1.
+    elasticity:             1.
     grid_shape:             [1001]
     xmin:                   -3.
     xmax:                   3.

@@ -65,7 +65,8 @@ class Burgers1D(Physics):
         "physics" sub-dictionary of the configuration file. 
 
         param_name_list: A list of strings. There should be one list item for each parameter. The 
-        i'th element of this list should be a string housing the name of the i'th parameter.
+        i'th element of this list should be a string housing the name of the i'th parameter. For 
+        the Burgers class, this should have two elements: a and w. 
 
         
         -------------------------------------------------------------------------------------------
@@ -74,6 +75,9 @@ class Burgers1D(Physics):
 
         Nothing!
         """
+
+        # Checks
+        assert(len(param_name_list) == 2);
 
         # Call the super class initializer.
         super().__init__(config, param_name_list);
@@ -86,7 +90,7 @@ class Burgers1D(Physics):
         # Make sure the config dictionary is actually for Burgers' equation.
         assert('burgers1d' in config);
         
-        # Fetch variables from config.. 
+        # Fetch variables from config. 
         self.nt                     : int       = config['burgers1d']['number_of_timesteps'];   # number of time steps when solving 
         self.spatial_grid_shape     : list[int] = config['burgers1d']['grid_shape'];            # number of grid points along each spatial axis
         self.spatial_qgrid_shape    : list[int] = self.spatial_grid_shape;
@@ -95,13 +99,13 @@ class Burgers1D(Physics):
         # dimension). Make sure this is the case.
         assert(self.dim == len(self.spatial_grid_shape));
 
-        # Fetch more variables from the 
+        # Fetch more variables from the config.
         self.xmin   = config['burgers1d']['xmin'];   # Minimum value of the spatial variable in the problem domain
         self.xmax   = config['burgers1d']['xmax'];   # Maximum value of the spatial variable in the problem domain
         self.dx     = (self.xmax - self.xmin) / (self.spatial_grid_shape[0] - 1);    # Spacing between grid points along the spatial axis.
         assert(self.dx > 0.)
 
-        self.tmax   : float     = config['burgers1d']['simulation_time'];    # Final simulation time. We solve form t = 0 to t = tmax
+        self.tmax   : float     = config['burgers1d']['elasticity'];        # We solve from t = 0 to t = tmax
         self.dt     : float     = self.tmax / (self.nt - 1);                # step size between successive time steps/the time step we use when solving.
 
         # Set up the spatial, temporal grid.
@@ -257,7 +261,7 @@ class Burgers1D(Physics):
         spatial grid point. 
         """
         
-        # First, approximate the spatial and teporal derivatives.
+        # First, approximate the spatial and temporal derivatives.
         # first axis is time index, and second index is spatial index.
         dUdx = (Xhist[:, 1:] - Xhist[:, :-1]) / self.dx;
         dUdt = (Xhist[1:, :] - Xhist[:-1, :]) / self.dt;
