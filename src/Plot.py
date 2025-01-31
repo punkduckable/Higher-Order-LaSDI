@@ -6,8 +6,8 @@ import  os;
 import  sys;
 physics_path    : str   = os.path.join(os.path.curdir, "Physics");
 ld_path         : str   = os.path.join(os.path.curdir, "LatentDynamics");
-sys.path.join(physics_path);
-sys.path.join(ld_path);
+sys.path.append(physics_path);
+sys.path.append(ld_path);
 
 import  logging;
 
@@ -46,19 +46,25 @@ mpl.rcParams['ytick.direction'] = 'in';
 # Plotting code.
 # -------------------------------------------------------------------------------------------------
 
-def Plot_Frame_2d(  fom_frame   : list[torch.Tensor], 
-                    model       : torch.nn.Module, 
-                    t_grid      : numpy.ndarray, 
-                    x_grid      : numpy.ndarray, 
-                    figsize     : tuple[int]        = (15, 4)) -> None:
+def Plot_Reconstruction(X_True  : list[torch.Tensor], 
+                        model   : torch.nn.Module, 
+                        t_grid  : numpy.ndarray, 
+                        x_grid  : numpy.ndarray, 
+                        figsize : tuple[int]        = (15, 4)) -> None:
     """
-    TODO 
+    This function plots a single fom solution, its reconstruction using model, and their 
+    difference. We assume the fom solution is SCALAR VALUED. Further, if the underlying physics
+    model requires n_IC initial conditions to initialize (n_IC'th order dynamics) then we produce
+    n_IC plots, the d'th one of which depicts the d'th derivative of the X_True and its 
+    reconstruction by model.
+
+     
 
     -----------------------------------------------------------------------------------------------
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    fom_frame: A list of torch.Tensor objects. The k'th element should be a torch.Tensor object 
+    X_True: A list of torch.Tensor objects. The k'th element should be a torch.Tensor object 
     of shape (nt, nx) whose i,j entry holds the value of the k'th time derivative of the fom 
     solution at t_grid[i], x_grid[j].
     
@@ -83,16 +89,16 @@ def Plot_Frame_2d(  fom_frame   : list[torch.Tensor],
     """
     
     # Run checks.
-    n_derivatives = len(fom_frame);
+    n_IC : int = len(X_True);
     assert(len(t_grid.shape)    == 1);
     assert(len(x_grid.shape)    == 1);
     n_t             : int   = t_grid.size;
     n_x             : int   = x_grid.size;
     assert(len(figsize)     == 2);
 
-    for i in range(n_derivatives):
-        assert(fom_frame[i].shape[0]    == n_t);
-        assert(fom_frame[i].shape[1]    == n_x);
+    for d in range(n_IC):
+        assert(X_True[d].shape[0]    == n_t);
+        assert(X_True[d].shape[1]    == n_x);
 
 
     # Set up the matrix of t, x values.
@@ -103,134 +109,95 @@ def Plot_Frame_2d(  fom_frame   : list[torch.Tensor],
     x_matrix : numpy.ndarray = numpy.empty(shape = (n_t, n_x), dtype = numpy.float32);
     for j in range(n_x):
         x_matrix[:, j] = x_grid[j];
-
-
-    # Now, make predictions and plot the results.
-    if(isinstance(model, Autoencoder)):
-        assert(n_derivatives == 1);
-
-        # Pass the input through the Autoencoder.
-        X_True  : torch.Tensor  = fom_frame[0];
-        X_Pred  : torch.Tensor  = model.forward(X_True);
-
-
-        # Map everything to numpy arrays.
-        X_True  = X_True.numpy();
-        X_Pred  = X_Pred.squeeze().detach().numpy();
-
-
-        # Get bounds.
-        epsilon     : float = .0001;
-        X_min       : float = min(numpy.min(X_True), numpy.min(X_Pred)) - epsilon;
-        X_max       : float = max(numpy.max(X_True), numpy.max(X_Pred)) + epsilon;
-
-        Diff_X_min  : float = numpy.min(Diff_X) - epsilon;
-        Diff_X_max  : float = numpy.max(Diff_X) + epsilon;
-
-
-        # X Plot
-        plt.figure(figsize = figsize);
-
-        plt.subplot(1, 3, 1);
-        plt.contourf(t_matrix, x_matrix, X_True, levels = numpy.linspace(X_min, X_max, 200));
-        plt.title("True");
-
-        plt.subplot(1, 3, 2);
-        plt.contourf(t_matrix, x_matrix, X_Pred, levels = numpy.linspace(X_min, X_max, 200));
-        plt.title("Prediction");
-        plt.colorbar(fraction = 0.1, format = "%0.2f", location = "left");
-
-        plt.subplot(1, 3, 3);
-        plt.contourf(t_matrix, x_matrix, Diff_X, levels = numpy.linspace(Diff_X_min, Diff_X_max, 200));
-        plt.title("Difference");
-        plt.colorbar(fraction = 0.1, format = "%0.2f");
-
-
-    elif(isinstance(model, Autoencoder_Pair)):
-        assert(n_derivatives == 2);
-
-        # Pass the input through the Autoencoder_Pair.
-        X_True : torch.Tensor   = fom_frame[0];
-        V_True : torch.Tensor   = fom_frame[1];
-
-        X_Pred, V_Pred          = model.forward(Displacement_Frames = X_True.reshape((1,) + X_True.shape), 
-                                                Velocity_Frames     = V_True.reshape((1,) + V_True.shape));
-
-        # Map everything to numpy arrays.
-        X_True  : numpy.ndarray = X_True.numpy();
-        V_True  : numpy.ndarray = V_True.numpy();
-
-        X_Pred  : numpy.ndarray = X_Pred.squeeze().detach().numpy();
-        V_Pred  : numpy.ndarray = V_Pred.squeeze().detach().numpy();
-
-        Diff_X  : numpy.ndarray = X_True - X_Pred;
-        Diff_V  : numpy.ndarray = V_True - V_Pred;
-
-
-        # Get bounds.
-        epsilon     : float = .0001;
-        X_min       : float = min(numpy.min(X_True), numpy.min(X_Pred)) - epsilon;
-        X_max       : float = max(numpy.max(X_True), numpy.max(X_Pred)) + epsilon;
-
-        V_min       : float = min(numpy.min(V_True), numpy.min(V_Pred)) - epsilon;
-        V_max       : float = max(numpy.max(V_True), numpy.max(V_Pred)) + epsilon;
-
-        Diff_X_min  : float = numpy.min(Diff_X) - epsilon;
-        Diff_X_max  : float = numpy.max(Diff_X) + epsilon;
-
-        Diff_V_min  : float = numpy.min(Diff_V) - epsilon;
-        Diff_V_max  : float = numpy.max(Diff_V) + epsilon;
-
-        # X Plot
-        fig, ax  = plt.subplots(1, 5, width_ratios = [1, 0.05, 1, 1, 0.05], figsize = figsize);
-        fig.tight_layout();
-
-        im0 = ax[0].contourf(t_matrix, x_matrix, X_True, levels = numpy.linspace(X_min, X_max, 200));
-        ax[0].set_title("True");
-
-        fig.colorbar(im0, cax = ax[1], format = "%0.2f", location = "left");
-
-        ax[2].contourf(t_matrix, x_matrix, X_Pred, levels = numpy.linspace(X_min, X_max, 200));
-        ax[2].set_title("Prediction");
-
-        im3 = ax[3].contourf(t_matrix, x_matrix, Diff_X, levels = numpy.linspace(Diff_X_min, Diff_X_max, 200));
-        ax[3].set_title("Difference");
-
-        fig.colorbar(im3, cax = ax[4], format = "%0.2f", location = "left");
     
-        
-        # V Plot
+
+    # Reshape each element of X_Pred to have a leading dimension of 1 (the model expects 3d tensors
+    # whose leading axis corresponds to the number of parameter values. In our case, this should be
+    # one.)
+    for d in range(n_IC):
+        X_True[d] = X_True[d].reshape((1,) + X_True[d].shape);
+
+
+    # Compute the predictions. The way this works depends on what class model is.
+    if(isinstance(model, Autoencoder)):
+            assert(n_IC == 1);
+
+            # Pass the input through the Autoencoder.
+            X_Pred  : list[torch.Tensor]    = [model.forward(X_True[0])];
+
+    if(isinstance(model, Autoencoder_Pair)):
+            assert(n_IC == 2);
+
+            # Pass the input through the Autoencoder.
+            Disp_Pred, Vel_Pred             = model.forward(X_True[0], X_True[1]);
+            X_Pred  : list[torch.Tensor]    = [Disp_Pred, Vel_Pred];
+    
+
+    # Map both the true and predicted solutions to numpy arrays.
+    # also set up list to hold the difference between the prediction and true solutions.
+    Diff_X : list[numpy.ndarray] = [];
+    for d in range(n_IC):
+        X_True[d] = X_True[d].squeeze().numpy();
+        X_Pred[d] = X_Pred[d].squeeze().detach().numpy();
+        Diff_X.append(X_True[d] - X_Pred[d]);
+
+
+    # Get bounds.
+    epsilon     : float         = .0001;
+    X_min       : list[float]   = [];
+    X_max       : list[float]   = [];
+    Diff_X_min  : list[float]   = [];
+    Diff_X_max  : list[float]   = [];
+
+    for d in range(n_IC):
+        X_min.append(       min(numpy.min(X_True[d]), numpy.min(X_Pred[d])) - epsilon);
+        X_max.append(       max(numpy.max(X_True[d]), numpy.max(X_Pred[d])) + epsilon);
+        Diff_X_min.append(  numpy.min(Diff_X[d]) - epsilon);
+        Diff_X_max.append(  numpy.max(Diff_X[d]) + epsilon);
+
+
+    # Now... plot the results!
+    for d in range(n_IC):
         fig, ax  = plt.subplots(1, 5, width_ratios = [1, 0.05, 1, 1, 0.05], figsize = figsize);
         fig.tight_layout();
 
-        im0 = ax[0].contourf(t_matrix, x_matrix, V_True, levels = numpy.linspace(V_min, V_max, 200));
+        im0 = ax[0].contourf(t_matrix, x_matrix, X_True[d], levels = numpy.linspace(X_min[d], X_max[d], 200));
         ax[0].set_title("True");
+        ax[0].set_xlabel("t");
+        ax[0].set_ylabel("x");
 
         fig.colorbar(im0, cax = ax[1], format = "%0.2f", location = "left");
 
-        ax[2].contourf(t_matrix, x_matrix, V_Pred, levels = numpy.linspace(V_min, V_max, 200));
+        ax[2].contourf(t_matrix, x_matrix, X_Pred[d], levels = numpy.linspace(X_min[d], X_max[d], 200));
         ax[2].set_title("Prediction");
+        ax[2].set_xlabel("t");
+        ax[2].set_ylabel("x");
 
-        im3 = ax[3].contourf(t_matrix, x_matrix, Diff_V, levels = numpy.linspace(Diff_V_min, Diff_V_max, 200));
+
+        im3 = ax[3].contourf(t_matrix, x_matrix, Diff_X[d], levels = numpy.linspace(Diff_X_min[d], Diff_X_max[d], 200));
         ax[3].set_title("Difference");
-        
+        ax[3].set_xlabel("t");
+        ax[3].set_ylabel("x");
+
         fig.colorbar(im3, cax = ax[4], format = "%0.2f", location = "left");
+
 
     # All done!
     plt.show();
 
 
 
-def Prediction( model           : torch.Module, 
-                physics         : Physics, 
-                latent_dynamics : LatentDynamics, 
-                gp_list         : list[GaussianProcessRegressor], 
-                param_grid      : numpy.ndarray, 
-                n_samples       : int, 
-                X_True          : list[numpy.ndarray], 
-                scale           : int               = 1)            -> None:
+def Plot_Prediction(model           : torch.nn.Module, 
+                    physics         : Physics, 
+                    latent_dynamics : LatentDynamics, 
+                    gp_list         : list[GaussianProcessRegressor], 
+                    param_grid      : numpy.ndarray, 
+                    n_samples       : int, 
+                    X_True          : list[numpy.ndarray], 
+                    scale           : int               = 1)            -> None:
     """
-    TODO
+    This function makes 
+
 
     -----------------------------------------------------------------------------------------------
     Arguments
