@@ -107,7 +107,7 @@ def sample_roms(model           : torch.nn.Module,
                 latent_dynamics : LatentDynamics, 
                 gp_list         : list[GaussianProcessRegressor], 
                 param_grid      : numpy.ndarray, 
-                n_samples       : int) ->           numpy.ndarray:
+                n_samples       : int) ->           list[numpy.ndarray]:
     """
     This function samples the latent coefficients, solves the corresponding latent dynamics, and 
     then returns the resulting latent solutions. 
@@ -150,10 +150,12 @@ def sample_roms(model           : torch.nn.Module,
     Returns
     -----------------------------------------------------------------------------------------------
     
-    A numpy.ndarray of size [n_test, n_samples, physics.nt, model.n_z]. The i, j, k, l 
-    element holds the l'th component of the k'th frame of the solution to the latent dynamics when 
-    we use the j'th sample of latent coefficients drawn from the posterior distribution for the 
-    i'th combination of parameter values (i'th row of param_grid).
+    A list of numpy.ndarrays, each of size [n_test, n_samples, physics.nt, model.n_z]. If the 
+    latent dynamics require n_ID initial conditions (latent_dynamics.n_ID = n_ID), then the 
+    returned list has n_ID elements, the d'th one of which is a 4d array whose i, j, k, l element 
+    holds the l'th component of the k'th frame of the solution to the d'th derivative of latent 
+    dynamics when we use the j'th sample of latent coefficients drawn from the posterior 
+    distribution for the i'th combination of parameter values (i'th row of param_grid).
     """
 
     # The param grid needs to be two dimensional, with the first axis corresponding to which 
@@ -176,17 +178,35 @@ def sample_roms(model           : torch.nn.Module,
     # the k'th combination of parameter values.
     coef_samples : list[numpy.ndarray]  = [sample_coefs(gp_list, param_grid[i], n_samples) for i in range(n_param)];
 
+    # Initialize a list to hold the solutions to the latent dynamics. This is a list of 4d numpy 
+    # arrays of shape (n_parm, n_samples, nt, nz). The i, j, k, l element of the d'th array holds
+    # the holds the l'th component of the  k'th frame of the d'th derivative of the solution to 
+    # the latent dynamics when we use the j'th sample of latent coefficients drawn from the 
+    # posterior distribution for the i'th combination of parameter values.
+    n_IC    : int                   = latent_dynamics.n_IC;
+    Zis     : list[numpy.ndarray]   = [];
+    for i in range(Zis):
+        Zis.append(numpy.zeros([n_param, n_samples, physics.nt, model.n_z]));
+
     # For each testing parameter, cycle through the samples of the coefficients for that 
     # combination of parameter values. For each set of coefficients, solve the corresponding latent 
-    # dynamics forward in time and store the resulting frames in Zis. This is a 4d array whose i, 
-    # j, k, l element holds the l'th component of the k'th frame of the solution to the latent 
-    # dynamics when we use the j'th sample of latent coefficients drawn from the posterior 
-    # distribution for the i'th combination of parameter values.
-    Zis = numpy.zeros([n_param, n_samples, physics.nt, model.n_z]);
-    for i, Zi in enumerate(Zis):
-        z_ic = Z0[i];
-        for j, coef_sample in enumerate(coef_samples[i]):
-            Zi[j] = latent_dynamics.simulate(coef_sample, z_ic, physics.t_grid);
+    # dynamics forward in time and store the resulting frames in Zis. 
+    for i in range(n_param):
+        # Fetch the initial conditions when we use the i'th combination of parameter values.
+        ith_ICs                 : list[numpy.ndarray]   = Z0[i];
+        coef_samples_ith_param  : numpy.ndarray         = coef_samples[i]
+
+        for j in range(n_samples):
+            # Fetch the j'th sample of the coefficients when we use the i'th combination of 
+            # parameter values.
+            jth_coef_sample_ith_param   : numpy.ndarray = coef_samples_ith_param[j, :];
+        
+            # Generate the latent trajectory when we use this set of coefficients.
+            Zij : list[numpy.ndarray] = latent_dynamics.simulate(coefs = jth_coef_sample_ith_param, IC = ith_ICs, times = physics.t_grid);
+        
+            # Now store the results in Zis. 
+            for d in range(n_IC):
+                Zis[d][i, j, :, :]  = Zij[d];
 
     # All done!
     return Zis;
