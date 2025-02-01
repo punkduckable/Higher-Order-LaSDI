@@ -511,7 +511,7 @@ class ParameterSpace:
         """
 
         # Extract information from the dictionary.
-        sefl.n_param            : int                   = dict_['n_param'];
+        self.n_param            : int                   = dict_['n_param'];
         self.train_space        : numpy.ndarray         = dict_['train_space'];
         self.test_space         : numpy.ndarray         = dict_['test_space'];
         self.test_grid_sizes    : list[int]             = dict_['test_grid_sizes'];
