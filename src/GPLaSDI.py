@@ -438,8 +438,8 @@ class BayesianGLaSDI:
         Returns
         -------------------------------------------------------------------------------------------
 
-        a 2d numpy ndarray object of shape (1, n_param) whose (0, j) element holds the value of 
-        the j'th parameter in the new sample.
+        a 2d numpy ndarray object of shape (1, n_p) whose (0, j) element holds the value of 
+        the j'th parameter in the new sample. Here, n_p is the number of parameters.
         """
 
         self.timer.start("new_sample");

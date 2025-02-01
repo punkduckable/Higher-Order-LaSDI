@@ -127,12 +127,12 @@ class ParameterSpace:
     # Initialize class variables
     param_list      : list[dict]            = [];   # A list housing the parameter dictionaries (from the yml file)
     param_name_list : list[str]             = [];   # A list housing the parameter names.
-    n_param         : int                   = 0;    # The number of parameters.
-    train_space     : numpy.ndarray         = None; # A 2D array of shape (n_train, n_param) whose i,j element is the j'th parameter value in the i'th combination of training parameters.
-    test_space      : numpy.ndarray         = None; # A 2D array of shape (n_test, n_param) whose i,j element is the j'th parameter value in the i'th combination of testing parameters.
+    n_p             : int                   = 0;    # The number of parameters.
+    train_space     : numpy.ndarray         = None; # A 2D array of shape (n_train, n_p) whose i,j element is the j'th parameter value in the i'th combination of training parameters.
+    test_space      : numpy.ndarray         = None; # A 2D array of shape (n_test, n_p) whose i,j element is the j'th parameter value in the i'th combination of testing parameters.
     n_init_train    : int                   = 0;    # The initial number of combinations of parameters in the training set.
     test_grid_sizes : list[int]             = [];   # A list whose i'th element is the number of different values of the i'th parameter in the test instances.
-    test_meshgrid   : tuple[numpy.ndarray]  = None; # A tuple of n_param ndarray objects whose i'th element holds the meshgrid of values for the i'th parameter.
+    test_meshgrid   : tuple[numpy.ndarray]  = None; # A tuple of n_p ndarray objects whose i'th element holds the meshgrid of values for the i'th parameter.
 
 
 
@@ -165,7 +165,7 @@ class ParameterSpace:
         # Load the parameter_space settings. Each parameters has a name, min and max, and 
         # information on how many instances we want. 
         self.param_list : list[dict]    = config['parameter_space']['parameters'];
-        self.n_param    : int           = len(self.param_list);
+        self.n_p        : int           = len(self.param_list);
 
         # Fetch the parameter names.
         self.param_name_list : list[str]    = [];
@@ -411,7 +411,7 @@ class ParameterSpace:
         Arguments
         -------------------------------------------------------------------------------------------
 
-        param: A 1d numpy ndarray object. It should have shape (n_param) and should hold a 
+        param: A 1d numpy ndarray object. It should have shape (self.n_p) and should hold a 
         parameter value that we want to add to the training set.
 
 
@@ -423,7 +423,7 @@ class ParameterSpace:
         Nothing!
         """
 
-        # Make sure param has n_param components/can be appended to the set of training parameters.
+        # Make sure param has n_p components/can be appended to the set of training parameters.
         assert(self.train_space.shape[1] == param.size);
 
         # Add the new parameter to the training space by appending it as a new row to 
@@ -452,25 +452,25 @@ class ParameterSpace:
 
         A dictionary with 4 keys. Below is a list of the keys with a short description of each 
         corresponding value. 
-            train_space: self.train_space, a 2d array of shape (n_train, n_param) whose i,j element 
+            train_space: self.train_space, a 2d array of shape (n_train, n_p) whose i,j element 
             holds the value of the j'th parameter in the i'th training case.
 
-            test_space: self.test_space, a 2d array of shape (n_test, n_param) whose i,j element 
+            test_space: self.test_space, a 2d array of shape (n_test, n_p) whose i,j element 
             holds the value of the j'th parameter in the i'th testing case.
 
             test_grid_sizes: A list whose i'th element specifies how many distinct parameter values
             we use for the i'th parameter. 
 
-            test_meshgrid: a tuple of n_param numpy.ndarray array objects whose i'th element is a
-            n_param-dimensional array whose i(1), i(2), ... , i(n_param) element holds the value of 
-            the i'th parameter in the i(1), ... , i(n_param) combination of parameter values in the 
+            test_meshgrid: a tuple of n_p numpy.ndarray array objects whose i'th element is a
+            n_p-dimensional array whose i(1), i(2), ... , i(n_p) element holds the value of 
+            the i'th parameter in the i(1), ... , i(n_p) combination of parameter values in the 
             testing test. 
 
             n_init_train: The number of combinations of training parameters in the training set.     
         """
 
         # Build the dictionary
-        dict_ = {'n_param'          : self.n_param, 
+        dict_ = {'n_p'              : self.n_p, 
                  'train_space'      : self.train_space,
                  'test_space'       : self.test_space,
                  'test_grid_sizes'  : self.test_grid_sizes,
@@ -511,7 +511,7 @@ class ParameterSpace:
         """
 
         # Extract information from the dictionary.
-        self.n_param            : int                   = dict_['n_param'];
+        self.n_p                : int                   = dict_['n_p'];
         self.train_space        : numpy.ndarray         = dict_['train_space'];
         self.test_space         : numpy.ndarray         = dict_['test_space'];
         self.test_grid_sizes    : list[int]             = dict_['test_grid_sizes'];
@@ -519,8 +519,8 @@ class ParameterSpace:
 
         # Run checks
         assert(self.n_init_train            == dict_['n_init_train']);
-        assert(self.train_space.shape[1]    == self.n_param);
-        assert(self.test_space.shape[1]     == self.n_param);
+        assert(self.train_space.shape[1]    == self.n_p);
+        assert(self.test_space.shape[1]     == self.n_p);
 
         # All done!
         return;

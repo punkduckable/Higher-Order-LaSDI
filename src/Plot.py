@@ -243,7 +243,8 @@ def Plot_Prediction(model           : torch.nn.Module,
     # ---------------------------------------------------------------------------------------------
 
     # First generate the latent trajectories. Z is a list of n_IC arrays, each one of which is a 
-    # 4d array of shape (n_params, n_samples, n_t, n_z).
+    # 4d array of shape (n_params, n_samples, n_t, n_z). Here, n_param is the number of 
+    # combinations of parameter values.
     Latent_Trajectories : list[torch.Tensor] = sample_roms( 
                                                 model           = model, 
                                                 physics         = physics, 

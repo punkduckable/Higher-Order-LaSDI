@@ -122,7 +122,7 @@ def sample_roms(model           : torch.nn.Module,
     set of coefficients, we solve the corresponding latent dynamics forward in time and store the 
     resulting solution frames. We do this for each sample and each combination of parameter values,
     resulting in an (n_param, n_sample, n_t, n_z) array of solution frames, which is what we 
-    return.
+    return. Here, n_param is the number of combinations of parameter values.
 
     
     -----------------------------------------------------------------------------------------------
