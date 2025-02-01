@@ -334,7 +334,7 @@ class Autoencoder(torch.nn.Module):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        X: A torch.Tensor object of shape (np, N_Frames, self.reshape_shape), where np is the 
+        X: A torch.Tensor object of shape (np, N_Frames, self.reshape_shape), where n_param is the 
         number of parameter values, N_Frames is the number of frames we want to encode and 
         reshape_shape specifies the shape of each frame. Displacement_Frames[i, j, ...] represents 
         the displacement portion of the j'th FOM frame for the i'th combination of parameter values.
@@ -451,7 +451,7 @@ class Autoencoder(torch.nn.Module):
         -------------------------------------------------------------------------------------------
         
         A list of list of numpy ndarray objects whose i'th element is a single element list housing
-        a numpy ndarray of shape (nz) whose j'th element holds the j'th component of the encoding 
+        a numpy ndarray of shape (n_z) whose j'th element holds the j'th component of the encoding 
         of the i'th FOM initial condition. If we let U0_i denote the FOM IC for the i'th set of 
         parameters, then the i'th element of the returned list is [self.encoder(U0_i)]
         """
@@ -632,17 +632,17 @@ class Autoencoder_Pair(torch.nn.Module):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Displacement_Frames: A torch.Tensor object of shape (np, N_Frames, self.reshape_shape), 
-        where np is the number of parameter values, N_Frames is the number of frames we want to 
-        encode and reshape_shape specifies the shape of each frame. Displacement_Frames[i, j, ...] 
-        represents the displacement portion of the j'th FOM frame for the i'th combination of 
-        parameter values.
+        Displacement_Frames: A torch.Tensor object of shape (n_param, N_Frames, 
+        self.reshape_shape), where n_param is the number of parameter values, N_Frames is the 
+        number of frames we want to encode and reshape_shape specifies the shape of each frame. 
+        Displacement_Frames[i, j, ...] represents the displacement portion of the j'th FOM frame 
+        for the i'th combination of parameter values.
 
-        Velocity_Frames: This is a torch.Tensor object of shape (np, N_Frames, self.reshape_shape), 
-        where np is the number of parameter values, N_Frames is the number of frames we want to 
-        encode for each parameter combination and reshape_shape specifies the shape of each frame. 
-        Velocity_Frames[i, j, ...] represents the velocity portion of the j'th FOM frame for the 
-        i'th combination of parameter values.
+        Velocity_Frames: This is a torch.Tensor object of shape (n_param, N_Frames, 
+        self.reshape_shape), where n_param is the number of parameter values, N_Frames is the 
+        number of frames we want to encode for each parameter combination and reshape_shape 
+        specifies the shape of each frame. Velocity_Frames[i, j, ...] represents the velocity 
+        portion of the j'th FOM frame for the i'th combination of parameter values.
         
 
         -------------------------------------------------------------------------------------------
@@ -728,15 +728,16 @@ class Autoencoder_Pair(torch.nn.Module):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Displacement_Frames: A torch.Tensor object of shape (np, N_Frames, self.reshape_shape), 
-        where np is the number of parameter values, N_Frames is the number of frames we want to 
-        encode and reshape_shape specifies the shape of each frame. Displacement_Frames[i, ...] 
-        represents the displacement portion of an FOM solution at some time, t. 
+        Displacement_Frames: A torch.Tensor object of shape (n_param, N_Frames, 
+        self.reshape_shape), where n_param is the number of parameter values, N_Frames is the 
+        number of frames we want to encode and reshape_shape specifies the shape of each frame. 
+        Displacement_Frames[i, ...] represents the displacement portion of an FOM solution at some 
+        time, t. 
 
-        Velocity_Frames: This is a torch.Tensor object of shape (np, N_Frames, self.reshape_shape), 
-        where np is the number of parameter values, N_Frames is the number of frames we want to 
-        encode and reshape_shape specifies the shape of each frame. Velocity_Frames[i, ...] 
-        represents the velocity portion of an FOM solution at some time, t. 
+        Velocity_Frames: This is a torch.Tensor object of shape (n_param, N_Frames, 
+        self.reshape_shape), where n_param is the number of parameter values, N_Frames is the 
+        number of frames we want to encode and reshape_shape specifies the shape of each frame. 
+        Velocity_Frames[i, ...] represents the velocity portion of an FOM solution at some time, t.
         
 
 
@@ -794,7 +795,7 @@ class Autoencoder_Pair(torch.nn.Module):
         -------------------------------------------------------------------------------------------
         
         A list of list of numpy ndarray objects whose i'th element is a two element list housing
-        numpy ndarrays of shape (nz). The j'th element of the two arrays hold the j'th component 
+        numpy ndarrays of shape (n_z). The j'th element of the two arrays hold the j'th component 
         of the encoding of the i'th FOM initial displacement and velocity, respectively. If we let 
         (U0_i, V0_i) denote the initial FOM displacement and velocity for the i'th set of 
         parameters, then the i'th element of the returned list is the list 

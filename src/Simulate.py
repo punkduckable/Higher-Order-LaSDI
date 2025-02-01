@@ -28,7 +28,7 @@ def average_rom(model           : torch.nn.Module,
                 physics         : Physics, 
                 latent_dynamics : LatentDynamics, 
                 gp_list         : list[GaussianProcessRegressor], 
-                param_grid      : numpy.ndarray):
+                param_grid      : numpy.ndarray) -> list[numpy.ndarray]:
     """
     This function simulates the latent dynamics for a collection of testing parameters by using
     the mean of the posterior distribution for each coefficient's posterior distribution. 
@@ -62,9 +62,9 @@ def average_rom(model           : torch.nn.Module,
     Returns
     -----------------------------------------------------------------------------------------------
     
-    A 3d numpy ndarray whose i, j, k element holds the k'th component of the j'th time step of 
-    the solution to the latent dynamics when we use the latent encoding of the initial condition 
-    from the i'th combination of parameter values
+    A 3d numpy ndarray of shape [n_param, n_t, n_z] whose i, j, k element holds the k'th component 
+    of the j'th time step of the solution to the latent dynamics when we use the latent encoding 
+    of the initial condition from the i'th combination of parameter values.
     """
 
     # The param grid needs to be two dimensional, with the first axis corresponding to which 
@@ -91,11 +91,15 @@ def average_rom(model           : torch.nn.Module,
     # resulting solution frames in Zis, a 3d array whose i, j, k element holds the k'th component 
     # of the j'th time step fo the latent solution when we use the coefficients from the posterior 
     # distribution for the i'th combination of parameter values.
-    nz  : int           = model.n_z;
-    Zis : numpy.ndarray = numpy.zeros([n_param, physics.nt, nz]);
+    n_IC    : int                   = latent_dynamics.n_IC;
+    Zis     : list[numpy.ndarray]   = [];
+    for d in range(n_IC):
+        Zis.append(numpy.zeros([n_param, physics.n_t, model.n_z]));
 
     for i in range(n_param):
-        Zis[i] = latent_dynamics.simulate(pred_mean[i], Z0[i], physics.t_grid);
+        ith_Zis : list[numpy.ndarray] = latent_dynamics.simulate(coefs = pred_mean[i], IC = Z0[i], times = physics.t_grid);
+        for d in range(n_IC):
+            Zis[d][i, :, :] = ith_Zis[d];
 
     # All done!
     return Zis;
@@ -150,7 +154,7 @@ def sample_roms(model           : torch.nn.Module,
     Returns
     -----------------------------------------------------------------------------------------------
     
-    A list of numpy.ndarrays, each of size [n_test, n_samples, physics.nt, model.n_z]. If the 
+    A list of numpy.ndarrays, each of size [n_test, n_samples, physics.n_t, model.n_z]. If the 
     latent dynamics require n_ID initial conditions (latent_dynamics.n_ID = n_ID), then the 
     returned list has n_ID elements, the d'th one of which is a 4d array whose i, j, k, l element 
     holds the l'th component of the k'th frame of the solution to the d'th derivative of latent 
@@ -179,14 +183,14 @@ def sample_roms(model           : torch.nn.Module,
     coef_samples : list[numpy.ndarray]  = [sample_coefs(gp_list, param_grid[i], n_samples) for i in range(n_param)];
 
     # Initialize a list to hold the solutions to the latent dynamics. This is a list of 4d numpy 
-    # arrays of shape (n_parm, n_samples, nt, nz). The i, j, k, l element of the d'th array holds
+    # arrays of shape (n_parm, n_samples, n_t, n_z). The i, j, k, l element of the d'th array holds
     # the holds the l'th component of the  k'th frame of the d'th derivative of the solution to 
     # the latent dynamics when we use the j'th sample of latent coefficients drawn from the 
     # posterior distribution for the i'th combination of parameter values.
     n_IC    : int                   = latent_dynamics.n_IC;
     Zis     : list[numpy.ndarray]   = [];
-    for i in range(Zis):
-        Zis.append(numpy.zeros([n_param, n_samples, physics.nt, model.n_z]));
+    for i in range(n_IC):
+        Zis.append(numpy.zeros([n_param, n_samples, physics.n_t, model.n_z]));
 
     # For each testing parameter, cycle through the samples of the coefficients for that 
     # combination of parameter values. For each set of coefficients, solve the corresponding latent 

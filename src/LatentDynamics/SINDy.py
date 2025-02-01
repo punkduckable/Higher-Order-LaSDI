@@ -37,7 +37,7 @@ class SINDy(LatentDynamics):
 
     def __init__(self, 
                  dim        : int, 
-                 nt         : int, 
+                 n_t        : int, 
                  config     : dict) -> None:
         r"""
         Initializes a SINDy object. This is a subclass of the LatentDynamics class which uses the 
@@ -56,7 +56,7 @@ class SINDy(LatentDynamics):
 
         dim: The number of dimensions in the latent space, where the latent dynamics takes place.
 
-        nt: The number of time steps we want to generate when solving (numerically) the latent 
+        n_t: The number of time steps we want to generate when solving (numerically) the latent 
         space dynamics.
 
         config: A dictionary housing the settings we need to set up a SINDy object. Specifically, 
@@ -73,10 +73,10 @@ class SINDy(LatentDynamics):
             the coefficient loss.
         """
 
-        # Run the base class initializer. The only thing this does is set the dim and nt 
+        # Run the base class initializer. The only thing this does is set the dim and n_t 
         # attributes.
-        super().__init__(dim, nt);
-        LOGGER.info("Initializing a SINDY object with dim = %d, nt = %d" % (self.dim, self.nt));
+        super().__init__(dim, n_t);
+        LOGGER.info("Initializing a SINDY object with dim = %d, n_t = %d" % (self.dim, self.n_t));
 
         # Set n_IC and n_coefs.
         # We only allow library terms of order <= 1. If we let z(t) \in \mathbb{R}^{dim} denote the 
@@ -103,17 +103,17 @@ class SINDy(LatentDynamics):
         self.fd         : callable  = FDdict[self.fd_type];
 
         r"""
-        Fetch the operator matrix. What does this do? Suppose we have a time series with nt points, 
+        Fetch the operator matrix. What does this do? Suppose we have a time series with n_t points, 
         x(t_0), ... , x(t_{nt - 1}) \in \mathbb{R}^d. Further assume that for each j, 
         t_j = t_0 + j \delta t, where \delta t is some positive constant. Let j \in {0, 1, ... , 
-        nt - 1}. Let xj be j'th vector whose k'th element is x_j(t_k). Then, the i'th element of 
+        n_t - 1}. Let xj be j'th vector whose k'th element is x_j(t_k). Then, the i'th element of 
         M xj holds the approximation to x_j'(t_k) using the stencil we selected above. 
 
         For instance, if we selected sdp12, corresponding to the central difference scheme, then 
-        we have (for j != 0, nt - 1)
+        we have (for j != 0, n_t - 1)
             [M xj]_i = (x_j(t_{i + 1}) - x(t_{j - 1}))/(2 \delta t).
         """
-        self.fd_oper, _, _          = self.fd.getOperators(self.nt);
+        self.fd_oper, _, _          = self.fd.getOperators(self.n_t);
 
         # Fetch the norm we are going to use on the sindy coefficients.
         # NOTE(kevin): by default, this will be L1 norm.
@@ -147,12 +147,12 @@ class SINDy(LatentDynamics):
         -------------------------------------------------------------------------------------------
 
         Latent_States: A single element list housing a 2d or 3d tensor. Let Z = Latent_States[0].
-        If Z is a 2d tensor, then it has shape (Nt, dim), where Nt specifies the length of the 
+        If Z is a 2d tensor, then it has shape (n_t, dim), where n_t specifies the length of the 
         sequence of latent states and dim is the dimension of the latent space. In this case, the 
         i,j entry of Z holds the j'th component of the latent state at the time  t_0 + i*dt. If 
-        it is a 3d tensor, then it has shape (Np, Nt, dim). In this case, we assume there are 
-        Np different combinations of parameter values. The i, j, k entry of Z in this case holds 
-        the k'th component of the latent encoding at time t_0 + j*dt when we use the i'th 
+        it is a 3d tensor, then it has shape (n_param, n_t, dim). In this case, we assume there are 
+        n_param different combinations of parameter values. The i, j, k entry of Z in this case 
+        holds the k'th component of the latent encoding at time t_0 + j*dt when we use the i'th 
         combination of parameter values. 
 
         dt: The time step between time steps. See the description of the "Z" argument. 
@@ -260,7 +260,7 @@ class SINDy(LatentDynamics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Z: A 2d tensor of shape (Nt, dim) whose i, j entry holds the j'th component of the i'th 
+        Z: A 2d tensor of shape (n_t, dim) whose i, j entry holds the j'th component of the i'th 
         time step in the latent time series. We assume that Z[i, :] represents the latent state
         at time t_0 + i*Dt
 
@@ -311,7 +311,7 @@ class SINDy(LatentDynamics):
         to the latent dynamics at the time values specified in times when we use the coefficients 
         in coefs to characterize the latent dynamics model. 
         
-        Specifically, it is a 2d array of shape (nt, dim), where nt is the number of time steps 
+        Specifically, it is a 2d array of shape (n_t, dim), where n_t is the number of time steps 
         (size of times) and dim is the latent space dimension (self.dim). Thus, the i,j element of 
         this matrix holds the j'th component of the latent solution at the time stored in the i'th 
         element of times. 

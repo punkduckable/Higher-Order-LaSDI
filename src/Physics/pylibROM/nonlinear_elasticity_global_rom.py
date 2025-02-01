@@ -1158,13 +1158,13 @@ def run(s               = 4.0,   # parameter in initial condition, where v_3(0,x
     # 12 + 1/2. Set up arrays to hold position and velocity data. 
     
     # Set up arrays to hold the position of each node at each time.
-    nt              : int           = math.ceil(t_final/dt) + 1;    # Number of time steps
-    nx              : int           = true_size;                    # Number of spatial points.
-    Velocities      : np.ndarray    = np.empty(shape = (nt, nx), dtype = np.float32);
-    Displacements   : np.ndarray    = np.empty(shape = (nt, nx), dtype = np.float32)
+    n_t              : int           = math.ceil(t_final/dt) + 1;    # Number of time steps
+    n_x              : int           = true_size;                    # Number of spatial points.
+    Velocities      : np.ndarray    = np.empty(shape = (n_t, n_x), dtype = np.float32);
+    Displacements   : np.ndarray    = np.empty(shape = (n_t, n_x), dtype = np.float32)
 
-    print("nt = %d, nx = %d, n_vertices = NA" % (nt, nx))
-
+    print("nt = %d, n_x = %d, n_vertices = %d" % (n_t, n_x, parallel_mesh.GetNV()));
+    
     # Fetch the initial position velocity and store them in the corresponding arrays.
     Velocities[0, :]                = np.array(vx.GetBlock(0).GetDataArray());
     Displacements[0, :]             = np.array(vx.GetBlock(1).GetDataArray());

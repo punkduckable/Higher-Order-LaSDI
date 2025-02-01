@@ -20,7 +20,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 class LatentDynamics:
     # Class variables
     dim     : int           = -1;       # Dimensionality of the latent space
-    nt      : int           = -1;       # Number of time steps when solving the latent dynamics
+    n_t      : int           = -1;      # Number of time steps when solving the latent dynamics
     n_coefs : int           = -1;       # Number of coefficients in the latent space dynamics
     n_IC    : int           = -1;       # Number of initial conditions to define the initial latent state.
 
@@ -29,7 +29,7 @@ class LatentDynamics:
 
 
 
-    def __init__(self, dim_ : int, nt_ : int) -> None:
+    def __init__(self, dim_ : int, n_t_ : int) -> None:
         """
         Initializes a LatentDynamics object. Each LatentDynamics object needs to have a 
         dimensionality (dim), a number of time steps, a model for the latent space dynamics, and 
@@ -45,17 +45,17 @@ class LatentDynamics:
 
         dim_: The number of dimensions in the latent space, where the latent dynamics takes place.
 
-        nt_: The number of time steps we want to generate when solving (numerically) the latent 
+        n_t_: The number of time steps we want to generate when solving (numerically) the latent 
         space dynamics.
         """
 
         # Set class variables.
         self.dim    : int   = dim_;
-        self.nt     : int   = nt_;
+        self.n_t    : int   = n_t_;
 
         # There must be at least one latent dimension and there must be at least 1 time step.
         assert(self.dim > 0);
-        assert(self.nt  > 0);
+        assert(self.n_t  > 0);
 
         # All done!
         return;
@@ -86,12 +86,12 @@ class LatentDynamics:
 
         Latent_States: A list of 2d or 3d tensor holding the latent position, velocity, etc. Here, 
         we will consider the case when len(Latent_Sates) = 1 and will let Z = Latent_States[0]. If 
-        Z has two dimensions, it has shape (Nt, Nz), where Nt specifies the number of time steps in 
-        each sequence of latent states and Nz is the dimension of the latent space. In this case, 
+        Z has two dimensions, it has shape (n_t, n_z), where n_t specifies the number of time steps in 
+        each sequence of latent states and n_Z is the dimension of the latent space. In this case, 
         the i,j entry of Z holds the j'th component of the latent state  at the time t_0 + i*dt. If 
-        it is a 3d tensor, then it has shape (Np, Nt, Nz). In this case, we assume there at Np 
-        different combinations of parameter values. The i, j, k entry of Z in this case holds the 
-        k'th component of the latent encoding at time t_0 + j*dt when we use the i'th combination 
+        it is a 3d tensor, then it has shape (n_param, n_t, n_Z). In this case, we assume there at 
+        n_param different combinations of parameter values. The i, j, k entry of Z in this case holds 
+        the k'th component of the latent encoding at time t_0 + j*dt when we use the i'th combination 
         of parameter values. 
 
         dt: The time step between time steps. See the description of the "Z" argument. 
@@ -148,7 +148,7 @@ class LatentDynamics:
         time derivatives at the time values specified in times when we use the coefficients in 
         coefs to characterize the latent dynamics model. 
         
-        Specifically, the i'th element is a 2d array of shape (nt, dim), where nt is the number 
+        Specifically, the i'th element is a 2d array of shape (n_t, dim), where n_t is the number 
         of time steps (size of times) and dim is the latent space dimension (self.dim). Thus, 
         the j,k element of this matrix holds the k'th component of the i'th time derivative of the
         latent solution at the time stored in the j'th element of times. 
@@ -188,9 +188,9 @@ class LatentDynamics:
         Returns
         -------------------------------------------------------------------------------------------
 
-        A 4d numpy ndarray object of shape (n_IC, n_samples, nt, dim), where n_IC = the number of 
+        A 4d numpy ndarray object of shape (n_IC, n_samples, n_t, dim), where n_IC = the number of 
         derivatives of the initial state we need to specify in the initial conditions, n_samples = 
-        the number of samples (the length of IC_Samples), nt = the number of time steps (size of 
+        the number of samples (the length of IC_Samples), n_t = the number of time steps (size of 
         times) and dim is the dimension of the latent space. The i, j, k, l element of this array 
         holds the l'th component of the solution of the latent dynamics at the j'th time step 
         (j'th element of times) when we use the i'th set of coefficients/initial conditions. 

@@ -40,7 +40,7 @@ class Physics:
     x_grid      : numpy.ndarray = numpy.array([]);
 
     # the number of time steps, as a positive integer.
-    nt          : int           = -1;
+    n_t         : int           = -1;
 
     # time step size. assume constant for now. 
     dt          : float         = -1.;
@@ -131,8 +131,8 @@ class Physics:
         Returns 
         -------------------------------------------------------------------------------------------
 
-        A list of (ns + 2)-dimensional torch.Tensor objects of shape (1, nt, nx[0], .. , 
-        nx[ns - 1]), where nt is the number of points along the temporal grid and nx = 
+        A list of (ns + 2)-dimensional torch.Tensor objects of shape (1, n_t, n_x[0], .. , 
+        n_x[ns - 1]), where n_t is the number of points along the temporal grid and n_x = 
         self.spatial_grid_shape specifies the number of grid points along the axes in the spatial grid.
         """
 
@@ -158,18 +158,18 @@ class Physics:
         Arguments
         -------------------------------------------------------------------------------------------
 
-        param: a 2d numpy.ndarray object of shape (np, n), where np is the number of combinations 
-        of parameters we want to test and n denotes the number of parameters in self's initial 
-        condition function.
+        param: a 2d numpy.ndarray object of shape (n_param, n_IC), where n_param is the number of 
+        combinations of parameters we want to test and n_IC denotes the number of parameters in self's 
+        initial condition function.
 
         
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
         
-        A list of torch.Tensor objects of shape (np, nt, nx[0], .. , nx[ns - 1]), where nt is the 
-        number of points along the temporal grid and nx = self.spatial_grid_shape specifies the 
-        number of grid points along the axes in the spatial grid. The i'th element of this list 
+        A list of torch.Tensor objects of shape (n_param, n_t, n_x[0], .. , n_x[ns - 1]), where n_t 
+        is the number of points along the temporal grid and n_t = self.spatial_grid_shape specifies 
+        the number of grid points along the axes in the spatial grid. The i'th element of this list 
         should hold the i'th time derivative of the FOM solutions.
         """
 
@@ -213,8 +213,8 @@ class Physics:
         -------------------------------------------------------------------------------------------
 
         Xhist: A (ns + 1)-dimensional numpy.ndarray object of shape self.spatial_grid_shape  = 
-        (nt, nx[0], ... , nx[ns - 1]), where nt is the number of points along the temporal grid and 
-        nx = self.spatial_grid_shape specifies the number of grid points along the axes in the 
+        (n_t, n_x[0], ... , n_x[ns - 1]), where n_t is the number of points along the temporal grid 
+        and n_x = self.spatial_grid_shape specifies the number of grid points along the axes in the 
         spatial grid. The i,j(0), ... , j(ns - 1) element of this array should hold the value of 
         the solution at the i'th time step and the spatial grid point with index 
         (j(0), ... , j(ns - 1)).

@@ -91,7 +91,7 @@ class Burgers1D(Physics):
         assert('burgers1d' in config);
         
         # Fetch variables from config. 
-        self.nt                     : int       = config['burgers1d']['number_of_timesteps'];   # number of time steps when solving 
+        self.n_t                     : int       = config['burgers1d']['number_of_timesteps'];   # number of time steps when solving 
         self.spatial_grid_shape     : list[int] = config['burgers1d']['grid_shape'];            # number of grid points along each spatial axis
         self.spatial_qgrid_shape    : list[int] = self.spatial_grid_shape;
         
@@ -106,11 +106,11 @@ class Burgers1D(Physics):
         assert(self.dx > 0.)
 
         self.tmax   : float     = config['burgers1d']['elasticity'];        # We solve from t = 0 to t = tmax
-        self.dt     : float     = self.tmax / (self.nt - 1);                # step size between successive time steps/the time step we use when solving.
+        self.dt     : float     = self.tmax / (self.n_t - 1);                # step size between successive time steps/the time step we use when solving.
 
         # Set up the spatial, temporal grid.
         self.x_grid : numpy.ndarray = numpy.linspace(self.xmin, self.xmax, self.spatial_grid_shape[0]);
-        self.t_grid : numpy.ndarray = numpy.linspace(0, self.tmax, self.nt);
+        self.t_grid : numpy.ndarray = numpy.linspace(0, self.tmax, self.n_t);
 
         self.maxk                   : int   = config['burgers1d']['maxk'];                  # TODO: ??? What is this ???
         self.convergence_threshold  : float = config['burgers1d']['convergence_threshold'];
@@ -185,8 +185,8 @@ class Burgers1D(Physics):
         Returns 
         -------------------------------------------------------------------------------------------
 
-        A single element list holding a 3d torch.Tensor object of shape (1, nt, nx), where nt is 
-        the number of points along the temporal grid and nx is the number along the spatial grid.
+        A single element list holding a 3d torch.Tensor object of shape (1, n_t, n_x), where n_t is 
+        the number of points along the temporal grid and n_x is the number along the spatial grid.
         """
         
         # Fetch the initial condition.
@@ -195,8 +195,8 @@ class Burgers1D(Physics):
         """
         # Solve the PDE and then reshape the result to be a 3d tensor with a leading dimension of 
         # size 1.
-        X       : torch.Tensor          = torch.Tensor(solver(u0, self.maxk, self.convergence_threshold, self.nt - 1, self.spatial_grid_shape[0], self.dt, self.dx));        
-        new_X   : list[torch.Tensor]    = [X.reshape(1, self.nt, self.spatial_grid_shape[0])];
+        X       : torch.Tensor          = torch.Tensor(solver(u0, self.maxk, self.convergence_threshold, self.n_t - 1, self.spatial_grid_shape[0], self.dt, self.dx));        
+        new_X   : list[torch.Tensor]    = [X.reshape(1, self.n_t, self.spatial_grid_shape[0])];
         """
 
         ######## REMOVE ME   ||
@@ -207,11 +207,11 @@ class Burgers1D(Physics):
     
         # Solve the PDE and then reshape the result to be a 3d tensor with a leading dimension of 
         # size 1.
-        X       : torch.Tensor  = torch.Tensor(solver(u0, self.maxk, self.convergence_threshold, self.nt - 1, self.spatial_grid_shape[0], self.dt, self.dx));
+        X       : torch.Tensor  = torch.Tensor(solver(u0, self.maxk, self.convergence_threshold, self.n_t - 1, self.spatial_grid_shape[0], self.dt, self.dx));
         V       : torch.Tensor  = Derivative1_Order4(X, h = self.dt);
         
-        X       : torch.Tensor  = X.reshape(1, self.nt, self.spatial_grid_shape[0]);
-        V       : torch.Tensor  = V.reshape(1, self.nt, self.spatial_grid_shape[0]);
+        X       : torch.Tensor  = X.reshape(1, self.n_t, self.spatial_grid_shape[0]);
+        V       : torch.Tensor  = V.reshape(1, self.n_t, self.spatial_grid_shape[0]);
 
         new_X   : list[torch.Tensor]    = [X, V];
 
@@ -250,8 +250,8 @@ class Burgers1D(Physics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Xhist: A 2d numpy.ndarray object of shape (nt, nx), where nt is the number of points along
-        the temporal axis and nx is the number of points along the spatial axis. The i,j element of
+        Xhist: A 2d numpy.ndarray object of shape (n_t, n_x), where n_t is the number of points along
+        the temporal axis and n_x is the number of points along the spatial axis. The i,j element of
         this array should have the j'th component of the solution at the i'th time step.
 
 
@@ -259,7 +259,7 @@ class Burgers1D(Physics):
         Returns
         -------------------------------------------------------------------------------------------
 
-        A two element tuple. The first is a numpy.ndarray object of shape (nt - 2, nx - 2) whose 
+        A two element tuple. The first is a numpy.ndarray object of shape (n_t - 2, n_x - 2) whose 
         i, j element holds the residual at the i + 1'th temporal grid point and the j + 1'th 
         spatial grid point. 
         """
@@ -298,7 +298,7 @@ def residual_burgers(un, uw, c, idxn1):
 
 
 
-def jacobian(u, c, idxn1, nx):
+def jacobian(u, c, idxn1, n_x):
 
     '''
 
@@ -308,17 +308,17 @@ def jacobian(u, c, idxn1, nx):
     '''
 
     diag_comp           = 1.0 + c * (2 * u - u[idxn1]);
-    subdiag_comp        = numpy.ones(nx - 1);
+    subdiag_comp        = numpy.ones(n_x - 1);
     subdiag_comp[:-1]   = -c * u[1:];
     data                = numpy.array([diag_comp, subdiag_comp]);
-    J                   = spdiags(data, [0, -1], nx - 1, nx - 1, format = 'csr');
+    J                   = spdiags(data, [0, -1], n_x - 1, n_x - 1, format = 'csr');
     J[0, -1]            = -c * u[0];
 
     return J;
 
 
 
-def solver(u0, maxk, convergence_threshold, nt, nx, Dt, Dx):
+def solver(u0, maxk, convergence_threshold, n_t, n_x, Dt, Dx):
     '''
 
     Solves 1D Burgers equation for generating the data
@@ -328,19 +328,19 @@ def solver(u0, maxk, convergence_threshold, nt, nx, Dt, Dx):
 
     c = Dt / Dx;
 
-    idxn1       = numpy.zeros(nx - 1, dtype = 'int');
-    idxn1[1:]   = numpy.arange(nx - 2);
-    idxn1[0]    = nx - 2;
+    idxn1       = numpy.zeros(n_x - 1, dtype = 'int');
+    idxn1[1:]   = numpy.arange(n_x - 2);
+    idxn1[0]    = n_x - 2;
 
-    u           = numpy.zeros((nt + 1, nx));
+    u           = numpy.zeros((n_t + 1, n_x));
     u[0]        = u0;
 
-    for n in range(nt):
+    for n in range(n_t):
         uw = u[n, :-1].copy();
         r = residual_burgers(u[n, :-1], uw, c, idxn1);
 
         for k in range(maxk):
-            J = jacobian(uw, c, idxn1, nx);
+            J = jacobian(uw, c, idxn1, n_x);
             duw = spsolve(J, -r);
             uw = uw + duw;
             r = residual_burgers(u[n, :-1], uw, c, idxn1);

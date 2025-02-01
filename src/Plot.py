@@ -65,7 +65,7 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
     -----------------------------------------------------------------------------------------------
 
     X_True: A list of torch.Tensor objects. The k'th element should be a torch.Tensor object 
-    of shape (nt, nx) whose i,j entry holds the value of the k'th time derivative of the fom 
+    of shape (n_t, n_x) whose i,j entry holds the value of the k'th time derivative of the fom 
     solution at t_grid[i], x_grid[j].
     
     model: A model (i.e., autoencoder). We use this to map the FOM IC's (stored in Physics) to the 
@@ -73,7 +73,7 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
 
     t_grid, x_value: The set of t and x values at which we have evaluated the fom solution, 
     respectively. Specifically, we assume that the k'th element of fom_frame is a torch.Tensor 
-    object of shape (nt, nx) where nt = t_grid.size and nx = x_grid.size. We assume that the 
+    object of shape (n_t, n_x) where n_t = t_grid.size and n_x = x_grid.size. We assume that the 
     i, j element of the k'th element of fom_frame represents the fom solution at t = t_grid[i] and 
     x = x_grid[j].
 
@@ -224,7 +224,7 @@ def Plot_Prediction(model           : torch.nn.Module,
 
     X_True: A list of n_IC (where n_IC is the number of IC's needed to initialize the latent 
     dynamics. This should also be latent_dynamics.n_IC). The d'th element should be a numpy ndarray 
-    object of shape (nt, nx), where nx is the number of points we use to discretize the spatial
+    object of shape (n_t, n_x), where n_t is the number of points we use to discretize the spatial
     axis of the fom solution domain. The i,j element of the d'th element of X_True should hold 
     the d'th derivative of the fom solution at the i'th time value and j'th spatial position.
 
@@ -260,7 +260,7 @@ def Plot_Prediction(model           : torch.nn.Module,
     n_z : int = model.n_z;
 
     # Only keep the predicted solutions when we use the first parameter value. Note that each
-    # element of this updated Z has shape (n_samples, nt, n_z). 
+    # element of this updated Z has shape (n_samples, n_t, n_z). 
     for d in range(n_IC):
         Latent_Trajectories[d] = Latent_Trajectories[d][0, :, :, :];
 
@@ -270,7 +270,7 @@ def Plot_Prediction(model           : torch.nn.Module,
         assert(n_IC == 1);
 
         # Pass the predictions through the decoder to get the corresponding fom frames. Note that 
-        # X_pred has shape (n_samples, nt, nx), where nx is the number of points along the spatial 
+        # X_pred has shape (n_samples, n_t, n_x), where n_x is the number of points along the spatial 
         # axis.
         X_pred        : numpy.ndarray       = model.decoder(torch.Tensor(Latent_Trajectories)).detach().numpy();
         X_pred_mean   : list[numpy.ndarray] = [X_pred.mean(0)];
@@ -280,7 +280,7 @@ def Plot_Prediction(model           : torch.nn.Module,
         assert(n_IC == 2);
 
         # Pass the predictions through the decoder to get the corresponding fom frames. Note that 
-        # X_pred has shape (n_samples, nt, nx), where nx is the number of points along the spatial 
+        # X_pred has shape (n_samples, n_t, n_x), where n_x is the number of points along the spatial 
         # axis.
         Disp_pred, Vel_Pred = model.decoder(torch.Tensor(Latent_Trajectories[0]), torch.Tensor(Latent_Trajectories[1]));
         Disp_pred           = Disp_pred.detach().numpy();
@@ -427,7 +427,7 @@ def plot_gp2d(  p1_mesh,
 
             std = gp_std[:, :, k]
             p = axs1[i, j].contourf(p1_mesh, p2_mesh, std, refine, cmap = cm)
-            fig1.colorbar(p, ticks = np.array([std.min(), std.max()]), format='%2.2f', ax = axs1[i, j])
+            fig1.colorbar(p, ticks = numpy.array([std.min(), std.max()]), format='%2.2f', ax = axs1[i, j])
             axs1[i, j].scatter(param_train[:, 0], param_train[:, 1], c='k', marker='+')
             axs1[i, j].set_title(r'$\sqrt{\Sigma^*_{' + str(i + 1) + str(j + 1) + '}}$')
             axs1[i, j].set_xlim(p1_range)
@@ -438,7 +438,7 @@ def plot_gp2d(  p1_mesh,
 
             mean = gp_mean[:, :, k]
             p = axs2[i, j].contourf(p1_mesh, p2_mesh, mean, refine, cmap = cm)
-            fig2.colorbar(p, ticks = np.array([mean.min(), mean.max()]), format='%2.2f', ax = axs2[i, j])
+            fig2.colorbar(p, ticks = numpy.array([mean.min(), mean.max()]), format='%2.2f', ax = axs2[i, j])
             axs2[i, j].scatter(param_train[:, 0], param_train[:, 1], c='k', marker='+')
             axs2[i, j].set_title(r'$\mu^*_{' + str(i + 1) + str(j + 1) + '}$')
             axs2[i, j].set_xlim(p1_range)
@@ -481,20 +481,20 @@ def heatmap2d(values, p1_grid, p2_grid, param_train, n_init, figsize=(10, 10), p
     im = ax.imshow(values, cmap = cmap)
     fig.colorbar(im, ax = ax, fraction = 0.04)
 
-    ax.set_xticks(np.arange(0, n_p1, 2), labels=np.round(p1_grid[::2], 2))
-    ax.set_yticks(np.arange(0, n_p2, 2), labels=np.round(p2_grid[::2], 2))
+    ax.set_xticks(numpy.arange(0, n_p1, 2), labels = numpy.round(p1_grid[::2], 2))
+    ax.set_yticks(numpy.arange(0, n_p2, 2), labels = numpy.round(p2_grid[::2], 2))
 
     for i in range(n_p1):
         for j in range(n_p2):
             ax.text(j, i, round(values[i, j], 1), ha='center', va='center', color='k')
 
-    grid_square_x = np.arange(-0.5, n_p1, 1)
-    grid_square_y = np.arange(-0.5, n_p2, 1)
+    grid_square_x = numpy.arange(-0.5, n_p1, 1)
+    grid_square_y = numpy.arange(-0.5, n_p2, 1)
 
     n_train = param_train.shape[0]
     for i in range(n_train):
-        p1_index = np.sum((p1_grid < param_train[i, 0]) * 1)
-        p2_index = np.sum((p2_grid < param_train[i, 1]) * 1)
+        p1_index = numpy.sum((p1_grid < param_train[i, 0]) * 1)
+        p2_index = numpy.sum((p2_grid < param_train[i, 1]) * 1)
 
         if i < n_init:
             color = 'r'

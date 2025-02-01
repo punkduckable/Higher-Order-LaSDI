@@ -112,7 +112,7 @@ def Initialize_Trainer(config : dict, restart_dict : dict = None):
     ld_type                 = config['latent_dynamics']['type'];
     assert(ld_type in config['latent_dynamics']);
     assert(ld_type in ld_dict);
-    latent_dynamics         = ld_dict[ld_type](Model.n_z, physics.nt, config['latent_dynamics']);
+    latent_dynamics         = ld_dict[ld_type](Model.n_z, physics.n_t, config['latent_dynamics']);
     if (restart_dict is not None):
         latent_dynamics.load(restart_dict['latent_dynamics']);
 

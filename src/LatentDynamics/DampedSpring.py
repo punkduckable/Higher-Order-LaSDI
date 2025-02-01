@@ -32,7 +32,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 class DampedSpring(LatentDynamics):
     def __init__(self, 
                  dim        : int, 
-                 nt         : int, 
+                 n_t        : int, 
                  config     : dict) -> None:
         r"""
         Initializes a DampedSpring object. This is a subclass of the LatentDynamics class which 
@@ -50,7 +50,7 @@ class DampedSpring(LatentDynamics):
 
         dim: The number of dimensions in the latent space, where the latent dynamics takes place.
 
-        nt: The number of time steps we want to generate when solving (numerically) the latent 
+        n_t: The number of time steps we want to generate when solving (numerically) the latent 
         space dynamics.
 
         config: A dictionary housing the settings we need to set up a DampedSpring object. 
@@ -60,10 +60,10 @@ class DampedSpring(LatentDynamics):
             the coefficient loss.
         """
 
-        # Run the base class initializer. The only thing this does is set the dim and nt 
+        # Run the base class initializer. The only thing this does is set the dim and n_t 
         # attributes.;
-        super().__init__(dim, nt);
-        LOGGER.info("Initializing a DampedSpring object with dim = %d, nt = %d" % (self.dim, self.nt));
+        super().__init__(dim, n_t);
+        LOGGER.info("Initializing a DampedSpring object with dim = %d, n_t = %d" % (self.dim, self.n_t));
         
         # Set n_coefs and n_IC.
         # Because K and C are dim x dim matrices, and b is in \mathbb{R}^dim, there are 
@@ -265,7 +265,7 @@ class DampedSpring(LatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------        
         
-        A 3d numpy ndarray of shape (2, nt, dim) where nt is the number of time steps (size of 
+        A 3d numpy ndarray of shape (2, n_t, dim) where n_t is the number of time steps (size of 
         times) and dim is the latent space dimension (self.dim). The 0,i,j and 1,i,j elements of 
         this array hold the j'th components of the displacement and velocity at the i'th time step, 
         respectively.

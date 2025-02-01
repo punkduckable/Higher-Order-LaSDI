@@ -139,12 +139,12 @@ class BayesianGLaSDI:
         # it's leading dimension has a size matching the number of combinations of parameters 
         # in the testing set.
         # 
-        # the latent_dynamics object specifies n_IC while the physics object specifies nt and the 
+        # the latent_dynamics object specifies n_IC while the physics object specifies n_t and the 
         # shape of each fom frame. Using this, we can initialize X_Train and X_Test to hold 
         # tensors whose leading dimension is 0 (indicating that we currently have no testing/
         # training data).
         for i in range(self.latent_dynamics.n_IC):
-            FOM_sequence_shape : tuple[int] = (0, self.physics.nt) + tuple(self.physics.spatial_qgrid_shape);
+            FOM_sequence_shape : tuple[int] = (0, self.physics.n_t) + tuple(self.physics.spatial_qgrid_shape);
             self.X_Train.append(torch.empty(FOM_sequence_shape, dtype = torch.float32));
             self.X_Test.append( torch.empty(FOM_sequence_shape, dtype = torch.float32));
 
@@ -487,7 +487,7 @@ class BayesianGLaSDI:
         # state's initial condition.
         LatentStates    : list[numpy.ndarray]   = [];
         for i in range(self.latent_dynamics.n_IC):
-            LatentStates.append(numpy.ndarray([n_test, self.n_samples, self.physics.nt, model.n_z]));
+            LatentStates.append(numpy.ndarray([n_test, self.n_samples, self.physics.n_t, model.n_z]));
         
         for i in range(n_test):
             for j in range(self.n_samples):
