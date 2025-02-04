@@ -228,7 +228,7 @@ def Plot_Prediction(model           : torch.nn.Module,
     axis of the fom solution domain. The i,j element of the d'th element of X_True should hold 
     the d'th derivative of the fom solution at the i'th time value and j'th spatial position.
 
-    scale:
+    scale: ???
     
 
     -----------------------------------------------------------------------------------------------
@@ -273,7 +273,7 @@ def Plot_Prediction(model           : torch.nn.Module,
         # Pass the predictions through the decoder to get the corresponding fom frames. Note that 
         # X_pred has shape (n_samples, n_t, n_x), where n_x is the number of points along the spatial 
         # axis.
-        X_pred        : numpy.ndarray       = model.decoder(torch.Tensor(Latent_Trajectories)).detach().numpy();
+        X_pred        : numpy.ndarray       = model.Decode(torch.Tensor(Latent_Trajectories)).detach().numpy();
         X_pred_mean   : list[numpy.ndarray] = [X_pred.mean(0)];
         X_pred_std    : list[numpy.ndarray] = [X_pred.std(0)];
     
@@ -283,7 +283,7 @@ def Plot_Prediction(model           : torch.nn.Module,
         # Pass the predictions through the decoder to get the corresponding fom frames. Note that 
         # X_pred has shape (n_samples, n_t, n_x), where n_x is the number of points along the spatial 
         # axis.
-        Disp_pred, Vel_Pred = model.decoder(torch.Tensor(Latent_Trajectories[0]), torch.Tensor(Latent_Trajectories[1]));
+        Disp_pred, Vel_Pred = model.Decode(torch.Tensor(Latent_Trajectories[0]), torch.Tensor(Latent_Trajectories[1]));
         Disp_pred           = Disp_pred.detach().numpy();
         Vel_Pred            = Vel_Pred.detach().numpy();
 

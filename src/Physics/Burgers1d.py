@@ -240,7 +240,7 @@ class Burgers1D(Physics):
     
 
     
-    def residual(self, Xhist : numpy.ndarray) -> tuple[numpy.ndarray, float]:
+    def residual(self, Xhist : list[numpy.ndarray]) -> tuple[numpy.ndarray, float]:
         """
         This function computes the PDE residual (difference between the left and right hand side
         of Burgers' equation when we substitute in the solution in Xhist).
@@ -250,9 +250,10 @@ class Burgers1D(Physics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Xhist: A 2d numpy.ndarray object of shape (n_t, n_x), where n_t is the number of points along
-        the temporal axis and n_x is the number of points along the spatial axis. The i,j element of
-        this array should have the j'th component of the solution at the i'th time step.
+        Xhist: A single element list of 2d numpy.ndarray object of shape (n_t, n_x), where n_t is 
+        the number of points along the temporal axis and n_x is the number of points along the 
+        spatial axis. The i,j element of the d'th array should have the j'th component of the 
+        d'th derivative of the fom solution at the i'th time step.
 
 
         -------------------------------------------------------------------------------------------
@@ -263,6 +264,9 @@ class Burgers1D(Physics):
         i, j element holds the residual at the i + 1'th temporal grid point and the j + 1'th 
         spatial grid point. 
         """
+
+        # Extract only the position data.
+        Xhist = Xhist[0];
         
         # First, approximate the spatial and temporal derivatives.
         # first axis is time index, and second index is spatial index.
