@@ -96,7 +96,7 @@ def Initialize_Trainer(config : dict, restart_dict : dict = None):
         param_space.load(restart_dict['parameter_space']);
     
     # Get the "physics" object we use to generate the fom dataset.
-    physics                 = Initialize_Physics(config, param_space.param_name_list);
+    physics                 = Initialize_Physics(config, param_space.param_names);
 
     # Get the Model (autoencoder). We try to learn dynamics that describe how the latent space of
     # this model evolve over time. If we are using a restart file, then load the saved model 
@@ -192,7 +192,7 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
 
 
 
-def Initialize_Physics(config: dict, param_name_list : list[str]) -> Physics:
+def Initialize_Physics(config: dict, param_names : list[str]) -> Physics:
     '''
     Initialize a physics FOM model according to config file.
     Currently only 'burgers1d' is available.
@@ -210,8 +210,8 @@ def Initialize_Physics(config: dict, param_name_list : list[str]) -> Physics:
         - physics 
             - type
 
-    param_name_list: A list housing the names of the parameters in the physics model. There should
-    be an entry in the configuration file for each named parameter. 
+    param_names: A list housing the names of the parameters in the physics model. There should be an
+    entry in the configuration file for each named parameter. 
             
     -----------------------------------------------------------------------------------------------
     Returns
@@ -226,7 +226,7 @@ def Initialize_Physics(config: dict, param_name_list : list[str]) -> Physics:
     LOGGER.info("Initializing Physics (%s)" % physics_type);
 
     # Next, initialize the "physics" object we are using to build the simulations.
-    physics         : Physics   = physics_dict[physics_type](physics_cfg, param_name_list);
+    physics         : Physics   = physics_dict[physics_type](physics_cfg, param_names);
 
     # All done!
     return physics;

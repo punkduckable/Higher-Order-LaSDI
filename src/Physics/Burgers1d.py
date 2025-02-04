@@ -51,7 +51,7 @@ class Burgers1D(Physics):
 
 
     
-    def __init__(self, config : dict, param_name_list : list[str] = None) -> None:
+    def __init__(self, config : dict, param_names : list[str] = None) -> None:
         """
         This is the initializer for the Burgers Physics class. This class essentially acts as a 
         wrapper around a 1D Burgers solver.
@@ -64,9 +64,9 @@ class Burgers1D(Physics):
         config: A dictionary housing the settings for the Burgers object. This should be the 
         "physics" sub-dictionary of the configuration file. 
 
-        param_name_list: A list of strings. There should be one list item for each parameter. The 
-        i'th element of this list should be a string housing the name of the i'th parameter. For 
-        the Burgers class, this should have two elements: a and w. 
+        param_names: A list of strings. There should be one list item for each parameter. The i'tj
+        element of this list should be a string housing the name of the i'th parameter. For the 
+        Burgers class, this should have two elements: a and w. 
 
         
         -------------------------------------------------------------------------------------------
@@ -77,10 +77,10 @@ class Burgers1D(Physics):
         """
 
         # Checks
-        assert(len(param_name_list) == 2);
+        assert(len(param_names) == 2);
 
         # Call the super class initializer.
-        super().__init__(config, param_name_list);
+        super().__init__(config, param_names);
 
         # The solution to Burgers' equation is scalar valued, so the qdim is 1. Likewise, since 
         # there is only one spatial dimension in the 1D burgers example, dim is also 1.
@@ -117,11 +117,11 @@ class Burgers1D(Physics):
 
         # Determine which index corresponds to 'a' and 'w' (we pass an array of parameter values, 
         # we need this information to figure out which element corresponds to which variable).
-        if (self.param_name_list is not None):
-            if 'a' in self.param_name_list:
-                self.a_idx = self.param_name_list.index('a');
-            if 'w' in self.param_name_list:
-                self.w_idx = self.param_name_list.index('w');
+        if (self.param_names is not None):
+            if 'a' in self.param_names:
+                self.a_idx = self.param_names.index('a');
+            if 'w' in self.param_names:
+                self.w_idx = self.param_names.index('w');
         
         # All done!
         return;
@@ -157,9 +157,9 @@ class Burgers1D(Physics):
         # Fetch the parameter values.
         a, w = 1.0, 1.0
 
-        if 'a' in self.param_name_list:
+        if 'a' in self.param_names:
             a = param[self.a_idx];
-        if 'w' in self.param_name_list:
+        if 'w' in self.param_names:
             w = param[self.w_idx];  
 
         # Compute the initial condition and return!

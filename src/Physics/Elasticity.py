@@ -27,7 +27,7 @@ import  nonlinear_elasticity_global_rom;
 # -------------------------------------------------------------------------------------------------
 
 class Elasticity(Physics):    
-    def __init__(self, config : dict, param_name_list : list[str] = None) -> None:
+    def __init__(self, config : dict, param_names : list[str] = None) -> None:
         """
         This is the initializer for the Elasticity class. This class essentially acts as a 
         wrapper around a non-linear elasticity solver in pylibROM.
@@ -40,7 +40,7 @@ class Elasticity(Physics):
         config: A dictionary housing the settings for the Elasticity object. This should be the 
         "physics" sub-dictionary of the configuration file. 
 
-        param_name_list: A list of strings. There should be one list item for each parameter. The 
+        param_names: A list of strings. There should be one list item for each parameter. The 
         i'th element of this list should be a string housing the name of the i'th parameter. For 
         the elasticity class, this should have one element: s.
 
@@ -53,10 +53,10 @@ class Elasticity(Physics):
         """
 
         # Checks.
-        assert(len(param_name_list) == 1);
+        assert(len(param_names) == 1);
 
         # Call the super class initializer.
-        super().__init__(config, param_name_list);
+        super().__init__(config, param_names);
 
         # The solution to the nonlinear elasticity equation is scalar valued, so the qdim is 1. 
         # Likewise, since there is only one spatial dimension in the nonlinear elasticity example, 
@@ -81,11 +81,11 @@ class Elasticity(Physics):
 
         # Determine which index corresponds to 'a' and 'w' (we pass an array of parameter values, 
         # we need this information to figure out which element corresponds to which variable).
-        if (self.param_name_list is not None):
-            if 'a' in self.param_name_list:
-                self.a_idx = self.param_name_list.index('a');
-            if 'w' in self.param_name_list:
-                self.w_idx = self.param_name_list.index('w');
+        if (self.param_names is not None):
+            if 'a' in self.param_names:
+                self.a_idx = self.param_names.index('a');
+            if 'w' in self.param_names:
+                self.w_idx = self.param_names.index('w');
         
         # All done!
         return;
@@ -121,9 +121,9 @@ class Elasticity(Physics):
         # Fetch the parameter values.
         a, w = 1.0, 1.0
 
-        if 'a' in self.param_name_list:
+        if 'a' in self.param_names:
             a = param[self.a_idx];
-        if 'w' in self.param_name_list:
+        if 'w' in self.param_names:
             w = param[self.w_idx];  
 
         # Compute the initial condition and return!

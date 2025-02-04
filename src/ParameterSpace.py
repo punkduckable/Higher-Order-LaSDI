@@ -43,18 +43,18 @@ def get_1dspace_from_list(param_dict : dict) -> tuple[int, numpy.ndarray]:
     Returns
     -----------------------------------------------------------------------------------------------
 
-    Two arguments: Nx and paramRange. paramRange is a 1d numpy ndarray (whose ith value is the 
-    i'th element of param_dict["list"]). Nx is the length of paramRange. 
+    Two arguments: n_values and paramRange. paramRange is a 1d numpy ndarray (whose ith value is 
+    the i'th element of param_dict["list"]). n_values is the length of paramRange. 
     """
 
     # In this case, the parameter dictionary should have a "list" attribute which should list the 
-    # parameter values we want to test. Fetch it (it's length is Nx) and use it to generate an
+    # parameter values we want to test. Fetch it (it's length is n_values) and use it to generate an
     # array of possible values.
-    Nx          : int           = len(param_dict['list']);
+    n_values    : int           = len(param_dict['list']);
     paramRange  : numpy.ndarray = numpy.array(param_dict['list']);
 
     # All done!
-    return Nx, paramRange;
+    return n_values, paramRange;
 
 
 
@@ -90,26 +90,26 @@ def create_uniform_1dspace(param_dict : dict) -> tuple[int, numpy.ndarray]:
     Returns
     -----------------------------------------------------------------------------------------------
 
-    Two arguments: Nx and paramRange. paramRange is a 1d numpy ndarray (whose ith value is the 
-    i'th possible value of the parameter. Thus, paramRange[0] = param_dict["min"] and 
-    paramRange[-1] = param_dict["max"]). Nx is the length of paramRange or, equivalently 
+    Two arguments: n_values and paramRange. paramRange is a 1d numpy ndarray (whose ith value is 
+    the i'th possible value of the parameter. Thus, paramRange[0] = param_dict["min"] and 
+    paramRange[-1] = param_dict["max"]). n_values is the length of paramRange or, equivalently 
     param_dict["sample_size"]. 
     """
 
     # Fetch the number of samples and the min/max value for this parameter.
-    Nx      : int   = param_dict['sample_size'];
-    minval  : float = param_dict['min'];
-    maxval  : float = param_dict['max'];
+    n_values    : int   = param_dict['sample_size'];
+    minval      : float = param_dict['min'];
+    maxval      : float = param_dict['max'];
 
     # Generate the range of parameter values. Note that we have to generate a uniform grid in the 
     # log space, then exponentiate it to generate logarithmic spacing.
     if (param_dict['log_scale']):
-        paramRange : numpy.ndarray  = numpy.exp(numpy.linspace(numpy.log(minval), numpy.log(maxval), Nx));
+        paramRange : numpy.ndarray  = numpy.exp(numpy.linspace(numpy.log(minval), numpy.log(maxval), n_values));
     else:
-        paramRange : numpy.ndarray  = numpy.linspace(minval, maxval, Nx);
+        paramRange : numpy.ndarray  = numpy.linspace(minval, maxval, n_values);
     
     # All done! 
-    return Nx, paramRange;
+    return n_values, paramRange;
 
 
 
@@ -125,14 +125,14 @@ getParam1DSpace : dict[str, callable]    = {'list'       : get_1dspace_from_list
 
 class ParameterSpace:
     # Initialize class variables
-    param_list      : list[dict]            = [];   # A list housing the parameter dictionaries (from the yml file)
-    param_name_list : list[str]             = [];   # A list housing the parameter names.
     n_p             : int                   = 0;    # The number of parameters.
-    train_space     : numpy.ndarray         = None; # A 2D array of shape (n_train, n_p) whose i,j element is the j'th parameter value in the i'th combination of training parameters.
-    test_space      : numpy.ndarray         = None; # A 2D array of shape (n_test, n_p) whose i,j element is the j'th parameter value in the i'th combination of testing parameters.
+    param_list      : list[dict]            = [];   # Length = n_p. I'th element holds the parameter dictionary for the i'th parameter
+    param_names     : list[str]             = [];   # Length = n_p. I'th element holds the name of the i'th parameter.
+    train_space     : numpy.ndarray         = None; # Shape = (n_train, n_p). i,j element is the j'th parameter value in the i'th combination of training parameters.
+    test_space      : numpy.ndarray         = None; # Shape = (n_test, n_p). i,j element is the j'th parameter value in the i'th combination of testing parameters.
     n_init_train    : int                   = 0;    # The initial number of combinations of parameters in the training set.
-    test_grid_sizes : list[int]             = [];   # A list whose i'th element is the number of different values of the i'th parameter in the test instances.
-    test_meshgrid   : tuple[numpy.ndarray]  = None; # A tuple of n_p ndarray objects whose i'th element holds the meshgrid of values for the i'th parameter.
+    test_grid_sizes : list[int]             = [];   # Length = n_p. i'th element is the number of distinct values of the i'th parameter in the test instances.
+    test_meshgrid   : tuple[numpy.ndarray]  = None; # Length = n_p. I'th element is an ndarray holding the meshgrid of values for the i'th parameter.
 
 
 
@@ -168,10 +168,10 @@ class ParameterSpace:
         self.n_p        : int           = len(self.param_list);
 
         # Fetch the parameter names.
-        self.param_name_list : list[str]    = [];
+        self.param_names : list[str]    = [];
         for param in self.param_list:
-            self.param_name_list += [param['name']];
-        LOGGER.info("Initializing a ParameterSpace object with parameters %s" % (str(self.param_name_list)));
+            self.param_names += [param['name']];
+        LOGGER.info("Initializing a ParameterSpace object with parameters %s" % (str(self.param_names)));
 
         # First, let's fetch the set of possible parameter values. This yields a 2^k x k matrix,
         # where k is the number of parameters. The i,j entry of this matrix gives the value of the 
@@ -301,11 +301,11 @@ class ParameterSpace:
 
         # Cycle through the parameters        
         for param in param_list:
-            # Fetch the set of possible parameter values (paramRange) + the size of this set (Nx)
-            Nx, paramRange  = getParam1DSpace[param['test_space_type']](param);
+            # Fetch the set of possible parameter values (paramRange) + the size of this set (n_values)
+            n_values, paramRange  = getParam1DSpace[param['test_space_type']](param);
 
-            # Add Nx, ParamRange to their corresponding lists
-            gridSizes      += [Nx];
+            # Add n_values, ParamRange to their corresponding lists
+            gridSizes      += [n_values];
             paramRanges    += [paramRange];
 
         # Now that we have the set of parameter values for each parameter, turn it into a grid.
@@ -353,7 +353,11 @@ class ParameterSpace:
         for paramRange in param_ranges:
             args += (paramRange,);
 
-        # Use numpy's meshgrid function to generate the grids of parameter values.
+        # Use numpy's meshgrid function to generate the grids of parameter values. This produces
+        # a set of n_p arrays, each of shape (N(1), N(2), ... N(n_p)), where N(k) = 
+        # len(param_ranges[k]) denotes the number of parameter values for the k'th parameter. 
+        # The i(1), ... , i(n_p) element of the k'th array holds param_ranges[k][i(k)], the i(k)'th
+        # value of the k'th parameter. 
         paramSpaces : tuple[numpy.ndarray] = numpy.meshgrid(*args, indexing = 'ij');
 
         # All done!
@@ -399,10 +403,10 @@ class ParameterSpace:
 
         # All done!
         return param_grid;
-    
 
 
-    def appendTrainSpace(self, param : numpy.ndarray) -> None:
+
+    def appendTrainSpace(self, param_values : numpy.ndarray) -> None:
         """
         Adds a new parameter to self's train space attribute.
 
@@ -424,11 +428,11 @@ class ParameterSpace:
         """
 
         # Make sure param has n_p components/can be appended to the set of training parameters.
-        assert(self.train_space.shape[1] == param.size);
+        assert(self.train_space.shape[1] == param_values.size);
 
         # Add the new parameter to the training space by appending it as a new row to 
         # self.train_space
-        self.train_space    : numpy.ndarray = numpy.vstack((self.train_space, param));
+        self.train_space    : numpy.ndarray = numpy.vstack((self.train_space, param_values));
         
         # All done!
         return;
@@ -471,6 +475,8 @@ class ParameterSpace:
 
         # Build the dictionary
         dict_ = {'n_p'              : self.n_p, 
+                 'param_list'       : self.param_list, 
+                 'param_names'      : self.param_names,
                  'train_space'      : self.train_space,
                  'test_space'       : self.test_space,
                  'test_grid_sizes'  : self.test_grid_sizes,
@@ -511,11 +517,13 @@ class ParameterSpace:
         """
 
         # Extract information from the dictionary.
-        self.n_p                : int                   = dict_['n_p'];
-        self.train_space        : numpy.ndarray         = dict_['train_space'];
-        self.test_space         : numpy.ndarray         = dict_['test_space'];
-        self.test_grid_sizes    : list[int]             = dict_['test_grid_sizes'];
-        self.test_meshgrid      : tuple[numpy.ndarray]  = dict_['test_meshgrid'];
+        self.n_p                : int                   = dict_['n_p'];         
+        self.param_list         : list                  = dict_['param_list'];      # length = n_p. I'th element holds dictionary for i'th parameter
+        self.param_names        : list[str]             = dict_['param_names'];     # length = n_p. I'th element holds the name of the i'th parameter. 
+        self.train_space        : numpy.ndarray         = dict_['train_space'];     #
+        self.test_space         : numpy.ndarray         = dict_['test_space'];      #
+        self.test_grid_sizes    : list[int]             = dict_['test_grid_sizes']; #
+        self.test_meshgrid      : tuple[numpy.ndarray]  = dict_['test_meshgrid'];   #
 
         # Run checks
         assert(self.n_init_train            == dict_['n_init_train']);
