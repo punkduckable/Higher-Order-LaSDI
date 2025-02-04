@@ -354,17 +354,16 @@ def Plot_Prediction(model           : torch.nn.Module,
 
 
 
-def plot_gp2d(  p1_mesh, 
-                p2_mesh, 
-                gp_mean, 
-                gp_std, 
-                param_train, 
-                param_labels    : list[str]     = ['p1', 'p2'], 
-                plot_shape      : list[int]     = [6, 5], 
+def Plot_GP2d(  p1_mesh         : numpy.ndarray, 
+                p2_mesh         : numpy.ndarray, 
+                gp_mean         : numpy.ndarray, 
+                gp_std          : numpy.ndarray, 
+                param_train     : numpy.ndarray, 
+                param_names     : list[str]     = ['p1', 'p2'], 
+                n_cols          : int           = 5, 
                 figsize         : tuple[int]    = (15, 13), 
-                refine                          = 10, 
-                cm                              = plt.cm.jet, 
-                margin          : float         = 0.05) -> None:
+                color_levels    : int           = 100, 
+                cm                              = plt.cm.jet) -> None:
     """
     TODO
 
@@ -373,9 +372,38 @@ def plot_gp2d(  p1_mesh,
     Arguments
     -----------------------------------------------------------------------------------------------
 
+    p1_mesh: A 2d ndarray object of shape (N(1), N(2)) where N(1), N(2) denote the number of 
+    distinct values for the first and second parameters in the training set, respectively. The i,j 
+    element of this array holds the i'th value of the first parameter.
+
+    p2_mesh: A 2d ndarray object of shape (N(1), N(2)) whose i,j element holds the j'th value of 
+    the second parameter.
+
+    gp_mesh: A 3d numpy array of shape (N(1), N(2), n_coef), where n_coef denotes the number of 
+    coefficients in the latent model. The i, j, k element of this model holds the mean of the 
+    posterior distribution for the k'th parameter when the parameters consist of the  i'th value
+    of the first parameter and the j'th of the second.
+
+    gp_mesh: A 3d numpy array of shape (N(1), N(2), n_coef), where n_coef denotes the number of 
+    coefficients in the latent model. The i, j, k element of this model holds the std of the 
+    posterior distribution for the k'th parameter when the parameters consist of the  i'th value
+    of the first parameter and the j'th of the second.
+
+    param_train: A 2d array of shape (n_train, 2) whose i, j element holds the value of the 
+    j'th parameter when we use the i'th combination of testing parameters.
+
+    param_names: A two element list housing the names for the two parameters. 
+
+    n_cols: The number of columns in our subplots.
+
+    figsize: A two element tuple specifying the size of the overall figure size. 
+    
+    color_levels: The number of color levels to put in our plot.
+
+    cm: The color map we use for the plots.
 
 
-
+    
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
@@ -384,134 +412,244 @@ def plot_gp2d(  p1_mesh,
     """
     
     # Checks
-    assert(p1_mesh.ndim == 2)
-    assert(p2_mesh.ndim == 2)
-    assert(gp_mean.ndim == 3)
-    assert(gp_std.ndim == 3)
-    assert(param_train.ndim == 2)
-    assert(gp_mean.shape == gp_std.shape)
+    assert(p1_mesh.ndim         == 2);
+    assert(p2_mesh.ndim         == 2);
+    assert(gp_mean.ndim         == 3);
+    assert(gp_std.ndim          == 3);
+    assert(param_train.ndim     == 2);
+    assert(gp_mean.shape        == gp_std.shape);
+    assert(len(param_names)    == 2);
 
-    # ???
-    plot_shape_ = [gp_mean.shape[-1] // plot_shape[-1], plot_shape[-1]]
-    if (gp_mean.shape[-1] % plot_shape[-1] > 0):
-        plot_shape_[0] += 1
+    # First, determine how many coefficients there are.
+    n_coef : int = gp_mean.shape[-1];   
 
-    # ???
-    p1_range = [p1_mesh.min() * (1. - margin), p1_mesh.max() * (1. + margin)]
-    p2_range = [p2_mesh.min() * (1. - margin), p2_mesh.max() * (1. + margin)]
+    # Figure out how many rows/columns of subplots we should make.
+    subplot_shape = [n_coef // n_cols, n_cols];
+    if (n_coef % n_cols > 0):
+        subplot_shape[0] += 1
 
-    # ???
-    fig1, axs1 = plt.subplots(plot_shape_[0], plot_shape_[1], figsize = figsize)
-    fig2, axs2 = plt.subplots(plot_shape_[0], plot_shape_[1], figsize = figsize)
+    # Set limits for the x/y axes.
+    p1_range = [p1_mesh.min()*.99, p1_mesh.max()*1.01];
+    p2_range = [p2_mesh.min()*.99, p2_mesh.max()*1.01];
 
-    for i in range(plot_shape_[0]):
-        for j in range(plot_shape_[1]):
-            k = j + i * plot_shape_[1]
+    # Setup the subplots (one for std, another for mean)
+    fig_std,    axs_std     = plt.subplots(subplot_shape[0], subplot_shape[1], figsize = figsize);
+    fig_mean,   axs_mean    = plt.subplots(subplot_shape[0], subplot_shape[1], figsize = figsize);
 
-            if (k >= gp_mean.shape[-1]):
-                axs1[i, j].set_xlim(p1_range)
-                axs1[i, j].set_ylim(p2_range)
-                axs2[i, j].set_xlim(p1_range)
-                axs2[i, j].set_ylim(p2_range)
+    # Cycle through the subplots.
+    for i in range(subplot_shape[0]):
+        for j in range(subplot_shape[1]):
+            # Figure out which combination of parameter values corresponds to the current plot.
+            k = j + i * subplot_shape[1];
+            
+            # Remove the plot frame.
+            axs_std[i, j].set_frame_on(False);
+            axs_mean[i, j].set_frame_on(False);
+
+
+            # -------------------------------------------------------------------------------------
+            # There are only n_coef plots. If k > n_coef, then there is nothing to plot but we need 
+            # to plot something (to avoid pissing off matplotlib).
+            if (k >= n_coef):
+                axs_std[i, j].set_xlim(p1_range);
+                axs_std[i, j].set_ylim(p2_range);
+                axs_std[i, j].set_frame_on(False);
+
+                axs_mean[i, j].set_xlim(p1_range);
+                axs_mean[i, j].set_ylim(p2_range);
+                axs_mean[i, j].set_frame_on(False);
+
                 if (j == 0):
-                    axs1[i, j].set_ylabel(param_labels[1])
-                    axs1[i, j].get_yaxis().set_visible(True)
-                    axs2[i, j].set_ylabel(param_labels[1])
-                    axs2[i, j].get_yaxis().set_visible(True)
-                if (i == plot_shape_[0] - 1):
-                    axs1[i, j].set_xlabel(param_labels[0])
-                    axs1[i, j].get_xaxis().set_visible(True)
-                    axs2[i, j].set_xlabel(param_labels[0])
-                    axs2[i, j].get_xaxis().set_visible(True)
+                    axs_std[i, j].set_ylabel(param_names[1]);
+                    axs_std[i, j].get_yaxis().set_visible(True);
+                    axs_mean[i, j].set_ylabel(param_names[1]);
+                    axs_mean[i, j].get_yaxis().set_visible(True);
+                if (i == subplot_shape[0] - 1):
+                    axs_std[i, j].set_xlabel(param_names[0]);
+                    axs_std[i, j].get_xaxis().set_visible(True);
+                    axs_mean[i, j].set_xlabel(param_names[0]);
+                    axs_mean[i, j].get_xaxis().set_visible(True);
+                
 
-                continue
+                continue;
 
-            std = gp_std[:, :, k]
-            p = axs1[i, j].contourf(p1_mesh, p2_mesh, std, refine, cmap = cm)
-            fig1.colorbar(p, ticks = numpy.array([std.min(), std.max()]), format='%2.2f', ax = axs1[i, j])
-            axs1[i, j].scatter(param_train[:, 0], param_train[:, 1], c='k', marker='+')
-            axs1[i, j].set_title(r'$\sqrt{\Sigma^*_{' + str(i + 1) + str(j + 1) + '}}$')
-            axs1[i, j].set_xlim(p1_range)
-            axs1[i, j].set_ylim(p2_range)
-            axs1[i, j].invert_yaxis()
-            axs1[i, j].get_xaxis().set_visible(False)
-            axs1[i, j].get_yaxis().set_visible(False)
 
-            mean = gp_mean[:, :, k]
-            p = axs2[i, j].contourf(p1_mesh, p2_mesh, mean, refine, cmap = cm)
-            fig2.colorbar(p, ticks = numpy.array([mean.min(), mean.max()]), format='%2.2f', ax = axs2[i, j])
-            axs2[i, j].scatter(param_train[:, 0], param_train[:, 1], c='k', marker='+')
-            axs2[i, j].set_title(r'$\mu^*_{' + str(i + 1) + str(j + 1) + '}$')
-            axs2[i, j].set_xlim(p1_range)
-            axs2[i, j].set_ylim(p2_range)
-            axs2[i, j].invert_yaxis()
-            axs2[i, j].get_xaxis().set_visible(False)
-            axs2[i, j].get_yaxis().set_visible(False)
+            # -------------------------------------------------------------------------------------
+            # Get the coefficient distribution std's for the k'th combination of parameter values.
+            std     = gp_std[:, :, k];
 
+            # Plot!!!!
+            p       = axs_std[i, j].contourf(p1_mesh, p2_mesh, std, color_levels, cmap = cm);
+            fig_std.colorbar(p, ticks = numpy.array([std.min(), std.max()]), format = '%2.2f', ax = axs_std[i, j]);
+            axs_std[i, j].scatter(param_train[:, 0], param_train[:, 1], c = 'k', marker = '+');
+            axs_std[i, j].set_title(r'$\sqrt{\Sigma^*_{' + str(i + 1) + str(j + 1) + '}}$');
+            axs_std[i, j].set_xlim(p1_range);
+            axs_std[i, j].set_ylim(p2_range);
+            axs_std[i, j].invert_yaxis();
+            axs_std[i, j].get_xaxis().set_visible(False);
+            axs_std[i, j].get_yaxis().set_visible(False);
+
+
+            # -------------------------------------------------------------------------------------
+            # Get the coefficient distribution mean's for the k'th combination of parameter values.
+            mean    = gp_mean[:, :, k];
+
+            # Plot!!!!
+            p       = axs_mean[i, j].contourf(p1_mesh, p2_mesh, mean, color_levels, cmap = cm);
+            fig_mean.colorbar(p, ticks = numpy.array([mean.min(), mean.max()]), format='%2.2f', ax = axs_mean[i, j]);
+            axs_mean[i, j].scatter(param_train[:, 0], param_train[:, 1], c = 'k', marker = '+');
+            axs_mean[i, j].set_title(r'$\mu^*_{' + str(i + 1) + str(j + 1) + '}$');
+            axs_mean[i, j].set_xlim(p1_range);
+            axs_mean[i, j].set_ylim(p2_range);
+            axs_mean[i, j].invert_yaxis();
+            axs_mean[i, j].get_xaxis().set_visible(False);
+            axs_mean[i, j].get_yaxis().set_visible(False);
+
+
+            # -------------------------------------------------------------------------------------
+            # Add plot labels (but only if the current subplot is in the first column or final 
+            # row).
             if (j == 0):
-                axs1[i, j].set_ylabel(param_labels[1])
-                axs1[i, j].get_yaxis().set_visible(True)
-                axs2[i, j].set_ylabel(param_labels[1])
-                axs2[i, j].get_yaxis().set_visible(True)
-            if (i == plot_shape_[0] - 1):
-                axs1[i, j].set_xlabel(param_labels[0])
-                axs1[i, j].get_xaxis().set_visible(True)
-                axs2[i, j].set_xlabel(param_labels[0])
-                axs2[i, j].get_xaxis().set_visible(True)
+                axs_std[i, j].set_ylabel(param_names[1]);
+                axs_std[i, j].get_yaxis().set_visible(True);
+                axs_mean[i, j].set_ylabel(param_names[1]);
+                axs_mean[i, j].get_yaxis().set_visible(True);
+            if (i == subplot_shape[0] - 1):
+                axs_std[i, j].set_xlabel(param_names[0]);
+                axs_std[i, j].get_xaxis().set_visible(True);
+                axs_mean[i, j].set_xlabel(param_names[0]);
+                axs_mean[i, j].get_xaxis().set_visible(True);
 
-    return
+    # Make the plots!
+    fig_mean.tight_layout();
+    fig_std.tight_layout();
+    plt.show();
+
+    # All done!
+    return;
 
 
 
-def heatmap2d(values, p1_grid, p2_grid, param_train, n_init, figsize=(10, 10), param_labels=['p1', 'p2'], title=''):
-    assert(p1_grid.ndim == 1)
-    assert(p2_grid.ndim == 1)
-    assert(values.ndim == 2)
-    assert(param_train.ndim == 2)
+def Plot_Heatmap2d( values          : numpy.ndarray, 
+                    p1_grid         : numpy.ndarray, 
+                    p2_grid         : numpy.ndarray, 
+                    param_train     : numpy.ndarray,
+                    n_init_train    : int,
+                    figsize         : tuple[int]    = (10, 10), 
+                    param_names     : list[str]     = ['p1', 'p2'], 
+                    title           : str           = ''):
+    """
+    TODO
 
-    n_p1 = len(p1_grid)
-    n_p2 = len(p2_grid)
-    assert(values.shape[0] == n_p1)
-    assert(values.shape[1] == n_p2)
+    
 
-    fig, ax = plt.subplots(1, 1, figsize = figsize)
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
 
+    values: A 2d numpy ndarray object of shape (n1, n2), where n1 and n2 are the length of p1_grid
+    and p2_grid, respectively (the number of p1, p2 values).
+
+    p1_grid: The set of possible values for the p1 parameter. This should be a 1d numpy ndarray 
+    whose i'th value holds the i'th value for the p1 parameter.
+
+    p2_grid: The same thing as p1_grid, but for the p2 parameter. 
+
+    param_train: A 2d array of shape (n_train, 2) whose i, j element holds the value of the 
+    j'th parameter when we use the i'th combination of testing parameters. We assume the first 
+    n_init_train rows in this array hold the combinations that were originally in the training 
+    set and the rest were added in successive rounds of training.
+
+    n_init_train: The initial number of combinations of parameters in the training set.
+
+    figsize: A two element tuple specifying the size of the overall figure size. 
+
+    param_names: A two element list housing the names for the two parameters. 
+
+    title: The plot title.
+    
+
+
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    Nothing!
+    """
+
+    # Checks.
+    assert(p1_grid.ndim     == 1);
+    assert(p2_grid.ndim     == 1);
+    assert(values.ndim      == 2);
+    assert(param_train.ndim == 2);
+    assert(len(figsize)     == 2);
+    assert(len(param_names) == 2);
+
+    n_p1    : int = len(p1_grid);
+    n_p2    : int = len(p2_grid);
+    assert(values.shape[0] == n_p1);
+    assert(values.shape[1] == n_p2);
+
+
+    # ---------------------------------------------------------------------------------------------
+    # Make the heatmap!
+
+    # Set up the subplots.
+    fig, ax = plt.subplots(1, 1, figsize = figsize);
+
+    # Set up the color map.
     from matplotlib.colors import LinearSegmentedColormap
-    cmap = LinearSegmentedColormap.from_list('rg', ['C0', 'w', 'C3'], N = 256)
+    cmap = LinearSegmentedColormap.from_list('rg', ['C0', 'w', 'C3'], N = 256);
 
-    im = ax.imshow(values, cmap = cmap)
-    fig.colorbar(im, ax = ax, fraction = 0.04)
+    # Plot the figure as an image (the i,j pixel is just value[i, j], the value associated with 
+    # the i'th value of p1 and j'th value of p2.
+    im = ax.imshow(values, cmap = cmap);
+    fig.colorbar(im, ax = ax, fraction = 0.04);
 
-    ax.set_xticks(numpy.arange(0, n_p1, 2), labels = numpy.round(p1_grid[::2], 2))
-    ax.set_yticks(numpy.arange(0, n_p2, 2), labels = numpy.round(p2_grid[::2], 2))
+    ax.set_xticks(numpy.arange(0, n_p1, 2), labels = numpy.round(p1_grid[::2], 2));
+    ax.set_yticks(numpy.arange(0, n_p2, 2), labels = numpy.round(p2_grid[::2], 2));
 
+    # Add the value itself (as text) to the center of each "pixel".
     for i in range(n_p1):
         for j in range(n_p2):
-            ax.text(j, i, round(values[i, j], 1), ha='center', va='center', color='k')
+            ax.text(j, i, round(values[i, j], 1), ha = 'center', va = 'center', color = 'k');
 
-    grid_square_x = numpy.arange(-0.5, n_p1, 1)
-    grid_square_y = numpy.arange(-0.5, n_p2, 1)
 
-    n_train = param_train.shape[0]
+    # ---------------------------------------------------------------------------------------------
+    # Add boxes around each "pixel" corresponding to a training point. 
+
+    # Stuff to help us plot the boxes.
+    grid_square_x   : numpy.ndarray = numpy.arange(-0.5, n_p1, 1);
+    grid_square_y   : numpy.ndarray = numpy.arange(-0.5, n_p2, 1);
+
+    # Add boxes around parameter combinations in the training set.
+    n_train : int   = param_train.shape[0];
     for i in range(n_train):
-        p1_index = numpy.sum((p1_grid < param_train[i, 0]) * 1)
-        p2_index = numpy.sum((p2_grid < param_train[i, 1]) * 1)
+        p1_index : float = numpy.sum(p1_grid < param_train[i, 0]);
+        p2_index : float = numpy.sum(p2_grid < param_train[i, 1]);
 
-        if i < n_init:
-            color = 'r'
+        # Add red boxes around the initial points and black ones around points we added to the 
+        # training set in later rounds.
+        if i < n_init_train:
+            color : str = 'r';
         else:
-            color = 'k'
+            color : str = 'k';
 
-        ax.plot([grid_square_x[p1_index], grid_square_x[p1_index]], [grid_square_y[p2_index], grid_square_y[p2_index] + 1],
-                c=color, linewidth=2)
-        ax.plot([grid_square_x[p1_index] + 1, grid_square_x[p1_index] + 1],
-                [grid_square_y[p2_index], grid_square_y[p2_index] + 1], c=color, linewidth=2)
-        ax.plot([grid_square_x[p1_index], grid_square_x[p1_index] + 1], [grid_square_y[p2_index], grid_square_y[p2_index]],
-                c=color, linewidth=2)
-        ax.plot([grid_square_x[p1_index], grid_square_x[p1_index] + 1],
-                [grid_square_y[p2_index] + 1, grid_square_y[p2_index] + 1], c=color, linewidth=2)
+        # Add colored lines around the pixel corresponding to the i'th training combination.
+        ax.plot([grid_square_x[p1_index],       grid_square_x[p1_index]     ],  [grid_square_y[p2_index],       grid_square_y[p2_index] + 1 ],  c = color, linewidth = 2);
+        ax.plot([grid_square_x[p1_index] + 1,   grid_square_x[p1_index] + 1 ],  [grid_square_y[p2_index],       grid_square_y[p2_index] + 1 ],  c = color, linewidth = 2);
+        ax.plot([grid_square_x[p1_index],       grid_square_x[p1_index] + 1 ],  [grid_square_y[p2_index],       grid_square_y[p2_index]     ],  c = color, linewidth = 2);
+        ax.plot([grid_square_x[p1_index],       grid_square_x[p1_index] + 1 ],  [grid_square_y[p2_index] + 1,   grid_square_y[p2_index] + 1 ],  c = color, linewidth = 2);
 
-    ax.set_xlabel(param_labels[0], fontsize=15)
-    ax.set_ylabel(param_labels[1], fontsize=15)
-    ax.set_title(title, fontsize=25)
-    return
+
+    # ---------------------------------------------------------------------------------------------
+    # Finalize the plot!
+
+    # Set plot lables and plot!
+    ax.set_xlabel(param_names[0], fontsize = 15);
+    ax.set_ylabel(param_names[1], fontsize = 15);
+    ax.set_title(title, fontsize = 25);
+    plt.show();
+
+    # All done!
+    return;
