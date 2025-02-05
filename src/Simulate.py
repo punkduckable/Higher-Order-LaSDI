@@ -81,8 +81,9 @@ def average_rom(model           : torch.nn.Module,
     Z0      : list[list[numpy.ndarray]] = model.latent_initial_conditions(param_grid, physics);
 
     # Evaluate each GP at each combination of parameter values. This returns two arrays, the 
-    # first of which is a 2d array whose i,j element specifies the mean of the posterior 
-    # distribution for the j'th coefficient at the i'th combination of parameter values.
+    # first of which is a 2d array of shape (n_param, n_coef) whose i,j element specifies the mean 
+    # of the posterior distribution for the j'th coefficient at the i'th combination of parameter 
+    # values.
     pred_mean, _ = eval_gp(gp_list, param_grid);
 
     # For each testing parameter, cycle through the mean value of each coefficient from each 
@@ -96,10 +97,17 @@ def average_rom(model           : torch.nn.Module,
     for d in range(n_IC):
         Zis.append(numpy.zeros([n_param, physics.n_t, model.n_z]));
 
+    n_t : int = physics.n_t;
+    n_z : int = latent_dynamics.dim;
     for i in range(n_param):
-        ith_Zis : list[numpy.ndarray] = latent_dynamics.simulate(coefs = pred_mean[i], IC = Z0[i], times = physics.t_grid);
+        # Reshape each element of the IC to have shape (1, n_z), which is what simulate expects
+        Z0_i     = Z0[i];
         for d in range(n_IC):
-            Zis[d][i, :, :] = ith_Zis[d];
+            Z0_i[d] = Z0_i[d].reshape(1, -1);
+        
+        ith_Zis : list[numpy.ndarray] = latent_dynamics.simulate(coefs = pred_mean[i, :], IC = Z0_i, times = physics.t_grid);
+        for d in range(n_IC):
+            Zis[d][i, :, :] = ith_Zis[d].reshape(n_t, n_z);
 
     # All done!
     return Zis;
@@ -194,11 +202,16 @@ def sample_roms(model           : torch.nn.Module,
 
     # For each testing parameter, cycle through the samples of the coefficients for that 
     # combination of parameter values. For each set of coefficients, solve the corresponding latent 
-    # dynamics forward in time and store the resulting frames in Zis. 
+    # dynamics forward in time and store the resulting frames in Zis.
+    n_t : int = physics.n_t;
+    n_z : int = latent_dynamics.dim; 
     for i in range(n_param):
         # Fetch the initial conditions when we use the i'th combination of parameter values.
+        # Reshape each element of the IC to have shape (1, n_z), which is what simulate expects
         ith_ICs                 : list[numpy.ndarray]   = Z0[i];
-        coef_samples_ith_param  : numpy.ndarray         = coef_samples[i]
+        for d in range(n_IC):
+            ith_ICs[d] = ith_ICs[d].reshape(1, -1);
+        coef_samples_ith_param  : numpy.ndarray         = coef_samples[i];
 
         for j in range(n_samples):
             # Fetch the j'th sample of the coefficients when we use the i'th combination of 
@@ -210,7 +223,7 @@ def sample_roms(model           : torch.nn.Module,
         
             # Now store the results in Zis. 
             for d in range(n_IC):
-                Zis[d][i, j, :, :]  = Zij[d];
+                Zis[d][i, j, :, :]  = Zij[d].reshape(n_t, n_z);
 
     # All done!
     return Zis;

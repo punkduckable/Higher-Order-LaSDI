@@ -290,6 +290,10 @@ class BayesianGLaSDI:
                 Z_X                 : torch.Tensor      = Z_X.cpu();
                 Z_V                 : torch.Tensor      = Z_V.cpu();
 
+
+                # --------------------------------------------------------------------------------
+                # Consistency loss
+
                 # Make sure Z_V actually looks like the time derivative of Z. 
                 n_param : int = Z_X.shape[0];
                 loss_consistency_Z    : torch.Tensor    = torch.zeros(1, dtype = torch.float32);
@@ -307,11 +311,25 @@ class BayesianGLaSDI:
                 loss_consistency    : torch.Tensor      = loss_consistency_Z + loss_consistency_X;
 
 
+                # --------------------------------------------------------------------------------
+                # Rollout loss
+                # TODO
+
+
+
+
+                # --------------------------------------------------------------------------------
+                # Reconstruction loss
+
                 # Compute the reconstruction loss. 
                 loss_recon_disp     : torch.Tensor      = self.MSE(X_Train_device[0], X_Pred);
                 loss_recon_vel      : torch.Tensor      = self.MSE(X_Train_device[1], V_Pred);
                 loss_recon          : torch.Tensor      = loss_recon_disp + loss_recon_vel;
             
+
+                # --------------------------------------------------------------------------------
+                # Latent Dynamics, Coefficient losses
+
                 # Build the Latent States for calibration.
                 Latent_States   : list[torch.Tensor]    = [Z_X, Z_V];
 
@@ -321,6 +339,11 @@ class BayesianGLaSDI:
                 # training parameter combinations, N_z = latent space dimension, and N_l = number of 
                 # terms in the SINDy library.
                 coefs, loss_ld, loss_coef       = ld.calibrate(Latent_States = Latent_States, dt = self.physics.dt);
+
+
+
+                # --------------------------------------------------------------------------------
+                # Total loss
 
                 # Compute the final loss.
                 loss = (self.loss_weights['recon']          * loss_recon + 
@@ -464,6 +487,7 @@ class BayesianGLaSDI:
         # Remember that coefs should specify the coefficients from that iteration. 
         model       : torch.nn.Module   = self.model.cpu();
         n_test      : int               = self.param_space.n_test();
+        n_IC        : int               = len(self.X_Test);
         model.load_state_dict(torch.load(self.path_checkpoint + '/' + 'checkpoint.pt'));
 
         # Map the initial conditions for the FOM to initial conditions in the latent space.
@@ -495,14 +519,22 @@ class BayesianGLaSDI:
         # is the number of derivatives of the latent state we need to fully define the latent 
         # state's initial condition.
         LatentStates    : list[numpy.ndarray]   = [];
-        for i in range(self.latent_dynamics.n_IC):
+        for i in range(n_IC):
             LatentStates.append(numpy.ndarray([n_test, self.n_samples, self.physics.n_t, model.n_z]));
         
+        n_t : int = self.physics.n_t;
+        n_z : int = self.latent_dynamics.dim;
         for i in range(n_test):
+            # Reshape each element of the IC to have shape (1, n_z), which is what simulate expects
+            Z0_i     = Z0[i];
+            for d in range(n_IC):
+                Z0_i[d] = Z0_i[d].reshape(1, -1);
+
+             # Cycle through the samples.            
             for j in range(self.n_samples):
-                LatentState_ij : list[numpy.ndarray] = self.latent_dynamics.simulate(coef_samples[i][j], Z0[i], self.physics.t_grid);
-                for k in range(self.latent_dynamics.n_IC):
-                    LatentStates[k][i, j, :, :] = LatentState_ij[k];
+                LatentState_ij : list[numpy.ndarray] = self.latent_dynamics.simulate(coef_samples[i][j, :], Z0_i, self.physics.t_grid);
+                for k in range(n_IC):
+                    LatentStates[k][i, j, :, :] = LatentState_ij[k].reshape(n_t, n_z);
 
         # Find the index of the parameter with the largest std.
         m_index : int = get_FOM_max_std(model, LatentStates);

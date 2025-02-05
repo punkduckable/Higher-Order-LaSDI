@@ -239,8 +239,8 @@ class DampedSpring(LatentDynamics):
 
     def simulate(   self,
                     coefs   : numpy.ndarray         | torch.Tensor, 
-                    IC      : list[numpy.ndarray    | torch.Tensor],
-                    times   : numpy.ndarray) -> list[numpy.ndarray  | torch.Tensor]:
+                    IC      : list[numpy.ndarray]   | list[torch.Tensor],
+                    times   : numpy.ndarray) -> list[numpy.ndarray]  | list[torch.Tensor]:
         """
         Time integrates the latent dynamics when it uses the coefficients specified in coefs and 
         starts from the (single) initial condition in z0.
@@ -314,11 +314,12 @@ class DampedSpring(LatentDynamics):
             # Now, cycle through the parameter combinations
             for i in range(n_param):
                 # Extract the i'th combinations of coefficients and initial conditions.
-                ith_coefs   : numpy.ndarray | torch.Tensor          = coefs[i, :];
-                ith_IC      : list[numpy.ndarray | torch.Tensor]    = [IC[0][i, :, :], IC[1][i, :, :]];
+                ith_coefs   : numpy.ndarray | torch.Tensor              = coefs[i, :];
+                ith_IC      : list[numpy.ndarray] | list[torch.Tensor]  = [IC[0][i, :, :], IC[1][i, :, :]];
 
                 # Call this function using them.
-                ith_Results : list[numpy.ndarray | torch.Tensor]    = self.simulate(coefs   = ith_coefs, 
+                ith_Results : list[numpy.ndarray] | list[torch.Tensor]  = self.simulate(
+                                                                                    coefs   = ith_coefs, 
                                                                                     IC      = ith_IC, 
                                                                                     times   = times);
 
@@ -333,7 +334,7 @@ class DampedSpring(LatentDynamics):
         # If we get here, then coefs has one dimension. In this case, each element of IC should 
         # have shape (dim, n). 
         Disp0   : numpy.ndarray | torch.Tensor  = IC[0]; 
-        Vel0    : numpy.ndarray | torch.Tensor  = IC[1]
+        Vel0    : numpy.ndarray | torch.Tensor  = IC[1];
 
         # First, we need to extract -K, -C, and b from coefs. We know that coefs is the least 
         # squares solution to d2Z_dt2 = hstack[Z, dZdt, 1] E^T. Thus, we expect that.
