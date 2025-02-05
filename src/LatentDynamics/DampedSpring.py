@@ -191,8 +191,8 @@ class DampedSpring(LatentDynamics):
         
         # First, compute the second time derivative of Z_X. This should also be the first time 
         # derivative of Z_V. We average the two so that the final loss depends on both.
-        d2Z_dt2_from_Z_X    : torch.Tensor  = Derivative2_Order4(X = Z_X,     h = dt);
-        d2Z_dt2_from_Z_V    : torch.Tensor  = Derivative1_Order4(X = Z_V, h = dt);
+        d2Z_dt2_from_Z_X    : torch.Tensor  = Derivative2_Order4(X = Z_X,   h = dt);
+        d2Z_dt2_from_Z_V    : torch.Tensor  = Derivative1_Order4(X = Z_V,   h = dt);
         d2Z_dt2             : torch.Tensor  = 0.5*d2Z_dt2_from_Z_X + 0.5*d2Z_dt2_from_Z_V;
 
         # Concatenate Z_X, Z_V and a column of 1's. We will solve for the matrix, E, which gives 
@@ -238,9 +238,9 @@ class DampedSpring(LatentDynamics):
 
 
     def simulate(   self,
-                    coefs   : numpy.ndarray, 
-                    IC      : list[numpy.ndarray],
-                    times   : numpy.ndarray) -> list[numpy.ndarray]:
+                    coefs   : numpy.ndarray         | torch.Tensor, 
+                    IC      : list[numpy.ndarray    | torch.Tensor],
+                    times   : numpy.ndarray) -> list[numpy.ndarray  | torch.Tensor]:
         """
         Time integrates the latent dynamics when it uses the coefficients specified in coefs and 
         starts from the (single) initial condition in z0.
@@ -250,12 +250,22 @@ class DampedSpring(LatentDynamics):
         Arguments
         -------------------------------------------------------------------------------------------
         
-        coefs: A one dimensional numpy.ndarray object representing the flattened copy of 
-        hstack[-K, -C, b]. We extract K, C, and b from coefs.
+        coefs: Either a one or two dimensional numpy.ndarray or torch.Tensor objects. If it has 
+        one dimension, then coefs represents a is a flattened copy of hstack[-K, -C, b], where 
+        K, C, and b are the optimal coefficients for a specific combination of parameter values. 
+        If coefs has two dimensions, then it should have shape (n_param, n_coef) and it's i'th row 
+        should represent the optimal set of coefficients when we use the i'th combination of 
+        parameter values. In this case, we inductively call simulate on each row of coefs. 
 
-        IC: A 2 element list of numpy ndarrays of shape dim. The j'th element of the two arrays 
-        should hold the j'th component of the position and velocity of the initial latent state.
-        
+        IC: A list of two numpy.ndarray or torch.Tensor objects. These objects should have either 
+        two or three dimensions. If coefs has one dimension, then each element of IC should have 
+        shape (n, dim) where n represents the number of initial conditions we want to simulate 
+        forward in time and dim is the latent dimension. If you want to simulate a single IC, then 
+        n == 1. If coefs has two dimensions (specifically if coefs.shape = (n_param, n_coef)), then 
+        each element of IC should have shape (n_param, n, dim). In this case, IC[d][i, j, :] 
+        represents the j'th initial condition for the d'th derivative of the latent state when 
+        we use the i'th combination of parameter values.
+
         times: A 1d numpy ndarray object whose i'th entry holds the value of the i'th time value 
         where we want to compute the latent solution. The elements of this array should be in 
         ascending order. 
@@ -265,40 +275,90 @@ class DampedSpring(LatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------        
         
-        A 3d numpy ndarray of shape (2, n_t, dim) where n_t is the number of time steps (size of 
-        times) and dim is the latent space dimension (self.dim). The 0,i,j and 1,i,j elements of 
-        this array hold the j'th components of the displacement and velocity at the i'th time step, 
-        respectively.
+        A list of two numpy ndarrays representing the simulated displacements and velocities. If 
+        coefs has two dimensions and shape (n_param, n_coefs), then each array should have shape 
+        (n_param, n_t, dim). The i,j,k element of the two arrays should hold the k'th component of 
+        the j'th time steps of the simulated displacement and velocity, respectively, when we use 
+        the i'th set of coefficients (coefs[i, :]) to simulate the latent dynamics. If coefs has 
+        one dimension, the then each array will have two dimensions and shape (n_t, dim). The i, j
+        element of the returned arrays should house the j'th component of the displacement and 
+        velocity at the i'th time step, respectively.
         """
 
         # Run checks.
         assert(len(IC)              == 2);
-        assert(IC[0].size           == self.dim);
-        assert(IC[1].size           == self.dim);
+        assert((len(coefs.shape)    == 1    and len(IC[0].shape)    == 2)    or  (len(coefs.shape)    == 2  and len(IC[0].shape)    == 3));
+        assert(IC[0].shape[-1]      == self.dim);
+        assert(IC[0].shape          == IC[1].shape);
         assert(len(times.shape)     == 1);
+        assert(type(coefs)          == type(IC[0]));
+        assert(type(coefs)          == type(IC[1]));
 
-        # Extract ICs
-        Z0      : numpy.ndarray     = IC[0]; 
-        dZ0_dt  : numpy.ndarray     = IC[1];
+
+        # The way this function works depends on if there is one set of coefficients or an entire
+        # batch of them. 
+        if(len(coefs.shape) == 2):
+            # In this case, coefs.shape = (n_param, n_coefs). First, let's extract n_parm and n_t.
+            n_param     : int   = coefs.shape[0];
+            n_t         : int   = times.size;
+            LOGGER.debug("Simulating with %d parameter combinations" % n_param);
+
+            # Set up arrays to hold the simulated positions and velocities.
+            if(isinstance(coefs, numpy.ndarray)):
+                Disp    : numpy.ndarray     = numpy.empty((n_param, n_t, self.dim), dtype = numpy.float32);
+                Vel     : numpy.ndarray     = numpy.empty((n_param, n_t, self.dim), dtype = numpy.float32);
+            elif(isinstance(coefs, torch.Tensor)):
+                Disp    : torch.Tensor      = torch.empty((n_param, n_t, self.dim), dtype = torch.float32);
+                Vel     : torch.Tensor      = torch.empty((n_param, n_t, self.dim), dtype = torch.float32);             
+
+            # Now, cycle through the parameter combinations
+            for i in range(n_param):
+                # Extract the i'th combinations of coefficients and initial conditions.
+                ith_coefs   : numpy.ndarray | torch.Tensor          = coefs[i, :];
+                ith_IC      : list[numpy.ndarray | torch.Tensor]    = [IC[0][i, :, :], IC[1][i, :, :]];
+
+                # Call this function using them.
+                ith_Results : list[numpy.ndarray | torch.Tensor]    = self.simulate(coefs   = ith_coefs, 
+                                                                                    IC      = ith_IC, 
+                                                                                    times   = times);
+
+                # Add these results to Disp, Vel.
+                Disp[i, :, :]   = ith_Results[0];
+                Vel[i, :, :]    = ith_Results[1];
+
+            # All done.
+            return [Disp, Vel];
+    
+
+        # If we get here, then coefs has one dimension. In this case, each element of IC should 
+        # have shape (dim, n). 
+        Disp0   : numpy.ndarray | torch.Tensor  = IC[0]; 
+        Vel0    : numpy.ndarray | torch.Tensor  = IC[1]
 
         # First, we need to extract -K, -C, and b from coefs. We know that coefs is the least 
         # squares solution to d2Z_dt2 = hstack[Z, dZdt, 1] E^T. Thus, we expect that.
         # E = [-K, -C, b]. 
-        E   : numpy.ndarray = coefs.reshape([2*self.dim + 1, self.dim]).T;
+        E   : numpy.ndarray | torch.Tensor = coefs.reshape([2*self.dim + 1, self.dim]).T;
 
-        # Extract K, C, and b.
-        K   : numpy.ndarray = -E[:, 0:self.dim];
-        C   : numpy.ndarray = -E[:, self.dim:(2*self.dim)];
-        b   : numpy.ndarray = E[:, 2*self.dim];
+        # Extract K, C, and b. Note that we need to reshape b to have shape (1, dim) to enable
+        # broadcasting.
+        K   : numpy.ndarray | torch.Tensor = -E[:, 0:self.dim];
+        C   : numpy.ndarray | torch.Tensor = -E[:, self.dim:(2*self.dim)];
+        b   : numpy.ndarray | torch.Tensor = E[:, 2*self.dim].reshape(1, -1);
 
-        # Set up a lambda function to approximate (d^2/dt^2)z(t) \approx -K z(t) - C (d/dt)z(t) + b
-        f    = lambda t, z, dz_dt: b - numpy.dot(C, dz_dt)  - numpy.dot(K, z);
+        # Set up a lambda function to approximate (d^2/dt^2)z(t) \approx -K z(t) - C (d/dt)z(t) + b.
+        # In this case, we expect dz_dt and z to have shape (n, dim). Thus, matmul(z, K.T) will have 
+        # shape (n, dim). The i'th row of this should hold the z portion of the rhs of the latent
+        # dynamics for the i'th IC. Similar results hold for dot(dz_dt, C.T). The final result 
+        # should have shape (n, dim). The i'th row should hold the rhs of the latent dynamics 
+        # for the i'th IC.
+        f    = lambda t, z, dz_dt: b - numpy.matmul(dz_dt, C.T)  - numpy.matmul(z, K.T);
 
         # Solve the ODE forward in time.
-        Z, dZ_dt = RK4(f = f, y0 = Z0, Dy0 = dZ0_dt, times = times);
+        Disp, Vel = RK4(f = f, y0 = Disp0, Dy0 = Vel0, times = times);
 
         # All done!
-        return [Z, dZ_dt];
+        return [Disp, Vel];
     
 
 
