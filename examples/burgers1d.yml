@@ -4,14 +4,14 @@ lasdi:
     # device:                 mps
     n_samples:              20
     lr:                     0.001
-    max_iter:               28000
+    max_iter:               12000
     n_iter:                 4000
-    max_greedy_iter:        28000
+    max_greedy_iter:        12000
     path_checkpoint:        checkpoint
     path_results:           results
     loss_weights:
       recon:                1.0
-      ld:                   0.5
+      ld:                   1.0
       coef:                 0.000001
       consistency:          1.0
 
@@ -60,7 +60,7 @@ latent_dynamics:
 physics:
   type:                     burgers1d
   burgers1d:
-    number_of_timesteps:    1001
+    number_of_timesteps:    501
     elasticity:             1.
     grid_shape:             [1001]
     xmin:                   -3.

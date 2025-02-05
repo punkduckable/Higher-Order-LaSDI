@@ -92,24 +92,18 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
     n_IC : int = len(X_True);
     assert(len(t_grid.shape)    == 1);
     assert(len(x_grid.shape)    == 1);
-    n_t             : int   = t_grid.size;
-    n_x             : int   = x_grid.size;
-    assert(len(figsize)     == 2);
+    n_t             : int       =  t_grid.size;
+    n_x             : int       =  x_grid.size;
+    assert(len(figsize)         == 2);
 
     for d in range(n_IC):
-        assert(X_True[d].shape[0]    == n_t);
-        assert(X_True[d].shape[1]    == n_x);
+        assert(X_True[d].ndim       == 2);
+        assert(X_True[d].shape[0]   == n_t);
+        assert(X_True[d].shape[1]   == n_x);
 
 
-    # Set up the matrix of t, x values.
-    t_matrix : numpy.ndarray = numpy.empty(shape = (n_t, n_x), dtype = numpy.float32);
-    for i in range(n_t):
-        t_matrix[i, :] = t_grid[i];
+    LOGGER.info("Making a Reconstruction plot with n_t = %d and n_x = %d" % (n_t, n_x));
 
-    x_matrix : numpy.ndarray = numpy.empty(shape = (n_t, n_x), dtype = numpy.float32);
-    for j in range(n_x):
-        x_matrix[:, j] = x_grid[j];
-    
 
     # Reshape each element of X_Pred to have a leading dimension of 1 (the model expects 3d tensors
     # whose leading axis corresponds to the number of parameter values. In our case, this should be
@@ -118,20 +112,8 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
         X_True[d] = X_True[d].reshape((1,) + X_True[d].shape);
 
 
-    # Compute the predictions. The way this works depends on what class model is.
-    if(isinstance(model, Autoencoder)):
-            assert(n_IC == 1);
-
-            # Pass the input through the Autoencoder.
-            X_Pred  : list[torch.Tensor]    = [model.forward(X_True[0])];
-
-    if(isinstance(model, Autoencoder_Pair)):
-            assert(n_IC == 2);
-
-            # Pass the input through the Autoencoder.
-            Disp_Pred, Vel_Pred             = model.forward(X_True[0], X_True[1]);
-            X_Pred  : list[torch.Tensor]    = [Disp_Pred, Vel_Pred];
-    
+    # Compute the predictions. 
+    X_Pred  : list[torch.Tensor]    = list(model.forward(*X_True));
 
     # Map both the true and predicted solutions to numpy arrays.
     # also set up list to hold the difference between the prediction and true solutions.
@@ -158,23 +140,24 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
 
     # Now... plot the results!
     for d in range(n_IC):
+        LOGGER.debug("Generating plot for time derivative %d of the fom solution" % d);
         fig, ax  = plt.subplots(1, 5, width_ratios = [1, 0.05, 1, 1, 0.05], figsize = figsize);
         fig.tight_layout();
 
-        im0 = ax[0].contourf(t_matrix, x_matrix, X_True[d], levels = numpy.linspace(X_min[d], X_max[d], 200));
+        im0 = ax[0].contourf(t_grid, x_grid, X_True[d].T, levels = numpy.linspace(X_min[d], X_max[d], 200));  # Note: contourf(X, Y, Z) requires Z.shape = (Y.shape, X.shape) with Z[i, j] corresponding to Y[i] and X[j]
         ax[0].set_title("True");
         ax[0].set_xlabel("t");
         ax[0].set_ylabel("x");
 
         fig.colorbar(im0, cax = ax[1], format = "%0.2f", location = "left");
 
-        ax[2].contourf(t_matrix, x_matrix, X_Pred[d], levels = numpy.linspace(X_min[d], X_max[d], 200));
+        ax[2].contourf(t_grid, x_grid, X_Pred[d].T, levels = numpy.linspace(X_min[d], X_max[d], 200));            
         ax[2].set_title("Prediction");
         ax[2].set_xlabel("t");
         ax[2].set_ylabel("x");
 
 
-        im3 = ax[3].contourf(t_matrix, x_matrix, Diff_X[d], levels = numpy.linspace(Diff_X_min[d], Diff_X_max[d], 200));
+        im3 = ax[3].contourf(t_grid, x_grid, Diff_X[d].T, levels = numpy.linspace(Diff_X_min[d], Diff_X_max[d], 200));
         ax[3].set_title("Difference");
         ax[3].set_xlabel("t");
         ax[3].set_ylabel("x");
@@ -194,11 +177,14 @@ def Plot_Prediction(model           : torch.nn.Module,
                     param_grid      : numpy.ndarray, 
                     n_samples       : int, 
                     X_True          : list[numpy.ndarray], 
-                    scale           : int               = 1)            -> None:
+                    figsize         : tuple[int]        = (14, 8))            -> None:
     """
-    TODO
+    This function plots the mean and std (as a function of t, x) prediction of each derivative of
+    the fom solution. We also plot each sample of each component of the latent trajectories over 
+    time.
 
 
+    
     -----------------------------------------------------------------------------------------------
     Arguments
     -----------------------------------------------------------------------------------------------
@@ -227,8 +213,9 @@ def Plot_Prediction(model           : torch.nn.Module,
     object of shape (n_t, n_x), where n_t is the number of points we use to discretize the spatial
     axis of the fom solution domain. The i,j element of the d'th element of X_True should hold 
     the d'th derivative of the fom solution at the i'th time value and j'th spatial position.
+    
+    figsize: a two element array specifying the width and height of the figure.
 
-    scale: ???
     
 
     -----------------------------------------------------------------------------------------------
@@ -257,48 +244,36 @@ def Plot_Prediction(model           : torch.nn.Module,
     n_IC : int = latent_dynamics.n_IC;
     assert(len(Latent_Trajectories) == n_IC);
 
-    # Fetch latent dimension size.
+    # Fetch latent dimension.
     n_z : int = model.n_z;
+    LOGGER.info("Computing mean/std of predictions. The Latent Trajectories have a shape of (n_params, n_samples, n_t, n_z) = %s" % str(Latent_Trajectories[0].shape));
 
     # Only keep the predicted solutions when we use the first parameter value. Note that each
-    # element of this updated Z has shape (n_samples, n_t, n_z). 
+    # element of Latent_Trajectories has shape (n_samples, n_t, n_z). Also map everything to 
+    # tensors.
     for d in range(n_IC):
-        Latent_Trajectories[d] = Latent_Trajectories[d][0, :, :, :];
+        Latent_Trajectories[d] = torch.Tensor(Latent_Trajectories[d][0, :, :, :]);
 
-    # Now generate the predictions. The way we do this depend on if we are using an Autoencoder or 
-    # an Autoencoder_Pair.
-    if(isinstance(model, Autoencoder)):
-        assert(n_IC == 1);
+    # Now generate the predictions.
+    X_Pred  : list[torch.Tensor] = list(model.Decode(*Latent_Trajectories));
+    assert(len(X_Pred) == n_IC);
+    LOGGER.debug("Predictions have shape %s" % str(X_Pred[0].shape));
 
-        # Pass the predictions through the decoder to get the corresponding fom frames. Note that 
-        # X_pred has shape (n_samples, n_t, n_x), where n_x is the number of points along the spatial 
-        # axis.
-        X_pred        : numpy.ndarray       = model.Decode(torch.Tensor(Latent_Trajectories)).detach().numpy();
-        X_pred_mean   : list[numpy.ndarray] = [X_pred.mean(0)];
-        X_pred_std    : list[numpy.ndarray] = [X_pred.std(0)];
-    
-    elif(isinstance(model, Autoencoder_Pair)):
-        assert(n_IC == 2);
+    # Compute the mean, std of the predictions across the samples.
+    X_pred_mean : list[numpy.ndarray] = [];
+    X_pred_std  : list[numpy.ndarray] = [];
+    for d in range(n_IC):
+        X_Pred[d]       = X_Pred[d].detach().numpy();       # X_Pred[i] has shape (n_samples, n_t, n_z).
+        X_pred_mean.append( numpy.mean( X_Pred[d], 0));
+        X_pred_std.append(  numpy.std(  X_Pred[d], 0));
 
-        # Pass the predictions through the decoder to get the corresponding fom frames. Note that 
-        # X_pred has shape (n_samples, n_t, n_x), where n_x is the number of points along the spatial 
-        # axis.
-        Disp_pred, Vel_Pred = model.Decode(torch.Tensor(Latent_Trajectories[0]), torch.Tensor(Latent_Trajectories[1]));
-        Disp_pred           = Disp_pred.detach().numpy();
-        Vel_Pred            = Vel_Pred.detach().numpy();
+    # Compute the solution residual (this will tell us how well the predicted solution satisfies 
+    # the underlying equation).
+    r, _ = physics.residual(X_pred_mean);
 
-        X_pred_mean   : list[numpy.ndarray] = [Disp_pred.mean(0),   Vel_Pred.mean(0)];
-        X_pred_std    : list[numpy.ndarray] = [Disp_pred.std(0),    Vel_Pred.std(0)];
-    
-    else:
-        raise TypeError("model must be Autoencoder or Autoencoder_Pair. Got %s" % str(type(model)));
-
-    # Compute the solution residual (this will tell us how well the predicted solution actually 
-    # satisfies the underlying equation).
-    r, e = physics.residual(X_pred_mean);
-
-    t_mesh, x_mesh = physics.t_grid, physics.x_grid;
-    if (physics.x_grid.ndim > 1):
+    t_grid  : numpy.ndarray = physics.t_grid;
+    x_grid  : numpy.ndarray = physics.x_grid;
+    if (x_grid.ndim > 1):
         raise RuntimeError('plot_prediction supports only 1D physics!');
 
 
@@ -308,49 +283,63 @@ def Plot_Prediction(model           : torch.nn.Module,
     # ---------------------------------------------------------------------------------------------
 
     for d in range(n_IC):
-        plt.figure();
+        LOGGER.debug("Generating plots for derivative %d" % d);
+        plt.figure(figsize = figsize);
 
         # Plot each component of the d'th derivative of the latent state over time (across the 
         # samples of the latent coefficients)
         plt.subplot(231);
         for s in range(n_samples):
             for i in range(n_z):
-                plt.plot(t_mesh, Latent_Trajectories[d][s, :, i], 'C' + str(i), alpha = 0.3);
+                plt.plot(t_grid, Latent_Trajectories[d][s, :, i], 'C' + str(i), alpha = 0.3);
         plt.title('Latent Space');
 
         # Plot the mean of the d'th derivative of the fom solution.
         plt.subplot(232);
-        plt.contourf(t_mesh, x_mesh, X_pred_mean[d][::scale, ::scale], 100, cmap = plt.cm.jet);
+        plt.contourf(t_grid, x_grid, X_pred_mean[d].T, 100, cmap = plt.cm.jet);   # Note: contourf(X, Y, Z) requires Z.shape = (Y.shape, X.shape) with Z[i, j] corresponding to Y[i] and X[j].
         plt.colorbar();
+        plt.xlabel("t");
+        plt.ylabel("x");
         plt.title('Decoder Mean Prediction');
         
         # Plot the std of the d'th derivative of the fom solution.
         plt.subplot(233);
-        plt.contourf(t_mesh, x_mesh, X_pred_std[d][::scale, ::scale], 100, cmap = plt.cm.jet);
+        plt.contourf(t_grid, x_grid, X_pred_std[d].T, 100, cmap = plt.cm.jet);
         plt.colorbar();
+        plt.xlabel("t");
+        plt.ylabel("x");
         plt.title('Decoder Standard Deviation');
 
         # Plot the d'th derivative of the true fom solution.
         plt.subplot(234);
-        plt.contourf(t_mesh, x_mesh, X_True[d][::scale, ::scale], 100, cmap = plt.cm.jet);
+        plt.contourf(t_grid, x_grid, X_True[d].T, 100, cmap = plt.cm.jet);
         plt.colorbar();
+        plt.xlabel("t");
+        plt.ylabel("x");
         plt.title('Ground Truth');
 
         # Plot the error between the mean predicted d'th derivative and the true d'th derivative of
         # the fom solution.
         plt.subplot(235);
         error = numpy.abs(X_True[d] - X_pred_mean[d]);
-        plt.contourf(t_mesh, x_mesh, error, 100, cmap = plt.cm.jet);
+        plt.contourf(t_grid, x_grid, error.T, 100, cmap = plt.cm.jet);
         plt.colorbar();
+        plt.xlabel("t");
+        plt.ylabel("x");
         plt.title('Absolute Error');
 
         # Finally, plot the residual.
         plt.subplot(236);
-        plt.contourf(t_mesh[:-1], x_mesh[:-1], r, 100, cmap = plt.cm.jet);
+        plt.contourf(t_grid[:-1], x_grid[:-1], r.T, 100, cmap = plt.cm.jet);
         plt.colorbar();
+        plt.xlabel("t");
+        plt.ylabel("x");
         plt.title('Residual');
 
         plt.tight_layout();
+
+    # All done!
+    plt.show();
 
 
 
@@ -365,7 +354,9 @@ def Plot_GP2d(  p1_mesh         : numpy.ndarray,
                 color_levels    : int           = 100, 
                 cm                              = plt.cm.jet) -> None:
     """
-    TODO
+    This function plots the mean and standard deviation of the posterior distributions of each 
+    latent dynamics coefficient as a function the (2) parameters. We assume there are just two 
+    parameters, p1 and p2, which condition the coefficient distributions.
 
 
     -----------------------------------------------------------------------------------------------
@@ -379,12 +370,12 @@ def Plot_GP2d(  p1_mesh         : numpy.ndarray,
     p2_mesh: A 2d ndarray object of shape (N(1), N(2)) whose i,j element holds the j'th value of 
     the second parameter.
 
-    gp_mesh: A 3d numpy array of shape (N(1), N(2), n_coef), where n_coef denotes the number of 
+    gp_mean: A 3d numpy array of shape (N(1), N(2), n_coef), where n_coef denotes the number of 
     coefficients in the latent model. The i, j, k element of this model holds the mean of the 
     posterior distribution for the k'th parameter when the parameters consist of the  i'th value
     of the first parameter and the j'th of the second.
 
-    gp_mesh: A 3d numpy array of shape (N(1), N(2), n_coef), where n_coef denotes the number of 
+    gp_std: A 3d numpy array of shape (N(1), N(2), n_coef), where n_coef denotes the number of 
     coefficients in the latent model. The i, j, k element of this model holds the std of the 
     posterior distribution for the k'th parameter when the parameters consist of the  i'th value
     of the first parameter and the j'th of the second.
@@ -418,15 +409,16 @@ def Plot_GP2d(  p1_mesh         : numpy.ndarray,
     assert(gp_std.ndim          == 3);
     assert(param_train.ndim     == 2);
     assert(gp_mean.shape        == gp_std.shape);
-    assert(len(param_names)    == 2);
+    assert(len(param_names)     == 2);
 
     # First, determine how many coefficients there are.
     n_coef : int = gp_mean.shape[-1];   
+    LOGGER.info("Producing GP plots with %d coefficients. The parameters are %d" % (n_coef, str(param_names)));
 
     # Figure out how many rows/columns of subplots we should make.
     subplot_shape = [n_coef // n_cols, n_cols];
     if (n_coef % n_cols > 0):
-        subplot_shape[0] += 1
+        subplot_shape[0] += 1;
 
     # Set limits for the x/y axes.
     p1_range = [p1_mesh.min()*.99, p1_mesh.max()*1.01];
@@ -441,7 +433,8 @@ def Plot_GP2d(  p1_mesh         : numpy.ndarray,
         for j in range(subplot_shape[1]):
             # Figure out which combination of parameter values corresponds to the current plot.
             k = j + i * subplot_shape[1];
-            
+            LOGGER.debug("Making plot %d" % k);
+
             # Remove the plot frame.
             axs_std[i, j].set_frame_on(False);
             axs_mean[i, j].set_frame_on(False);
@@ -451,6 +444,7 @@ def Plot_GP2d(  p1_mesh         : numpy.ndarray,
             # There are only n_coef plots. If k > n_coef, then there is nothing to plot but we need 
             # to plot something (to avoid pissing off matplotlib).
             if (k >= n_coef):
+                LOGGER.debug("%d > %d (n_coef). Thus, we are making a default plot" % (k, n_coef));
                 axs_std[i, j].set_xlim(p1_range);
                 axs_std[i, j].set_ylim(p2_range);
                 axs_std[i, j].set_frame_on(False);
@@ -470,7 +464,6 @@ def Plot_GP2d(  p1_mesh         : numpy.ndarray,
                     axs_mean[i, j].set_xlabel(param_names[0]);
                     axs_mean[i, j].get_xaxis().set_visible(True);
                 
-
                 continue;
 
 
@@ -539,7 +532,11 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
                     param_names     : list[str]     = ['p1', 'p2'], 
                     title           : str           = ''):
     """
-    TODO
+    This plot makes a "heatmap". Specifically, we assume that values represents the samples of 
+    a function which depends on two paramaters, p1 and p2. The i,j entry of values represents 
+    the value of some function when p1 = p1_grid[i] and p2 = p2_grid[j]. We make an image whose 
+    i, j has a color based on values[i, j]. We also add boxes around each pixel that is part of 
+    the training set (with special red boxes for elements of the initial training set).
 
     
 
@@ -590,26 +587,32 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     assert(values.shape[0] == n_p1);
     assert(values.shape[1] == n_p2);
 
+    # Setup.
+    n_train : int   = param_train.shape[0];
+    n_test  : int   = len(p1_grid)*len(p2_grid);
+    LOGGER.info("Making heatmap. Parameters = %s. There are %d training points (%d initial) and %d testing points." % (str(param_names), n_train, n_init_train, n_test));
+
 
     # ---------------------------------------------------------------------------------------------
     # Make the heatmap!
 
     # Set up the subplots.
     fig, ax = plt.subplots(1, 1, figsize = figsize);
+    LOGGER.debug("Making the initial heatmap");
 
     # Set up the color map.
-    from matplotlib.colors import LinearSegmentedColormap
+    from matplotlib.colors import LinearSegmentedColormap;
     cmap = LinearSegmentedColormap.from_list('rg', ['C0', 'w', 'C3'], N = 256);
 
     # Plot the figure as an image (the i,j pixel is just value[i, j], the value associated with 
     # the i'th value of p1 and j'th value of p2.
     im = ax.imshow(values, cmap = cmap);
     fig.colorbar(im, ax = ax, fraction = 0.04);
-
     ax.set_xticks(numpy.arange(0, n_p1, 2), labels = numpy.round(p1_grid[::2], 2));
     ax.set_yticks(numpy.arange(0, n_p2, 2), labels = numpy.round(p2_grid[::2], 2));
 
     # Add the value itself (as text) to the center of each "pixel".
+    LOGGER.debug("Adding values to the center of each pixel");
     for i in range(n_p1):
         for j in range(n_p2):
             ax.text(j, i, round(values[i, j], 1), ha = 'center', va = 'center', color = 'k');
@@ -623,7 +626,7 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     grid_square_y   : numpy.ndarray = numpy.arange(-0.5, n_p2, 1);
 
     # Add boxes around parameter combinations in the training set.
-    n_train : int   = param_train.shape[0];
+    LOGGER.debug("Adding boxes around parameters in the training set");
     for i in range(n_train):
         p1_index : float = numpy.sum(p1_grid < param_train[i, 0]);
         p2_index : float = numpy.sum(p2_grid < param_train[i, 1]);
