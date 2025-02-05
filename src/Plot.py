@@ -413,7 +413,7 @@ def Plot_GP2d(  p1_mesh         : numpy.ndarray,
 
     # First, determine how many coefficients there are.
     n_coef : int = gp_mean.shape[-1];   
-    LOGGER.info("Producing GP plots with %d coefficients. The parameters are %d" % (n_coef, str(param_names)));
+    LOGGER.info("Producing GP plots with %d coefficients. The parameters are %s" % (n_coef, str(param_names)));
 
     # Figure out how many rows/columns of subplots we should make.
     subplot_shape = [n_coef // n_cols, n_cols];

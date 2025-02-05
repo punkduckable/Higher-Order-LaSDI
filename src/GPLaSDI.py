@@ -76,7 +76,7 @@ def optimizer_to(optim : Optimizer, device : str) -> None:
 
 
 class BayesianGLaSDI:
-    X_Train : list[torch.Tensor]    = [];   # An n_IC element list of ndarrays of shape (Np, Nt, ...), each holding sequences of some derivative of FOM states
+    X_Train : list[torch.Tensor]    = [];   # An n_IC element list of ndarrays of shape (n_param, n_t, ...), each holding sequences of some derivative of FOM states
     X_Test  : list[torch.Tensor]    = [];   # Same as X_Test, but used for the test set (X_train holds sequences for the training set).
 
     def __init__(self, 
@@ -132,12 +132,12 @@ class BayesianGLaSDI:
         self.param_space                    = param_space;
         
         # Set placeholder tensors to hold the testing and training data. We expect to set up 
-        # X_Train to be an n_IC element list of tensors of shape (Np, Nt, Nx[0], ... , Nx[Nd - 1]), 
-        # where Np is the number of parameter combinations in the training set, Nt is the number of 
-        # time steps per FOM solution, and Nx[0], ... , Nx[Nd - 1] represent the number of steps 
-        # along the qgrid (spatial axes + vector dimension). X_Test has an analogous shape, but 
-        # it's leading dimension has a size matching the number of combinations of parameters 
-        # in the testing set.
+        # X_Train to be an n_IC element list of tensors of shape (n_param, n_t, n_x[0], ... , 
+        # n_x[Nd - 1]), where n_param is the number of parameter combinations in the training set, 
+        # n_t is the number of time steps per FOM solution, and n_x[0], ... , n_x[Nd - 1] represent 
+        # the number of steps along the qgrid (spatial axes + vector dimension). X_Test has an 
+        # analogous shape, but it's leading dimension has a size matching the number of 
+        # combinations of parameters in the testing set.
         # 
         # the latent_dynamics object specifies n_IC while the physics object specifies n_t and the 
         # shape of each fom frame. Using this, we can initialize X_Train and X_Test to hold 
@@ -254,16 +254,16 @@ class BayesianGLaSDI:
             # Forward pass
 
             if(isinstance(model_device, Autoencoder)):
-                # Run the forward pass. This results in a tensor of shape (Np, Nt, Nz), where Np is 
-                # the number of parameters, Nt is the number of time steps in the time series, and 
-                # Nz is the latent space dimension. X_Pred, should have the same shape as X_Train, 
-                # (Np, Nt, Nx[0], .... , Nx[Nd - 1]). 
+                # Run the forward pass. This results in a tensor of shape (n_param, n_t, n_z), 
+                # where n_param is the number of parameters, n_t is the number of time steps in 
+                # the time series, and n_z is the latent space dimension. X_Pred, should have the 
+                # same shape as X_Train, (n_param, n_t, n_x[0], .... , n_x[Nd - 1]). 
                 Z_X               : torch.Tensor        = model_device.Encode(X_Train_device[0]);
                 X_pred          : torch.Tensor          = model_device.Decode(Z_X);
                 Z_X               : torch.Tensor        = Z_X.cpu();
                 
                 # Compute the reconstruction loss. 
-                loss_recon      : torch.Tensor          = self.MSE(X_Train_device[0], X_pred);
+                loss_recon      : torch.Tensor          = self.MSE(X_Train_device[0], X_Pred);
 
                 # Build the Latent States for calibration.
                 Latent_States   : list[torch.Tensor]    = [Z_X];
@@ -276,30 +276,39 @@ class BayesianGLaSDI:
                 coefs, loss_ld, loss_coef       = ld.calibrate(Latent_States = Latent_States, dt = self.physics.dt);
 
                 # Compute the final loss.
-                loss = (self.loss_weights['recon']          * loss_recon + 
-                        self.loss_weights['ld']             * loss_ld / n_train + 
-                        self.loss_weights['coef']          * loss_coef / n_train);
+                loss = (self.loss_weights['recon']  * loss_recon + 
+                        self.loss_weights['ld']     * loss_ld / n_train + 
+                        self.loss_weights['coef']   * loss_coef / n_train);
 
 
             elif(isinstance(model_device, Autoencoder_Pair)):
-                # Run the forward pass. This results in two tensors of shape (Np, Nt, Nz), where Np 
-                # is the number of parameters, Nt is the number of time steps in the time series, 
-                # and Nz is the latent space dimension.  
+                # Run the forward pass. This results in two tensors of shape (n_parm, n_t, n_z), 
+                # where n_param is the number of parameter combinations, n_t is the number of 
+                # time steps in the time series, and n_z is the latent space dimension. 
                 Z_X, Z_V                                = model_device.Encode(Displacement_Frames = X_Train_device[0], Velocity_Frames = X_Train_device[1]);
-                X_pred, V_Pred                          = model_device.Decode(Z_X, Z_V);
+                X_Pred, V_Pred                          = model_device.Decode(Z_X, Z_V);
                 Z_X                 : torch.Tensor      = Z_X.cpu();
                 Z_V                 : torch.Tensor      = Z_V.cpu();
 
-                # Make sure Z_V actually looks like the time derivative of Z. We call this the 
-                # "consistency loss".
-                Np : int = Z_X.shape[0];
-                loss_consistency    : torch.Tensor      = torch.zeros(1, dtype = torch.float32);
-                for i in range(Np):
+                # Make sure Z_V actually looks like the time derivative of Z. 
+                n_param : int = Z_X.shape[0];
+                loss_consistency_Z    : torch.Tensor    = torch.zeros(1, dtype = torch.float32);
+                for i in range(n_param):
                     dZi_dt              : torch.Tensor      = Derivative1_Order4(X = Z_X[i, :, :], h = self.physics.dt);
-                    loss_consistency    : torch.Tensor      = loss_consistency + self.MSE(dZi_dt, Z_V[i, :, :]);
+                    loss_consistency_Z  : torch.Tensor      = loss_consistency_Z + self.MSE(dZi_dt, Z_V[i, :, :]);
+
+                # Next, make sure that V_Pred actually looks like the derivative of X_Pred. 
+                loss_consistency_X    : torch.Tensor    = torch.zeros(1, dtype = torch.float32);
+                for i in range(n_param):
+                    dX_Pred_i_dt        : torch.Tensor      = Derivative1_Order4(X = X_Pred[i, ...], h = self.physics.dt);
+                    loss_consistency_X  : torch.Tensor      = loss_consistency_X + self.MSE(dX_Pred_i_dt, V_Pred[i, ...]);
+
+                # Compute the consistency loss
+                loss_consistency    : torch.Tensor      = loss_consistency_Z + loss_consistency_X;
+
 
                 # Compute the reconstruction loss. 
-                loss_recon_disp     : torch.Tensor      = self.MSE(X_Train_device[0], X_pred);
+                loss_recon_disp     : torch.Tensor      = self.MSE(X_Train_device[0], X_Pred);
                 loss_recon_vel      : torch.Tensor      = self.MSE(X_Train_device[1], V_Pred);
                 loss_recon          : torch.Tensor      = loss_recon_disp + loss_recon_vel;
             
@@ -347,11 +356,11 @@ class BayesianGLaSDI:
 
             # Report the current iteration number and losses
             if(isinstance(model_device, Autoencoder)):
-                LOGGER.info("Iter: %05d/%d, Loss: %3.10f, Loss Recon: %3.10f, Loss LD: %3.10f, Loss COEF: %3.10f, max|c|: %04.1f, "
+                LOGGER.info("Iter: %05d/%d, Total: %3.10f, Recon: %3.10f, LD: %3.10f, Coef: %3.10f, max|c|: %04.1f, "
                             % (iter + 1, self.max_iter, loss.item(), loss_recon.item(), loss_ld.item(), loss_coef.item(), max_coef));
             elif(isinstance(model_device, Autoencoder_Pair)):
-                LOGGER.info("Iter: %05d/%d, Loss: %3.10f, Loss Disp: %3.10f, Loss Vel: %3.10f, Loss Consistency: %3.10f, Loss LD: %3.10f, Loss COEF: %3.10f, max|c|: %04.1f, "
-                            % (iter + 1, self.max_iter, loss.item(), loss_recon_disp.item(), loss_recon_vel.item(), loss_consistency.item(), loss_ld.item(), loss_coef.item(), max_coef)); 
+                LOGGER.info("Iter: %05d/%d, Total: %3.10f, Disp: %3.10f, Vel: %3.10f,  Consistency Z: %3.10f, Consistency X: %3.10f, LD: %3.10f, Coef: %3.10f, max|c|: %04.1f, "
+                            % (iter + 1, self.max_iter, loss.item(), loss_recon_disp.item(), loss_recon_vel.item(), loss_consistency_Z.item(), loss_consistency_X.item(), loss_ld.item(), loss_coef.item(), max_coef)); 
 
             # If there are fewer than 6 training examples, report the set of parameter combinations.
             if n_train < 6:
