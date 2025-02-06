@@ -18,11 +18,15 @@ import  logging;
 import  time;
 
 import  numpy;
+import  torch;
 
 from    Enums               import  NextStep, Result;
+from    ParameterSpace      import  ParameterSpace;
+from    Physics             import  Physics;
+from    LatentDynamics      import  LatentDynamics;
 from    GPLaSDI             import  BayesianGLaSDI;
 from    Initialize          import  Initialize_Trainer;
-from    Sample              import  Run_Samples, Pick_Samples, Collect_Samples;
+from    Sample              import  Run_Samples, Pick_Samples;
 from    Logging             import  Initialize_Logger, Log_Dictionary;
 
 # Set up the logger.
@@ -112,37 +116,18 @@ def main():
 
 
     # ---------------------------------------------------------------------------------------------
-    # Save, shutdown
+    # Save!
     # ---------------------------------------------------------------------------------------------
 
-    # Save restart (or final) file.
-    date        = time.localtime();
-    date_str    = "{month:02d}_{day:02d}_{year:04d}_{hour:02d}_{minute:02d}";
-    date_str    = date_str.format(month     = date.tm_mon, 
-                                  day       = date.tm_mday, 
-                                  year      = date.tm_year, 
-                                  hour      = date.tm_hour + 3, 
-                                  minute    = date.tm_min);
-    
-    if (use_restart == True):
-        # rename old restart file if exists.
-        if (os.path.isfile(restart_filename) == True):
-            old_timestamp = restart_dict['timestamp'];
-            os.rename(restart_filename, restart_filename + '.' + old_timestamp);
-        restart_path : str = restart_filename;
-    else:
-        restart_path : str = 'lasdi_' + date_str + '.npy';
-    
-    # Build the restart save dictionary and then save it.
-    restart_dict = {'parameter_space'   : param_space.export(),
-                    'physics'           : physics.export(),
-                    'model'             : model.export(),
-                    'latent_dynamics'   : latent_dynamics.export(),
-                    'trainer'           : trainer.export(),
-                    'timestamp'         : date_str,
-                    'next_step'         : next_step,
-                    'result'            : result};
-    numpy.save(restart_path, restart_dict);
+    # Save!
+    Save(   param_space         = param_space,
+            physics             = physics,
+            model               = model, 
+            latent_dynamics     = latent_dynamics,
+            trainer             = trainer,
+            next_step           = next_step,
+            result              = result,
+            restart_filename    = restart_filename);
 
     # All done!
     return;
@@ -151,7 +136,7 @@ def main():
 
 
 # -------------------------------------------------------------------------------------------------
-# Step
+# Helper functions
 # -------------------------------------------------------------------------------------------------
 
 def step(trainer        : BayesianGLaSDI, 
@@ -261,6 +246,89 @@ def step(trainer        : BayesianGLaSDI,
     return result, next_step;
 
 
+
+def Save(   param_space         : ParameterSpace, 
+            physics             : Physics, 
+            model               : torch.nn.Module, 
+            latent_dynamics     : LatentDynamics,
+            trainer             : BayesianGLaSDI, 
+            next_step           : NextStep, 
+            result              : Result,
+            restart_filename    : str               = None) -> None:
+    """
+    This function saves a trained model, trainer, latent dynamics, etc. You should call this 
+    function after running the LASDI algorithm.
+
+
+    
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+
+    param_space: The parameter space object we use to fetch the training and testing parameter 
+    combinations during training.
+    
+    physics: The Physics object we use to define the fom model, fetch initial conditions, and 
+    generate fom solutions.
+
+    latent_dynamics: the LatentDynamics object we use to define the dynamics in model's latent 
+    space.
+
+    trainer: The LaSDI object we use to train model using the data from physics and dynamics from
+    latent_dynamics.
+
+    next_step: An enumeration indicating the next step (should we continue training). This should 
+    have been returned by the final call to the step function.
+
+    result: An enumeration indicating the result of the last step of training. This should have
+    have been returned by the final call to the step function.
+
+    restart_filename: If we loaded from a restart, then this is the name of the restart we loaded.
+    Otherwise, if we did not load from a restart, this should be None.
+
+
+    
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    Nothing!
+    """
+
+    # Save restart (or final) file.
+    date        = time.localtime();
+    date_str    = "{month:02d}_{day:02d}_{year:04d}_{hour:02d}_{minute:02d}";
+    date_str    = date_str.format(month     = date.tm_mon, 
+                                  day       = date.tm_mday, 
+                                  year      = date.tm_year, 
+                                  hour      = date.tm_hour + 3, 
+                                  minute    = date.tm_min);
+    
+    if(restart_filename != None):
+        # rename old restart file if exists.
+        if (os.path.isfile(restart_filename) == True):
+            old_timestamp = restart_dict['timestamp'];
+            os.rename(restart_filename, restart_filename + '.' + old_timestamp);
+        restart_path : str = restart_filename;
+    else:
+        restart_path : str = 'lasdi_' + date_str + '.npy';
+    
+    # Make sure we place this in the results dictionary.
+    restart_path        = os.path.join(os.path.join(os.path.pardir, "results"), restart_path);
+
+    # Build the restart save dictionary and then save it.
+    restart_dict = {'parameter_space'   : param_space.export(),
+                    'physics'           : physics.export(),
+                    'model'             : model.export(),
+                    'latent_dynamics'   : latent_dynamics.export(),
+                    'trainer'           : trainer.export(),
+                    'timestamp'         : date_str,
+                    'next_step'         : next_step,
+                    'result'            : result};
+    numpy.save(restart_path, restart_dict);
+
+    # All done!
+    return;
 
 
 if __name__ == "__main__":
