@@ -279,10 +279,11 @@ class DampedSpring(LatentDynamics):
         coefs has two dimensions and shape (n_param, n_coefs), then each array should have shape 
         (n_param, n_t, dim). The i,j,k element of the two arrays should hold the k'th component of 
         the j'th time steps of the simulated displacement and velocity, respectively, when we use 
-        the i'th set of coefficients (coefs[i, :]) to simulate the latent dynamics. If coefs has 
-        one dimension, the then each array will have two dimensions and shape (n_t, dim). The i, j
-        element of the returned arrays should house the j'th component of the displacement and 
-        velocity at the i'th time step, respectively.
+        the i'th set of coefficients (coefs[i, :]) to simulate the latent dynamics.
+        
+        If coefs has one dimension, the then each array will have two dimensions and shape 
+        (n_t, dim). The i, j element of the returned arrays should house the j'th component of the
+        displacement and velocity at the i'th time step, respectively.
         """
 
         # Run checks.
@@ -298,18 +299,21 @@ class DampedSpring(LatentDynamics):
         # The way this function works depends on if there is one set of coefficients or an entire
         # batch of them. 
         if(len(coefs.shape) == 2):
-            # In this case, coefs.shape = (n_param, n_coefs). First, let's extract n_parm and n_t.
-            n_param     : int   = coefs.shape[0];
-            n_t         : int   = times.size;
+            # In this case, coefs.shape = (n_param, n_coefs) and each element of IC has shape 
+            # (n_param, n, dim). First, let's extract n_parm, n_t, and n.
+            n_param     : int       =   coefs.shape[0];
+            assert(IC[0].shape[0]   ==  n_param);
+            n_t         : int       =   times.size;
+            n           : int       =   IC[0].shape[1];
             LOGGER.debug("Simulating with %d parameter combinations" % n_param);
 
             # Set up arrays to hold the simulated positions and velocities.
             if(isinstance(coefs, numpy.ndarray)):
-                Disp    : numpy.ndarray     = numpy.empty((n_param, n_t, self.dim), dtype = numpy.float32);
-                Vel     : numpy.ndarray     = numpy.empty((n_param, n_t, self.dim), dtype = numpy.float32);
+                D   : numpy.ndarray     = numpy.empty((n_param, n_t, n, self.dim), dtype = numpy.float32);
+                V   : numpy.ndarray     = numpy.empty((n_param, n_t, n, self.dim), dtype = numpy.float32);
             elif(isinstance(coefs, torch.Tensor)):
-                Disp    : torch.Tensor      = torch.empty((n_param, n_t, self.dim), dtype = torch.float32);
-                Vel     : torch.Tensor      = torch.empty((n_param, n_t, self.dim), dtype = torch.float32);             
+                D   : torch.Tensor      = torch.empty((n_param, n_t, n, self.dim), dtype = torch.float32);
+                V   : torch.Tensor      = torch.empty((n_param, n_t, n, self.dim), dtype = torch.float32);             
 
             # Now, cycle through the parameter combinations
             for i in range(n_param):
@@ -323,18 +327,18 @@ class DampedSpring(LatentDynamics):
                                                                                     IC      = ith_IC, 
                                                                                     times   = times);
 
-                # Add these results to Disp, Vel.
-                Disp[i, :, :]   = ith_Results[0];
-                Vel[i, :, :]    = ith_Results[1];
+                # Add these results to D, V.
+                D[i, :, :, :]  = ith_Results[0];
+                V[i, :, :, :]  = ith_Results[1];
 
             # All done.
-            return [Disp, Vel];
+            return [D, V];
     
 
         # If we get here, then coefs has one dimension. In this case, each element of IC should 
         # have shape (dim, n). 
-        Disp0   : numpy.ndarray | torch.Tensor  = IC[0]; 
-        Vel0    : numpy.ndarray | torch.Tensor  = IC[1];
+        D0  : numpy.ndarray | torch.Tensor  = IC[0]; 
+        V0  : numpy.ndarray | torch.Tensor  = IC[1];
 
         # First, we need to extract -K, -C, and b from coefs. We know that coefs is the least 
         # squares solution to d2Z_dt2 = hstack[Z, dZdt, 1] E^T. Thus, we expect that.
@@ -353,13 +357,16 @@ class DampedSpring(LatentDynamics):
         # dynamics for the i'th IC. Similar results hold for dot(dz_dt, C.T). The final result 
         # should have shape (n, dim). The i'th row should hold the rhs of the latent dynamics 
         # for the i'th IC.
-        f    = lambda t, z, dz_dt: b - numpy.matmul(dz_dt, C.T)  - numpy.matmul(z, K.T);
+        if(isinstance(coefs, numpy.ndarray)):
+            f   = lambda t, z, dz_dt: b - numpy.matmul(dz_dt, C.T)  - numpy.matmul(z, K.T);
+        if(isinstance(coefs, torch.Tensor)):
+            f   = lambda t, z, dz_dt: b - torch.matmul(dz_dt, C.T)  - torch.matmul(z, K.T);
 
-        # Solve the ODE forward in time.
-        Disp, Vel = RK4(f = f, y0 = Disp0, Dy0 = Vel0, times = times);
+        # Solve the ODE forward in time. D and V should have shape (n_t, n, dim).
+        D, V = RK4(f = f, y0 = D0, Dy0 = V0, times = times);
 
         # All done!
-        return [Disp, Vel];
+        return [D, V];
     
 
 
