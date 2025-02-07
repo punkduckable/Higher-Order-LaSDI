@@ -111,9 +111,11 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
     for d in range(n_IC):
         X_True[d] = X_True[d].reshape((1,) + X_True[d].shape);
 
-
     # Compute the predictions. 
-    X_Pred  : list[torch.Tensor]    = list(model.forward(*X_True));
+    if(n_IC == 1):
+        X_Pred  : list[torch.Tensor]    = [model.forward(*X_True)];
+    else:
+        X_Pred  : list[torch.Tensor]    = list(model.forward(*X_True));
 
     # Map both the true and predicted solutions to numpy arrays.
     # also set up list to hold the difference between the prediction and true solutions.

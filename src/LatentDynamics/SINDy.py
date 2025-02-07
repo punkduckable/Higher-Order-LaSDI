@@ -279,70 +279,125 @@ class SINDy(LatentDynamics):
 
 
 
-    def simulate(self, 
-                 coefs  : numpy.ndarray, 
-                 IC     : list[numpy.ndarray], 
-                 times  : numpy.ndarray) -> list[numpy.ndarray]:
+    def simulate(   self,
+                    coefs   : numpy.ndarray         | torch.Tensor, 
+                    IC      : list[numpy.ndarray]   | list[torch.Tensor],
+                    times   : numpy.ndarray) -> list[numpy.ndarray]  | list[torch.Tensor]:
         """
-        Time integrates the latent dynamics when it uses the coefficients specified in coefs and 
-        starts from the (single) initial condition in z0.
-
+        Time integrates the latent dynamics using the coefficients specified in coefs when we
+        start from the initial condition(s) in z0.
+ 
 
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
         
-        coefs: A one dimensional numpy.ndarray object representing the flattened copy of the array 
-        of latent dynamics coefficients that calibrate returns.
+        coefs: Either a one or two dimensional numpy.ndarray or torch.Tensor objects. If it has 
+        one dimension, then coefs represents a is a flattened copy of array of latent dynamics 
+        coefficients that calibrate returns. If coefs has two dimensions, then it should have shape 
+        (n_param, n_coef) and it's i'th row should represent the optimal set of coefficients when 
+        we use the i'th combination of parameter values. In this case, we inductively call simulate 
+        on each row of coefs. 
 
-        IC: A single element list of numpy.ndarray objects of shape dim. The j'th element of this 
-        list should hold the j'th component of the initial position for the latent dynamics.
+        IC: A single element list of numpy.ndarray or torch.Tensor objects. These objects should 
+        have either two or three dimensions. If coefs has one dimension, then each element of IC 
+        should have shape (n, dim) where n represents the number of initial conditions we want to 
+        simulate forward in time and dim is the latent dimension. If you want to simulate a single 
+        IC, then n == 1. If coefs has two dimensions (specifically if coefs.shape = 
+        (n_param, n_coef)), then each element of IC should have shape (n_param, n, dim). In this 
+        case, IC[d][i, j, :] represents the j'th initial condition for the d'th derivative of the 
+        latent state when we use the i'th combination of parameter values.
 
         times: A 1d numpy ndarray object whose i'th entry holds the value of the i'th time value 
         where we want to compute the latent solution. The elements of this array should be in 
-        ascending order.
+        ascending order. 
 
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------        
         
-        A single element list whose lone element is a 2d numpy.ndarray object holding the solution 
-        to the latent dynamics at the time values specified in times when we use the coefficients 
-        in coefs to characterize the latent dynamics model. 
+        A single element list of numpy.ndarrays representing the simulated displacements. If 
+        coefs has two dimensions and shape (n_param, n_coefs), then each array should have shape 
+        (n_param, n_t, n, dim). The i,j,k,l element of the arrays should hold the l'th component of 
+        the j'th time step of the simulated displacement and velocity, respectively, when we use 
+        the k'th IC and the coefficients for the i'th combination of parameter values to simulate 
+        the latent dynamics.
         
-        Specifically, it is a 2d array of shape (n_t, dim), where n_t is the number of time steps 
-        (size of times) and dim is the latent space dimension (self.dim). Thus, the i,j element of 
-        this matrix holds the j'th component of the latent solution at the time stored in the i'th 
-        element of times. 
+        If coefs has one dimension, the then each array will have two dimensions and shape 
+        (n_t, n, dim). The i,j,k element of the returned arrays should house the k'th component of 
+        the displacement and velocity, respectively, at the i'th time step when we use the j'th IC 
+        to simulate the latent dynamics.
         """
 
         # Run checks.
-        assert(len(IC)          == 1);
-        assert(IC[0].size       == self.dim);
-        assert(len(times.shape) == 1);
+        assert(len(IC)              == 1);
+        assert((len(coefs.shape)    == 1    and len(IC[0].shape)    == 2)    or  (len(coefs.shape)    == 2  and len(IC[0].shape)    == 3));
+        assert(IC[0].shape[-1]      == self.dim);
+        assert(len(times.shape)     == 1);
+        assert(type(coefs)          == type(IC[0]));
 
-        # Extract IC.
-        z0  : numpy.ndarray = IC[0];
+        # Setup. Extract n_t and n.
+        n_t         : int       =   times.size;
 
-        # First, reshape coefs as a matrix. Since we only allow for linear terms, there are dim + 1
-        # library terms and dim equations, where dim = self.dim.
-        # Note: copy is inevitable for numpy==1.26. removed copy=False temporarily.
-        c_i : numpy.ndarray = coefs.reshape([self.dim + 1, self.dim]).T
+        if(len(coefs.shape) == 2):
+            # In this case, coefs.shape = (n_param, n_coefs) and each element of IC has shape 
+            # (n_param, n, dim). First, let's extract n_parm and n.
+            n_param     : int       =   coefs.shape[0];
+            n           : int       =   IC[0].shape[1];
+            assert(IC[0].shape[0]   ==  n_param);
+            LOGGER.debug("Simulating with %d parameter combinations" % n_param);
+
+            # Set up arrays to hold the simulated positions and velocities.
+            if(isinstance(coefs, numpy.ndarray)):
+                X   : numpy.ndarray     = numpy.empty((n_param, n_t, n, self.dim), dtype = numpy.float32);
+            elif(isinstance(coefs, torch.Tensor)):
+                X   : torch.Tensor      = torch.empty((n_param, n_t, n, self.dim), dtype = torch.float32);
+
+            # Now, cycle through the parameter combinations
+            for i in range(n_param):
+                # Extract the i'th combinations of coefficients and initial conditions.
+                ith_coefs   : numpy.ndarray | torch.Tensor              = coefs[i, :];
+                ith_IC      : list[numpy.ndarray] | list[torch.Tensor]  = [IC[0][i, :, :]];
+
+                # Call this function using them.
+                ith_Results : list[numpy.ndarray] | list[torch.Tensor]  = self.simulate(
+                                                                                    coefs   = ith_coefs, 
+                                                                                    IC      = ith_IC, 
+                                                                                    times   = times);
+
+                # Add these results to D, V.
+                X[i, :, :, :]  = ith_Results[0];
+
+            # All done.
+            return [X];
+        
+        # If we get here, then coefs has one dimension. In this case, each element of IC should 
+        # have shape (n, dim). First, reshape coefs as a matrix. Since we only allow for linear 
+        # terms, there are dim + 1 library terms and dim equations, where dim = self.dim.
+        n   : int           = IC[0].shape[0];
+        c_i : numpy.ndarray = coefs.reshape([self.dim + 1, self.dim]).T;
 
         # Set up a lambda function to approximate dz_dt. In SINDy, we learn a coefficient matrix 
         # C such that the latent state evolves according to the dynamical system 
         #   z'(t) = C \Phi(z(t)), 
         # where \Phi(z(t)) is the library of terms. Note that the zero column of C corresponds 
         # to the constant library term, 1. 
-        dz_dt               = lambda z, t : c_i[:, 1:] @ z + c_i[:, 0]
+        dz_dt               = lambda z, t : c_i[:, 1:] @ z + c_i[:, 0];
 
-        # Solve the ODE forward in time.
-        Z_i : numpy.ndarray = odeint(dz_dt, z0, times)
+        # Set up an array to hold the results of each simulation.
+        if(isinstance(coefs, numpy.ndarray)):
+            X : numpy.ndarray = numpy.empty((n_t, n, self.dim), dtype = numpy.float32);
+        elif(isinstance(coefs, torch.Tensor)):
+            X : torch.Tensor = torch.empty((n_t, n, self.dim), dtype = torch.float32);
 
+        # Solve each ODE forward in time.
+        for j in range(n):
+            X[:, j, :] = odeint(dz_dt, IC[0][j, :], times);
+        
         # All done!
-        return [Z_i];
-    
+        return [X];
+
 
 
     def export(self) -> dict:

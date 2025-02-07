@@ -205,7 +205,7 @@ class MultiLayerPerceptron(torch.nn.Module):
             # replacing the last k with a single dimension whose size matches the dimensionality of
             # the domain of the first layer. Note that we use torch.Tensor.view instead of 
             # torch.Tensor.reshape in order to avoid data copying.
-            X = X.view(list(X.shape[:-len(self.reshape_shape)]) + [self.widths[self.reshape_index]])
+            X = X.view(list(X.shape[:-len(self.reshape_shape)]) + [self.widths[self.reshape_index]]);
 
         # Pass X through the network layers (except for the final one, which has no activation 
         # function).

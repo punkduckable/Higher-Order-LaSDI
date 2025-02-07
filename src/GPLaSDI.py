@@ -268,7 +268,7 @@ class BayesianGLaSDI:
             else:
                 Z       : list[torch.Tensor]    = list(Z);
             
-            X_Pred  = list(model_device.Decode(*Z));
+            X_Pred = model_device.Decode(*Z);
             if(isinstance(X_Pred, torch.Tensor)):
                 X_Pred  : list[torch.Tensor]    = [X_Pred];
             else:
