@@ -118,40 +118,48 @@ class LatentDynamics:
                  IC     : list[numpy.ndarray], 
                  times  : numpy.ndarray) -> list[numpy.ndarray]:
         """
-        Time integrates the latent dynamics when it uses the coefficients specified in coefs and 
-        starts from the (single) initial condition in z0. The user must implement this method.
+        Time integrates the latent dynamics using the coefficients specified in coefs when we
+        start from the initial condition(s) in IC.
 
 
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
         
-        coefs: A one dimensional numpy.ndarray object holding the coefficients we want to use 
-        to solve the latent dynamics forward in time. 
-        
-        IC: A list of n_IC numpy.ndarray objects, each of shape dim. Here, n_IC is the number of 
-        initial conditions we need to specify to define the initial state of the latent dynamics. 
-        Likewise, dim the the dimension of the latent space (the space where the dynamics take 
-        place). The j'th element of the i'th element of this list should hold the j'th component of 
-        the initial condition for the i'th derivative of the initial condition. 
+        coefs: Either a one or two dimensional numpy.ndarray or torch.Tensor objects. If it has 
+        one dimension, then coefs represents a is a flattened copy of hstack[-K, -C, b], where 
+        K, C, and b are the optimal coefficients for a specific combination of parameter values. 
+        If coefs has two dimensions, then it should have shape (n_param, n_coef) and it's i'th row 
+        should represent the optimal set of coefficients when we use the i'th combination of 
+        parameter values. In this case, we inductively call simulate on each row of coefs. 
+
+        IC: A list of n_IC numpy.ndarray or torch.Tensor objects. These objects should have either 
+        two or three dimensions. If coefs has one dimension, then each element of IC should have 
+        shape (n, dim) where n represents the number of initial conditions we want to simulate 
+        forward in time and dim is the latent dimension. If you want to simulate a single IC, then 
+        n == 1. If coefs has two dimensions (specifically if coefs.shape = (n_param, n_coef)), then 
+        each element of IC should have shape (n_param, n, dim). In this case, IC[d][i, j, :] 
+        represents the j'th initial condition for the d'th derivative of the latent state when 
+        we use the i'th combination of parameter values.
 
         times: A 1d numpy ndarray object whose i'th entry holds the value of the i'th time value 
         where we want to compute the latent solution. The elements of this array should be in 
-        ascending order.
+        ascending order. 
 
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------        
         
-        A list of 2d numpy.ndarray object holding the solution to the latent dynamics and its 
-        time derivatives at the time values specified in times when we use the coefficients in 
-        coefs to characterize the latent dynamics model. 
+        A list of n_IC numpy ndarrays representing the simulated displacements and velocities. If 
+        coefs has two dimensions and shape (n_param, n_coefs), then each array should have shape 
+        (n_param, n_t, dim). The i,j,k element of the arrays should hold the k'th component of 
+        the j'th time steps of the simulated displacement and velocity, respectively, when we use 
+        the i'th set of coefficients (coefs[i, :]) to simulate the latent dynamics.
         
-        Specifically, the i'th element is a 2d array of shape (n_t, dim), where n_t is the number 
-        of time steps (size of times) and dim is the latent space dimension (self.dim). Thus, 
-        the j,k element of this matrix holds the k'th component of the i'th time derivative of the
-        latent solution at the time stored in the j'th element of times. 
+        If coefs has one dimension, the then each array will have two dimensions and shape 
+        (n_t, dim). The i, j element of the returned arrays should house the j'th component of the
+        displacement and velocity at the i'th time step, respectively.
         """
 
         raise RuntimeError('Abstract function LatentDynamics.simulate!');

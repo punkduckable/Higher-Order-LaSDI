@@ -243,7 +243,7 @@ class DampedSpring(LatentDynamics):
                     times   : numpy.ndarray) -> list[numpy.ndarray]  | list[torch.Tensor]:
         """
         Time integrates the latent dynamics using the coefficients specified in coefs when we
-        start from the initial condition(s) in z0.
+        start from the initial condition(s) in IC.
 
 
         -------------------------------------------------------------------------------------------
