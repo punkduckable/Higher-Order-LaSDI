@@ -257,7 +257,11 @@ def Plot_Prediction(model           : torch.nn.Module,
         Latent_Trajectories[d] = torch.Tensor(Latent_Trajectories[d][0, :, :, :]);
 
     # Now generate the predictions.
-    X_Pred  : list[torch.Tensor] = list(model.Decode(*Latent_Trajectories));
+    X_Pred = model.Decode(*Latent_Trajectories);
+    if(n_IC == 1):
+        X_Pred  : list[torch.Tensor]    = [X_Pred];
+    else:
+        X_Pred  : list[torch.Tensor]    = list(X_Pred);
     assert(len(X_Pred) == n_IC);
     LOGGER.debug("Predictions have shape %s" % str(X_Pred[0].shape));
 
