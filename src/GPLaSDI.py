@@ -250,29 +250,6 @@ class BayesianGLaSDI:
 
             # Zero out the gradients. 
             self.optimizer.zero_grad();
-
-
-            # -------------------------------------------------------------------------------------
-            # Forward pass
-
-            # Run the forward pass. This results in a list of tensors, each of which has shape 
-            # (n_param, n_t, n_z), where n_param is the number of parameter combinations in the 
-            # training set, n_t is the number of time steps in each time series, and n_z is the 
-            # latent space dimension. We decode these tensors to get X_Pred, a list of tensors, 
-            # each one of which should have shape (n_parma, n_t, n_x[0], ... , n_x[n_space - 1], 
-            # where n_space is the number of spatial dimensions and n_x[k] represents the shape of 
-            # the k'th spatial axis.
-            Z       = model_device.Encode(*X_Train_device);
-            if(isinstance(Z, torch.Tensor)):
-                Z       : list[torch.Tensor]    = [Z];
-            else:
-                Z       : list[torch.Tensor]    = list(Z);
-            
-            X_Pred = model_device.Decode(*Z);
-            if(isinstance(X_Pred, torch.Tensor)):
-                X_Pred  : list[torch.Tensor]    = [X_Pred];
-            else:
-                X_Pred  : list[torch.Tensor]    = list(X_Pred);
             
 
             # -------------------------------------------------------------------------------------
@@ -280,6 +257,10 @@ class BayesianGLaSDI:
 
             # Different kinds of models have different losses.
             if(isinstance(model_device, Autoencoder)):
+                # Run the forward pass.
+                Z       : list[torch.Tensor]    = [model_device.Encoder(*X_Train_device)];
+                X_Pred  : list[torch.Tensor]    = [model_device.Decoder(*Z)];
+
                 # Compute the reconstruction loss. 
                 loss_recon      : torch.Tensor          = self.MSE(X_Train_device[0], X_Pred[0]);
 
@@ -297,11 +278,23 @@ class BayesianGLaSDI:
 
 
             elif(isinstance(model_device, Autoencoder_Pair)):
+                # --------------------------------------------------------------------------------
+                # Forward pass
+
+                # Run the forward pass. This results in a a list of tensors, each one of which 
+                # should have shape (n_param, n_t, n_x[0], ... , n_x[n_space - 1]), where n_space 
+                # is the number of spatial dimensions and n_x[k] represents the shape of the k'th 
+                # spatial axis.
+                Z       : list[torch.Tensor]    = list(model_device.Encode(*X_Train_device));
+                X_Pred  : list[torch.Tensor]    = list(model_device.Decode(*Z));
+
                 # Setup. 
-                Z_D     : torch.Tensor  = Z[0];
-                Z_V     : torch.Tensor  = Z[1];
-                D_Pred  : torch.Tensor  = X_Pred[0];
-                V_Pred  : torch.Tensor  = X_Pred[1];
+                D       : torch.Tensor  = X_Train_device[0];    # shape (n_param, n_t, n_x[0], ... , n_x[n_space - 1])
+                V       : torch.Tensor  = X_Train_device[1];    # shape (n_param, n_t, n_x[0], ... , n_x[n_space - 1])
+                Z_D     : torch.Tensor  = Z[0];                 # shape (n_param, n_t, n_z)
+                Z_V     : torch.Tensor  = Z[1];                 # shape (n_param, n_t, n_z)
+                D_Pred  : torch.Tensor  = X_Pred[0];            # shape (n_param, n_t, n_x[0], ... , n_x[n_space - 1])
+                V_Pred  : torch.Tensor  = X_Pred[1];            # shape (n_param, n_t, n_x[0], ... , n_x[n_space - 1])
 
 
                 # --------------------------------------------------------------------------------
@@ -331,6 +324,39 @@ class BayesianGLaSDI:
                 loss_recon_V    : torch.Tensor      = self.MSE(X_Train_device[1], V_Pred);
                 loss_recon      : torch.Tensor      = loss_recon_D + loss_recon_V;
             
+
+                # --------------------------------------------------------------------------------
+                # Chain Rule Losses
+
+                # First, we compute the X portion of the chain rule loss. This stems from the 
+                # fact that 
+                #       (d/dt)X(t) \approx (d/dt)\phi_D,D(Z_D(t)) 
+                #                   = (d/dz)\phi_D,D(Z_D(t)) Z_V(t)
+                # Here, \phi_D,D is the displacement portion of the decoder. We can use torch to 
+                # compute jacobian-vector products. Note that the jvp function expects a function 
+                # as its first arguments (to define the forward pass). It passes the inputs through 
+                # func, then computes the jacobian-vector product (using reverse mode AD) of inputs 
+                # with v. It returns the result of the forward pass and the associated 
+                # jacobian-vector product. We only keep the latter.
+                d_dz_D_Pred__z_V    : torch.Tensor  = torch.autograd.functional.jvp(
+                                                            func    = lambda Z_D : model_device.Displacement_Autoencoder.Decode(Z_D), 
+                                                            inputs  = Z_D, 
+                                                            v       = Z_V)[1];
+                loss_chain_rule_X   : torch.Tensor  = self.MSE(V, d_dz_D_Pred__z_V);
+
+                # Next, we compute the Z portion of the chain rule loss:
+                #       (d/dt)Z(t) \approx (d/dt)\phi_E,D(D(t))
+                #                   = (d/dX)\phi_E,D(D(t)) V(t)
+                # Here, \phi_E,D is the displacement portion of the encoder.
+                d_dx_Z_D__V         : torch.Tensor  = torch.autograd.functional.jvp(
+                                                            func    = lambda D : model_device.Displacement_Autoencoder.Encode(D),
+                                                            inputs  = D, 
+                                                            v       = V)[1];
+                loss_chain_rule_Z   : torch.Tensor  = self.MSE(Z_V, d_dx_Z_D__V);
+
+                # Compute the total chain rule loss. 
+                loss_chain_rule     : torch.Tensor  = loss_chain_rule_X + loss_chain_rule_Z;
+
 
                 # --------------------------------------------------------------------------------
                 # Latent Dynamics, Coefficient losses
@@ -397,6 +423,7 @@ class BayesianGLaSDI:
                 # Compute the final loss.
                 loss = (self.loss_weights['recon']          * loss_recon + 
                         self.loss_weights['consistency']    * loss_consistency +
+                        self.loss_weights['chain_rule']     * loss_chain_rule + 
                         self.loss_weights['rollout']        * loss_rollout +
                         self.loss_weights['ld']             * loss_ld / n_train + 
                         self.loss_weights['coef']           * loss_coef / n_train);
@@ -433,8 +460,8 @@ class BayesianGLaSDI:
                 LOGGER.info("Iter: %05d/%d, Total: %3.10f, Recon: %3.10f, LD: %3.10f, Coef: %3.10f, max|c|: %04.1f, "
                             % (iter + 1, self.max_iter, loss.item(), loss_recon.item(), loss_ld.item(), loss_coef.item(), max_coef));
             elif(isinstance(model_device, Autoencoder_Pair)):
-                LOGGER.info("Iter: %05d/%d, Total: %3.6f, Recon D: %3.6f, Recon V: %3.6f,  Cons Z: %3.6f, Cons X: %3.6f, Roll D: %3.6f, Roll V: %3.6f, Roll ZD: %3.6f, Roll ZV: %3.6f, LD: %3.6f, Coef: %3.6f, max|c|: %04.1f, "
-                            % (iter + 1, self.max_iter, loss.item(), loss_recon_D.item(), loss_recon_V.item(), loss_consistency_Z.item(), loss_consistency_X.item(), loss_rollout_D.item(), loss_rollout_V.item(), loss_rollout_ZD.item(), loss_rollout_ZV.item(), loss_ld.item(), loss_coef.item(), max_coef)); 
+                LOGGER.info("Iter: %05d/%d, Total: %3.6f, Recon D: %3.6f, Recon V: %3.6f, CR X: %3.6f, CR Z: %3.6f, Cons Z: %3.6f, Cons X: %3.6f, Roll D: %3.6f, Roll V: %3.6f, Roll ZD: %3.6f, Roll ZV: %3.6f, LD: %3.6f, Coef: %3.6f, max|c|: %04.1f, "
+                            % (iter + 1, self.max_iter, loss.item(), loss_recon_D.item(), loss_recon_V.item(), loss_chain_rule_X.item(), loss_chain_rule_Z.item(), loss_consistency_Z.item(), loss_consistency_X.item(), loss_rollout_D.item(), loss_rollout_V.item(), loss_rollout_ZD.item(), loss_rollout_ZV.item(), loss_ld.item(), loss_coef.item(), max_coef)); 
 
             # If there are fewer than 6 training examples, report the set of parameter combinations.
             if n_train < 6:

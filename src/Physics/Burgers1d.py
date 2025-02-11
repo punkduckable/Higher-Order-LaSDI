@@ -191,13 +191,14 @@ class Burgers1D(Physics):
         
         # Fetch the initial condition.
         u0 : numpy.ndarray = self.initial_condition(param)[0];
+        
         """
         # Solve the PDE and then reshape the result to be a 3d tensor with a leading dimension of 
         # size 1.
         X       : torch.Tensor          = torch.Tensor(solver(u0, self.maxk, self.convergence_threshold, self.n_t - 1, self.spatial_grid_shape[0], self.dt, self.dx));        
         new_X   : list[torch.Tensor]    = [X.reshape(1, self.n_t, self.spatial_grid_shape[0])];
         """
-        
+
         #"""
         ######## REMOVE ME   ||
         ######## REMOVE ME   ||

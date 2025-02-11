@@ -193,22 +193,22 @@ class DampedSpring(LatentDynamics):
         # derivative of Z_V. We average the two so that the final loss depends on both.
         d2Z_dt2_from_Z_X    : torch.Tensor  = Derivative2_Order4(X = Z_X,   h = dt);
         d2Z_dt2_from_Z_V    : torch.Tensor  = Derivative1_Order4(X = Z_V,   h = dt);
-        d2Z_dt2             : torch.Tensor  = 0.5*d2Z_dt2_from_Z_X + 0.5*d2Z_dt2_from_Z_V;
+        d2Z_dt2             : torch.Tensor  = 0.5*(d2Z_dt2_from_Z_X + d2Z_dt2_from_Z_V);
 
         # Concatenate Z_X, Z_V and a column of 1's. We will solve for the matrix, E, which gives 
         # the best fit for the system d2Z_dt2 = cat[Z_X, Z_V, 1] E. This matrix has the form 
-        # E^T = [-K, -C, b]. Thus, we can extract K, C, and b from W.
-        W       : torch.Tensor  = torch.cat([Z_X, Z_V, torch.ones((Z_X.shape[0], 1))], dim = 1);
+        # E^T = [-K, -C, b]. Thus, we can extract K, C, and b from Z_CAT.
+        Z_CAT   : torch.Tensor  = torch.cat([Z_X, Z_V, torch.ones((Z_X.shape[0], 1))], dim = 1);
 
         # For each j, solve the least squares problem 
-        #   min{ || d2Z_dt2[:, j] - W E(j)|| : E(j) \in \mathbb{R}^(dim*(2*dim + 1)) }
+        #   min{ || d2Z_dt2[:, j] - Z_CAT E(j)|| : E(j) \in \mathbb{R}^(dim*(2*dim + 1)) }
         # We store the resulting solutions in a matrix, coefs, whose j'th column holds the 
         # results for the j'th column of Z_V. Thus, coefs is a 2d tensor with shape 
         # (2*dim + 1, dim).
-        coefs   : torch.Tensor  = torch.linalg.lstsq(W, d2Z_dt2).solution;
+        coefs   : torch.Tensor  = torch.linalg.lstsq(Z_CAT, d2Z_dt2).solution;
 
         # Compute the losses
-        Loss_LD     = self.LD_LossFunction(d2Z_dt2, torch.matmul(W, coefs));
+        Loss_LD     = self.LD_LossFunction(d2Z_dt2, torch.matmul(Z_CAT, coefs));
         Loss_Coef   = torch.norm(coefs, self.coef_norm_order);
 
         if(False):
@@ -219,7 +219,7 @@ class DampedSpring(LatentDynamics):
             b   : torch.Tensor  = E[:, 2*self.dim:(2*self.dim + 1)];
             
             # Compute the RHS of the diff eq using coefs and the matrices we found.
-            RHS_coefs           = torch.matmul(W, coefs);
+            RHS_coefs           = torch.matmul(Z_CAT, coefs);
             RHS_Manual          = torch.matmul(torch.ones((Z_X.shape[0], 1)), b.T) - torch.matmul(Z_V, C.T) - torch.matmul(Z_X, K.T);
 
             # Select a random row to sample.
