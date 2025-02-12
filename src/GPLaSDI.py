@@ -237,7 +237,7 @@ class BayesianGLaSDI:
         n_IC                : int               = self.latent_dynamics.n_IC;
         n_rollout           : int               = self.n_rollout;
         ld                  : LatentDynamics    = self.latent_dynamics;
-        best_loss           : float             = numpy.Inf;                    # Stores the lowest loss we get in this round of training.
+        best_loss           : float             = numpy.inf;                    # Stores the lowest loss we get in this round of training.
 
         # Determine number of iterations we should run in this round of training.
         next_iter   : int = min(self.restart_iter + self.n_iter, self.max_iter);
