@@ -1,18 +1,18 @@
 lasdi:
   type:                     gplasdi
   gplasdi:
-    # device:                 mps
     n_samples:              20
     lr:                     0.001
-    max_iter:               24000
-    n_iter:                 4000
-    max_greedy_iter:        24000
-    n_rollout:              20
+    max_iter:               12000
+    n_iter:                 2000
+    max_greedy_iter:        12000
+    n_rollout:              30
     loss_weights:
       recon:                1.0
-      ld:                   2.0
+      chain_rule:           1.0
+      ld:                   0.5
       rollout:              0.5
-      coef:                 0.001
+      coef:                 0.0001
       consistency:          1.0
 
 workflow:
@@ -46,7 +46,7 @@ model:
     hidden_widths:          [100]
     latent_dimension:       5
   pair:
-    hidden_widths:          [100]
+    hidden_widths:          [250, 100, 100, 100]
     latent_dimension:       5  
 
 latent_dynamics:
