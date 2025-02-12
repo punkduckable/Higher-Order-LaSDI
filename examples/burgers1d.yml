@@ -1,12 +1,17 @@
 lasdi:
   type:                     gplasdi
   gplasdi:
-    n_samples:              20
     lr:                     0.001
+    n_samples:              20
+
+    n_rollout_init:         10
+    iter_rollout_increase:  2000
+    rollout_increase_amt:   10
+
     max_iter:               12000
     n_iter:                 2000
     max_greedy_iter:        12000
-    n_rollout:              30
+
     loss_weights:
       recon:                1.0
       chain_rule:           1.0

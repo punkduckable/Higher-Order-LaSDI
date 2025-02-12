@@ -152,13 +152,15 @@ class BayesianGLaSDI:
         self.timer                          = Timer();
 
         # Extract training/loss hyperparameters from the configuration file. 
-        self.n_samples          : int       = config['n_samples'];      # Number of samples to draw per coefficient per combination of parameters
-        self.lr                 : float     = config['lr'];             # Learning rate for the optimizer.
-        self.n_iter             : int       = config['n_iter'];         # Number of iterations for one train and greedy sampling
-        self.max_iter           : int       = config['max_iter'];       # We stop training if restart_iter goes above this number. 
-        self.max_greedy_iter    : int       = config['max_greedy_iter'];# We stop performing greedy sampling if restart_iter goes above this number.
-        self.n_rollout          : int       = config['n_rollout'];      # The number of epochs for simulate forward when computing the rollout loss.
-        self.loss_weights       : dict      = config['loss_weights'];   # A dictionary housing the weights of the various parts of the loss function.
+        self.lr                     : float     = config['lr'];                     # Learning rate for the optimizer.
+        self.n_samples              : int       = config['n_samples'];              # Number of samples to draw per coefficient per combination of parameters
+        self.n_rollout_init         : int       = config['n_rollout_init'];         # The initial number of epochs for simulate forward when computing the rollout loss.
+        self.iter_rollout_increase  : int       = config['iter_rollout_increase'];  # We increase n_rollout after this many iterations.
+        self.rollout_increase_amt   : int       = config['rollout_increase_amt'];   # We increase n_rollout by this much each time we increase it.
+        self.n_iter                 : int       = config['n_iter'];                 # Number of iterations for one train and greedy sampling
+        self.max_iter               : int       = config['max_iter'];               # We stop training if restart_iter goes above this number. 
+        self.max_greedy_iter        : int       = config['max_greedy_iter'];        # We stop performing greedy sampling if restart_iter goes above this number.
+        self.loss_weights           : dict      = config['loss_weights'];           # A dictionary housing the weights of the various parts of the loss function.
 
         LOGGER.debug("  - n_samples = %d, lr = %f, n_iter = %d, ld_weight = %f, coef_weight = %f" \
                      % (self.n_samples, self.lr, self.n_iter, self.loss_weights['ld'], self.loss_weights['coef']));
@@ -235,7 +237,7 @@ class BayesianGLaSDI:
         # Final setup.
         n_train             : int               = self.param_space.n_train();
         n_IC                : int               = self.latent_dynamics.n_IC;
-        n_rollout           : int               = self.n_rollout;
+        n_rollout           : int               = self.n_rollout_init + self.rollout_increase_amt*(self.restart_iter//self.iter_rollout_increase);
         ld                  : LatentDynamics    = self.latent_dynamics;
         best_loss           : float             = numpy.inf;                    # Stores the lowest loss we get in this round of training.
 
@@ -247,6 +249,10 @@ class BayesianGLaSDI:
         for iter in range(self.restart_iter, next_iter):
             # Begin timing the current training step.            
             self.timer.start("train_step");
+
+            # Check if we need to update n_rollout
+            if(iter > 0 and (iter % self.iter_rollout_increase) == 0):
+                n_rollout += self.rollout_increase_amt;
 
             # Zero out the gradients. 
             self.optimizer.zero_grad();
@@ -393,7 +399,7 @@ class BayesianGLaSDI:
                 Z_Rollout   : list[torch.Tensor]    = self.latent_dynamics.simulate(coefs = coefs, IC = Z_Rollout_IC, times = rollout_times)
 
                 # Only keep the final simulated frame from each latent trajectory.
-                for d in range(self.latent_dynamics.n_IC):
+                for d in range(n_IC):
                     Z_Rollout[d]    = Z_Rollout[d][:, -1, :, :];
                 
                 # Decode the predictions
