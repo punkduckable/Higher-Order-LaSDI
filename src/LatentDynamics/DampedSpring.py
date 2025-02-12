@@ -144,15 +144,15 @@ class DampedSpring(LatentDynamics):
         assert(Latent_States[0].shape   == Latent_States[1].shape);
 
         # Extract the latent states and their velocities.
-        Z_X     : torch.Tensor  = Latent_States[0];
+        Z_D     : torch.Tensor  = Latent_States[0];
         Z_V     : torch.Tensor  = Latent_States[1];
         
 
         # -----------------------------------------------------------------------------------------
         # If Z has three dimensions, loop over all train cases.
-        if (len(Z_X.shape) == 3):
+        if (len(Z_D.shape) == 3):
             # Fetch the number of training cases.
-            n_train : int = Z_X.shape[0];
+            n_train : int = Z_D.shape[0];
             LOGGER.debug("Finding the optimal coefficients for %d parameter values" % n_train);
 
             # Prepare an array to house the flattened coefficient matrices for each combination of
@@ -173,7 +173,7 @@ class DampedSpring(LatentDynamics):
                 k'th component of the j'th frame of the latent trajectory for the i'th combination 
                 of parameter values. 
                 """
-                result : tuple[torch.Tensor] = self.calibrate([Z_X[i], Z_V[i]], dt);
+                result : tuple[torch.Tensor] = self.calibrate([Z_D[i], Z_V[i]], dt);
 
                 # Package everything from this combination of training values.
                 coefs[i, :] = result[0];
@@ -187,18 +187,18 @@ class DampedSpring(LatentDynamics):
 
         # -----------------------------------------------------------------------------------------
         # evaluate for one training case.
-        assert(len(Z_X.shape) == 2);
+        assert(len(Z_D.shape) == 2);
         
-        # First, compute the second time derivative of Z_X. This should also be the first time 
+        # First, compute the second time derivative of Z_D. This should also be the first time 
         # derivative of Z_V. We average the two so that the final loss depends on both.
-        d2Z_dt2_from_Z_X    : torch.Tensor  = Derivative2_Order4(X = Z_X,   h = dt);
+        d2Z_dt2_from_Z_D    : torch.Tensor  = Derivative2_Order4(X = Z_D,   h = dt);
         d2Z_dt2_from_Z_V    : torch.Tensor  = Derivative1_Order4(X = Z_V,   h = dt);
-        d2Z_dt2             : torch.Tensor  = 0.5*(d2Z_dt2_from_Z_X + d2Z_dt2_from_Z_V);
+        d2Z_dt2             : torch.Tensor  = 0.5*(d2Z_dt2_from_Z_D + d2Z_dt2_from_Z_V);
 
-        # Concatenate Z_X, Z_V and a column of 1's. We will solve for the matrix, E, which gives 
-        # the best fit for the system d2Z_dt2 = cat[Z_X, Z_V, 1] E. This matrix has the form 
+        # Concatenate Z_D, Z_V and a column of 1's. We will solve for the matrix, E, which gives 
+        # the best fit for the system d2Z_dt2 = cat[Z_D, Z_V, 1] E. This matrix has the form 
         # E^T = [-K, -C, b]. Thus, we can extract K, C, and b from Z_CAT.
-        Z_CAT   : torch.Tensor  = torch.cat([Z_X, Z_V, torch.ones((Z_X.shape[0], 1))], dim = 1);
+        Z_CAT   : torch.Tensor  = torch.cat([Z_D, Z_V, torch.ones((Z_D.shape[0], 1))], dim = 1);
 
         # For each j, solve the least squares problem 
         #   min{ || d2Z_dt2[:, j] - Z_CAT E(j)|| : E(j) \in \mathbb{R}^(dim*(2*dim + 1)) }
@@ -220,11 +220,11 @@ class DampedSpring(LatentDynamics):
             
             # Compute the RHS of the diff eq using coefs and the matrices we found.
             RHS_coefs           = torch.matmul(Z_CAT, coefs);
-            RHS_Manual          = torch.matmul(torch.ones((Z_X.shape[0], 1)), b.T) - torch.matmul(Z_V, C.T) - torch.matmul(Z_X, K.T);
+            RHS_Manual          = torch.matmul(torch.ones((Z_D.shape[0], 1)), b.T) - torch.matmul(Z_V, C.T) - torch.matmul(Z_D, K.T);
 
             # Select a random row to sample.
             import random;
-            row : int           = random.randint(a = 0, b = Z_X.shape[0]);
+            row : int           = random.randint(a = 0, b = Z_D.shape[0]);
 
             print("Row %d of RHS using coefs:                   %s" % (row, str(RHS_coefs[row, :])));
             print("Row %d of RHS using K, C, and b:             %s" % (row, str(RHS_Manual[row, :])));
