@@ -253,6 +253,7 @@ class BayesianGLaSDI:
             # Check if we need to update n_rollout
             if(iter > 0 and (iter % self.iter_rollout_increase) == 0):
                 n_rollout += self.rollout_increase_amt;
+                LOGGER.info("n_rollout is now %d" % n_rollout);
 
             # Zero out the gradients. 
             self.optimizer.zero_grad();
@@ -279,8 +280,8 @@ class BayesianGLaSDI:
 
                 # Compute the final loss.
                 loss = (self.loss_weights['recon']  * loss_recon + 
-                        self.loss_weights['ld']     * loss_ld / n_train + 
-                        self.loss_weights['coef']   * loss_coef / n_train);
+                        self.loss_weights['ld']     * loss_ld + 
+                        self.loss_weights['coef']   * loss_coef);
 
 
             elif(isinstance(model_device, Autoencoder_Pair)):
@@ -431,8 +432,8 @@ class BayesianGLaSDI:
                         self.loss_weights['consistency']    * loss_consistency +
                         self.loss_weights['chain_rule']     * loss_chain_rule + 
                         self.loss_weights['rollout']        * loss_rollout +
-                        self.loss_weights['ld']             * loss_ld / n_train + 
-                        self.loss_weights['coef']           * loss_coef / n_train);
+                        self.loss_weights['ld']             * loss_ld + 
+                        self.loss_weights['coef']           * loss_coef);
 
 
             # Convert coefs to numpy and find the maximum element.
