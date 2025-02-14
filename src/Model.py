@@ -874,7 +874,7 @@ class Autoencoder_Pair(torch.nn.Module):
     
 
 
-def load_Autoencoder_Pair(self, dict_ : dict) -> Autoencoder_Pair:
+def load_Autoencoder_Pair(dict_ : dict) -> Autoencoder_Pair:
     """
     This function builds a Autoencoder_Pair object using the information in dict_. dict_ should be 
     the dictionary returned by the export method for some Autoencoder_Pair object (or a 
@@ -912,8 +912,8 @@ def load_Autoencoder_Pair(self, dict_ : dict) -> Autoencoder_Pair:
                                                 reshape_shape   = reshape_shape);
     
     # Now replace its auto-encoders.
-    AEP.Displacement_Autoencoder = load_Autoencoder(dict_['Displacement dict']);
-    AEP.Displacement_Autoencoder = load_Autoencoder(dict_['Velocity dict']);
+    AEP.Displacement_Autoencoder    = load_Autoencoder(dict_['Displacement dict']);
+    AEP.Velocity_Autoencoder        = load_Autoencoder(dict_['Velocity dict']);
 
     # All done!
     return AEP;

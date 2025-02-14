@@ -4,8 +4,8 @@ lasdi:
     lr:                     0.001
     n_samples:              20
 
-    n_rollout_init:         10
-    iter_rollout_increase:  2000
+    n_rollout_init:         5
+    iter_rollout_increase:  1000
     rollout_increase_amt:   10
 
     max_iter:               12000
