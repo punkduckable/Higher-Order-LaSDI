@@ -173,21 +173,20 @@ class ParameterSpace:
             self.param_names += [param['name']];
         LOGGER.info("Initializing a ParameterSpace object with parameters %s" % (str(self.param_names)));
 
-        # First, let's fetch the set of possible parameter values. This yields a 2^k x k matrix,
-        # where k is the number of parameters. The i,j entry of this matrix gives the value of the 
-        # j'th parameter on the i'th instance.
-        # Note: we initially only allow 2 values for each parameter (max and min).
-        self.train_space    = self.createInitialTrainSpace(self.param_list);
-        self.n_init_train   = self.train_space.shape[0];
-        LOGGER.info("The training set has %d parameter combinations" % (self.n_init_train));
-
-        # Next, let's make a set of parameter combinations to test at.
+        # First, let's make a set of parameter combinations to test at.
         test_space_type : str = config['parameter_space']['test_space']['type']
         if (test_space_type == 'grid'):
             # Generate the set possible parameter combinations. See the docstring for 
             # "createTestGridSpace" for details.
-            self.test_grid_sizes, self.test_meshgrid, self.test_space = self.createTestGridSpace(self.param_list);
+            self.test_grid_sizes, self.test_meshgrid, self.test_space = self.createTestGridSpace();
         LOGGER.info("The testing set has %d parameter combinations" % (self.test_space.shape[0]));
+
+        # Next, let's make the training set. This should be a 2^k x n_p matrix, where n_p is the 
+        # number of parameters. The i,j entry of this matrix gives the value of the j'th parameter 
+        # in the i'th combination of parameters in the training set.
+        self.train_space    = self.createInitialTrainSpace();
+        self.n_init_train   = self.train_space.shape[0];
+        LOGGER.info("The training set has %d parameter combinations" % (self.n_init_train));
 
         # All done!
         return;
@@ -212,28 +211,26 @@ class ParameterSpace:
 
 
 
-    def createInitialTrainSpace(self, param_list : list[dict]) -> numpy.ndarray:
+    def createInitialTrainSpace(self) -> numpy.ndarray:
         """
         Sets up a grid of parameter value combinations to train at. Note that we only use the min 
-        and max value of each parameter when setting up this grid.
+        and max value of each parameter when setting up this grid. You must run this AFTER running 
+        the createTestGridSpace function, since we use the min/max value of each parameter in 
+        the testing set to build the training set. 
 
 
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
 
-        param_list: A list of parameter dictionaries. Each entry should be a dictionary with the 
-        following keys:
-            - name
-            - min
-            - max
+        Nothing!
         
             
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        A 2d array of shape ((2)^k, k), where k is the number of parameters (k == len(param_list)).
+        A 2d array of shape ((2)^k, k), where k is the number of parameters (k == len(self.param_list)).
         The i'th column is the flattened i'th mesh_grid array we when we create a mesh grid using 
         the min and max value of each parameter as the argument. See "createHyperMeshGrid" for 
         details. 
@@ -246,7 +243,10 @@ class ParameterSpace:
         # parameter value combinations.
         paramRanges : list[numpy.ndarray] = [];
 
-        for param in param_list:    
+        for i in range(len(self.param_list)):
+            # Fetch the current parameter dictionary.
+            param : dict = self.param_list[i];
+
             # Fetch the min, max value of the current parameter. 
             minval  : float = param['min'];
             maxval  : float = param['max'];
@@ -262,18 +262,18 @@ class ParameterSpace:
     
 
 
-    def createTestGridSpace(self, param_list : list[dict]) -> tuple[list[int], tuple[numpy.ndarray], numpy.ndarray]:
+    def createTestGridSpace(self) -> tuple[list[int], tuple[numpy.ndarray], numpy.ndarray]:
         """
-        This function sets up a grid of parameter value combinations to test at. 
+        This function sets up a grid of parameter value combinations to test at. This uses the 
+        information in the self.param_list variable. It should be run BEFORE running 
+        createInitialTrainSpace
 
 
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
 
-        param_list: A list of parameter dictionaries. Each dictionary should either use the 
-        "uniform" or "list" format. See create_uniform_1dspace and get_1dspace_from_list, 
-        respectively.
+        None!
 
 
         -------------------------------------------------------------------------------------------
@@ -285,13 +285,13 @@ class ParameterSpace:
         The first is a list whose i'th element specifies the number of distinct values of the i'th 
         parameter we consider (this is the length of the i'th element of "paramRanges" below).
 
-        The second is a a tuple of k numpy ndarrays (where k = len(param_list)), the i'th one of 
-        which is a k-dimensional array with shape (N0, ... , N{k - 1}), where Ni = 
-        param_list[i].size whose i(0), ... , i(k - 1) element specifies the value of the i'th 
+        The second is a a tuple of k numpy ndarrays (where k = len(self.param_list)), the i'th one 
+        of which is a k-dimensional array with shape (N0, ... , N{k - 1}), where Ni = 
+        self.param_list[i].size whose i(0), ... , i(k - 1) element specifies the value of the i'th 
         parameter in the i(0), ... , i(k - 1)'th unique combination of parameter values.
 
         The third one is a 2d array of parameter values. It has shape (M, k), where 
-        M = \prod_{i = 0}^{k - 1} param_list[i].size. 
+        M = \prod_{i = 0}^{k - 1} self.param_list[i].size. 
         """
 
         # Set up arrays to hold the parameter values + number of parameter values for each 
@@ -300,9 +300,16 @@ class ParameterSpace:
         gridSizes   : list[int]     = [];
 
         # Cycle through the parameters        
-        for param in param_list:
+        for i in range(len(self.param_list)):
+            # Fetch the current parameter.
+            param   : dict  = self.param_list[i];
+
             # Fetch the set of possible parameter values (paramRange) + the size of this set (n_values)
             n_values, paramRange  = getParam1DSpace[param['test_space_type']](param);
+
+            # Determine the min, max value of this parameter.
+            self.param_list[i]['min']   = numpy.min(paramRange);
+            self.param_list[i]['max']   = numpy.max(paramRange);
 
             # Add n_values, ParamRange to their corresponding lists
             gridSizes      += [n_values];

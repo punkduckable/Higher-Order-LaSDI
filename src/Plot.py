@@ -270,7 +270,7 @@ def Plot_Prediction(model           : torch.nn.Module,
     X_pred_std  : list[numpy.ndarray] = [];
     for d in range(n_IC):
         X_Pred[d]       = X_Pred[d].detach().numpy();       # X_Pred[i] has shape (n_samples, n_t, n_z).
-        X_pred_mean.append( numpy.mean( X_Pred[d], 0));
+        X_pred_mean.append( numpy.mean( X_Pred[d], 0));     # X_pred_mean[i] has shape (n_t, n_z).
         X_pred_std.append(  numpy.std(  X_Pred[d], 0));
 
     # Compute the solution residual (this will tell us how well the predicted solution satisfies 

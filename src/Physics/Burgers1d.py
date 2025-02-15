@@ -78,8 +78,8 @@ class Burgers1D(Physics):
 
         # Checks
         assert(len(param_names) == 2);
-        assert('a' in self.param_names);
-        assert('w' in self.param_names);
+        assert('a' in param_names);
+        assert('w' in param_names);
 
         # Call the super class initializer.
         super().__init__(config, param_names);
@@ -94,8 +94,9 @@ class Burgers1D(Physics):
         
         # Fetch variables from config. 
         self.n_t                    : int       = config['burgers1d']['n_t'];       # number of time steps when solving 
-        self.spatial_grid_shape     : list[int] = [config['burgers1d']['n_x']];     # number of grid points along each spatial axis
-        self.spatial_qgrid_shape    : list[int] = [self.spatial_grid_shape];
+        self.n_x                    : int       = config['burgers1d']['n_x']
+        self.spatial_grid_shape     : list[int] = [self.n_x];                       # number of grid points along each spatial axis
+        self.spatial_qgrid_shape    : list[int] = self.spatial_grid_shape;
 
         # If there are n spatial dimensions, then the grid needs to have n axes (one for each 
         # dimension). Make sure this is the case.
@@ -111,7 +112,7 @@ class Burgers1D(Physics):
         self.dt     : float     = self.tmax / (self.n_t - 1);               # step size between successive time steps/the time step we use when solving.
 
         # Set up the t, x grids. 
-        self.x_grid : numpy.ndarray = numpy.linspace(self.xmin, self.xmax, self.spatial_grid_shape[0]);
+        self.x_grid : numpy.ndarray = numpy.linspace(self.x_min, self.x_max, self.spatial_grid_shape[0]);
         self.t_grid : numpy.ndarray = numpy.linspace(0, self.tmax, self.n_t);
 
         self.maxk                   : int   = config['burgers1d']['maxk'];                  # TODO: ??? What is this ???
@@ -237,17 +238,17 @@ class Burgers1D(Physics):
     
 
     
-    def residual(self, Xhist : list[numpy.ndarray]) -> tuple[numpy.ndarray, float]:
+    def residual(self, X_hist : list[numpy.ndarray]) -> tuple[numpy.ndarray, float]:
         """
         This function computes the PDE residual (difference between the left and right hand side
-        of Burgers' equation when we substitute in the solution in Xhist).
+        of Burgers' equation when we substitute in the solution in X_hist).
 
 
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Xhist: A single element list of 2d numpy.ndarray object of shape (n_t, n_x), where n_t is 
+        X_hist: A single element list of 2d numpy.ndarray object of shape (n_t, n_x), where n_t is 
         the number of points along the temporal axis and n_x is the number of points along the 
         spatial axis. The i,j element of the d'th array should have the j'th component of the 
         d'th derivative of the fom solution at the i'th time step.
@@ -263,15 +264,20 @@ class Burgers1D(Physics):
         """
 
         # Extract only the position data.
-        Xhist = Xhist[0];
+        X_hist = X_hist[0];
+
+        # Run checks.
+        assert(len(X_hist.shape)     == 2);
+        assert(X_hist.shape[0]       == self.n_t);
+        assert(X_hist.shape[1]       == self.n_x);
         
         # First, approximate the spatial and temporal derivatives.
         # first axis is time index, and second index is spatial index.
-        dUdx = (Xhist[:, 1:] - Xhist[:, :-1]) / self.dx;
-        dUdt = (Xhist[1:, :] - Xhist[:-1, :]) / self.dt;
+        dUdx = (X_hist[:, 1:] - X_hist[:, :-1]) / self.dx;
+        dUdt = (X_hist[1:, :] - X_hist[:-1, :]) / self.dt;
 
         # compute the residual + the norm of the residual.
-        r   : numpy.ndarray = dUdt[:, :-1] - Xhist[:-1, :-1] * dUdx[:-1, :];
+        r   : numpy.ndarray = dUdt[:, :-1] - X_hist[:-1, :-1] * dUdx[:-1, :];
         e   : float         = numpy.linalg.norm(r);
 
         # All done!
