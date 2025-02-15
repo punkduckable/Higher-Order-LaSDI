@@ -78,6 +78,8 @@ class Burgers1D(Physics):
 
         # Checks
         assert(len(param_names) == 2);
+        assert('a' in self.param_names);
+        assert('w' in self.param_names);
 
         # Call the super class initializer.
         super().__init__(config, param_names);
@@ -91,24 +93,24 @@ class Burgers1D(Physics):
         assert('burgers1d' in config);
         
         # Fetch variables from config. 
-        self.n_t                     : int       = config['burgers1d']['number_of_timesteps'];   # number of time steps when solving 
-        self.spatial_grid_shape     : list[int] = config['burgers1d']['grid_shape'];            # number of grid points along each spatial axis
-        self.spatial_qgrid_shape    : list[int] = self.spatial_grid_shape;
-        
+        self.n_t                    : int       = config['burgers1d']['n_t'];       # number of time steps when solving 
+        self.spatial_grid_shape     : list[int] = [config['burgers1d']['n_x']];     # number of grid points along each spatial axis
+        self.spatial_qgrid_shape    : list[int] = [self.spatial_grid_shape];
+
         # If there are n spatial dimensions, then the grid needs to have n axes (one for each 
         # dimension). Make sure this is the case.
         assert(self.dim == len(self.spatial_grid_shape));
 
         # Fetch more variables from the config.
-        self.xmin   = config['burgers1d']['xmin'];   # Minimum value of the spatial variable in the problem domain
-        self.xmax   = config['burgers1d']['xmax'];   # Maximum value of the spatial variable in the problem domain
-        self.dx     = (self.xmax - self.xmin) / (self.spatial_grid_shape[0] - 1);    # Spacing between grid points along the spatial axis.
+        self.x_min  = config['burgers1d']['x_min'];   # Minimum value of the spatial variable in the problem domain
+        self.x_max  = config['burgers1d']['x_max'];   # Maximum value of the spatial variable in the problem domain
+        self.dx     = (self.x_max - self.x_min) / (self.spatial_grid_shape[0] - 1);    # Spacing between grid points along the spatial axis.
         assert(self.dx > 0.)
 
-        self.tmax   : float     = config['burgers1d']['elasticity'];        # We solve from t = 0 to t = tmax
-        self.dt     : float     = self.tmax / (self.n_t - 1);                # step size between successive time steps/the time step we use when solving.
+        self.tmax   : float     = config['burgers1d']['t_max'];             # We solve from t = 0 to t = t_max
+        self.dt     : float     = self.tmax / (self.n_t - 1);               # step size between successive time steps/the time step we use when solving.
 
-        # Set up the spatial, temporal grid.
+        # Set up the t, x grids. 
         self.x_grid : numpy.ndarray = numpy.linspace(self.xmin, self.xmax, self.spatial_grid_shape[0]);
         self.t_grid : numpy.ndarray = numpy.linspace(0, self.tmax, self.n_t);
 
@@ -117,11 +119,8 @@ class Burgers1D(Physics):
 
         # Determine which index corresponds to 'a' and 'w' (we pass an array of parameter values, 
         # we need this information to figure out which element corresponds to which variable).
-        if (self.param_names is not None):
-            if 'a' in self.param_names:
-                self.a_idx = self.param_names.index('a');
-            if 'w' in self.param_names:
-                self.w_idx = self.param_names.index('w');
+        self.a_idx = self.param_names.index('a');
+        self.w_idx = self.param_names.index('w');
         
         # All done!
         return;
@@ -132,7 +131,7 @@ class Burgers1D(Physics):
         """
         Evaluates the initial condition along the spatial grid. For this class, we use the 
         following initial condition:
-            u(x, 0) = a*exp(-x^2 / (2*w^2))
+            u(0, x) = a*exp(-x^2 / (2*w^2))
         where a and w are the corresponding parameter values.
 
 
@@ -155,12 +154,8 @@ class Burgers1D(Physics):
         """
 
         # Fetch the parameter values.
-        a, w = 1.0, 1.0
-
-        if 'a' in self.param_names:
-            a = param[self.a_idx];
-        if 'w' in self.param_names:
-            w = param[self.w_idx];  
+        a = param[self.a_idx];
+        w = param[self.w_idx];  
 
         # Compute the initial condition and return!
         return [a * numpy.exp(- self.x_grid ** 2 / 2 / w / w)];

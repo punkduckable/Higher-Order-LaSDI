@@ -28,7 +28,7 @@ class Physics:
     spatial_grid_shape  : list[int] = [];
     
     # the shape of each time step of the fom solution. 
-    spatial_qgrid_shape : list[int]     = [];
+    spatial_qgrid_shape : list[int] = [];
     
     '''
         numpy nd-array, assuming the shape of:
