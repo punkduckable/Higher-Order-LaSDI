@@ -8,9 +8,9 @@ lasdi:
     iter_rollout_increase:  100
     rollout_increase_amt:   1
 
-    max_iter:               12000
+    max_iter:               6000
     n_iter:                 2000
-    max_greedy_iter:        12000
+    max_greedy_iter:        6000
 
     loss_weights:
       recon:                1.0
@@ -49,9 +49,6 @@ model:
 
 latent_dynamics:
   type:                     spring
-  sindy:
-    fd_type:                sbp12
-    coef_norm_order:        fro
   spring: 
     coef_norm_order:        fro
 
