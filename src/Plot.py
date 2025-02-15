@@ -336,7 +336,7 @@ def Plot_Prediction(model           : torch.nn.Module,
 
         # Finally, plot the residual.
         plt.subplot(236);
-        plt.contourf(t_grid[:-1], x_grid[:-1], r.T, 100, cmap = plt.cm.jet);
+        plt.contourf(t_grid, x_grid, r.T, 100, cmap = plt.cm.jet);
         plt.colorbar();
         plt.xlabel("t");
         plt.ylabel("x");

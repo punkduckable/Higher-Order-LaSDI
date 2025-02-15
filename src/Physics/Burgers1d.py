@@ -135,6 +135,9 @@ class Burgers1D(Physics):
             u(0, x) = a*exp(-x^2 / (2*w^2))
         where a and w are the corresponding parameter values.
 
+        We also compute the velocity IC by solving forward a few time steps and the computing the 
+        time derivative using finite differences.
+
 
         -------------------------------------------------------------------------------------------
         Arguments
@@ -149,18 +152,44 @@ class Burgers1D(Physics):
         Returns 
         -------------------------------------------------------------------------------------------
 
-        A list of 1d numpy.ndarray objects, each of shape length self.spatial_grid_shape[0] (the 
-        number of grid points along the spatial axis). The i'th element holds the initial state of 
-        the i'th time derivative of the FOM state.
+        A two element list of 1d numpy.ndarray objects, each of shape length 
+        self.spatial_grid_shape[0] (the number of grid points along the spatial axis). The i'th 
+        element holds the initial state of the i'th time derivative of the FOM state.
         """
 
         # Fetch the parameter values.
-        a = param[self.a_idx];
-        w = param[self.w_idx];  
+        a   : float     = param[self.a_idx];
+        w   : float     = param[self.w_idx];  
 
-        # Compute the initial condition and return!
-        return [a * numpy.exp(- self.x_grid ** 2 / 2 / w / w)];
+        # Get the initial displacement.
+        u0  : numpy.ndarray     = a * numpy.exp(- self.x_grid ** 2 / 2 / w / w);
+
+        # return [u0];
+
+        #"""
+        ######## REMOVE ME   ||
+        ######## REMOVE ME   ||
+        ######## REMOVE ME   ||
+        ######## REMOVE ME  \  /
+        ######## REMOVE ME   \/
+        
+        # Solve forward a few time steps.
+        D       : numpy.ndarray         = solver(u0, self.maxk, self.convergence_threshold, 5, self.spatial_grid_shape[0], self.dt, self.dx);
+        V       : numpy.ndarray         = Derivative1_Order4(torch.Tensor(D), h = self.dt);
+        
+        # Get the ICs from the solution.
+        u0                              = D[0, :];
+        v0                              = V[0, :];
+            
+        # All done!
+        return [u0, v0];
     
+        ######## REMOVE ME   /\
+        ######## REMOVE ME  /  \
+        ######## REMOVE ME   ||
+        ######## REMOVE ME   ||
+        ######## REMOVE ME   ||
+        #"""
 
 
     def solve(self, param : numpy.ndarray) -> list[torch.Tensor]:
@@ -273,11 +302,18 @@ class Burgers1D(Physics):
         
         # First, approximate the spatial and temporal derivatives.
         # first axis is time index, and second index is spatial index.
-        dUdx = (X_hist[:, 1:] - X_hist[:, :-1]) / self.dx;
-        dUdt = (X_hist[1:, :] - X_hist[:-1, :]) / self.dt;
+        dUdx    : numpy.ndarray     = numpy.empty_like(X_hist);
+        dUdt    : numpy.ndarray     = numpy.empty_like(X_hist);
+
+
+        dUdx[:, :-1]    = (X_hist[:, 1:] - X_hist[:, :-1]) / self.dx;   # Use forward difference for all but the last time value.
+        dUdx[:, -1]     = dUdx[:, -2];                                  # Use backwards difference for the last time value
+        
+        dUdt[:-1, :]    = (X_hist[1:, :] - X_hist[:-1, :]) / self.dt;   # Use forward difference for all but the last position
+        dUdt[-1, :]     = dUdt[-2, :];                                  # Use backwards difference for the last time value.
 
         # compute the residual + the norm of the residual.
-        r   : numpy.ndarray = dUdt[:, :-1] - X_hist[:-1, :-1] * dUdx[:-1, :];
+        r   : numpy.ndarray = dUdt - X_hist * dUdx;
         e   : float         = numpy.linalg.norm(r);
 
         # All done!

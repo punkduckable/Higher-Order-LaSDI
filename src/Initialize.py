@@ -16,12 +16,13 @@ import  numpy;
 import  torch; 
 
 from    SINDy               import  SINDy;
-from    Physics             import  Physics;
 from    DampedSpring        import  DampedSpring;
 from    ParameterSpace      import  ParameterSpace;
 from    GPLaSDI             import  BayesianGLaSDI;
 from    Model               import  Autoencoder, load_Autoencoder, Autoencoder_Pair, load_Autoencoder_Pair;
+from    Physics             import  Physics;
 from    Burgers1d           import  Burgers1D;
+from    Explicit            import  Explicit;
 
 # Set up logger.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
@@ -35,7 +36,8 @@ model_load_dict =  {'ae'        : load_Autoencoder,
                     'pair'      : load_Autoencoder_Pair};
 ld_dict         =  {'sindy'     : SINDy, 
                     'spring'    : DampedSpring};
-physics_dict    =  {'burgers1d' : Burgers1D};
+physics_dict    =  {'burgers1d' : Burgers1D,
+                    'explicit'  : Explicit};
 
 
 

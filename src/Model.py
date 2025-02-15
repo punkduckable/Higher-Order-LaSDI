@@ -45,25 +45,6 @@ act_dict = {'ELU'           : torch.nn.ELU,
 
 
 
-######## REMOVE ME   ||
-######## REMOVE ME   ||
-######## REMOVE ME   ||
-######## REMOVE ME  \  /
-######## REMOVE ME   \/
-
-Utils_Path    : str  = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
-sys.path.append(Utils_Path);
-
-from    Burgers1d           import  solver;
-from    FiniteDifference    import  Derivative1_Order4;
-
-######## REMOVE ME   /\
-######## REMOVE ME  /  \
-######## REMOVE ME   ||
-######## REMOVE ME   ||
-######## REMOVE ME   ||
-
-
 
 # -------------------------------------------------------------------------------------------------
 # MLP class
@@ -812,28 +793,12 @@ class Autoencoder_Pair(torch.nn.Module):
 
         # Cycle through the parameters.
         for i in range(n_param):
-            ######## REMOVE ME   ||
-            ######## REMOVE ME   ||
-            ######## REMOVE ME   ||
-            ######## REMOVE ME  \  /
-            ######## REMOVE ME   \/
-
-            u0      : numpy.ndarray         = physics.initial_condition(param_grid[i])[0];
-            X       : numpy.ndarray         = solver(u0, physics.maxk, physics.convergence_threshold, 5, physics.spatial_grid_shape[0], physics.dt, physics.dx);
-            V       : numpy.ndarray         = Derivative1_Order4(torch.Tensor(X), h = physics.dt);
+            # Get the ICs for the i'th combination of parameter values.
+            ICs     : list[numpy.ndarray]   = physics.initial_condition(param_grid[i]);
+            u0      : numpy.ndarray         = ICs[0];
+            v0      : numpy.ndarray         = ICs[1];
             
-            u0                              = X[0, :];
-            v0                              = V[0, :];
-            
-            ######## REMOVE ME   /\
-            ######## REMOVE ME  /  \
-            ######## REMOVE ME   ||
-            ######## REMOVE ME   ||
-            ######## REMOVE ME   ||
-
-
-            # Fetch the IC for the i'th set of parameters. Then map it to a tensor.
-            # u0, v0  = physics.initial_condition(param_grid[i]);
+            # Map the ICs to a tensor.
             u0      = torch.Tensor(u0).reshape((1, 1) + u0.shape);
             v0      = torch.Tensor(v0).reshape((1, 1) + v0.shape);
 
