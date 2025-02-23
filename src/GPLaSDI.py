@@ -251,7 +251,7 @@ class BayesianGLaSDI:
             self.timer.start("train_step");
 
             # Check if we need to update n_rollout
-            if(iter > 0 and (iter % self.iter_rollout_increase) == 0):
+            if(iter > 0 and ((iter % self.iter_rollout_increase) == 0)):
                 n_rollout += self.rollout_increase_amt;
                 LOGGER.info("n_rollout is now %d" % n_rollout);
 
