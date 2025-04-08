@@ -71,14 +71,10 @@ class DampedSpring(LatentDynamics):
         self.n_IC       : int   = 2;
         self.n_coefs    : int   = dim*(2*dim + 1);
 
-        # Now, read the coefficient norm order.
         assert('spring' in config);
         self.coef_norm_order    = config['spring']['coef_norm_order'];
-
-        # Set up the loss function for the latent dynamics.
         self.LD_LossFunction = torch.nn.MSELoss();
 
-        # All done!
         return;
     
 
@@ -139,19 +135,18 @@ class DampedSpring(LatentDynamics):
         the coefficients across the set of combinations of parameters in the training set.
         """
 
-        # Run checks.
         assert(len(Latent_States)       == 2);
         assert(Latent_States[0].shape   == Latent_States[1].shape);
 
-        # Extract the latent states and their velocities.
         Z_D     : torch.Tensor  = Latent_States[0];
         Z_V     : torch.Tensor  = Latent_States[1];
         
 
         # -----------------------------------------------------------------------------------------
         # If Z has three dimensions, loop over all train cases.
+        
         if (len(Z_D.shape) == 3):
-            # Fetch the number of training cases.
+            # Z_D should have shape (Np, Nt, Nz).
             n_train : int = Z_D.shape[0];
             LOGGER.debug("Finding the optimal coefficients for %d parameter values" % n_train);
 
@@ -159,11 +154,8 @@ class DampedSpring(LatentDynamics):
             # parameter values.
             coefs = torch.empty([n_train, self.dim*(2*self.dim + 1)], dtype = torch.float32);
 
-            # Initialize the losses.
             Loss_LD     : torch.Tensor  = torch.tensor(0, dtype = torch.float32);
             Loss_Coef   : torch.Tensor  = torch.tensor(0, dtype = torch.float32);
-
-            # Cycle through the combinations of parameter values.
             for i in range(n_train):
                 """"
                 Get the optimal K, C, and b coefficients for the i'th combination of parameter 
@@ -172,21 +164,23 @@ class DampedSpring(LatentDynamics):
                 Remember that Z is 3d tensor of shape (Np, Nt, Nz) whose (i, j, k) entry holds the 
                 k'th component of the j'th frame of the latent trajectory for the i'th combination 
                 of parameter values. 
+
+                In this case, calibrate will return three variables - coefs, Loss_LD, Loss_Coef -
+                for the current combination of parameter values. 
                 """
                 result : tuple[torch.Tensor] = self.calibrate([Z_D[i], Z_V[i]], dt);
 
-                # Package everything from this combination of training values.
                 coefs[i, :] = result[0];
                 Loss_LD    += result[1];
                 Loss_Coef  += result[2];
             
-            # All done!
             return coefs, Loss_LD, Loss_Coef;
-            
+
 
 
         # -----------------------------------------------------------------------------------------
-        # evaluate for one training case.
+        # Otherwise, if Z has two dimensions, then evaluate for one training case.
+
         assert(len(Z_D.shape) == 2);
         
         # First, compute the second time derivative of Z_D. This should also be the first time 
@@ -230,8 +224,8 @@ class DampedSpring(LatentDynamics):
             print("Row %d of RHS using K, C, and b:             %s" % (row, str(RHS_Manual[row, :])));
             print("Max diff between RHS with coefs and K/C/b:   %f" % torch.max(torch.abs(RHS_coefs - RHS_Manual)));
 
-        # Prepare coefs and the losses to return. Note: we flatten the coefficient matrix.
-        # Note: output of lstsq is not contiguous in memory.
+        # Prepare coefs and the losses to return. 
+        # Note: we flatten the coefficient matrix.
         coefs   : torch.Tensor  = coefs.detach().flatten();
         return coefs, Loss_LD, Loss_Coef;
     
