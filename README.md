@@ -1,5 +1,5 @@
 Dependencies (version number)
-- Python        (3.10)j
+- Python        (3.10)
 - numpy         (1.26.4)
 - pytorch       (2.5.1)
 - scikit-learn  (1.5.2)
@@ -8,6 +8,8 @@ Dependencies (version number)
 - scipy         (1.14.1)
 - matplotlib    (3.9.2)
 - seaborn       (0.13.2)
+
+Further, if you want to use the Nonlinear-Elasticity example, you will also need to install PyMFEM.
 
 What things to I need to modify if I want to use my own [object]?
 - [LatentDynamics]
