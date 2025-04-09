@@ -18,26 +18,40 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 
 class Physics:
     # spatial dimension of the problem domain.
-    spatial_dim : int       = -1;
+    spatial_dim :    int            = -1;
     
     # The FOM solution can be vector valued. If it is, then qdim specifies the dimensionality of 
     # the FOM solution at each point. If the solution is scalar valued, then qdim = -1. 
-    qdim        : int       = -1;
+    qdim            : int           = -1;
 
     # The shape of each frame of a FOM solution to this equation. This is the shape of the objects
-    # we will put into our autoencoder.
-    Frame_Shape : list[int] = [];
+    # we will put into our autoencoder. If there is no structure to the spatial positions of the 
+    # nodes in each solution frame, then this may be a single element list specifying the number
+    # of nodes. On the other hand, if the nodes are organized into a grid with k axes, then this 
+    # could be a k-element list whose i'th element specifies the size of the i'th axis. If qdim 
+    # != -1 (the solution is vector-valued), qdim should be the leading element of Frame_Shape.
+    Frame_Shape     : list[int]     = [];
+
+    # If qdim = -1 (the solution is scalar valued), then this should be an array of shape 
+    # (Frame_Shape[0], ... , Frame_Shape[-1], spatial_dim) whose i(1), ... , i(-1), k element holds 
+    # the k'th component of the position of the i(1), ... , i(-1) node. 
+    X_Positions     : numpy.ndarray = numpy.array([]);
 
     # A dictionary housing the configuration parameters for the Physics object.
-    config      : dict      = {};
+    config          : dict          = {};
     
     # list of parameter names to parse parameters.
-    param_names : list[str] = None;
+    param_names     : list[str]     = None;
+
+    # If true, then we can assume that for each parameter value, the t_Grid for that parameter 
+    # value has uniformly sized time steps (t_Grid[i + 1] - t_Grid[i] = dt is the same for each i).
+    # This allows us to use higher order finite difference schemes, for instance. 
+    Uniform_t_Grid  : bool          = False;
 
 
 
 
-    def __init__(self, config : dict, param_names : list[str] = None) -> None:
+    def __init__(self, config : dict, param_names : list[str] = None, Uniform_t_Grid : bool = False) -> None:
         """
         A Physics object acts as a wrapper around a solver for a particular equation. The initial 
         condition in that function can have named parameters. Each physics object should have a 
@@ -66,6 +80,7 @@ class Physics:
         
         self.config         = config;
         self.param_names    = param_names;
+        self.Uniform_t_Grid = Uniform_t_Grid;
         return;
     
 

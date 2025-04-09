@@ -55,8 +55,10 @@ class Explicit(Physics):
         assert('w' in param_names);
 
         # Call the super class initializer.
-        super().__init__(config, param_names);
-
+        super().__init__(config         = config, 
+                         param_names    = param_names, 
+                         Uniform_t_Grid = True);
+        
         # The functions we deal with are scalar valued. Likewise, since there is only one spatial 
         # dimension, dim is also 1. 
         self.qdim           : int   = 1;
@@ -72,8 +74,8 @@ class Explicit(Physics):
         self.dx                     : float     = (self.x_max - self.x_min)/(self.n_x - 1);
         self.Frame_Shape            : list[int] = [self.n_x];                       # number of grid points along each spatial axis
 
-        # Set up the x grid.
-        self.x_grid : numpy.ndarray = numpy.linspace(self.x_min, self.x_max, self.n_x, dtype = numpy.float32);
+        # Set up X_Positions, which holds the spatial coordinate of each node (grid point).
+        self.X_Positions : numpy.ndarray = numpy.linspace(self.x_min, self.x_max, self.n_x, dtype = numpy.float32);
      
         # Determine which index corresponds to 'a' and 'w' (we pass an array of parameter values, 
         # we need this information to figure out which element corresponds to which variable).

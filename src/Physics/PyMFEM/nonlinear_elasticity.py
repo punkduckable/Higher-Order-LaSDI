@@ -236,7 +236,8 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
                 shear_modulus   : float         = 0.25, 
                 bulk_modulus    : float         = 5.0,
                 theta           : float         = 0.1/64.,
-                serialize_steps : int           = 1) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]:
+                serialize_steps : int           = 1, 
+                VisIt           : bool          = True) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """
     This examples solves a time dependent nonlinear elasticity problem of the form 
 
@@ -299,6 +300,9 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
 
     serialize_steps: Serialize (save) the solution this often.
 
+    VisIt: A boolean which, if True, will prompt the code to save the displacement and velocity 
+    GridFunctions every time we serialize them. It will save the GridFunctions in a format that
+    VisIt (visit.llnl.gov) can understand/work with.
     
         
     -----------------------------------------------------------------------------------------------
@@ -367,9 +371,8 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     # Refine the mesh 
     LOGGER.debug("Refining mesh");
     for lev in range(ref_levels):
-        mesh.UniformRefinement()
-
-
+        mesh.UniformRefinement();
+    
 
     # ---------------------------------------------------------------------------------------------
     # 2. Define the vector finite element spaces representing the mesh
@@ -391,10 +394,10 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
 
     # Setup the grid functions for displacement and velocity.
     VD  = mfem.BlockVector(fe_offset);
-    D   = mfem.GridFunction();
-    V   = mfem.GridFunction();
-    V.MakeRef(fespace, VD.GetBlock(0), 0);
-    D.MakeRef(fespace, VD.GetBlock(1), 0);
+    D_gf   = mfem.GridFunction();
+    V_gf   = mfem.GridFunction();
+    V_gf.MakeRef(fespace, VD.GetBlock(0), 0);
+    D_gf.MakeRef(fespace, VD.GetBlock(1), 0);
     
     # ???
     D_ref = mfem.GridFunction(fespace);
@@ -417,8 +420,8 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     LOGGER.debug("Setting up objects to hold the initial conditions;");
     velo        = InitialVelocity(dim);
     deform      = InitialDeformation(dim);
-    V.ProjectCoefficient(velo);
-    D.ProjectCoefficient(deform);
+    V_gf.ProjectCoefficient(velo);
+    D_gf.ProjectCoefficient(deform);
 
     # Impose boundary conditions.
     LOGGER.debug("Imposing Boundary Conditions");
@@ -434,8 +437,8 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     LOGGER.info("Setting up Hyperelastic operator.");
 
     oper = HyperelasticOperator(fespace, ess_bdr, visc, mu, K);
-    ee0 = oper.ElasticEnergy(D);
-    ke0 = oper.KineticEnergy(V);
+    ee0 = oper.ElasticEnergy(D_gf);
+    ke0 = oper.KineticEnergy(V_gf);
 
     LOGGER.info("initial elastic energy (EE) = " + str(ee0));
     LOGGER.info("initial kinetic energy (KE) = " + str(ke0));
@@ -466,6 +469,26 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
+    # 7. VisIt
+
+    # Setup VisIt visualization (if we are doing that)
+    if (VisIt):
+        LOGGER.info("Setting up VisIt visualization.");
+
+        dc_path : str = os.path.join(os.path.join(os.path.curdir, "VisIt"), "nlelast-fom");
+        dc = mfem.VisItDataCollection(dc_path, mesh);
+        dc.SetPrecision(8);
+        # // To save the mesh using MFEM's parallel mesh format:
+        # // dc->SetFormat(DataCollection::PARALLEL_FORMAT);
+        dc.RegisterField("Disp",    D_gf);
+        dc.RegisterField("Vel",     V_gf);
+        dc.SetCycle(0);
+        dc.SetTime(0.0);
+        dc.Save();
+
+
+
+    # ---------------------------------------------------------------------------------------------
     # 6. Perform time-integration (looping over the time iterations, ti, with a time-step dt).
     
     LOGGER.info("Running time stepping from t = 0 to t = %f with dt = %d" % (t_final, dt));
@@ -490,8 +513,8 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
         # Should we serialize?
         if (last_step or (ti % serialize_steps) == 0):
             # Find energy.
-            ee = oper.ElasticEnergy(D);
-            ke = oper.KineticEnergy(V);
+            ee = oper.ElasticEnergy(D_gf);
+            ke = oper.KineticEnergy(V_gf);
 
             text : str  = ( "step " + str(ti) + ", t = " + str(t) + ", EE = " +
                             str(ee) + ", KE = " + str(ke) +
@@ -501,10 +524,18 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
 
             # Serialize the current displacement, velocity, and time.
             times_list.append(t);
-            displacements_list.append(D.GetDataArray());
-            velocities_list.append(V.GetDataArray());
+            displacements_list.append(D_gf.GetDataArray());
+            velocities_list.append(V_gf.GetDataArray());
+        
+
+            # If visualizing, Save the GridFunctions to the VisIt object.
+            if(VisIt):
+                dc.SetCycle(ti);
+                dc.SetTime(t);
+                dc.Save();
 
         ti = ti + 1;
+        
 
 
 

@@ -82,7 +82,9 @@ class Burgers1D(Physics):
         assert('w' in param_names);
 
         # Call the super class initializer.
-        super().__init__(config, param_names);
+        super().__init__(config         = config, 
+                         param_names    = param_names, 
+                         Uniform_t_Grid = True);
 
         # The solution to Burgers' equation is scalar valued, so the qdim is 1. Likewise, since 
         # there is only one spatial dimension in the 1D burgers example, dim is also 1.
@@ -102,8 +104,8 @@ class Burgers1D(Physics):
         self.dx     = (self.x_max - self.x_min) / (self.n_x - 1);    # Spacing between grid points along the spatial axis.
         assert(self.dx > 0.);
 
-        # Set up the x grid. 
-        self.x_grid : numpy.ndarray = numpy.linspace(self.x_min, self.x_max, self.n_x);
+        # Set up X_Positions, which holds the spatial coordinate of each node (grid point).
+        self.X_Positions : numpy.ndarray = numpy.linspace(self.x_min, self.x_max, self.n_x, dtype = numpy.float32);
 
         # ???
         self.maxk                   : int   = config['burgers1d']['maxk'];                  # TODO: ??? What is this ???
