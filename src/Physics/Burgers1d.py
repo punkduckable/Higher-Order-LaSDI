@@ -86,35 +86,26 @@ class Burgers1D(Physics):
 
         # The solution to Burgers' equation is scalar valued, so the qdim is 1. Likewise, since 
         # there is only one spatial dimension in the 1D burgers example, dim is also 1.
-        self.qdim   : int   = 1;
-        self.dim    : int   = 1;
-
+        self.qdim           : int   = 1;
+        self.spatial_dim    : int   = 1;
+        
         # Make sure the config dictionary is actually for Burgers' equation.
         assert('burgers1d' in config);
-        
-        # Fetch variables from config. 
-        self.n_t                    : int       = config['burgers1d']['n_t'];       # number of time steps when solving 
-        self.n_x                    : int       = config['burgers1d']['n_x']
-        self.spatial_grid_shape     : list[int] = [self.n_x];                       # number of grid points along each spatial axis
-        self.spatial_qgrid_shape    : list[int] = self.spatial_grid_shape;
 
-        # If there are n spatial dimensions, then the grid needs to have n axes (one for each 
-        # dimension). Make sure this is the case.
-        assert(self.dim == len(self.spatial_grid_shape));
+        # Fetch variables from config. 
+        self.n_x                    : int       = config['burgers1d']['n_x'];
+        self.Frame_Shape            : list[int] = [self.n_x];                       # number of grid points along each spatial axis
 
         # Fetch more variables from the config.
         self.x_min  = config['burgers1d']['x_min'];   # Minimum value of the spatial variable in the problem domain
         self.x_max  = config['burgers1d']['x_max'];   # Maximum value of the spatial variable in the problem domain
-        self.dx     = (self.x_max - self.x_min) / (self.spatial_grid_shape[0] - 1);    # Spacing between grid points along the spatial axis.
-        assert(self.dx > 0.)
+        self.dx     = (self.x_max - self.x_min) / (self.n_x - 1);    # Spacing between grid points along the spatial axis.
+        assert(self.dx > 0.);
 
-        self.tmax   : float     = config['burgers1d']['t_max'];             # We solve from t = 0 to t = t_max
-        self.dt     : float     = self.tmax / (self.n_t - 1);               # step size between successive time steps/the time step we use when solving.
+        # Set up the x grid. 
+        self.x_grid : numpy.ndarray = numpy.linspace(self.x_min, self.x_max, self.n_x);
 
-        # Set up the t, x grids. 
-        self.x_grid : numpy.ndarray = numpy.linspace(self.x_min, self.x_max, self.spatial_grid_shape[0]);
-        self.t_grid : numpy.ndarray = numpy.linspace(0, self.tmax, self.n_t);
-
+        # ???
         self.maxk                   : int   = config['burgers1d']['maxk'];                  # TODO: ??? What is this ???
         self.convergence_threshold  : float = config['burgers1d']['convergence_threshold'];
 
@@ -152,9 +143,9 @@ class Burgers1D(Physics):
         Returns 
         -------------------------------------------------------------------------------------------
 
-        A two element list of 1d numpy.ndarray objects, each of shape length 
-        self.spatial_grid_shape[0] (the number of grid points along the spatial axis). The i'th 
-        element holds the initial state of the i'th time derivative of the FOM state.
+        A two element list of 1d numpy.ndarray objects, each of shape length self.n_x (the number 
+        of grid points along the spatial axis). The i'th element holds the initial state of the 
+        i'th time derivative of the FOM state.
         """
 
         # Fetch the parameter values.
@@ -172,10 +163,15 @@ class Burgers1D(Physics):
         ######## REMOVE ME   ||
         ######## REMOVE ME  \  /
         ######## REMOVE ME   \/
-        
+
+        # Calculate dt.
+        n_t     : int           = self.config['burgers1d']['n_t'];
+        t_max   : float         = self.config['burgers1d']['t_max']; 
+        dt      : float         = t_max/(n_t - 1);
+
         # Solve forward a few time steps.
-        D       : numpy.ndarray         = solver(u0, self.maxk, self.convergence_threshold, 5, self.spatial_grid_shape[0], self.dt, self.dx);
-        V       : numpy.ndarray         = Derivative1_Order4(torch.Tensor(D), h = self.dt);
+        D       : numpy.ndarray         = solver(u0, self.maxk, self.convergence_threshold, 5, self.n_x, dt, self.dx);
+        V       : numpy.ndarray         = Derivative1_Order4(torch.Tensor(D), h = dt);
         
         # Get the ICs from the solution.
         u0                              = D[0, :];
@@ -192,7 +188,7 @@ class Burgers1D(Physics):
         #"""
 
 
-    def solve(self, param : numpy.ndarray) -> list[torch.Tensor]:
+    def solve(self, param : numpy.ndarray) -> tuple[list[torch.Tensor], numpy.ndarray]:
         """
         Solves the 1d burgers equation when the IC uses the parameters in the param array.
 
@@ -209,19 +205,33 @@ class Burgers1D(Physics):
         -------------------------------------------------------------------------------------------
         Returns 
         -------------------------------------------------------------------------------------------
+        
+        A two element tuple: X, t_Grid.
 
-        A single element list holding a 3d torch.Tensor object of shape (1, n_t, n_x), where n_t is 
-        the number of points along the temporal grid and n_x is the number along the spatial grid.
+        X is an n_param element list whose i'th element is an n_IC element list whose j'th element
+        is a torch.Tensor object of shape (n_t(i), n_x[0], ... , n_x[ns- 1]) holding the j'th 
+        derivative of the FOM solution for the i'th combination of parameter values. Here, n_IC is 
+        the number of initial conditions needed to specify the IC, n_param is the number of rows 
+        in param, n_t(i) is the number of time steps we used to generate the solution with the 
+        i'th combination of parameter values (the length of the i'th element of t_Grid).
+
+        t_Grid is a list whose i'th element is a 1d numpy array housing the time steps from the 
+        solution to the underlying equation when we use the i'th combination of parameter values.
         """
         
         # Fetch the initial condition.
         u0 : numpy.ndarray = self.initial_condition(param)[0];
         
+        # Compute dt. 
+        n_t     : int           = self.config['burgers1d']['n_t'];
+        t_max   : float         = self.config['burgers1d']['t_max']; 
+        dt      : float         = t_max/(n_t - 1);
+
         """
         # Solve the PDE and then reshape the result to be a 3d tensor with a leading dimension of 
         # size 1.
-        X       : torch.Tensor          = torch.Tensor(solver(u0, self.maxk, self.convergence_threshold, self.n_t - 1, self.spatial_grid_shape[0], self.dt, self.dx));        
-        new_X   : list[torch.Tensor]    = [X.reshape(1, self.n_t, self.spatial_grid_shape[0])];
+        X       : torch.Tensor          = torch.Tensor(solver(u0, self.maxk, self.convergence_threshold, n_t - 1, self.n_x, dt, self.dx));        
+        new_X   : list[torch.Tensor]    = [X.reshape(1, n_t, self.n_x)];
         """
 
         #"""
@@ -233,11 +243,11 @@ class Burgers1D(Physics):
     
         # Solve the PDE and then reshape the result to be a 3d tensor with a leading dimension of 
         # size 1.
-        X       : torch.Tensor  = torch.Tensor(solver(u0, self.maxk, self.convergence_threshold, self.n_t - 1, self.spatial_grid_shape[0], self.dt, self.dx));
-        V       : torch.Tensor  = Derivative1_Order4(X, h = self.dt);
+        X       : torch.Tensor  = torch.Tensor(solver(u0, self.maxk, self.convergence_threshold, n_t - 1, self.n_x, dt, self.dx));
+        V       : torch.Tensor  = Derivative1_Order4(X, h = dt);
         
-        X       : torch.Tensor  = X.reshape(1, self.n_t, self.spatial_grid_shape[0]);
-        V       : torch.Tensor  = V.reshape(1, self.n_t, self.spatial_grid_shape[0]);
+        X       : torch.Tensor  = X.reshape(1, n_t, self.n_x);
+        V       : torch.Tensor  = V.reshape(1, n_t, self.n_x);
 
         new_X   : list[torch.Tensor]    = [X, V];
 
@@ -252,20 +262,6 @@ class Burgers1D(Physics):
         return new_X;
     
 
-
-    def export(self) -> dict:
-        """
-        Returns a dictionary housing self's internal state. You can use this dictionary to 
-        effectively serialize self.
-        """
-
-        dict_ : dict = {'t_grid'    : self.t_grid, 
-                        'x_grid'    : self.x_grid, 
-                        'dt'        : self.dt, 
-                        'dx'        : self.dx};
-        return dict_;
-    
-
     
     def residual(self, X_hist : list[numpy.ndarray]) -> tuple[numpy.ndarray, float]:
         """
@@ -278,9 +274,10 @@ class Burgers1D(Physics):
         -------------------------------------------------------------------------------------------
 
         X_hist: A single element list of 2d numpy.ndarray object of shape (n_t, n_x), where n_t is 
-        the number of points along the temporal axis and n_x is the number of points along the 
-        spatial axis. The i,j element of the d'th array should have the j'th component of the 
-        d'th derivative of the fom solution at the i'th time step.
+        the number of points along the temporal axis (this is specified by the configuration file) 
+        and n_x is the number of points along the spatial axis. The i,j element of the d'th array 
+        should have the j'th component of the d'th derivative of the fom solution at the i'th time 
+        step.
 
 
         -------------------------------------------------------------------------------------------
@@ -292,24 +289,27 @@ class Burgers1D(Physics):
         spatial grid point. 
         """
 
+        # Run checks.
+        assert(len(X_hist.shape)     == 2);
+        assert(X_hist.shape[1]       == self.n_x);
+
         # Extract only the position data.
         X_hist = X_hist[0];
 
-        # Run checks.
-        assert(len(X_hist.shape)     == 2);
-        assert(X_hist.shape[0]       == self.n_t);
-        assert(X_hist.shape[1]       == self.n_x);
-        
+        # Compute dt. 
+        n_t     : int           = self.config['burgers1d']['n_t'];
+        t_max   : float         = self.config['burgers1d']['t_max']; 
+        dt      : float         = t_max/(n_t - 1);
+
         # First, approximate the spatial and temporal derivatives.
         # first axis is time index, and second index is spatial index.
         dUdx    : numpy.ndarray     = numpy.empty_like(X_hist);
         dUdt    : numpy.ndarray     = numpy.empty_like(X_hist);
 
-
         dUdx[:, :-1]    = (X_hist[:, 1:] - X_hist[:, :-1]) / self.dx;   # Use forward difference for all but the last time value.
         dUdx[:, -1]     = dUdx[:, -2];                                  # Use backwards difference for the last time value
         
-        dUdt[:-1, :]    = (X_hist[1:, :] - X_hist[:-1, :]) / self.dt;   # Use forward difference for all but the last position
+        dUdt[:-1, :]    = (X_hist[1:, :] - X_hist[:-1, :]) / dt;        # Use forward difference for all but the last position
         dUdt[-1, :]     = dUdt[-2, :];                                  # Use backwards difference for the last time value.
 
         # compute the residual + the norm of the residual.

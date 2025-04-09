@@ -59,33 +59,22 @@ class Explicit(Physics):
 
         # The functions we deal with are scalar valued. Likewise, since there is only one spatial 
         # dimension, dim is also 1. 
-        self.qdim   : int   = 1;
-        self.dim    : int   = 1;
+        self.qdim           : int   = 1;
+        self.spatial_dim    : int   = 1;
 
         # Make sure the config dictionary is actually for the explicit physics model.
         assert('explicit' in config);
-        
-        # Set up time variables.
-        self.n_t                    : int       = config['explicit']['n_t'];
-        self.t_max                  : float     = config['explicit']['t_max'];      # We solve from t = 0 to t = t_max. 
-        self.dt                     : float     = self.t_max / (self.n_t - 1);      # step size between successive time steps/the time step we use when solving.
-        
+
         # Set up spatial variables
         self.n_x                    : int       = config['explicit']['n_x'];    
         self.x_min                  : float     = config['explicit']['x_min'];
         self.x_max                  : float     = config['explicit']['x_max'];
         self.dx                     : float     = (self.x_max - self.x_min)/(self.n_x - 1);
-        self.spatial_grid_shape     : list[int] = [self.n_x];                       # number of grid points along each spatial axis
-        self.spatial_qgrid_shape    : list[int] = self.spatial_grid_shape;
+        self.Frame_Shape            : list[int] = [self.n_x];                       # number of grid points along each spatial axis
 
-        # If there are n spatial dimensions, then the grid needs to have n axes (one for each 
-        # dimension). Make sure this is the case.
-        assert(self.dim == len(self.spatial_grid_shape));
-
-        # Set up the x, t grids.
+        # Set up the x grid.
         self.x_grid : numpy.ndarray = numpy.linspace(self.x_min, self.x_max, self.n_x, dtype = numpy.float32);
-        self.t_grid : numpy.ndarray = numpy.linspace(0, self.t_max, self.n_t, dtype = numpy.float32);
-
+     
         # Determine which index corresponds to 'a' and 'w' (we pass an array of parameter values, 
         # we need this information to figure out which element corresponds to which variable).
         self.a_idx = self.param_names.index('a');
@@ -121,9 +110,9 @@ class Explicit(Physics):
         Returns 
         -------------------------------------------------------------------------------------------
 
-        A list of 1d numpy.ndarray objects, each of shape length self.spatial_grid_shape[0] (the 
-        number of grid points along the spatial axis). The i'th element holds the initial state of 
-        the i'th time derivative of the FOM state.
+        A list of 1d numpy.ndarray objects, each of shape length self.n_x (the number of grid 
+        points along the spatial axis). The i'th element holds the initial state of the i'th time 
+        derivative of the FOM state.
         """
 
         # Fetch the parameter values.
@@ -137,7 +126,7 @@ class Explicit(Physics):
     
 
 
-    def solve(self, param : numpy.ndarray) -> list[torch.Tensor]:
+    def solve(self, param : numpy.ndarray) -> tuple[list[torch.Tensor], numpy.ndarray]:
         """
         Evaluates the function u(t, x) (see __init__ docstring) on the t, x grids using the 
         parameters in param.
@@ -155,18 +144,31 @@ class Explicit(Physics):
         -------------------------------------------------------------------------------------------
         Returns 
         -------------------------------------------------------------------------------------------
+        
+        A two element tuple: X, t_Grid.
 
-        A two element list. Each element is a 3d torch.Tensor object of shape (1, n_t, n_x), where 
-        n_t is the number of points along the temporal grid and n_x is the number along the spatial 
-        grid.
+        X is an n_param element list whose i'th element is an n_IC element list whose j'th element
+        is a torch.Tensor object of shape (n_t(i), n_x[0], ... , n_x[ns- 1]) holding the j'th 
+        derivative of the FOM solution for the i'th combination of parameter values. Here, n_IC is 
+        the number of initial conditions needed to specify the IC, n_param is the number of rows 
+        in param, n_t(i) is the number of time steps we used to generate the solution with the 
+        i'th combination of parameter values (the length of the i'th element of t_Grid).
+
+        t_Grid is a list whose i'th element is a 1d numpy array housing the time steps from the 
+        solution to the underlying equation when we use the i'th combination of parameter values.
         """
-
+       
         # Fetch the parameter values.
         a   : float             = param[self.a_idx];
         w   : float             = param[self.w_idx]; 
 
+        # Make the t_grid
+        n_t     : int           = self.config['explicit']['n_t'];
+        t_max   : float         = self.config['explicit']['t_max']; # We solve from t = 0 to t = t_max. 
+        t_Grid  : numpy.ndarray = numpy.linspace(0, t_max, n_t, dtype = numpy.float32);
+
         # Make the t, x meshgrids.
-        t_mesh, x_mesh          = numpy.meshgrid(self.t_grid, self.x_grid, indexing = 'ij');
+        t_mesh, x_mesh          = numpy.meshgrid(t_Grid, self.x_grid, indexing = 'ij');
         t_mesh                  = torch.tensor(t_mesh);
         x_mesh                  = torch.tensor(x_mesh);
 
@@ -189,22 +191,8 @@ class Explicit(Physics):
         V = V.reshape((1,) + V.shape);
 
         # All done!
-        return [U, V];
-    
-
-
-    def export(self) -> dict:
-        """
-        Returns a dictionary housing self's internal state. You can use this dictionary to 
-        effectively serialize self.
-        """
-
-        dict_ : dict = {'t_grid'    : self.t_grid, 
-                        'x_grid'    : self.x_grid, 
-                        'dt'        : self.dt, 
-                        'dx'        : self.dx};
-        return dict_;
-    
+        return [U, V], t_Grid;
+        
 
     
     def residual(self, X_hist : list[numpy.ndarray]) -> tuple[numpy.ndarray, float]:
@@ -219,9 +207,9 @@ class Explicit(Physics):
         -------------------------------------------------------------------------------------------
 
         X_hist: A list of 2d numpy.ndarray object of shape (n_t, n_x), where n_t is the number of 
-        points along the temporal axis and n_x is the number of points along the spatial axis. The 
-        i,j element of the d'th array should have the j'th component of the d'th derivative of the 
-        fom solution at the i'th time step.
+        points along the temporal axis (this is specified by the configuration file) and n_x is the 
+        number of points along the spatial axis. The i,j element of the d'th array should have the 
+        j'th component of the d'th derivative of the fom solution at the i'th time step.
 
         
         -------------------------------------------------------------------------------------------
@@ -235,7 +223,6 @@ class Explicit(Physics):
 
         # Run checks.
         assert(len(X_hist[0].shape)     == 2);
-        assert(X_hist[0].shape[0]       == self.n_t);
         assert(X_hist[0].shape[1]       == self.n_x);
 
         # compute the residual + the norm of the residual.
