@@ -17,8 +17,7 @@ import  torch;
 from    scipy.integrate     import  odeint;
 
 from    LatentDynamics      import  LatentDynamics;
-from    Stencils            import  FDdict;
-
+from    FiniteDifference    import  Derivative1_Order4, Derivative1_Order2_NonUniform;
 
 # Setup logger.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
@@ -30,14 +29,10 @@ LOGGER  : logging.Logger    = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class SINDy(LatentDynamics):
-    fd_type     = ''
-    fd          = None
-    fd_oper     = None
-
-
-    def __init__(self, 
-                 n_z        : int, 
-                 config     : dict) -> None:
+    def __init__(   self, 
+                    n_z             : int,
+                    coef_norm_order : str | float,
+                    Uniform_t_Grid  : bool) -> None:
         r"""
         Initializes a SINDy object. This is a subclass of the LatentDynamics class which uses the 
         SINDy algorithm as its model for the ODE governing the latent state. Specifically, we 
@@ -55,24 +50,25 @@ class SINDy(LatentDynamics):
 
         n_z: The number of dimensions in the latent space, where the latent dynamics takes place.
 
-        config: A dictionary housing the settings we need to set up a SINDy object. Specifically, 
-        this dictionary should have a key called "sindy" whose corresponding value is another 
-        dictionary with the following two keys:
-            - fd_type: A string specifying which finite-difference scheme we should use when
-            approximating the time derivative of the solution to the latent dynamics at a 
-            specific time. Currently, the following options are allowed:
-                - 'sbp12': summation-by-parts 1st/2nd (boundary/interior) order operator
-                - 'sbp24': summation-by-parts 2nd/4th order operator
-                - 'sbp36': summation-by-parts 3rd/6th order operator
-                - 'sbp48': summation-by-parts 4th/8th order operator
-            - coef_norm_order: A string specifying which norm we want to use when computing
-            the coefficient loss.
+        coef_norm_order: A string or float specifying which norm we want to use when computing
+        the coefficient loss. We pass as the "p" argument to torch.norm. 
+
+        Uniform_t_Grid: A boolean which, if True, specifies that for each parameter value, the 
+        times corresponding to the frames of the solution for that parameter value will be 
+        uniformly spaced. In other words, the first frame corresponds to time t0, the second to 
+        t0 + h, the k'th to t0 + (k - 1)h, etc (note that h may depend on the parameter value, but
+        it needs to be constant for a specific parameter value). The value of this setting 
+        determines which finite difference method we use to compute time derivatives. 
         """
 
         # Run the base class initializer. The only thing this does is set the n_z and n_t 
         # attributes.
-        super().__init__(n_z, n_t);
-        LOGGER.info("Initializing a SINDY object with n_z = %d, n_t = %d" % (self.n_z, self.n_t));
+        super().__init__(n_z                = n_z, 
+                         coef_norm_order    = coef_norm_order, 
+                         Uniform_t_Grid     = Uniform_t_Grid);
+        LOGGER.info("Initializing a SINDY object with n_z = %d, coef_norm_order = %s, Uniform_t_Grid = %s" % (  self.n_z, 
+                                                                                                                str(self.coef_norm_order), 
+                                                                                                                str(self.Uniform_t_Grid)));
 
         # Set n_IC and n_coefs.
         # We only allow library terms of order <= 1. If we let z(t) \in \mathbb{R}^{n_z} denote the 
@@ -83,49 +79,15 @@ class SINDy(LatentDynamics):
         self.n_coefs    : int   = self.n_z*(self.n_z + 1);
         self.n_IC       : int   = 1;
 
-
-        # Make sure config is actually a dictionary for a SINDY type latent dynamics.
-        assert('sindy' in config)
-
-        """
-        Determine which finite difference scheme we should use to approximate the time derivative
-        of the latent space dynamics. Currently, we allow the following values for "fd_type":
-            - 'sbp12': summation-by-parts 1st/2nd (boundary/interior) order operator
-            - 'sbp24': summation-by-parts 2nd/4th order operator
-            - 'sbp36': summation-by-parts 3rd/6th order operator
-            - 'sbp48': summation-by-parts 4th/8th order operator
-        """
-        self.fd_type    : str       = config['sindy']['fd_type'];
-        self.fd         : callable  = FDdict[self.fd_type];
-
-        r"""
-        Fetch the operator matrix. What does this do? Suppose we have a time series with n_t points, 
-        x(t_0), ... , x(t_{nt - 1}) \in \mathbb{R}^d. Further assume that for each j, 
-        t_j = t_0 + j \delta t, where \delta t is some positive constant. Let j \in {0, 1, ... , 
-        n_t - 1}. Let xj be j'th vector whose k'th element is x_j(t_k). Then, the i'th element of 
-        M xj holds the approximation to x_j'(t_k) using the stencil we selected above. 
-
-        For instance, if we selected sdp12, corresponding to the central difference scheme, then 
-        we have (for j != 0, n_t - 1)
-            [M xj]_i = (x_j(t_{i + 1}) - x(t_{j - 1}))/(2 \delta t).
-        """
-        self.fd_oper, _, _          = self.fd.getOperators(self.n_t);
-
-        # Fetch the norm we are going to use on the sindy coefficients.
-        # NOTE(kevin): by default, this will be L1 norm.
-        self.coef_norm_order = config['sindy']['coef_norm_order'];
-
         # TODO(kevin): other loss functions
         self.MSE = torch.nn.MSELoss();
-
-        # All done!
         return;
     
 
 
     def calibrate(  self,  
-                    Latent_States   : list[list[torch.Tensor]]  | list[torch.Tensor], 
-                    t_Grid          : list[numpy.ndarray]       | numpy.ndarray) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+                    Latent_States   : list[list[torch.Tensor]], 
+                    t_Grid          : list[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         r"""
         This function computes the optimal SINDy coefficients using the current latent time 
         series. Specifically, let us consider the case when Z has two dimensions (the case when 
@@ -142,24 +104,15 @@ class SINDy(LatentDynamics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Latent_States: Either a list of lists of 2d tensors, or a list of 2d tensors. 
+        Latent_States: An n_param (number of parameter combinations we want to calibrate) element
+        list. The i'th list element should be an n_IC element list whose j'th element is a 2d numpy 
+        array of shape (n_t(i), n_z) whose p, q element holds the q'th component of the j'th 
+        derivative of the latent state during the p'th time step (whose time value corresponds to 
+        the p'th element of t_Grid) when we use the i'th combination of parameter values. 
         
-        If Latent_States is a list of lists, then t_Grid should be a list of 1d numpy.ndarray 
-        object. In this case, Latent_States should be a list of length n_param (number of parameter 
-        combinations we want to calibrate). The i'th list element should be an n_IC element list 
-        whose j'th element is a 2d numpy array of shape (n_t(i), n_z) whose p, q element holds the 
-        q'th component of the j'th derivative of the latent state during the p'th time step (whose 
-        time value corresponds to the p'th element of t_Grid) when we use the i'th combination of 
-        parameter values. 
-        
-        if Latent_States is a list of numpy arrays, then t_Grid should be a 1d numpy arrays. In 
-        this case, Latent_States should be a list of length n_IC. The j'th element of this list 
-        should be an numpy ndarray of shape (n_t(i), n_z) whose p, q element holds the q'th 
-        component of the j'th derivative of the latent state during the p'th time step (whose 
-        time value corresponds to the p'th element t_Grid).
-        
-        t_Grid: Either a list of 1d numpy ndarray objects or a 1d numpy ndarray object. See the 
-        description of Latent_States for details. 
+        t_Grid: An n_param element list of 1d torch.Tensor objects. The i'th element should be a 
+        1d tensor of length n_t(i) whose j'th element holds the time value corresponding to the 
+        j'th frame when we use the i'th combination of parameter values.
 
         
         -------------------------------------------------------------------------------------------
@@ -182,13 +135,13 @@ class SINDy(LatentDynamics):
         """
 
         # Run checks.
-        if(isinstance(t_Grid, list)):
-            n_param : int   = len(t_Grid);
-            for i in range(n_param):
-                assert(len(Latent_States[i]) == 1);
-        else: 
-            n_param : int   = 1;
-            assert(len(Latent_States) == 1);
+        assert(isinstance(t_Grid, list));
+        assert(isinstance(Latent_States, list));
+        assert(len(Latent_States)   == len(t_Grid));
+
+        n_param : int   = len(t_Grid);
+        for i in range(n_param):
+            assert(len(Latent_States[i]) == 1);
 
 
         # -----------------------------------------------------------------------------------------
@@ -210,8 +163,8 @@ class SINDy(LatentDynamics):
                 
                 Note that Result a 3 element tuple.
                 """
-                result : tuple[torch.Tensor] = self.calibrate(Latent_States = Latent_States[i], 
-                                                              t_Grid        = t_Grid[i]);
+                result : tuple[torch.Tensor] = self.calibrate(Latent_States = [Latent_States[i]], 
+                                                              t_Grid        = [t_Grid[i]]);
 
                 # Package the results from this combination of parameter values.
                 coefs[i, :] = result[0];
@@ -225,26 +178,34 @@ class SINDy(LatentDynamics):
         # -----------------------------------------------------------------------------------------
         # evaluate for one combination of parameter values case.
 
-        # First, compute the time derivatives. This yields a torch.Tensor object whose i,j entry 
-        # holds an approximation of (d/dt) Z_j(t_0 + i*dt).
-        Z       : torch.Tensor = Latent_States[0];
-        dZdt    : torch.Tensor = self.compute_time_derivative(Z, t_Grid[1] - t_Grid[0])
-        time_dim, space_dim = dZdt.shape
+        t_Grid  : torch.Tensor  = t_Grid[0];
+        Z       : torch.Tensor  = Latent_States[0];
+        n_t     : int           = len(t_Grid);
+
+        # First, compute the time derivatives. Which method we use depends on if we have a uniform 
+        # grid spacing or not. If so, we use an O(h^4) method. Otherwise, we use an O(h^2) one. In
+        # either case, this yields a 2d torch.Tensor object of shape (n_t, n_z) whose i,j element 
+        # holds the holds an approximation of (d/dt) Z_j(t_Grid[i]).
+        if(self.Uniform_t_Grid == True):
+            h       : float         = t_Grid[1] - t_Grid[0];
+            dZdt    : torch.Tensor  = Derivative1_Order4(Z, h);
+        else:
+            dZdt    : torch.Tensor  = Derivative1_Order2_NonUniform(Z, t_Grid = t_Grid);
 
         # Concatenate a column of ones. This will correspond to a constant term in the latent 
         # dynamics.
-        Z_i     : torch.Tensor  = torch.cat([torch.ones(time_dim, 1), Z], dim = 1)
+        Z_1     : torch.Tensor  = torch.cat([torch.ones(n_t, 1), Z], dim = 1)
         
         # For each j, solve the least squares problem 
-        #   min{ || dZdt[:, j] - Z_i c_j|| : C_j \in \mathbb{R}ˆNl }
+        #   min{ || dZdt[:, j] - Z_1 c_j|| : C_j \in \mathbb{R}ˆNl }
         # where Nl is the number of library terms (in this case, just n_z + 1, since we only allow
         # constant and linear terms). We store the resulting solutions in a matrix, coefs, whose 
         # j'th column holds the results for the j'th column of dZdt. Thus, coefs is a 2d tensor
         # with shape (Nl, n_z).
-        coefs   : torch.Tensor  = torch.linalg.lstsq(Z_i, dZdt).solution
+        coefs   : torch.Tensor  = torch.linalg.lstsq(Z_1, dZdt).solution
 
         # Compute the losses.
-        loss_sindy = self.MSE(dZdt, Z_i @ coefs)
+        loss_sindy = self.MSE(dZdt, Z_1 @ coefs)
         # NOTE(kevin): by default, this will be L1 norm.
         loss_coef = torch.norm(coefs, self.coef_norm_order)
 
@@ -252,36 +213,6 @@ class SINDy(LatentDynamics):
         # Note: output of lstsq is not contiguous in memory.
         coefs   : torch.Tensor  = coefs.detach().flatten()
         return coefs, loss_sindy, loss_coef
-
-
-
-    def compute_time_derivative(self, Z : torch.Tensor, Dt : float) -> torch.Tensor:
-        """
-        This function builds the SINDy dataset, assuming only linear terms in the SINDy dataset. 
-        The time derivatives are computed through finite difference.
-
-
-        -------------------------------------------------------------------------------------------
-        Arguments
-        -------------------------------------------------------------------------------------------
-
-        Z: A 2d tensor of shape (n_t, n_z) whose i, j entry holds the j'th component of the i'th 
-        time step in the latent time series. We assume that Z[i, :] represents the latent state
-        at time t_0 + i*Dt
-
-        Dt: The time step between latent frames (the time between Z[:, i] and Z[:, i + 1])
-
-
-        -------------------------------------------------------------------------------------------
-        Returns 
-        -------------------------------------------------------------------------------------------
-
-        The output dZdt is a 2D tensor with the same shape as Z. It's i, j entry holds an 
-        approximation to (d/dt)Z_j(t_0 + j Dt). We compute this approximation using self's stencil.
-        """
-
-        return (1. / Dt) * torch.sparse.mm(self.fd_oper, Z)
-
 
 
     def simulate(   self,
@@ -329,6 +260,7 @@ class SINDy(LatentDynamics):
         assert(len(coefs.shape)     == 2);
         n_param = coefs.shape[0];
         assert(isinstance(t_Grid, list));
+        assert(isinstance(IC, list));
         assert(len(IC)              == n_param);
         assert(len(t_Grid)          == n_param);
         
@@ -377,14 +309,14 @@ class SINDy(LatentDynamics):
         # If we get here, then coefs has one row. In this case, each element of IC should 
         # have shape (n(i), n_z). First, reshape coefs as a matrix. Since we only allow for linear 
         # terms, there are n_z + 1 library terms and n_z equations, where n_z = self.n_z.
-        c_i : numpy.ndarray = coefs.reshape([self.n_z + 1, self.n_z]).T;
+        c_1 : numpy.ndarray = coefs.reshape([self.n_z + 1, self.n_z]).T;
 
         # Set up a lambda function to approximate dz_dt. In SINDy, we learn a coefficient matrix 
         # C such that the latent state evolves according to the dynamical system 
         #   z'(t) = C \Phi(z(t)), 
         # where \Phi(z(t)) is the library of terms. Note that the zero column of C corresponds 
         # to the constant library term, 1. 
-        dz_dt               = lambda z, t : c_i[:, 1:] @ z + c_i[:, 0];
+        dz_dt               = lambda z, t : c_1[:, 1:] @ z + c_1[:, 0];
 
         # Set up an array to hold the results of each simulation.
         if(isinstance(coefs, numpy.ndarray)):
@@ -400,32 +332,3 @@ class SINDy(LatentDynamics):
         
         # All done!
         return [[X]];
-
-
-
-    def export(self) -> dict:
-        """
-        This function packages self's contents into a dictionary which it then returns. We can use 
-        this dictionary to create a new SINDy object which has the same internal state as self. 
-        
-        
-        -------------------------------------------------------------------------------------------
-        Arguments
-        -------------------------------------------------------------------------------------------
-        
-        None!
-
-
-        -------------------------------------------------------------------------------------------
-        Returns
-        -------------------------------------------------------------------------------------------
-        
-        A dictionary with two keys: fd_type and coef_norm_order. The former specifies which finite
-        different scheme we use while the latter specifies which norm we want to use when computing
-        the coefficient loss. 
-        """
-
-        param_dict                      = super().export()
-        param_dict['fd_type']           = self.fd_type
-        param_dict['coef_norm_order']   = self.coef_norm_order
-        return param_dict
