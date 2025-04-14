@@ -18,7 +18,6 @@ from    scipy.sparse        import  spdiags;
 import  torch;
 
 from    Physics             import  Physics;
-from    Stencils            import  FDdict;
 
 
 ######## REMOVE ME   ||

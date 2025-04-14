@@ -70,6 +70,14 @@ class Physics:
         param_names: A list of strings. There should be one list item for each parameter. The i'th 
         element of this list should be a string housing the name of the i'th parameter.
 
+        Uniform_t_Grid: A boolean which, if True, specifies that for each parameter value, the 
+        times corresponding to the frames of the solution for that parameter value will be 
+        uniformly spaced. In other words, the first frame corresponds to time t0, the second to 
+        t0 + h, the k'th to t0 + (k - 1)h, etc (note that h may depend on the parameter value, but
+        it needs to be constant for a specific parameter value). The value of this setting 
+        determines which finite difference method we use to compute time derivatives. 
+
+
         
         -------------------------------------------------------------------------------------------
         Returns
@@ -111,7 +119,7 @@ class Physics:
     
 
 
-    def solve(self, param : numpy.ndarray) -> list[torch.Tensor]:
+    def solve(self, param : numpy.ndarray) -> tuple[list[torch.Tensor], numpy.ndarray]:
         """
         The user should write an instance of this method for their specific Physics sub-class.
         This function should solve the underlying equation when the IC uses the parameters in 
@@ -122,8 +130,7 @@ class Physics:
         Arguments
         -------------------------------------------------------------------------------------------
 
-        param: A 1d numpy.ndarray object with two elements corresponding to the values of the 
-        initial condition parameters.
+        param: A numpy.ndarray object holding the values of the initial condition parameters.
 
                 
         -------------------------------------------------------------------------------------------
