@@ -16,7 +16,7 @@ import  numpy;
 import  torch;
 
 from    LatentDynamics      import  LatentDynamics;
-from    FiniteDifference    import  Derivative1_Order4, Derivative2_Order4;
+from    FiniteDifference    import  Derivative1_Order4, Derivative2_Order4, Derivative1_Order2_NonUniform, Derivative2_Order2_NonUniform;
 from    Solvers             import  RK4;
 
 
@@ -30,10 +30,10 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class DampedSpring(LatentDynamics):
-    def __init__(self, 
-                 dim        : int, 
-                 n_t        : int, 
-                 config     : dict) -> None:
+    def __init__(   self, 
+                    n_z             : int, 
+                    coef_order_norm :   str | float, 
+                    Uniform_t_Grid  :   bool) -> None:
         r"""
         Initializes a DampedSpring object. This is a subclass of the LatentDynamics class which 
         implements the following latent dynamics
@@ -48,40 +48,43 @@ class DampedSpring(LatentDynamics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        dim: The number of dimensions in the latent space, where the latent dynamics takes place.
+        n_z: The number of dimensions in the latent space, where the latent dynamics takes place.
+        
+        coef_norm_order: A string or float specifying which norm we want to use when computing
+        the coefficient loss. We pass as the "p" argument to torch.norm. 
 
-        n_t: The number of time steps we want to generate when solving (numerically) the latent 
-        space dynamics.
-
-        config: A dictionary housing the settings we need to set up a DampedSpring object. 
-        Specifically, this dictionary should have a key called "spring" whose corresponding value 
-        is another dictionary with the following key:
-            - coef_norm_order: A string specifying which norm we want to use when computing
-            the coefficient loss.
+        Uniform_t_Grid: A boolean which, if True, specifies that for each parameter value, the 
+        times corresponding to the frames of the solution for that parameter value will be 
+        uniformly spaced. In other words, the first frame corresponds to time t0, the second to 
+        t0 + h, the k'th to t0 + (k - 1)h, etc (note that h may depend on the parameter value, but
+        it needs to be constant for a specific parameter value). The value of this setting 
+        determines which finite difference method we use to compute time derivatives. 
         """
 
-        # Run the base class initializer. The only thing this does is set the dim and n_t 
+        # Run the base class initializer. The only thing this does is set the n_z and n_t 
         # attributes.;
-        super().__init__(dim, n_t);
-        LOGGER.info("Initializing a DampedSpring object with dim = %d, n_t = %d" % (self.dim, self.n_t));
+        super().__init__(   n_z             = n_z,
+                            coef_norm_order = coef_order_norm,
+                            Uniform_t_Grid  = Uniform_t_Grid);
+        LOGGER.info("Initializing a SINDY object with n_z = %d, coef_norm_order = %s, Uniform_t_Grid = %s" % (  self.n_z, 
+                                                                                                                str(self.coef_norm_order), 
+                                                                                                                str(self.Uniform_t_Grid)));        
         
         # Set n_coefs and n_IC.
-        # Because K and C are dim x dim matrices, and b is in \mathbb{R}^dim, there are 
-        # dim*(2*dim + 1) coefficients in the latent dynamics.
+        # Because K and C are n_z x n_z matrices, and b is in \mathbb{R}^n_z, there are 
+        # n_z*(2*n_z + 1) coefficients in the latent dynamics.
         self.n_IC       : int   = 2;
-        self.n_coefs    : int   = dim*(2*dim + 1);
+        self.n_coefs    : int   = n_z*(2*n_z + 1);
 
-        assert('spring' in config);
-        self.coef_norm_order    = config['spring']['coef_norm_order'];
+        # Setup the loss function.
         self.LD_LossFunction = torch.nn.MSELoss();
-
         return;
     
 
 
     def calibrate(self, 
                   Latent_States : list[torch.Tensor],
-                  dt            : float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+                  t_Grid        : list[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         r"""
         For each combination of parameter values, this function computes the optimal K, C, and b 
         coefficients in the sequence of latent states for that combination of parameter values.
@@ -101,119 +104,125 @@ class DampedSpring(LatentDynamics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Latent_States: A two element list whose elements hold the latent positions and velocities, 
-        respectively. Each list element is a 2d or 3d tensor. If they are 2d tensors, then each 
-        has shape (Nt, Nz), where Nt specifies the length of the sequence of latent states and Nz 
-        is the dimension of the latent space. In this case, the i,j entry of Latent_States[0], 
-        Latent_States[1] holds the j'th component of the latent state and the latent velocity, 
-        respectively, at the i'th time. If they are is a 3d tensors, then each has shape (Np, Nt, 
-        Nz). In this case, we assume there are Np different combinations of parameter values. The 
-        i, j, k entry of Latent_States[0], Latent_States[1] hold the k'th component of the latent 
-        encoding and the latent velocity at the j'th time when we use the i'th combination of 
-        parameter values. 
-
-        dt: The time step between time steps. See the description of the "Latent_States" argument. 
+        Latent_States: An n_param (number of parameter combinations we want to calibrate) element
+        list. The i'th list element should be an n_IC element list whose j'th element is a 2d numpy 
+        array of shape (n_t(i), n_z) whose p, q element holds the q'th component of the j'th 
+        derivative of the latent state during the p'th time step (whose time value corresponds to 
+        the p'th element of t_Grid) when we use the i'th combination of parameter values. 
         
+        t_Grid: An n_param element list of 1d torch.Tensor objects. The i'th element should be a 
+        1d tensor of length n_t(i) whose j'th element holds the time value corresponding to the 
+        j'th frame when we use the i'th combination of parameter values.
 
+
+        
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        We return three variables. 
+        Three variables: coefs, loss_sindy, and loss_coef. 
         
-        The first holds the coefficients. It is a torch.Tensor of shape (n_train, dim*(2*dim + 1)), 
-        where n_train is the number of parameter combinations in the training set and dim is the 
-        dimension of the latent space. The i'th row holds the flattened version of 
-        hstack(K, C, b), where K, C, and b are the optimal coefficients for the time series 
-        corresponding to the i'th combination of parameter values.
+        coefs holds the coefficients. It is a matrix of shape (n_train, n_coef), where n_train 
+        is the number of parameter combinations in the training set and n_coef is the number of 
+        coefficients in the latent dynamics. The i,j entry of this array holds the value of the 
+        j'th coefficient when we use the i'th combination of parameter values.
 
-        The second holds the total Latent Dynamics loss. It is a single element tensor whose lone 
-        entry holds the sum of the Latent Dynamics (left minus right hand side of the ODE) across 
-        the set of combinations of parameters in the training set. 
+        loss_sindy holds the total SINDy loss. It is a single element tensor whose lone entry holds
+        the sum of the SINDy losses across the set of combinations of parameters in the training 
+        set. 
 
-        The third is a single element tensor whose lone element holds the sum of the L1 norms of 
+        loss_coef is a single element tensor whose lone element holds the sum of the L1 norms of 
         the coefficients across the set of combinations of parameters in the training set.
         """
 
-        assert(len(Latent_States)       == 2);
-        assert(Latent_States[0].shape   == Latent_States[1].shape);
+        # Run checks.
+        assert(isinstance(t_Grid, list));
+        assert(isinstance(Latent_States, list));
+        assert(len(Latent_States)   == len(t_Grid));
 
-        Z_D     : torch.Tensor  = Latent_States[0];
-        Z_V     : torch.Tensor  = Latent_States[1];
-        
+        n_param : int   = len(t_Grid);
+        for i in range(n_param):
+            assert(len(Latent_States[i]) == 2);
+
 
         # -----------------------------------------------------------------------------------------
-        # If Z has three dimensions, loop over all train cases.
+        # If there are multiple combinations of parameter values, loop through them.
         
-        if (len(Z_D.shape) == 3):
-            # Z_D should have shape (Np, Nt, Nz).
-            n_train : int = Z_D.shape[0];
-            LOGGER.debug("Finding the optimal coefficients for %d parameter values" % n_train);
-
+        if (n_param > 1):
             # Prepare an array to house the flattened coefficient matrices for each combination of
             # parameter values.
-            coefs = torch.empty([n_train, self.dim*(2*self.dim + 1)], dtype = torch.float32);
+            coefs = torch.empty([n_param, self.n_coefs], dtype = torch.float32);
 
-            Loss_LD     : torch.Tensor  = torch.tensor(0, dtype = torch.float32);
-            Loss_Coef   : torch.Tensor  = torch.tensor(0, dtype = torch.float32);
-            for i in range(n_train):
+            # Compute the losses, coefficients for each combination of parameter values.
+            loss_sindy  = torch.zeros(1, dtype = torch.float32);
+            loss_coef   = torch.zeros(1, dtype = torch.float32);
+            for i in range(n_param):
                 """"
-                Get the optimal K, C, and b coefficients for the i'th combination of parameter 
-                values. 
+                Get the optimal SINDy coefficients for the i'th combination of parameter values. 
+                Remember that Latent_States[i][0] is a tensor of shape (n_t(j), n_z) whose (j, k) 
+                entry holds the k'th component of the j'th frame of the latent trajectory for the 
+                i'th combination of parameter values. 
                 
-                Remember that Z is 3d tensor of shape (Np, Nt, Nz) whose (i, j, k) entry holds the 
-                k'th component of the j'th frame of the latent trajectory for the i'th combination 
-                of parameter values. 
-
-                In this case, calibrate will return three variables - coefs, Loss_LD, Loss_Coef -
-                for the current combination of parameter values. 
+                Note that Result a 3 element tuple.
                 """
-                result : tuple[torch.Tensor] = self.calibrate([Z_D[i], Z_V[i]], dt);
+                result : tuple[torch.Tensor] = self.calibrate(Latent_States = [Latent_States[i]], 
+                                                              t_Grid        = [t_Grid[i]]);
 
+                # Package the results from this combination of parameter values.
                 coefs[i, :] = result[0];
-                Loss_LD    += result[1];
-                Loss_Coef  += result[2];
+                loss_sindy += result[1];
+                loss_coef  += result[2];
             
-            return coefs, Loss_LD, Loss_Coef;
-
-
+            # Package everything to return!
+            return coefs, loss_sindy, loss_coef;
+        
 
         # -----------------------------------------------------------------------------------------
-        # Otherwise, if Z has two dimensions, then evaluate for one training case.
+        # Evaluate for one combination of parameter values case.
 
-        assert(len(Z_D.shape) == 2);
+        Z       : torch.Tensor  = Latent_States[0];
+        t_Grid  : torch.Tensor  = t_Grid[0];
+        n_t     : int           = len(t_Grid);
+
+        Z_D     : torch.Tensor  = Z[0];
+        Z_V     : torch.Tensor  = Z[1];
         
         # First, compute the second time derivative of Z_D. This should also be the first time 
         # derivative of Z_V. We average the two so that the final loss depends on both.
-        d2Z_dt2_from_Z_D    : torch.Tensor  = Derivative2_Order4(X = Z_D,   h = dt);
-        d2Z_dt2_from_Z_V    : torch.Tensor  = Derivative1_Order4(X = Z_V,   h = dt);
+        if(self.Uniform_t_Grid  == True):
+            h : float = t_Grid[1] - t_Grid[0];
+            d2Z_dt2_from_Z_D    : torch.Tensor  = Derivative2_Order4(X = Z_D,   h = h);
+            d2Z_dt2_from_Z_V    : torch.Tensor  = Derivative1_Order4(X = Z_V,   h = h);
+        else:
+            d2Z_dt2_from_Z_D    : torch.Tensor  = Derivative2_Order2_NonUniform(X = Z_D, t_Grid = t_Grid);
+            d2Z_dt2_from_Z_V    : torch.Tensor  = Derivative1_Order2_NonUniform(X = Z_V, t_Grid = t_Grid);
         d2Z_dt2             : torch.Tensor  = 0.5*(d2Z_dt2_from_Z_D + d2Z_dt2_from_Z_V);
 
         # Concatenate Z_D, Z_V and a column of 1's. We will solve for the matrix, E, which gives 
         # the best fit for the system d2Z_dt2 = cat[Z_D, Z_V, 1] E. This matrix has the form 
-        # E^T = [-K, -C, b]. Thus, we can extract K, C, and b from Z_CAT.
-        Z_CAT   : torch.Tensor  = torch.cat([Z_D, Z_V, torch.ones((Z_D.shape[0], 1))], dim = 1);
+        # E^T = [-K, -C, b]. Thus, we can extract K, C, and b from Z_1.
+        Z_1   : torch.Tensor  = torch.cat([Z_D, Z_V, torch.ones((Z_D.shape[0], 1))], dim = 1);
 
         # For each j, solve the least squares problem 
-        #   min{ || d2Z_dt2[:, j] - Z_CAT E(j)|| : E(j) \in \mathbb{R}^(dim*(2*dim + 1)) }
+        #   min{ || d2Z_dt2[:, j] - Z_1 E(j)|| : E(j) \in \mathbb{R}^(n_z*(2*n_z + 1)) }
         # We store the resulting solutions in a matrix, coefs, whose j'th column holds the 
         # results for the j'th column of Z_V. Thus, coefs is a 2d tensor with shape 
-        # (2*dim + 1, dim).
-        coefs   : torch.Tensor  = torch.linalg.lstsq(Z_CAT, d2Z_dt2).solution;
+        # (2*n_z + 1, n_z).
+        coefs   : torch.Tensor  = torch.linalg.lstsq(Z_1, d2Z_dt2).solution;
 
         # Compute the losses
-        Loss_LD     = self.LD_LossFunction(d2Z_dt2, torch.matmul(Z_CAT, coefs));
+        Loss_LD     = self.LD_LossFunction(d2Z_dt2, torch.matmul(Z_1, coefs));
         Loss_Coef   = torch.norm(coefs, self.coef_norm_order);
 
         if(False):
             # Extract K, C, and b from coefs.
             E   : torch.Tensor  = coefs.T;
-            K   : torch.Tensor  = -E[:, 0:self.dim];
-            C   : torch.Tensor  = -E[:, self.dim:(2*self.dim)];
-            b   : torch.Tensor  = E[:, 2*self.dim:(2*self.dim + 1)];
+            K   : torch.Tensor  = -E[:, 0:self.n_z];
+            C   : torch.Tensor  = -E[:, self.n_z:(2*self.n_z)];
+            b   : torch.Tensor  = E[:, 2*self.n_z:(2*self.n_z + 1)];
             
             # Compute the RHS of the diff eq using coefs and the matrices we found.
-            RHS_coefs           = torch.matmul(Z_CAT, coefs);
+            RHS_coefs           = torch.matmul(Z_1, coefs);
             RHS_Manual          = torch.matmul(torch.ones((Z_D.shape[0], 1)), b.T) - torch.matmul(Z_V, C.T) - torch.matmul(Z_D, K.T);
 
             # Select a random row to sample.
@@ -232,162 +241,146 @@ class DampedSpring(LatentDynamics):
 
 
     def simulate(   self,
-                    coefs   : numpy.ndarray         | torch.Tensor, 
-                    IC      : list[numpy.ndarray]   | list[torch.Tensor],
-                    times   : numpy.ndarray) -> list[numpy.ndarray]  | list[torch.Tensor]:
+                    coefs   : numpy.ndarray             | torch.Tensor, 
+                    IC      : list[list[numpy.ndarray]] | list[list[torch.Tensor]],
+                    t_Grid  : list[numpy.ndarray]) -> list[list[numpy.ndarray]]  | list[list[torch.Tensor]]:
         """
-        Time integrates the latent dynamics using the coefficients specified in coefs when we
-        start from the initial condition(s) in IC.
-
+        Time integrates the latent dynamics from multiple initial conditions for each combination
+        of coefficients in coefs. 
+ 
 
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
         
-        coefs: Either a one or two dimensional numpy.ndarray or torch.Tensor objects. If it has 
-        one dimension, then coefs represents a is a flattened copy of hstack[-K, -C, b], where 
-        K, C, and b are the optimal coefficients for a specific combination of parameter values. 
-        If coefs has two dimensions, then it should have shape (n_param, n_coef) and it's i'th row 
-        should represent the optimal set of coefficients when we use the i'th combination of 
-        parameter values. In this case, we inductively call simulate on each row of coefs. 
+        coefs: A two dimensional numpy.ndarray or torch.Tensor objects of shape (n_param, n_coef)
+        whose i'th row represents the optimal set of coefficients when we use the i'th combination 
+        of parameter values. We inductively call simulate on each row of coefs. 
 
-        IC: A list of two numpy.ndarray or torch.Tensor objects. These objects should have either 
-        two or three dimensions. If coefs has one dimension, then each element of IC should have 
-        shape (n, dim) where n represents the number of initial conditions we want to simulate 
-        forward in time and dim is the latent dimension. If you want to simulate a single IC, then 
-        n == 1. If coefs has two dimensions (specifically if coefs.shape = (n_param, n_coef)), then 
-        each element of IC should have shape (n_param, n, dim). In this case, IC[d][i, j, :] 
-        represents the j'th initial condition for the d'th derivative of the latent state when 
-        we use the i'th combination of parameter values.
+        IC: An n_param element list whose i'th element is an n_IC element list whose j'th element
+        is a 2d numpy.ndarray or torch.Tensor object of shape (n(i), n_z). Here, n(i) is the 
+        number of initial conditions (for a fixed set of coefficients) we want to simulate forward 
+        using the i'th set of coefficients. Further, n_z is the latent dimension. If you want to 
+        simulate a single IC, for the i'th set of coefficients, then n(i) == 1. IC[i][j][k, :] 
+        should hold the k'th initial condition for the j'th derivative of the latent state when
+        we use the i'th combination of parameter values. 
 
-        times: A 1d numpy ndarray object whose i'th entry holds the value of the i'th time value 
-        where we want to compute the latent solution. The elements of this array should be in 
-        ascending order. 
+        t_Grid: A n_param element list whose i'th entry is a 2d numpy ndarray object of shape 
+        (n(i), n_t(i)) whose j, k entry specifies the k'th time value we want to find the latent 
+        states when we use the j'th initial conditions and the i'th set of coefficients. Each 
+        row of each array should have elements in ascending order. 
 
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------        
         
-        A list of two numpy ndarrays representing the simulated displacements and velocities. If 
-        coefs has two dimensions and shape (n_param, n_coefs), then each array should have shape 
-        (n_param, n_t, dim). The i,j,k element of the two arrays should hold the k'th component of 
-        the j'th time steps of the simulated displacement and velocity, respectively, when we use 
-        the i'th set of coefficients (coefs[i, :]) to simulate the latent dynamics.
-        
-        If coefs has one dimension, the then each array will have two dimensions and shape 
-        (n_t, dim). The i, j element of the returned arrays should house the j'th component of the
-        displacement and velocity at the i'th time step, respectively.
+        An n_param element list whose i'th item is a list of length n_IC whose j'th entry is a 3d 
+        array of shape (n_t(i), n(i), n_z). The p, q, r entry of this array should hold the r'th 
+        component of the q'th sample of the p'th time step of the j'th derivative latent state 
+        use the i'th combination of parameter values to define the latent dynamics. 
         """
 
         # Run checks.
-        assert(len(IC)              == 2);
-        assert((len(coefs.shape)    == 1    and len(IC[0].shape)    == 2)    or  (len(coefs.shape)    == 2  and len(IC[0].shape)    == 3));
-        assert(IC[0].shape[-1]      == self.dim);
-        assert(IC[0].shape          == IC[1].shape);
-        assert(len(times.shape)     == 1);
-        assert(type(coefs)          == type(IC[0]));
-        assert(type(coefs)          == type(IC[1]));
+        assert(len(coefs.shape)     == 2);
+        n_param = coefs.shape[0];
+        assert(isinstance(t_Grid, list));
+        assert(isinstance(IC, list));
+        assert(len(IC)              == n_param);
+        assert(len(t_Grid)          == n_param);
+        
+        assert(isinstance(IC[0], list));
+        n_IC : int = len(IC[0]);
+        assert(n_IC == 2);
+        for i in range(n_param):
+            assert(isinstance(IC[i], list));
+            assert(len(IC[i] == n_IC));
+            assert(len(t_Grid[i].shape) == 2);
+            for j in range(n_IC):
+                assert(len(IC[i][j].shape) == 2);
+                assert(type(coefs)          == type(IC[i][j]));
+                assert(IC[i][j].shape[1]    == self.n_z);
 
 
-        # The way this function works depends on if there is one set of coefficients or an entire
-        # batch of them. 
-        if(len(coefs.shape) == 2):
-            # In this case, coefs.shape = (n_param, n_coefs) and each element of IC has shape 
-            # (n_param, n, dim). First, let's extract n_parm, n_t, and n.
-            n_param     : int       =   coefs.shape[0];
-            assert(IC[0].shape[0]   ==  n_param);
-            n_t         : int       =   times.size;
-            n           : int       =   IC[0].shape[1];
+        # -----------------------------------------------------------------------------------------
+        # If there are multiple combinations of parameter values, loop through them.
+
+        # This function behaves differently if there is one set of coefficients or multiple of them.
+        if(n_param > 1):
             LOGGER.debug("Simulating with %d parameter combinations" % n_param);
 
-            # Set up arrays to hold the simulated positions and velocities.
-            if(isinstance(coefs, numpy.ndarray)):
-                D   : numpy.ndarray     = numpy.empty((n_param, n_t, n, self.dim), dtype = numpy.float32);
-                V   : numpy.ndarray     = numpy.empty((n_param, n_t, n, self.dim), dtype = numpy.float32);
-            elif(isinstance(coefs, torch.Tensor)):
-                D   : torch.Tensor      = torch.empty((n_param, n_t, n, self.dim), dtype = torch.float32);
-                V   : torch.Tensor      = torch.empty((n_param, n_t, n, self.dim), dtype = torch.float32);             
+            # Cycle through the parameter combinations
+            Z   : list[list[numpy.ndarray]] | list[list[torch.Tensor]]  = [];
+            for i in range(n_param): 
+                # Fetch the i'th set of coefficients, the corresponding collection of initial
+                # conditions, and the set of time values.
+                ith_coefs   : numpy.ndarray             | torch.Tensor              = coefs[i, :].reshape(1, -1);
+                ith_IC      : list[list[numpy.ndarray]] | list[list[torch.Tensor]]  = [IC[i]];
+                ith_t_Grid  : list[numpy.ndarray]                                   = [t_Grid[i]];
 
-            # Now, cycle through the parameter combinations
-            for i in range(n_param):
-                # Extract the i'th combinations of coefficients and initial conditions.
-                ith_coefs   : numpy.ndarray | torch.Tensor              = coefs[i, :];
-                ith_IC      : list[numpy.ndarray] | list[torch.Tensor]  = [IC[0][i, :, :], IC[1][i, :, :]];
-
-                # Call this function using them.
-                ith_Results : list[numpy.ndarray] | list[torch.Tensor]  = self.simulate(
+                # Call this function using them. This should return a 2 element holding the 
+                # displacement and velocity of the solution for the i'th combination of 
+                # parameter values.
+                ith_Results : list[numpy.ndarray]   | list[torch.Tensor]    = self.simulate(
                                                                                     coefs   = ith_coefs, 
                                                                                     IC      = ith_IC, 
-                                                                                    times   = times);
+                                                                                    times   = ith_t_Grid)[0];
 
-                # Add these results to D, V.
-                D[i, :, :, :]  = ith_Results[0];
-                V[i, :, :, :]  = ith_Results[1];
+                # Add these results to X.
+                Z.append(ith_Results);
 
             # All done.
-            return [D, V];
-    
+            return Z;
 
-        # If we get here, then coefs has one dimension. In this case, each element of IC should 
-        # have shape (n, dim). 
-        D0  : numpy.ndarray | torch.Tensor  = IC[0]; 
-        V0  : numpy.ndarray | torch.Tensor  = IC[1];
+
+        # -----------------------------------------------------------------------------------------
+        # Evaluate for one combination of parameter values case.
+
+        # In this case, there is just one parameter. Extract t_Grid, which has shape 
+        # (n(i), n_t(i)).
+        t_Grid  : numpy.ndarray = t_Grid[0];
+        n_i     : int           = t_Grid.shape[0];
+        n_t_i   : int           = t_Grid.shape[1];
+        
+        # coefs has shape (1, n_coefs). Each element of IC should have shape (n(i), n_z). 
+        D0  : numpy.ndarray | torch.Tensor  = IC[0][0]; 
+        V0  : numpy.ndarray | torch.Tensor  = IC[0][1];
 
         # First, we need to extract -K, -C, and b from coefs. We know that coefs is the least 
         # squares solution to d2Z_dt2 = hstack[Z, dZdt, 1] E^T. Thus, we expect that.
         # E = [-K, -C, b]. 
-        E   : numpy.ndarray | torch.Tensor = coefs.reshape([2*self.dim + 1, self.dim]).T;
+        E   : numpy.ndarray | torch.Tensor = coefs.reshape([2*self.n_z + 1, self.n_z]).T;
 
-        # Extract K, C, and b. Note that we need to reshape b to have shape (1, dim) to enable
+        # Extract K, C, and b. Note that we need to reshape b to have shape (1, n_z) to enable
         # broadcasting.
-        K   : numpy.ndarray | torch.Tensor = -E[:, 0:self.dim];
-        C   : numpy.ndarray | torch.Tensor = -E[:, self.dim:(2*self.dim)];
-        b   : numpy.ndarray | torch.Tensor = E[:, 2*self.dim].reshape(1, -1);
+        K   : numpy.ndarray | torch.Tensor = -E[:, 0:self.n_z];
+        C   : numpy.ndarray | torch.Tensor = -E[:, self.n_z:(2*self.n_z)];
+        b   : numpy.ndarray | torch.Tensor = E[:, 2*self.n_z].reshape(1, -1);
 
         # Set up a lambda function to approximate (d^2/dt^2)z(t) \approx -K z(t) - C (d/dt)z(t) + b.
-        # In this case, we expect dz_dt and z to have shape (n, dim). Thus, matmul(z, K.T) will have 
-        # shape (n, dim). The i'th row of this should hold the z portion of the rhs of the latent
+        # In this case, we expect dz_dt and z to have shape (n, n_z). Thus, matmul(z, K.T) will have 
+        # shape (n, n_z). The i'th row of this should hold the z portion of the rhs of the latent
         # dynamics for the i'th IC. Similar results hold for dot(dz_dt, C.T). The final result 
-        # should have shape (n, dim). The i'th row should hold the rhs of the latent dynamics 
+        # should have shape (n, n_z). The i'th row should hold the rhs of the latent dynamics 
         # for the i'th IC.
         if(isinstance(coefs, numpy.ndarray)):
             f   = lambda t, z, dz_dt: b - numpy.matmul(dz_dt, C.T)  - numpy.matmul(z, K.T);
         if(isinstance(coefs, torch.Tensor)):
             f   = lambda t, z, dz_dt: b - torch.matmul(dz_dt, C.T)  - torch.matmul(z, K.T);
 
-        # Solve the ODE forward in time. D and V should have shape (n_t, n, dim).
-        D, V = RK4(f = f, y0 = D0, Dy0 = V0, times = times);
+        # Set up arrays to hold the results of each simulation.
+        if(isinstance(coefs, numpy.ndarray)):
+            D : numpy.ndarray   = numpy.empty((n_t_i, n_i, self.n_z), dtype = numpy.float32);
+            V : numpy.ndarray   = numpy.empty((n_t_i, n_i, self.n_z), dtype = numpy.float32);
+        elif(isinstance(coefs, torch.Tensor)):
+            D : torch.Tensor    = torch.empty((n_t_i, n_i, self.n_z), dtype = torch.float32);
+            V : torch.Tensor    = torch.empty((n_t_i, n_i, self.n_z), dtype = torch.float32);
+
+        # Solve the ODE forward in time. D and V should have shape (n_t, n, n_z).
+        for j in range(n_i):
+            D_j, V_j    = RK4(f = f, y0 = D0[j, :], Dy0 = V0[j, :], times = t_Grid[j, :]);
+            D[:, j, :]  = D_j;
+            V[:, j, :]  = V_j;
 
         # All done!
-        return [D, V];
-    
-
-
-    def export(self) -> dict:
-        """
-        This function packages self's contents into a dictionary which it then returns. We can use 
-        this dictionary to create a new DampedSpring object which has the same internal state as 
-        self. 
-        
-        
-        -------------------------------------------------------------------------------------------
-        Arguments
-        -------------------------------------------------------------------------------------------
-        
-        None!
-
-
-        -------------------------------------------------------------------------------------------
-        Returns
-        -------------------------------------------------------------------------------------------
-        
-        A dictionary with one key: coef_norm_order. It's value specifies which norm we want to use 
-        when computing the coefficient loss. 
-        """
-
-        param_dict                      = super().export();
-        param_dict['coef_norm_order']   = self.coef_norm_order;
-
-        return param_dict;
-        
+        return [[D, V]];

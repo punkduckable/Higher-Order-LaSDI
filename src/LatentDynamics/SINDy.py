@@ -146,6 +146,7 @@ class SINDy(LatentDynamics):
 
         # -----------------------------------------------------------------------------------------
         # If there are multiple combinations of parameter values, loop through them.
+        
         if (n_param > 1):
             # Prepare an array to house the flattened coefficient matrices for each combination of
             # parameter values.
@@ -176,7 +177,7 @@ class SINDy(LatentDynamics):
             
 
         # -----------------------------------------------------------------------------------------
-        # evaluate for one combination of parameter values case.
+        # Evaluate for one combination of parameter values case.
 
         t_Grid  : torch.Tensor  = t_Grid[0];
         Z       : torch.Tensor  = Latent_States[0];
@@ -213,6 +214,7 @@ class SINDy(LatentDynamics):
         # Note: output of lstsq is not contiguous in memory.
         coefs   : torch.Tensor  = coefs.detach().flatten()
         return coefs, loss_sindy, loss_coef
+
 
 
     def simulate(   self,
@@ -276,6 +278,10 @@ class SINDy(LatentDynamics):
                 assert(type(coefs)          == type(IC[i][j]));
                 assert(IC[i][j].shape[1]    == self.n_z);
 
+
+        # -----------------------------------------------------------------------------------------
+        # If there are multiple combinations of parameter values, loop through them.
+        
         if(n_param > 1):
             LOGGER.debug("Simulating with %d parameter combinations" % n_param);
 
@@ -288,7 +294,8 @@ class SINDy(LatentDynamics):
                 ith_IC      : list[list[numpy.ndarray]] | list[list[torch.Tensor]]  = [IC[i]];
                 ith_t_Grid  : list[numpy.ndarray]                                   = [t_Grid[i]];
 
-                # Call this function using them.
+                # Call this function using them. This should return a 1 element holding the 
+                # the solution for the i'th combination of parameter values.
                 ith_Results : list[numpy.ndarray]   | list[torch.Tensor]    = self.simulate(
                                                                                     coefs   = ith_coefs, 
                                                                                     IC      = ith_IC, 
@@ -300,6 +307,10 @@ class SINDy(LatentDynamics):
             # All done.
             return Z;
         
+
+        # -----------------------------------------------------------------------------------------
+        # Evaluate for one combination of parameter values case.
+
         # In this case, there is just one parameter. Extract t_Grid, which has shape 
         # (n(i), n_t(i)).
         t_Grid  : numpy.ndarray = t_Grid[0];
@@ -316,7 +327,7 @@ class SINDy(LatentDynamics):
         #   z'(t) = C \Phi(z(t)), 
         # where \Phi(z(t)) is the library of terms. Note that the zero column of C corresponds 
         # to the constant library term, 1. 
-        dz_dt               = lambda z, t : c_1[:, 1:] @ z + c_1[:, 0];
+        f   = lambda z, t : c_1[:, 1:] @ z + c_1[:, 0];
 
         # Set up an array to hold the results of each simulation.
         if(isinstance(coefs, numpy.ndarray)):
@@ -328,7 +339,7 @@ class SINDy(LatentDynamics):
         # should be a 1 element list whose lone element is a n_IC element = 1 element whose 
         # lone element is a 2d numpy.ndarray object with shape (n(i), n_z).
         for j in range(n_i):
-            X[:, j, :] = odeint(dz_dt, IC[0][0][j, :], t_Grid);
+            X[:, j, :] = odeint(f, IC[0][0][j, :], t_Grid[j, :]);
         
         # All done!
         return [[X]];
