@@ -254,8 +254,9 @@ class SINDy(LatentDynamics):
         
         An n_param element list whose i'th item is a list of length n_IC whose j'th entry is a 3d 
         array of shape (n_t(i), n(i), n_z). The p, q, r entry of this array should hold the r'th 
-        component of the q'th sample of the p'th time step of the j'th derivative latent state 
-        use the i'th combination of parameter values to define the latent dynamics. 
+        component of the p'th frame of the j'th tine derivative of the solution to the latent 
+        dynamics when we use the q'th initial condition for the i'th combination of parameter 
+        values.
         """
 
         # Run checks.

@@ -142,21 +142,22 @@ class LatentDynamics:
         Arguments
         -------------------------------------------------------------------------------------------
         
-        coefs: A dimensional numpy.ndarray or torch.Tensor object of shape (n_param, n_coef). The 
-        i'th row should represent the optimal set of coefficients when we use the i'th combination 
+        coefs: A two dimensional numpy.ndarray or torch.Tensor objects of shape (n_param, n_coef)
+        whose i'th row represents the optimal set of coefficients when we use the i'th combination 
         of parameter values. We inductively call simulate on each row of coefs. 
 
-        IC: A n_IC element list of numpy.ndarray or torch.Tensor objects. If 
-        coefs.shape = (n_param, n_coef)), then each element of IC should have shape 
-        (n_param, n, n_z). In this case, IC[d][i, j, :] represents the j'th initial condition for 
-        the d'th derivative of the latent state when we use the i'th combination of parameter 
-        values.
+        IC: An n_param element list whose i'th element is an n_IC element list whose j'th element
+        is a 2d numpy.ndarray or torch.Tensor object of shape (n(i), n_z). Here, n(i) is the 
+        number of initial conditions (for a fixed set of coefficients) we want to simulate forward 
+        using the i'th set of coefficients. Further, n_z is the latent dimension. If you want to 
+        simulate a single IC, for the i'th set of coefficients, then n(i) == 1. IC[i][j][k, :] 
+        should hold the k'th initial condition for the j'th derivative of the latent state when
+        we use the i'th combination of parameter values. 
 
-        t_Grid: An n_param element list of torch.Tensor or numpy.ndarray objects. If coefs has 
-        shape (n_param, n_coef) and each element of IC has shape (n_param, n, n_z), then the 
-        i'th element of t_Grid should be a 2d numpy ndarray object of shape (n, n_t(i)) whose 
-        j, k entry specifies the k'th time value for the j'th initial condition when we use the 
-        i'th set of coefficients. Each row of each array should be in ascending order.
+        t_Grid: A n_param element list whose i'th entry is a 2d numpy ndarray object of shape 
+        (n(i), n_t(i)) whose j, k entry specifies the k'th time value we want to find the latent 
+        states when we use the j'th initial conditions and the i'th set of coefficients. Each 
+        row of each array should have elements in ascending order. 
 
         
 
@@ -164,14 +165,11 @@ class LatentDynamics:
         Returns
         -------------------------------------------------------------------------------------------        
         
-        A list of n_param lists. The i'th list item is a list of length n_IC. 
-        
-        If coefs has shape (n_param, n_coefs), the j'th entry of the i'th list should be a 3d 
-        array of shape (n_t(i), n, n_z), where n_t(i) is the number of time steps in the i'th 
-        combination of parameter values. The p, q, r entry of this array should hold the r'th 
-        component of the q'th sample of the p'th time step of the j'th derivative latent state when 
-        we sample the coefficients from the posterior distribution for the i'th combination of 
-        parameter values.
+        An n_param element list whose i'th item is a list of length n_IC whose j'th entry is a 3d 
+        array of shape (n_t(i), n(i), n_z). The p, q, r entry of this array should hold the r'th 
+        component of the p'th frame of the j'th tine derivative of the solution to the latent 
+        dynamics when we use the q'th initial condition for the i'th combination of parameter 
+        values.
         """
 
         raise RuntimeError('Abstract function LatentDynamics.simulate!');
