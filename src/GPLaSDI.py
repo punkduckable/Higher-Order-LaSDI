@@ -25,7 +25,7 @@ from    ParameterSpace              import  ParameterSpace;
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
 from    Simulate                    import  get_FOM_max_std;
-from    FiniteDifference            import  Derivative1_Order4;
+from    FiniteDifference            import  Derivative1_Order4, Derivative2_Order2_NonUniform;
 
 
 # Setup Logger
@@ -76,8 +76,15 @@ def optimizer_to(optim : Optimizer, device : str) -> None:
 
 
 class BayesianGLaSDI:
-    X_Train : list[torch.Tensor]    = [];   # An n_IC element list of ndarrays of shape (n_param, n_t, ...), each holding sequences of some derivative of FOM states
-    X_Test  : list[torch.Tensor]    = [];   # Same as X_Test, but used for the test set (X_train holds sequences for the training set).
+    # An n_Train element list. The i'th element is is an nn_IC element list whose j'th element is a
+    # numpy ndarray of shape (nt(u), Frame_Shape) holding a sequence of samples of the j'th 
+    # derivative of the FOM solution when we use the i'th combination of parameter values. 
+    X_Train : list[list[torch.Tensor]]  = [];  
+    t_Train : list[torch.Tensor]        = []; 
+
+    # Same as X_Test, but used for the test set.
+    X_Test  : list[list[torch.Tensor]]  = [];  
+    t_Test  : list[torch.Tensor]        = [];
 
     def __init__(self, 
                  physics            : Physics, 
@@ -131,23 +138,6 @@ class BayesianGLaSDI:
         self.latent_dynamics                = latent_dynamics;
         self.param_space                    = param_space;
         
-        # Set placeholder tensors to hold the testing and training data. We expect to set up 
-        # X_Train to be an n_IC element list of tensors of shape (n_param, n_t, n_x[0], ... , 
-        # n_x[Nd - 1]), where n_param is the number of parameter combinations in the training set, 
-        # n_t is the number of time steps per FOM solution, and n_x[0], ... , n_x[Nd - 1] represent 
-        # the number of steps along the qgrid (spatial axes + vector dimension). X_Test has an 
-        # analogous shape, but it's leading dimension has a size matching the number of 
-        # combinations of parameters in the testing set.
-        # 
-        # the latent_dynamics object specifies n_IC while the physics object specifies n_t and the 
-        # shape of each fom frame. Using this, we can initialize X_Train and X_Test to hold 
-        # tensors whose leading dimension is 0 (indicating that we currently have no testing/
-        # training data).
-        for i in range(self.latent_dynamics.n_IC):
-            FOM_sequence_shape : tuple[int] = (0, self.physics.n_t) + tuple(self.physics.spatial_qgrid_shape);
-            self.X_Train.append(torch.empty(FOM_sequence_shape, dtype = torch.float32));
-            self.X_Test.append( torch.empty(FOM_sequence_shape, dtype = torch.float32));
-
         # Initialize a timer object. We will use this while training.
         self.timer                          = Timer();
 
@@ -162,8 +152,8 @@ class BayesianGLaSDI:
         self.max_greedy_iter        : int       = config['max_greedy_iter'];        # We stop performing greedy sampling if restart_iter goes above this number.
         self.loss_weights           : dict      = config['loss_weights'];           # A dictionary housing the weights of the various parts of the loss function.
 
-        LOGGER.debug("  - n_samples = %d, lr = %f, n_iter = %d, ld_weight = %f, coef_weight = %f" \
-                     % (self.n_samples, self.lr, self.n_iter, self.loss_weights['ld'], self.loss_weights['coef']));
+        LOGGER.debug("  - n_samples = %d, lr = %f, n_iter = %d, LD_weight = %f, coef_weight = %f" \
+                     % (self.n_samples, self.lr, self.n_iter, self.loss_weights['LD'], self.loss_weights['coef']));
 
         # Set up the optimizer and loss function.
         self.optimizer          : Optimizer = torch.optim.Adam(model.parameters(), lr = self.lr);
@@ -217,29 +207,45 @@ class BayesianGLaSDI:
         Nothing!
         """
 
-        # Make sure we have at least one training data point (the 0 axis of X_Train[0] corresponds 
-        # to which combination of training parameters we use).
-        assert(self.X_Train[0].shape[0] > 0);
-        assert(self.X_Train[0].shape[0] == self.param_space.n_train());
+        # Make sure we have at least one training data point.
+        assert(len(self.X_Train) > 0);
+        assert(len(self.X_Train) == self.param_space.n_train());
+
+        # Fetch parameters.
+        n_train             : int               = self.param_space.n_train();
+        n_IC                : int               = self.latent_dynamics.n_IC;
+        n_rollout           : int               = self.n_rollout_init + self.rollout_increase_amt*(self.restart_iter//self.iter_rollout_increase);
+        LD                  : LatentDynamics    = self.latent_dynamics;
+        best_loss           : float             = numpy.inf;                    # Stores the lowest loss we get in this round of training.
 
         # Map everything to self's device.
-        device              : str                   = self.device;
-        model_device        : torch.nn.Module       = self.model.to(device);
-        X_Train_device      : list[torch.Tensor]    = [];
-        for i in range(len(self.X_Train)):
-            X_Train_device.append(self.X_Train[i].to(device));
+        device              : str                       = self.device;
+        model_device        : torch.nn.Module           = self.model.to(device);
+        X_Train_device      : list[list[torch.Tensor]]  = [];
+        t_Train_device      : list[torch.Tensor]        = [];
+        for i in range(n_train):
+            t_Train_device.append(self.t_Train[i].to(device));
+            
+            ith_X_Train_device  : list[torch.Tensor] = [];
+            for j in range(n_IC):
+                ith_X_Train_device.append(self.X_Train[i][j].to(device));
+            X_Train_device.append(ith_X_Train_device);
 
         # Make sure the checkpoints and results directories exist.
         from pathlib import Path
         Path(self.path_checkpoint).mkdir(   parents = True, exist_ok = True);
         Path(self.path_results).mkdir(      parents = True, exist_ok = True);
         
-        # Final setup.
-        n_train             : int               = self.param_space.n_train();
-        n_IC                : int               = self.latent_dynamics.n_IC;
-        n_rollout           : int               = self.n_rollout_init + self.rollout_increase_amt*(self.restart_iter//self.iter_rollout_increase);
-        ld                  : LatentDynamics    = self.latent_dynamics;
-        best_loss           : float             = numpy.inf;                    # Stores the lowest loss we get in this round of training.
+        # Set up the t_Grid for the rollout. This should result in an array whose j, k element is
+        # the k'th time step we want to solve for when we use the j'th rollout initial condition 
+        # when we use the i'th combination of parameter values. Thus, the i,j element should be 
+        # t_Train_device[j + k].
+        t_Grid_rollout : list[torch.Tensor] = [];
+        for i in range(n_train):
+            t_Grid_i_Rollout = torch.empty((n_i, n_rollout), dtype = torch.float32);
+            for k in range(n_rollout):
+                t_Grid_i_Rollout[:, k]  = t_Train_device[k:(k + n_i)];
+            t_Grid_rollout.append(t_Grid_i_Rollout);
 
         # Determine number of iterations we should run in this round of training.
         next_iter   : int = min(self.restart_iter + self.n_iter, self.max_iter);
@@ -250,10 +256,20 @@ class BayesianGLaSDI:
             # Begin timing the current training step.            
             self.timer.start("train_step");
 
-            # Check if we need to update n_rollout
+            # Check if we need to update n_rollout. If so, then we also need to update 
+            # t_Grid_rollout.
             if(iter > 0 and ((iter % self.iter_rollout_increase) == 0)):
                 n_rollout += self.rollout_increase_amt;
+
+                t_Grid_rollout : list[torch.Tensor] = [];
+                for i in range(n_train):
+                    t_Grid_i_Rollout = torch.empty((n_i, n_rollout), dtype = torch.float32);
+                    for k in range(n_rollout):
+                        t_Grid_i_Rollout[:, k]  = t_Train_device[k:(k + n_i)];
+                    t_Grid_rollout.append(t_Grid_i_Rollout);
+            
                 LOGGER.info("n_rollout is now %d" % n_rollout);
+
 
             # Zero out the gradients. 
             self.optimizer.zero_grad();
@@ -264,180 +280,211 @@ class BayesianGLaSDI:
 
             # Different kinds of models have different losses.
             if(isinstance(model_device, Autoencoder)):
-                # Run the forward pass.
-                Z       : list[torch.Tensor]    = [model_device.Encoder(*X_Train_device)];
-                X_Pred  : list[torch.Tensor]    = [model_device.Decoder(*Z)];
+                # Compute the reconstructions.
+                Z       : list[list[torch.Tensor]]  = [];
+                X_Pred  : list[list[torch.Tensor]]  = [];
+
+                for i in range(n_train):
+                    Z.append([model_device.Encoder(*(X_Train_device[i]))]);
+                    X_Pred.append([model_device.Decoder(*(Z[i]))]);
 
                 # Compute the reconstruction loss. 
-                loss_recon      : torch.Tensor          = self.MSE(X_Train_device[0], X_Pred[0]);
+                loss_recon      : torch.Tensor          = torch.zeros(1, dtype = torch.float32);
+                for i in range(n_train):
+                    loss_recon  += self.MSE(X_Train_device[i][0], X_Pred[i][0]);
 
                 # Compute the latent dynamics and coefficient losses. Also fetch the current latent
                 # dynamics coefficients for each training point. The latter is stored in a 3d array 
                 # called "coefs" of shape (n_train, N_z, N_l), where N_{\mu} = n_train = number of 
                 # training parameter combinations, N_z = latent space dimension, and N_l = number of 
                 # terms in the SINDy library.
-                coefs, loss_ld, loss_coef       = ld.calibrate(Latent_States = Z, dt = self.physics.dt);
+                coefs, loss_LD, loss_coef       = LD.calibrate(Latent_States    = Z,
+                                                               t_Grid           = t_Train_device);
 
                 # Compute the final loss.
                 loss = (self.loss_weights['recon']  * loss_recon + 
-                        self.loss_weights['ld']     * loss_ld + 
+                        self.loss_weights['LD']     * loss_LD + 
                         self.loss_weights['coef']   * loss_coef);
 
 
             elif(isinstance(model_device, Autoencoder_Pair)):
-                # --------------------------------------------------------------------------------
-                # Forward pass
-
-                # Run the forward pass. This results in a a list of tensors, each one of which 
-                # should have shape (n_param, n_t, n_x[0], ... , n_x[n_space - 1]), where n_space 
-                # is the number of spatial dimensions and n_x[k] represents the shape of the k'th 
-                # spatial axis.
-                Z       : list[torch.Tensor]    = list(model_device.Encode(*X_Train_device));
-                X_Pred  : list[torch.Tensor]    = list(model_device.Decode(*Z));
-
                 # Setup. 
-                D       : torch.Tensor  = X_Train_device[0];    # shape (n_param, n_t, n_x[0], ... , n_x[n_space - 1])
-                V       : torch.Tensor  = X_Train_device[1];    # shape (n_param, n_t, n_x[0], ... , n_x[n_space - 1])
-                Z_D     : torch.Tensor  = Z[0];                 # shape (n_param, n_t, n_z)
-                Z_V     : torch.Tensor  = Z[1];                 # shape (n_param, n_t, n_z)
-                D_Pred  : torch.Tensor  = X_Pred[0];            # shape (n_param, n_t, n_x[0], ... , n_x[n_space - 1])
-                V_Pred  : torch.Tensor  = X_Pred[1];            # shape (n_param, n_t, n_x[0], ... , n_x[n_space - 1])
+                Latent_States       : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 2 element list of (n_t_i, n_z) arrays.
+                
+                loss_recon_D        : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
+                loss_recon_V        : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
+
+                loss_consistency_Z  : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
+                loss_consistency_X  : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
+
+                loss_chain_rule_X   : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
+                loss_chain_rule_Z   : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
+
+                loss_rollout_Z_D    : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
+                loss_rollout_Z_V    : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
+                loss_rollout_D      : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
+                loss_rollout_V      : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
 
 
-                # --------------------------------------------------------------------------------
-                # Consistency losses
-
-                # Make sure Z_V actually looks like the time derivative of Z_X. 
-                loss_consistency_Z    : torch.Tensor    = torch.zeros(1, dtype = torch.float32);
+                # Cycle through the combinations of parameter values.
                 for i in range(n_train):
-                    dZ_Di_dt              : torch.Tensor    = Derivative1_Order4(X = Z_D[i, :, :], h = self.physics.dt);
-                    loss_consistency_Z  : torch.Tensor      = loss_consistency_Z + self.MSE(dZ_Di_dt, Z_V[i, :, :]);
+                    # Setup. 
+                    D_i         : torch.Tensor  = X_Train_device[i][0];
+                    V_i         : torch.Tensor  = X_Train_device[i][1];
 
-                # Next, make sure that V_Pred actually looks like the derivative of D_Pred. 
-                loss_consistency_X    : torch.Tensor    = torch.zeros(1, dtype = torch.float32);
-                for i in range(n_train):
-                    dD_Pred_i_dt        : torch.Tensor      = Derivative1_Order4(X = D_Pred[i, ...], h = self.physics.dt);
-                    loss_consistency_X  : torch.Tensor      = loss_consistency_X + self.MSE(dD_Pred_i_dt, V_Pred[i, ...]);
-
-                # Compute the consistency loss
-                loss_consistency    : torch.Tensor      = loss_consistency_Z + loss_consistency_X;
+                    t_Grid_i    : torch.Tensor  = t_Train_device[i];
+                    n_t_i       : int           = t_Grid_i.shape[0];
 
 
-                # --------------------------------------------------------------------------------
-                # Reconstruction loss
+                    # -----------------------------------------------------------------------------
+                    # Forward pass
 
-                # Compute the reconstruction loss. 
-                loss_recon_D    : torch.Tensor      = self.MSE(X_Train_device[0], D_Pred);
-                loss_recon_V    : torch.Tensor      = self.MSE(X_Train_device[1], V_Pred);
-                loss_recon      : torch.Tensor      = loss_recon_D + loss_recon_V;
+                    # Run the forward pass. This results in an n_train element list whose i'th 
+                    # element is a 2 element list whose j'th element is a tensor of shape 
+                    # (n_t(i), n_x[0], ... , n_x[-1]) whose [k, ...] slice holds our prediction for 
+                    # the j'th time derivative of the FOM solution at time t_Grid[i][k] when we use 
+                    # the i'th combination of parameter values. Here, n_t(i) is the number of time 
+                    # steps in the solution for the i'th combination of parameter values. 
+                    Z_i     : list[torch.Tensor]        = list(model_device.Encode(*X_Train_device[i]));
+                    Z_D_i   : torch.Tensor              = Z_i[0];       # shape (n_t(i), n_z)
+                    Z_V_i   : torch.Tensor              = Z_i[1];       # shape (n_t(i), )
+                    Latent_States.append(Z_i);
+
+                    X_Pred_i    : list[torch.Tensor]    = list(model_device.Decode(*Z_i));
+                    D_Pred_i    : torch.Tensor          = X_Pred_i[0];
+                    V_Pred_i    : torch.Tensor          = X_Pred_i[1];
+
+
+                    # ----------------------------------------------------------------------------
+                    # Reconstruction loss
+
+                    # Compute the reconstruction loss. 
+                    loss_recon_D += self.MSE(D_i, D_Pred_i);
+                    loss_recon_V += self.MSE(V_i, V_Pred_i);
+
+
+                    # --------------------------------------------------------------------------------
+                    # Consistency losses
+
+                    # Make sure Z_V actually looks like the time derivative of Z_X. 
+                    if(self.physics.Uniform_t_Grid == True):
+                        h               : float             = t_Grid_i[1] - t_Grid_i[0];
+                        dZ_Di_dt        : torch.Tensor      = Derivative1_Order4(X = Z_D_i, h = h);
+                    else:
+                        dZ_Di_dt        : torch.Tensor      = Derivative2_Order2_NonUniform(X = Z_D_i, t_Grid = t_Grid_i);
+                    
+                    loss_consistency_Z  : torch.Tensor      = loss_consistency_Z + self.MSE(dZ_Di_dt, Z_V_i);
+
+                    # Next, make sure that V_Pred actually looks like the derivative of D_Pred. 
+                    if(self.physics.Uniform_t_Grid  == True):
+                        h               : float             = t_Grid_i[1] - t_Grid_i[0];
+                        dD_Pred_i_dt    : torch.Tensor      = Derivative1_Order4(X = D_Pred_i, h = h);
+                    else:
+                        dZ_Di_dt        : torch.Tensor      = Derivative2_Order2_NonUniform(X = D_Pred_i, t_Grid = t_Grid_i);
+
+                    loss_consistency_X  : torch.Tensor      = loss_consistency_X + self.MSE(dD_Pred_i_dt, V_Pred_i);
+
             
+                    # ----------------------------------------------------------------------------
+                    # Chain Rule Losses
 
-                # --------------------------------------------------------------------------------
-                # Chain Rule Losses
+                    # First, we compute the X portion of the chain rule loss. This stems from the 
+                    # fact that 
+                    #       (d/dt)X(t) \approx (d/dt)\phi_D,D(Z_D(t)) 
+                    #                   = (d/dz)\phi_D,D(Z_D(t)) Z_V(t)
+                    # Here, \phi_D,D is the displacement portion of the decoder. We can use torch 
+                    # to compute jacobian-vector products. Note that the jvp function expects a 
+                    # function as its first arguments (to define the forward pass). It passes the 
+                    # inputs through func, then computes the jacobian-vector product (using 
+                    # reverse mode AD) of inputs with v. It returns the result of the forward pass 
+                    # and the associated jacobian-vector product. We only keep the latter.
+                    d_dz_D_Pred__Z_V_i  : torch.Tensor  = torch.autograd.functional.jvp(
+                                                                func    = lambda Z_D : model_device.Displacement_Autoencoder.Decode(Z_D), 
+                                                                inputs  = Z_D_i, 
+                                                                v       = Z_V_i)[1];
+                    loss_chain_rule_X += self.MSE(V_i, d_dz_D_Pred__Z_V_i);
 
-                # First, we compute the X portion of the chain rule loss. This stems from the 
-                # fact that 
-                #       (d/dt)X(t) \approx (d/dt)\phi_D,D(Z_D(t)) 
-                #                   = (d/dz)\phi_D,D(Z_D(t)) Z_V(t)
-                # Here, \phi_D,D is the displacement portion of the decoder. We can use torch to 
-                # compute jacobian-vector products. Note that the jvp function expects a function 
-                # as its first arguments (to define the forward pass). It passes the inputs through 
-                # func, then computes the jacobian-vector product (using reverse mode AD) of inputs 
-                # with v. It returns the result of the forward pass and the associated 
-                # jacobian-vector product. We only keep the latter.
-                d_dz_D_Pred__z_V    : torch.Tensor  = torch.autograd.functional.jvp(
-                                                            func    = lambda Z_D : model_device.Displacement_Autoencoder.Decode(Z_D), 
-                                                            inputs  = Z_D, 
-                                                            v       = Z_V)[1];
-                loss_chain_rule_X   : torch.Tensor  = self.MSE(V, d_dz_D_Pred__z_V);
+                    # Next, we compute the Z portion of the chain rule loss:
+                    #       (d/dt)Z(t) \approx (d/dt)\phi_E,D(D(t))
+                    #                   = (d/dX)\phi_E,D(D(t)) V(t)
+                    # Here, \phi_E,D is the displacement portion of the encoder.
+                    d_dx_Z_D__V         : torch.Tensor  = torch.autograd.functional.jvp(
+                                                                func    = lambda D : model_device.Displacement_Autoencoder.Encode(D),
+                                                                inputs  = D_i, 
+                                                                v       = V_i)[1];
+                    loss_chain_rule_Z += self.MSE(Z_V_i, d_dx_Z_D__V);
 
-                # Next, we compute the Z portion of the chain rule loss:
-                #       (d/dt)Z(t) \approx (d/dt)\phi_E,D(D(t))
-                #                   = (d/dX)\phi_E,D(D(t)) V(t)
-                # Here, \phi_E,D is the displacement portion of the encoder.
-                d_dx_Z_D__V         : torch.Tensor  = torch.autograd.functional.jvp(
-                                                            func    = lambda D : model_device.Displacement_Autoencoder.Encode(D),
-                                                            inputs  = D, 
-                                                            v       = V)[1];
-                loss_chain_rule_Z   : torch.Tensor  = self.MSE(Z_V, d_dx_Z_D__V);
+                    
+                    # -----------------------------------------------------------------------------
+                    # Rollout loss.
+                    
+                    # Select the latent states we want to use as initial conditions for the i'th 
+                    # combination of parameter values. This should be any latent state other than
+                    # the final n_rollout (so we can simulate forward n_rollout steps and still get
+                    # valid target values). Each element of Z_Rollout_IC is a 2 element list of 
+                    # numpy.ndarray objects of shape (n_t - n_rollout, n_z).
+                    Z_Rollout_IC_i : list[list[torch.Tensor]] = [[Z_D_i[:(-n_rollout), :], Z_V_i[:(-n_rollout), :]]];
 
-                # Compute the total chain rule loss. 
-                loss_chain_rule     : torch.Tensor  = loss_chain_rule_X + loss_chain_rule_Z;
+                    # Simulate the frames forward in time. This should return a 2 element list 
+                    # whose j'th element has shape (n_rollout, n_i, n_z). The p, q, r element of 
+                    # the j'th element should hold the r'th component of the p'th frame of the 
+                    # j'th time derivative of the solution when we use the p'th initial condition.
+                    Z_Rollout_i     : list[torch.Tensor]    = self.latent_dynamics.simulate(coefs = coefs, IC = Z_Rollout_IC_i, t_Grid = t_Grid_rollout)[0];
+                    Z_D_Rollout_i   : torch.Tensor          = Z_Rollout_i[0];
+                    Z_V_Rollout_i   : torch.Tensor          = Z_Rollout_i[1];
+
+                    # The final frame from each simulation is the prediction.
+                    Z_D_Rollout_Predict_i   : torch.Tensor  = Z_D_Rollout_i[-1, :, :];
+                    Z_V_Rollout_Predict_i   : torch.Tensor  = Z_V_Rollout_i[-1, :, :];
+                
+                    # Now fetch the corresponding targets.
+                    Z_D_Rollout_Target_i    : torch.Tensor  = Z_D_i[n_rollout:, :]; 
+                    Z_V_Rollout_Target_i    : torch.Tensor  = Z_V_i[n_rollout:, :]; 
+
+                    # Decode the latent predictions to get FOM predictions.
+                    D_Rollout_Predict_i, V_Rollout_Predict_i = model_device.Decode(Z_D_Rollout_Predict_i, Z_V_Rollout_Predict_i);
+                
+                    # Get the corresponding FOM targets.
+                    D_Rollout_Target_i      : torch.Tensor  = D_i[n_rollout:, ...];
+                    V_Rollout_Target_i      : torch.Tensor  = V_i[n_rollout:, ...];
+                
+                    # Compute the losses for the i'th combination of parameter values!
+                    loss_rollout_Z_D +=  self.MSE(Z_D_Rollout_Target_i, Z_D_Rollout_Predict_i);
+                    loss_rollout_Z_V +=  self.MSE(Z_V_Rollout_Target_i, Z_V_Rollout_Predict_i);
+                    loss_rollout_D   +=  self.MSE(D_Rollout_Target_i,   D_Rollout_Predict_i);
+                    loss_rollout_V   +=  self.MSE(V_Rollout_Target_i,   V_Rollout_Predict_i);
 
 
                 # --------------------------------------------------------------------------------
                 # Latent Dynamics, Coefficient losses
-
-                # Build the Latent States for calibration.
-                Latent_States   : list[torch.Tensor]    = [Z_D, Z_V];
 
                 # Compute the latent dynamics and coefficient losses. Also fetch the current latent
                 # dynamics coefficients for each training point. The latter is stored in a 2d array 
                 # called "coefs" of shape (n_train, n_coefs), where n_train = number of training 
                 # parameter parameters and n_coefs denotes the number of coefficients in the latent
                 # dynamics model. 
-                coefs, loss_ld, loss_coef       = ld.calibrate(Latent_States = Latent_States, dt = self.physics.dt);
-
-
-                # --------------------------------------------------------------------------------
-                # Rollout losses
-
-                # First, select the latent states we want to simulate forward in time; we need 
-                # to have corresponding targets. Each element of Z_Rollout_IC has shape 
-                # (n_param, n_t - n_rollout, n_z).
-                Z_Rollout_IC    : list[torch.Tensor]    = [Z_D[:, :(-n_rollout), :], Z_V[:, :(-n_rollout), :]];
-
-
-                # Now set up a fake set of "times". We just need n_rollout times such that the
-                # (i + 1)'th time is self.physics.dt greater than the i'th time.
-                rollout_times   : numpy.ndarray = numpy.empty((n_rollout), dtype = numpy.float32);
-                rollout_times[0] = 0.0;
-                for i in range(1, n_rollout):
-                    rollout_times[i] = rollout_times[i - 1] + self.physics.dt
-
-                # Simulate the frames forward in time. Each element of Z_rollout should have shape
-                # (n_param, n_rollout, n_t - n_rollout, n_z)
-                Z_Rollout   : list[torch.Tensor]    = self.latent_dynamics.simulate(coefs = coefs, IC = Z_Rollout_IC, times = rollout_times)
-
-                # Only keep the final simulated frame from each latent trajectory.
-                for d in range(n_IC):
-                    Z_Rollout[d]    = Z_Rollout[d][:, -1, :, :];
-                
-                # Decode the predictions
-                D_Rollout_Pred, V_Rollout_Pred  = model_device.Decode(*Z_Rollout);
-                
-                # Get the corresponding targets (the i'th prediction should match the 
-                # (i + n_rollout)'th fom frame. Same for the latent states. Note that the elements 
-                # of X_Train should have shape (n_param, n_t, ...).
-                D_Rollout_Target    : torch.Tensor  = X_Train_device[0][:, n_rollout:, ...];
-                V_Rollout_Target    : torch.Tensor  = X_Train_device[1][:, n_rollout:, ...];
-
-                ZD_Rollout_Target   : torch.Tensor  = Z_D[:, n_rollout:, :];
-                ZV_Rollout_Target   : torch.Tensor  = Z_V[:, n_rollout:, :];
-
-                # Compute the rollout loss!
-                loss_rollout_ZD     : torch.Tensor  = self.MSE(ZD_Rollout_Target, Z_Rollout[0]);
-                loss_rollout_ZV     : torch.Tensor  = self.MSE(ZV_Rollout_Target, Z_Rollout[1]);
-                loss_rollout_D      : torch.Tensor  = self.MSE(D_Rollout_Target, D_Rollout_Pred);
-                loss_rollout_V      : torch.Tensor  = self.MSE(V_Rollout_Target, V_Rollout_Pred);
-
-                loss_rollout        : torch.Tensor  = loss_rollout_ZD + loss_rollout_ZV + loss_rollout_D + loss_rollout_V;
+                coefs, loss_LD, loss_coef       = LD.calibrate(Latent_States = Latent_States, t_Grid    = t_Train_device);
 
 
                 # --------------------------------------------------------------------------------
                 # Total loss
+
+                loss_recon          : torch.Tensor  = loss_recon_D + loss_recon_V;
+                loss_consistency    : torch.Tensor  = loss_consistency_Z + loss_consistency_X;
+                loss_chain_rule     : torch.Tensor  = loss_chain_rule_X + loss_chain_rule_Z;
+                loss_rollout        : torch.Tensor  = loss_rollout_Z_D + loss_rollout_Z_V + loss_rollout_D + loss_rollout_V;
 
                 # Compute the final loss.
                 loss = (self.loss_weights['recon']          * loss_recon + 
                         self.loss_weights['consistency']    * loss_consistency +
                         self.loss_weights['chain_rule']     * loss_chain_rule + 
                         self.loss_weights['rollout']        * loss_rollout +
-                        self.loss_weights['ld']             * loss_ld + 
+                        self.loss_weights['LD']             * loss_LD + 
                         self.loss_weights['coef']           * loss_coef);
 
 
             # Convert coefs to numpy and find the maximum element.
-            coefs           : numpy.ndarray = coefs.numpy();
+            coefs           : numpy.ndarray = coefs.numpy();                # Shape = (n_train, n_coefs).
             max_coef        : numpy.float32 = numpy.abs(coefs).max();
 
 
@@ -465,10 +512,10 @@ class BayesianGLaSDI:
             # Report the current iteration number and losses
             if(isinstance(model_device, Autoencoder)):
                 LOGGER.info("Iter: %05d/%d, Total: %3.10f, Recon: %3.10f, LD: %3.10f, Coef: %3.10f, max|c|: %04.1f, "
-                            % (iter + 1, self.max_iter, loss.item(), loss_recon.item(), loss_ld.item(), loss_coef.item(), max_coef));
+                            % (iter + 1, self.max_iter, loss.item(), loss_recon.item(), loss_LD.item(), loss_coef.item(), max_coef));
             elif(isinstance(model_device, Autoencoder_Pair)):
                 LOGGER.info("Iter: %05d/%d, Total: %3.6f, Recon D: %3.6f, Recon V: %3.6f, CR X: %3.6f, CR Z: %3.6f, Cons Z: %3.6f, Cons X: %3.6f, Roll D: %3.6f, Roll V: %3.6f, Roll ZD: %3.6f, Roll ZV: %3.6f, LD: %3.6f, Coef: %3.6f, max|c|: %04.1f, "
-                            % (iter + 1, self.max_iter, loss.item(), loss_recon_D.item(), loss_recon_V.item(), loss_chain_rule_X.item(), loss_chain_rule_Z.item(), loss_consistency_Z.item(), loss_consistency_X.item(), loss_rollout_D.item(), loss_rollout_V.item(), loss_rollout_ZD.item(), loss_rollout_ZV.item(), loss_ld.item(), loss_coef.item(), max_coef)); 
+                            % (iter + 1, self.max_iter, loss.item(), loss_recon_D.item(), loss_recon_V.item(), loss_chain_rule_X.item(), loss_chain_rule_Z.item(), loss_consistency_Z.item(), loss_consistency_X.item(), loss_rollout_D.item(), loss_rollout_V.item(), loss_rollout_Z_D.item(), loss_rollout_Z_V.item(), loss_LD.item(), loss_coef.item(), max_coef)); 
 
             # If there are fewer than 6 training examples, report the set of parameter combinations.
             if n_train < 6:
@@ -560,8 +607,8 @@ class BayesianGLaSDI:
         """
 
         self.timer.start("new_sample");
-        assert(self.X_Test[0].size(0)       >  0);
-        assert(self.X_Test[0].size(0)       == self.param_space.n_test());
+        assert(len(self.X_Test)             >  0);
+        assert(len(self.X_Test)             == self.param_space.n_test());
         assert(self.best_coefs.shape[0]     == self.param_space.n_train());
 
         coefs : numpy.ndarray = self.best_coefs;
@@ -591,25 +638,31 @@ class BayesianGLaSDI:
 
         # Now, solve the latent dynamics forward in time for each set of coefficients in 
         # coef_samples. There are n_test combinations of parameter values, and we have n_samples 
-        # sets of coefficients for each combination of parameter values. For each of those, we want 
-        # to solve the corresponding latent dynamics for n_t time steps. Each one of the frames 
-        # in that solution live in \mathbb{R}^{n_z}. Thus, we need to store the results in a 4d 
-        # array of shape (n_test, n_samples, n_t, n_z) whose i, j, k, l element holds the l'th 
-        # component of the k'th frame of the solution to the latent dynamics when we use the 
-        # j'th sample of the coefficients for the i'th testing parameter value and when the latent
-        # dynamics uses the encoding of the i'th FOM IC as its IC. 
+        # sets of coefficients for each combination of parameter values. For the i'th one of those,
+        # we want to solve the latent dynamics for n_t(i) times steps. Each one of the frames 
+        # in that solution live in \mathbb{R}^{n_z}. Thus, we need to store the results in an 
+        # n_test element list whose i'th element is an array of shape (n_samples, n_t(i), n_z) 
+        # whose j, k, l element holds the l'th component of the k'th frame of the solution to the 
+        # latent dynamics when we use the j'th sample of the coefficients for the i'th testing 
+        # parameter value and when the latent dynamics uses the encoding of the i'th FOM IC as 
+        # its IC. 
         # 
         # In general, we may need to store n_IC derivatives of the latent solution to get the 
         # full latent state, so we store the results in a list of length n_IC, where n_IC - 1 
         # is the number of derivatives of the latent state we need to fully define the latent 
         # state's initial condition.
-        LatentStates    : list[numpy.ndarray]   = [];
+        LatentStates    : list[list[numpy.ndarray]]   = [];
         for i in range(n_IC):
-            LatentStates.append(numpy.ndarray([n_test, self.n_samples, self.physics.n_t, model.n_z]));
+            LatentStates.append([]);
+            for j in range(n_test):
+                LatentStates[i].append(numpy.ndarray([self.n_samples, len(self.t_Test[j]), model.n_z]));
         
-        n_t : int = self.physics.n_t;
-        n_z : int = self.latent_dynamics.dim;
+        n_z : int = self.latent_dynamics.n_z;
         for i in range(n_test):
+            # Fetch the t_Grid for this parameter value.
+            t_Grid  : numpy.ndarray = self.t_Test[i];
+            n_t_j   : int           = len(t_Grid);
+
             # Reshape each element of the IC to have shape (1, n_z), which is what simulate expects
             Z0_i     = Z0[i];
             for d in range(n_IC):
@@ -617,9 +670,9 @@ class BayesianGLaSDI:
 
              # Cycle through the samples.            
             for j in range(self.n_samples):
-                LatentState_ij : list[numpy.ndarray] = self.latent_dynamics.simulate(coef_samples[i][j, :], Z0_i, self.physics.t_grid);
+                LatentState_ij : list[numpy.ndarray] = self.latent_dynamics.simulate(coef_samples[i][j, :], Z0_i, t_Grid);
                 for k in range(n_IC):
-                    LatentStates[k][i, j, :, :] = LatentState_ij[k].reshape(n_t, n_z);
+                    LatentStates[k][i][j, :, :] = LatentState_ij[k].reshape(n_t_j, n_z);
 
         # Find the index of the parameter with the largest std.
         m_index : int = get_FOM_max_std(model, LatentStates);
@@ -648,6 +701,8 @@ class BayesianGLaSDI:
 
         dict_ = {'X_Train'          : self.X_Train, 
                  'X_Test'           : self.X_Test, 
+                 't_Train'          : self.t_Train,
+                 't_Test'           : self.t_Test,
                  'lr'               : self.lr, 
                  'n_iter'           : self.n_iter,
                  'n_samples'        : self.n_samples, 
@@ -685,10 +740,14 @@ class BayesianGLaSDI:
         """
 
         # Extract instance variables from dict_.
-        self.X_Train        : list[torch.Tensor]    = dict_['X_Train'];
-        self.X_Test         : list[torch.Tensor]    = dict_['X_Test'];
-        self.best_coefs     : numpy.ndarray         = dict_['best_coefs'];
-        self.restart_iter   : int                   = dict_['restart_iter'];
+        self.X_Train        : list[list[torch.Tensor]]  = dict_['X_Train'];
+        self.X_Test         : list[list[torch.Tensor]]  = dict_['X_Test'];
+
+        self.t_Train        : list[numpy.ndarray]       = dict_['t_Train'];
+        self.t_Test         : list[numpy.ndarray]       = dict_['t_Test'];
+
+        self.best_coefs     : numpy.ndarray             = dict_['best_coefs'];
+        self.restart_iter   : int                       = dict_['restart_iter'];
 
         # Load the timer / optimizer. 
         self.timer.load(dict_['timer']);
