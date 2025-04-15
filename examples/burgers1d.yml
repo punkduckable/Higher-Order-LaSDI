@@ -15,7 +15,7 @@ lasdi:
     loss_weights:
       recon:                1.0
       chain_rule:           1.0
-      ld:                   0.5
+      LD:                   0.5
       rollout:              0.5
       coef:                 0.0001
       consistency:          1.0
@@ -53,11 +53,7 @@ model:
 
 latent_dynamics:
   type:                     spring
-  sindy:
-    fd_type:                sbp12
-    coef_norm_order:        fro
-  spring: 
-    coef_norm_order:        fro
+  coef_norm_order:          fro
 
 physics:
   type:                     burgers1d

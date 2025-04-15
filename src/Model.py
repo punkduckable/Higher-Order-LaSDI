@@ -178,7 +178,7 @@ class MultiLayerPerceptron(torch.nn.Module):
             # tensor has a final dimension size that matches the input dimension size for the first
             # layer. The check below makes sure that the final k dimensions of the input, X, match
             # the stored reshape_shape.
-            assert(list(X.shape[-len(self.reshape_shape):]) == self.reshape_shape)
+            assert(list(X.shape[-len(self.reshape_shape):]) == self.reshape_shape);
             
             # Now that we know the final k dimensions of X have the correct shape, let's squeeze 
             # them into 1 dimension (so that we can pass the squeezed tensor through the first 
@@ -315,26 +315,23 @@ class Autoencoder(torch.nn.Module):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        X: A torch.Tensor object of shape (n_param, N_Frames, self.reshape_shape), where n_param is 
-        the number of combinations of parameter values, N_Frames is the number of frames we want to 
-        encode and reshape_shape specifies the shape of each frame. Displacement_Frames[i, j, ...] 
-        represents the displacement portion of the j'th FOM frame for the i'th combination of 
-        parameter values.
+        X: A torch.Tensor object of shape (N_Frames, self.reshape_shape), where, N_Frames is the 
+        number of frames we want to encode and reshape_shape specifies the shape of each frame. 
 
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        A torch.Tensor of shape (np, n_Frames, self.n_z) whose i,j element holds the j'th component 
+        A torch.Tensor of shape (n_Frames, self.n_z) whose i,j element holds the j'th component 
         of the encoding of the i'th FOM frame.
         """
 
-        # Check that we have the same number of displacement, velocity frames.
-        assert(len(X.shape)         ==  len(self.reshape_shape) + 2);
-        assert(list(X.shape[2:])    ==  self.reshape_shape);
+        # Check that the inputs have the correct shape.
+        assert(len(X.shape)         ==  len(self.reshape_shape) + 1);
+        assert(list(X.shape[1:])    ==  self.reshape_shape);
     
-        # Encode the FOM frames.
+        # Encode the frames!
         return self.encoder(X);
 
 
@@ -348,24 +345,22 @@ class Autoencoder(torch.nn.Module):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Z: A torch.Tensor of shape (np, n_Frames, self.n_z) whose i,j,k element holds the k'th 
-        component of the encoding of the j'th FOM frame for the i'th combination of parameter 
-        values.
+        Z: A torch.Tensor of shape (n_Frames, self.n_z) whose j,k element holds the k'th 
+        component of the encoding of the j'th frame.
      
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        A torch.Tensor object, R, of shape (np, n_Frames, self.reshape_shape). R[i, j ...] 
-        represents the reconstruction of the j'th FOM frame for the i'th combination of parameter
-        values. 
+        A torch.Tensor object, R, of shape (n_Frames, self.reshape_shape). R[i ...] 
+        represents the reconstruction of the i'th FOM frame.
         """
 
-        # Check that we have the same number of displacement, velocity frames.
-        assert(len(Z.shape)   == 3);
+        # Check that the input has the correct shape. 
+        assert(len(Z.shape)   == 2);
     
-        # Decode the displacement frames.
+        # Decode the frames!
         return self.decoder(Z);
 
 
@@ -426,17 +421,20 @@ class Autoencoder(torch.nn.Module):
         parameters.
 
         physics: A "Physics" object that, among other things, stores the IC for each combination of 
-        parameters. 
+        parameter values.
 
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
         
-        A list of list of numpy ndarray objects whose i'th element is a single element list housing
-        a numpy ndarray of shape (n_z) whose j'th element holds the j'th component of the encoding 
-        of the i'th FOM initial condition. If we let U0_i denote the FOM IC for the i'th set of 
-        parameters, then the i'th element of the returned list is [self.encoder(U0_i)]
+        An n_test element list whose i'th element is an n_IC element list whose j'th element is an 
+        numpy.ndarray of shape (n_z) whose k'th element holds the k'th component of the encoding of
+        the initial condition for the j'th derivative of the latent dynamics corresponding to the 
+        i'th combination of parameter values.
+        
+        If we let U0_i denote the FOM IC for the i'th set of parameters, then the i'th element of 
+        the returned list is [self.encoder(U0_i)].
         """
 
         # Figure out how many combinations of parameter values there are.
@@ -448,11 +446,11 @@ class Autoencoder(torch.nn.Module):
         for i in range(n_param):
             # Fetch the IC for the i'th set of parameters. Then map it to a tensor.
             u0 : numpy.ndarray  = physics.initial_condition(param_grid[i])[0];
-            u0                  = torch.Tensor(u0).reshape((1, 1) + u0.shape);
+            u0                  = torch.Tensor(u0).reshape((1) + u0.shape);
 
             # Encode the IC, then map the encoding to a numpy array.
             z0 : torch.Tensor   = self.Encode(u0);
-            z0 : numpy.ndarray  = z0[0, 0, :].detach().numpy();
+            z0 : numpy.ndarray  = z0[0, :].detach().numpy();
 
             # Append the new IC to the list of latent ICs
             Z0.append([z0]);
@@ -615,17 +613,15 @@ class Autoencoder_Pair(torch.nn.Module):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Displacement_Frames: A torch.Tensor object of shape (n_param, N_Frames, 
-        self.reshape_shape), where n_param is the number of combinations of parameter values, 
-        N_Frames is the number of frames we want to encode and reshape_shape specifies the shape 
-        of each frame. Displacement_Frames[i, j, ...] represents the displacement portion of the 
-        j'th FOM frame for the i'th combination of parameter values.
+        Displacement_Frames: A torch.Tensor object of shape (N_Frames, self.reshape_shape), where 
+        N_Frames is the number of frames we want to encode and reshape_shape specifies the shape of 
+        each frame. Displacement_Frames[i, ...] represents the displacement portion of the i'th FOM
+        frame. 
 
-        Velocity_Frames: This is a torch.Tensor object of shape (n_param, N_Frames, 
-        self.reshape_shape), where n_param is the number of combinations of parameter values, 
+        Velocity_Frames: A torch.Tensor object of shape (N_Frames, self.reshape_shape), where 
         N_Frames is the number of frames we want to encode for each parameter combination and 
         reshape_shape specifies the shape of each frame. Velocity_Frames[i, j, ...] represents 
-        the velocity portion of the j'th FOM frame for the i'th combination of parameter values.
+        the velocity portion of the i'th FOM frame.
         
 
         -------------------------------------------------------------------------------------------
@@ -641,9 +637,9 @@ class Autoencoder_Pair(torch.nn.Module):
         """
 
         # Check that we have the same number of displacement, velocity frames.
-        assert(len(Displacement_Frames.shape)       ==  len(self.reshape_shape) + 2);
+        assert(len(Displacement_Frames.shape)       ==  len(self.reshape_shape) + 1);
         assert(Displacement_Frames.shape            ==  Velocity_Frames.shape);
-        assert(list(Displacement_Frames.shape[2:])  ==  self.reshape_shape);
+        assert(list(Displacement_Frames.shape[1:])  ==  self.reshape_shape);
     
         # Encode the displacement frames.
         Latent_Displacement : torch.Tensor = self.Displacement_Autoencoder.Encode( Displacement_Frames);
@@ -777,13 +773,15 @@ class Autoencoder_Pair(torch.nn.Module):
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
-        
-        A list of list of numpy ndarray objects whose i'th element is a two element list housing
-        numpy ndarrays of shape (n_z). The j'th element of the two arrays hold the j'th component 
-        of the encoding of the i'th FOM initial displacement and velocity, respectively. If we let 
-        (U0_i, V0_i) denote the initial FOM displacement and velocity for the i'th set of 
-        parameters, then the i'th element of the returned list is the list 
-        [self.encoder(U0_i)[0], self.encoder(U0_i)[1]].
+
+        An n_test element list whose i'th element is an n_IC element list whose j'th element is an 
+        numpy.ndarray of shape (n_z) whose k'th element holds the k'th component of the encoding of
+        the initial condition for the j'th derivative of the latent dynamics corresponding to the 
+        i'th combination of parameter values.
+            
+        If we let (U0_i, V0_i) denote the initial FOM displacement and velocity for the i'th 
+        combination of parameter values, then the i'th element of the returned list is the list 
+        [self.encoder(U0_i, V0_i)[0], self.encoder(U0_i, V0_i)[1]].
         """
 
         # Figure out how many combinations of parameter values there are.
@@ -799,14 +797,14 @@ class Autoencoder_Pair(torch.nn.Module):
             v0      : numpy.ndarray         = ICs[1];
             
             # Map the ICs to a tensor.
-            u0      = torch.Tensor(u0).reshape((1, 1) + u0.shape);
-            v0      = torch.Tensor(v0).reshape((1, 1) + v0.shape);
+            u0      = torch.Tensor(u0).reshape((1) + u0.shape);
+            v0      = torch.Tensor(v0).reshape((1) + v0.shape);
 
             # Encode the IC, then map the encoding to a numpy array.
             z0, Dz0 = self.Encode(  Displacement_Frames = u0, 
                                     Velocity_Frames     = v0);
-            z0      : numpy.ndarray = z0[0, 0, :].detach().numpy();
-            Dz0     : numpy.ndarray = Dz0[0, 0, :].detach().numpy();
+            z0      : numpy.ndarray = z0[0, :].detach().numpy();
+            Dz0     : numpy.ndarray = Dz0[0, :].detach().numpy();
 
             # Concatenate the IC's and append them to the list.
             Z0.append([z0, Dz0]);

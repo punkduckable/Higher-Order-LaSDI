@@ -98,7 +98,7 @@ def Initialize_Trainer(config : dict, restart_dict : dict = None):
         param_space.load(restart_dict['parameter_space']);
     
     # Get the "physics" object we use to generate the fom dataset.
-    physics                 = Initialize_Physics(config, param_space.param_names);
+    physics : Physics   = Initialize_Physics(config, param_space.param_names);
 
     # Get the Model (autoencoder). We try to learn dynamics that describe how the latent space of
     # this model evolve over time. If we are using a restart file, then load the saved model 
@@ -114,7 +114,9 @@ def Initialize_Trainer(config : dict, restart_dict : dict = None):
     ld_type                 = config['latent_dynamics']['type'];
     assert(ld_type in config['latent_dynamics']);
     assert(ld_type in ld_dict);
-    latent_dynamics         = ld_dict[ld_type](Model.n_z, physics.n_t, config['latent_dynamics']);
+    latent_dynamics         = ld_dict[ld_type]( n_z             = Model.n_z, 
+                                                coef_norm_order = config['latent_dynamics']['coef_norm_order'],
+                                                Uniform_t_Grid  = physics.Uniform_t_Grid);
     if (restart_dict is not None):
         latent_dynamics.load(restart_dict['latent_dynamics']);
 
@@ -178,16 +180,16 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
         n_z                 : int               = model_config['latent_dimension'];
         activation          : str               = model_config['activation']  if 'activation' in config else 'tanh';
 
-        # Now build the widths attribute + fetch spatial_qgrid_shape from physics.
-        spatial_qgrid_shape : list[int]         = physics.spatial_qgrid_shape;
-        space_dim           : int               = numpy.prod(spatial_qgrid_shape);
+        # Now build the widths attribute + fetch Frame_Shape from physics.
+        Frame_Shape         : list[int]         = physics.Frame_Shape;
+        space_dim           : int               = numpy.prod(Frame_Shape);
         widths              : list[int]         = [space_dim] + hidden_widths + [n_z];
 
         # Now build the model!
         model           : torch.nn.Module   = model_dict[model_type](
                                                         widths          = widths, 
                                                         activation      = activation, 
-                                                        reshape_shape   = spatial_qgrid_shape);
+                                                        reshape_shape   = Frame_Shape);
 
         # All done!
         return model;

@@ -261,7 +261,7 @@ class SINDy(LatentDynamics):
 
         # Run checks.
         assert(len(coefs.shape)     == 2);
-        n_param = coefs.shape[0];
+        n_param : int = coefs.shape[0];
         assert(isinstance(t_Grid, list));
         assert(isinstance(IC, list));
         assert(len(IC)              == n_param);
@@ -281,7 +281,7 @@ class SINDy(LatentDynamics):
 
 
         # -----------------------------------------------------------------------------------------
-        # If there are multiple combinations of parameter values, loop through them.
+        # If there are multiple combinations of coefficients, loop through them.
         
         if(n_param > 1):
             LOGGER.debug("Simulating with %d parameter combinations" % n_param);

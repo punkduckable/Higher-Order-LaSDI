@@ -284,7 +284,7 @@ class DampedSpring(LatentDynamics):
 
         # Run checks.
         assert(len(coefs.shape)     == 2);
-        n_param = coefs.shape[0];
+        n_param : int = coefs.shape[0];
         assert(isinstance(t_Grid, list));
         assert(isinstance(IC, list));
         assert(len(IC)              == n_param);
