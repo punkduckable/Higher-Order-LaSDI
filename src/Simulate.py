@@ -30,7 +30,8 @@ def average_rom(trainer         : BayesianGLaSDI,
                 physics         : Physics, 
                 latent_dynamics : LatentDynamics, 
                 gp_list         : list[GaussianProcessRegressor], 
-                param_grid      : numpy.ndarray) -> list[numpy.ndarray]:
+                param_grid      : numpy.ndarray,
+                t_Grid          : list[numpy.ndarray] | list[torch.Tensor]) -> list[numpy.ndarray]:
     """
     This function simulates the latent dynamics for a set of parameter values by using the mean of
     the posterior distribution for each coefficient's posterior distribution. Specifically, for 
@@ -60,7 +61,12 @@ def average_rom(trainer         : BayesianGLaSDI,
     parameters and n_param is the number of combinations of parameter values. The i,j element of 
     this array holds the value of the j'th parameter in the i'th combination of parameter values. 
 
+    t_Grid: A n_param element list whose i'th entry is a 2d numpy.ndarray or torch.Tensor object 
+    of shape (n_t(i)) or (1, n_t(i)) whose k'th or (0, k)'th entry specifies the k'th time value 
+    we want to find the latent states when we use the j'th initial conditions and the i'th set of
+    coefficients.
 
+    
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
@@ -75,6 +81,8 @@ def average_rom(trainer         : BayesianGLaSDI,
     n_param : int   = param_grid.shape[0];
     n_IC    : int   = latent_dynamics.n_IC;
     n_z     : int   = latent_dynamics.n_z;
+    assert(isinstance(t_Grid),  list);
+    assert(len(t_Grid)          == n_param);
 
     # For each parameter in param_grid, fetch the corresponding initial condition and then encode
     # it. This gives us a list whose i'th element holds the encoding of the i'th initial condition.
@@ -84,25 +92,27 @@ def average_rom(trainer         : BayesianGLaSDI,
     # first of which is a 2d array of shape (n_param, n_coef) whose i,j element specifies the mean 
     # of the posterior distribution for the j'th coefficient at the i'th combination of parameter 
     # values.
-    pred_mean, _ = eval_gp(gp_list, param_grid);
+    post_mean, _ = eval_gp(gp_list, param_grid);
 
-    # For each testing parameter, use the mean value of each posterior distribution to define the 
-    # coefficients, solve the corresponding laten dynamics (starting from the corresponding IC 
-    # value) and store the resulting solution frames in an n_IC element list whose i'th element 
-    # is a 2d numpy ndarray of shape (n_t_i, n_z) whose j, k element holds the k'th component of 
-    # the j'th time step of the latent solution when we use the mean of the posterior distribution 
-    # for the i'th combination of parameter values to define the latent dynamics coefficients. 
-    
+    # Make each element of t_Grid into a numpy.ndarray of shape (1, n_t(i)). This is what 
+    # simulate expects.
     for i in range(n_param):
-        # Reshape each element of the IC to have shape (1, n_z), which is what simulate expects
-        Z0_i     = Z0[i];
-        for d in range(n_IC):
-            Z0_i[d] = Z0_i[d].reshape(1, -1);
-        
-        ith_Zis : list[numpy.ndarray] = latent_dynamics.simulate(coefs = pred_mean[i, :], IC = Z0_i, times = physics.t_grid);
-        for d in range(n_IC):
-            Zis[d][i, :, :] = ith_Zis[d].reshape(n_t, n_z);
+        if(isinstance(t_Grid[i], torch.Tensor)):
+            t_Grid[i] = t_Grid[i].detach().numpy();
+        t_Grid[i] = t_Grid[i].reshape(1, -1);
 
+    # Simulate the laten dynamics! For each testing parameter, use the mean value of each posterior 
+    # distribution to define the coefficients. 
+    Zis : list[list[numpy.ndarray]] = latent_dynamics.simulate( coefs   = post_mean, 
+                                                                IC      = Z0, 
+                                                                t_Grid  = t_Grid);
+    
+    # At this point, Zis[i][j] has shape (n_t_i, 1, n_z). We remove the extra dimension.
+    for i in range(n_param):
+        n_t_i   : int   = t_Grid[i].shape(1);
+        for j in range(n_IC):
+            Zis[i][j] = Zis[i][j].reshape(n_t_i, n_z);
+    
     # All done!
     return Zis;
 
