@@ -13,6 +13,7 @@ import  torch;
 import  numpy;
 from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 
+from    GPLaSDI                     import  BayesianGLaSDI;
 from    GaussianProcess             import  eval_gp, sample_coefs;
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
@@ -24,23 +25,25 @@ from    Model                       import  Autoencoder, Autoencoder_Pair;
 # Simulate latent dynamics
 # -------------------------------------------------------------------------------------------------
 
-def average_rom(model           : torch.nn.Module, 
+def average_rom(trainer         : BayesianGLaSDI,
+                model           : torch.nn.Module, 
                 physics         : Physics, 
                 latent_dynamics : LatentDynamics, 
                 gp_list         : list[GaussianProcessRegressor], 
                 param_grid      : numpy.ndarray) -> list[numpy.ndarray]:
     """
-    This function simulates the latent dynamics for a collection of testing parameters by using
-    the mean of the posterior distribution for each coefficient's posterior distribution. 
-    Specifically, for each parameter combination, we determine the mean of the posterior 
-    distribution for each coefficient. We then use this mean to simulate the latent dynamics 
-    forward in time (starting from the latent encoding of the FOM initial condition for that 
-    combination of coefficients).
+    This function simulates the latent dynamics for a set of parameter values by using the mean of
+    the posterior distribution for each coefficient's posterior distribution. Specifically, for 
+    each parameter combination, we determine the mean of the posterior distribution for each 
+    coefficient. We then use this mean to simulate the latent dynamics forward in time (starting 
+    from the latent encoding of the FOM initial condition for that combination of coefficients).
 
     
     -----------------------------------------------------------------------------------------------
     Arguments
     -----------------------------------------------------------------------------------------------
+
+    trainer: A BayesianGLaSDI object that we use to train the model. 
 
     model: The actual model object that we use to map the ICs into the latent space.
 
@@ -53,28 +56,25 @@ def average_rom(model           : torch.nn.Module,
     match the number of columns in param_grid. The i'th element of this list is a GP regressor 
     object that predicts the i'th coefficient. 
 
-    param_grid: A 2d numpy.ndarray object of shape (number of parameter combination, number of 
-    parameters). The i,j element of this array holds the value of the j'th parameter in the i'th 
-    combination of parameters. 
+    param_grid: A 2d numpy.ndarray object of shape (n_param, n_p), where n_p is the number of 
+    parameters and n_param is the number of combinations of parameter values. The i,j element of 
+    this array holds the value of the j'th parameter in the i'th combination of parameter values. 
 
 
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
     
-    A 3d numpy ndarray of shape [n_param, n_t, n_z] whose i, j, k element holds the k'th component 
-    of the j'th time step of the solution to the latent dynamics when we use the latent encoding 
-    of the initial condition from the i'th combination of parameter values.
+    An n_param element list whose i'th element is a 2d numpy ndarray object of shape (n_t, n_z) 
+    whose j, k element holds the k'th component of the latent solution at the j'th time step when 
+    we the means of the posterior distribution for the i'th combination of parameter values to 
+    define the coefficients in the latent dynamics.
     """
 
-    # The param grid needs to be two dimensional, with the first axis corresponding to which 
-    # instance of the parameter values we are using. If there is only one parameter, it may be 1d. 
-    # We can fix that by adding on an axis with size 1. 
-    if (param_grid.ndim == 1):
-        param_grid = param_grid.reshape(1, -1);
-
-    # Now fetch the number of combinations of parameter values.
-    n_param : int = param_grid.shape[0];
+    # Setup
+    n_param : int   = param_grid.shape[0];
+    n_IC    : int   = latent_dynamics.n_IC;
+    n_z     : int   = latent_dynamics.n_z;
 
     # For each parameter in param_grid, fetch the corresponding initial condition and then encode
     # it. This gives us a list whose i'th element holds the encoding of the i'th initial condition.
@@ -86,19 +86,13 @@ def average_rom(model           : torch.nn.Module,
     # values.
     pred_mean, _ = eval_gp(gp_list, param_grid);
 
-    # For each testing parameter, cycle through the mean value of each coefficient from each 
-    # posterior distribution. For each set of coefficients (combination of parameter values), solve
-    # the latent dynamics forward in time (starting from the corresponding IC value) and store the
-    # resulting solution frames in Zis, a 3d array whose i, j, k element holds the k'th component 
-    # of the j'th time step fo the latent solution when we use the coefficients from the posterior 
-    # distribution for the i'th combination of parameter values.
-    n_IC    : int                   = latent_dynamics.n_IC;
-    Zis     : list[numpy.ndarray]   = [];
-    for d in range(n_IC):
-        Zis.append(numpy.zeros([n_param, physics.n_t, model.n_z]));
-
-    n_t : int = physics.n_t;
-    n_z : int = latent_dynamics.dim;
+    # For each testing parameter, use the mean value of each posterior distribution to define the 
+    # coefficients, solve the corresponding laten dynamics (starting from the corresponding IC 
+    # value) and store the resulting solution frames in an n_IC element list whose i'th element 
+    # is a 2d numpy ndarray of shape (n_t_i, n_z) whose j, k element holds the k'th component of 
+    # the j'th time step of the latent solution when we use the mean of the posterior distribution 
+    # for the i'th combination of parameter values to define the latent dynamics coefficients. 
+    
     for i in range(n_param):
         # Reshape each element of the IC to have shape (1, n_z), which is what simulate expects
         Z0_i     = Z0[i];
@@ -204,7 +198,7 @@ def sample_roms(model           : torch.nn.Module,
     # combination of parameter values. For each set of coefficients, solve the corresponding latent 
     # dynamics forward in time and store the resulting frames in Zis.
     n_t : int = physics.n_t;
-    n_z : int = latent_dynamics.dim; 
+    n_z : int = latent_dynamics.n_z; 
     for i in range(n_param):
         # Fetch the initial conditions when we use the i'th combination of parameter values.
         # Reshape each element of the IC to have shape (1, n_z), which is what simulate expects
@@ -230,32 +224,31 @@ def sample_roms(model           : torch.nn.Module,
 
 
 
-def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[numpy.ndarray]) -> int:
+def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndarray]]) -> int:
     r"""
-    Finds which parameter combination gives the maximum standard deviation of some component 
-    of the FOM solution at some time step across the corresponding samples of the coefficients
-    in the latent space. 
+    We find the combination of parameter values which produces with FOM solution with the greatest
+    variance.
 
-    We assume that LatentStates is a list of 4d tensors of shape (n_test, n_samples, n_t, n_z). 
-    Here, n_test is the number of testing combinations, n_samples is the number of samples of the 
-    latent coefficients we draw per parameter combination, n_t is the number of time steps we 
-    generate in the latent space per set of coefficients, and n_z is the dimension of the latent 
-    space.
+    To make that more precise, consider the set of all FOM frames generated by decoding the latent 
+    trajectories in LatentStates. We assume these latent trajectories were generated as follows:
+    For a combination of parameter values, we sampled the posterior coefficient distribution for 
+    that combination of parameter values. For each set of coefficients, we solved the corresponding
+    latent dynamics forward in time. We assume the user used the same time grid for all latent 
+    trajectories for that combination of parameter values.
+    
+    After solving, we end up with a collection of latent trajectories for that parameter value. 
+    We then decoded each latent trajectory, which gives us a collection of FOM trajectories for 
+    that combination of parameter values. At each value in the time grid, we have a collection of
+    frames. We can compute the variance of each component of the frames at that time value for that
+    combination of parameter values. We do this for each time value and for each combination of
+    parameter values and then return the index for the combination of parameter values that gives
+    the largest variance (among all components at all time frames).
 
-    For each time step and parameter combination, we get a set of latent frames. We map that 
-    set to a set of FOM frames and then find the STD of each component of those FOM frames 
-    across the samples. This give us a number. We find the corresponding number for each time 
-    step and combination of parameter values and then return the parameter combination that 
-    gives the biggest number (for some time step).
-
-    Let i \in {1, 2, ... , n_test} and k \in {1, 2, ... , n_t}. For each j, we map the k'th frame
-    of the j'th solution trajectory for the i'th parameter combination 
-    (LatentStates[:][i, j, k, :]) to a FOM frame. We do this for each j (the set of samples), which 
-    gives us a collection of n_sample FOM frames, representing samples of the distribution of FOM 
-    frames at the k'th time step when we use the posterior distribution for the i'th set of 
-    parameters. For each l \in {1, 2, ... , n_FOM}, we compute the STD of the set of l'th 
-    components of these n_sample FOM frames. We do this for each i and k and then figure out which 
-    i, k, l combination gives the largest STD. We return the corresponding i index. 
+    Stated another way, we find the following:
+        argmax_{i}[ STD[ { Decoder(LatentStates[i][0][p, q, :])_k : p \in {1, 2, ... , n_samples(i)} } ]
+                    |   k \in {1, 2, ... , n_{FOM}},
+                        i \in {1, 2, ... , n_param},
+                        q \in {1, 2, ... , n_t(i)} ]
     
 
     -----------------------------------------------------------------------------------------------
@@ -265,98 +258,132 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[numpy.ndarray])
     model: The model. We assume the solved dynamics (whose frames are stored in Zis) 
     take place in the model's latent space. We use this to decode the solution frames.
 
-    LatentStates: A list of 4d numpy array of shape (n_test, n_samples, n_t, n_z). The i, j, k, l
-    element of the d'th list item holds the l'th component of the k'th frame of the d'th time 
-    derivative of the solution to the latent dynamics when we use the j'th sample of latent 
-    coefficients drawn from the posterior distribution for the i'th testing parameter.
+    LatentStates: An n_param element list whose i'th element is an n_IC element list whose j'th
+    element is a 3d tensor of shape (n_samples(i), n_t(i), n_z) whose p, q, r element holds the 
+    r'th component of the j'th component of the latent solution at the q'th time step when we solve 
+    the latent dynamics using the p'th set of coefficients we got by sampling the posterior 
+    distribution for the i'th combination of parameter values. 
 
-    
 
     -----------------------------------------------------------------------------------------------
     Returns:
     -----------------------------------------------------------------------------------------------
 
     An integer. The index of the testing parameter that gives the largest standard deviation. 
-    Specifically, for each testing parameter, we compute the STD of each component of the FOM 
-    solution at each frame generated by samples from the posterior coefficient distribution for 
-    that parameter. We compute the maximum of these STDs and pair that number with the parameter. 
-    We then return the index of the parameter whose corresponding maximum std (the number we pair
-    with it) is greatest.
+    See the description above for details.
     """
+    
+    # Run checks.
+    assert(isinstance(LatentStates,         list));
+    assert(isinstance(LatentStates[0],      list));
+    assert(isinstance(LatentStates[0][0],   numpy.ndarray));
+    assert(len(LatentStates[0][0])          == 3);
 
+    n_param : int   = len(LatentStates);
+    n_IC    : int   = len(LatentStates[0]);
+    n_z     : int   = LatentStates[0][0].shape[2];
+
+    assert(n_z  == model.n_z);
+
+    for i in range(n_param):
+        assert(isinstance(LatentStates[i], list));
+        assert(len(LatentStates[i]) == n_IC);
+
+        assert(isinstance(LatentStates[i][0],   numpy.ndarray));
+        assert(len(LatentStates[i][0].shape)    == 3);
+        n_samples_i : int   = LatentStates[i][0].shape[0];
+        n_t_i       : int   = LatentStates[i][0].shape[1];
+
+        for j in range(1, n_IC):
+            assert(isinstance(LatentStates[i][j],   numpy.ndarray));
+            assert(len(LatentStates[i][j].shape)    == 3);
+            assert(LatentStates[i][j].shape[0]      == n_samples_i);
+            assert(LatentStates[i][j].shape[1]      == n_t_i);
+            assert(LatentStates[i][j].shape[2]      == n_z);
+
+    # Find the index that gives the largest STD!
     max_std     : float     = 0.0;
     m_index     : int       = 0;
     
     if(isinstance(model, Autoencoder)):
-        assert(len(LatentStates) == 1);
-        Latent_Displacements    : numpy.ndarray = LatentStates[0];
-        n_Test                  : int           = Latent_Displacements.shape[0];
+        assert(n_IC == 1);
 
-        for m in range(n_Test):
-            # Zi is a 3d tensor of shape (n_samples, n_t, n_z), where n_samples is the number of 
-            # samples of the posterior distribution per parameter, n_t is the number of time steps 
-            # in the latent dynamics solution, and n_z is the dimension of the latent space. The
-            # i,j,k element of Zi is the k'th component of the j'th frame of the solution to the 
-            # latent dynamics when the latent dynamics uses the i'th set of sampled parameter 
-            # values.
-            Z_m             : torch.Tensor  = torch.Tensor(Latent_Displacements[m, ...]);
+        for i in range(n_param):
+            # Fetch the set of latent trajectories for the i'th combination of parameter values.
+            # Z_i is a 3d tensor of shape (n_samples_i, n_t_i, n_z), where n_samples_i is the 
+            # number of samples of the posterior distribution for the i'th combination of parameter 
+            # values, n_t_i is the number of time steps in the latent dynamics solution for the 
+            # i'th combination of parameter values, nd n_z is the dimension of the latent space. 
+            # The p, q, r element of Zi is the r'th component of the q'th frame of the latent 
+            # solution corresponding to p'th sample of the posterior distribution for the i'th 
+            # combination of parameter values.
+            Z_i             : torch.Tensor  = torch.Tensor(LatentStates[i][0]);
 
-            # Now decode the frames.
-            X_pred_m        : numpy.ndarray = model.Decode(Z_m).detach().numpy();
+            # Now decode the frames, one sample at a time.
+            n_samples_i     : int           = Z_i.shape[0];
+            n_t_i           : int           = Z_i.shape[1];
+            X_Pred_i        : numpy.ndarray = numpy.empty((n_samples_i, n_t_i, n_z), dtype = numpy.float32);
+            for j in range(n_samples_i):
+                X_Pred_i[j, :, :] = model.Decode(Z_i[j, :, :]).detach().numpy();
 
             # Compute the standard deviation across the sample axis. This gives us an array of shape 
             # (n_t, n_FOM) whose i,j element holds the (sample) standard deviation of the j'th component 
             # of the i'th frame of the FOM solution. In this case, the sample distribution consists of 
             # the set of j'th components of i'th frames of FOM solutions (one for each sample of the 
             # coefficient posterior distributions).
-            X_pred_m_std    : numpy.ndarray = X_pred_m.std(0);
+            X_pred_i_std    : numpy.ndarray = X_Pred_i.std(0);
 
             # Now compute the maximum standard deviation across frames/FOM components.
-            max_std_m       : numpy.float32 = X_pred_m_std.max();
+            max_std_i       : numpy.float32 = X_pred_i_std.max();
 
             # If this is bigger than the biggest std we have seen so far, update the maximum.
-            if max_std_m > max_std:
-                m_index : int   = m;
-                max_std : float = max_std_m;
+            if max_std_i > max_std:
+                m_index : int   = i;
+                max_std : float = max_std_i;
 
         # Report the index of the testing parameter that gave the largest maximum std.
         return m_index
 
 
     elif(isinstance(model, Autoencoder_Pair)):
-        assert(len(LatentStates)    == 2);
-        Latent_Displacements    : numpy.ndarray     = LatentStates[0];
-        Latent_Velocities       : numpy.ndarray     = LatentStates[1];
-        n_Test                  : int               = Latent_Displacements.shape[0];
+        assert(n_IC == 2);
 
-        # Cycle through the testing parameters, components of the derivative.
-        for m in range(n_Test):
-            # Build the latent state for the i'th testing sample. 
-            # In this case, the latent state is a 2 element list of 3d tensor of shape (n_samples, 
-            # n_t, n_z), where n_samples is the number of samples of the posterior distribution 
-            # per parameter, n_t is the number of time steps in the latent dynamics solution, and 
-            # n_z is the dimension of the latent space. The i,j,k element of the d'th list item is 
-            # the k'th component of the j'th frame of the d'th derivative of the solution to the 
-            # latent dynamics when the latent dynamics uses the i'th set of sampled parameter 
-            # values.
-            X_pred_m, _  = model.Decode(Latent_Displacement = torch.Tensor(Latent_Displacements[m, ...]), 
-                                        Latent_Velocity     = torch.Tensor(Latent_Velocities[m, ...]));
-            X_pred_m            = X_pred_m.detach().numpy();
+        for i in range(n_param):
+            # Fetch the set of latent trajectories for the i'th combination of parameter values.
+            # Z_D_i and Z_D_i are a 3d tensor sof shape (n_samples_i, n_t_i, n_z), where 
+            # n_samples_i is the number of samples of the posterior distribution for the i'th 
+            # combination of parameter values, n_t_i is the number of time steps in the latent 
+            # dynamics solution for the i'th combination of parameter values, nd n_z is the 
+            # dimension of the latent space. 
+            # 
+            # The p, q, r element of Z_D_i is the r'th component of the q'th frame of the latent 
+            # displacement corresponding to p'th sample of the posterior distribution for the i'th 
+            # combination of parameter values. The components of Z_V_i are analogous but for the 
+            # latent velocity. 
+            Z_D_i   : torch.Tensor  = torch.Tensor(LatentStates[i][0]);
+            Z_V_i   : torch.Tensor  = torch.Tensor(LatentStates[i][1]);
+
+            n_samples_i : int           = Z_D_i.shape[0];
+            n_t_i       : int           = Z_D_i.shape[1];
+            D_Pred_i    : numpy.ndarray = numpy.empty((n_samples_i, n_t_i, n_z), dtype = numpy.float32);
+            for j in range(n_samples_i):
+                D_Pred_ij, _ = model.Decode(Latent_Displacement   = Z_D_i, Latent_Velocity    = Z_V_i);
+                D_Pred_i[j, :, :] = D_Pred_ij.detach().numpy();
 
             # Compute the standard deviation across the sample axis. This gives us an array of 
             # shape (n_t, n_FOM) whose i,j element holds the (sample) standard deviation of the 
             # j'th component of the i'th frame of the FOM solution. In this case, the sample 
             # distribution consists of the set of j'th components of i'th frames of FOM solutions 
             # (one for each sample of the coefficient posterior distributions).
-            X_pred_m_std    : numpy.ndarray = X_pred_m.std(0);
+            D_Pred_i_std    : numpy.ndarray = D_Pred_i.std(0);
 
             # Now compute the maximum standard deviation across frames/FOM components.
-            max_std_m       : numpy.float32 = X_pred_m_std.max();
+            max_std_i       : numpy.float32 = D_Pred_i_std.max();
 
             # If this is bigger than the biggest std we have seen so far, update the maximum.
-            if max_std_m > max_std:
-                m_index : int   = m;
-                max_std : float = max_std_m;
+            if max_std_i > max_std:
+                m_index : int   = i;
+                max_std : float = max_std_i;
 
         # Report the index of the testing parameter that gave the largest maximum std.
         return m_index;
