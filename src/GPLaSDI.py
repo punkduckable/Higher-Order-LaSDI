@@ -80,10 +80,18 @@ class BayesianGLaSDI:
     # numpy ndarray of shape (nt(u), Frame_Shape) holding a sequence of samples of the j'th 
     # derivative of the FOM solution when we use the i'th combination of parameter values. 
     X_Train : list[list[torch.Tensor]]  = [];  
+
+    # An n_Train element list whose i'th element is a torch.Tensor of shape (n_t_i) whose (0, j)
+    # element holds the time value for the j'th frame when we use the i'th combination of parameter 
+    # values.
     t_Train : list[torch.Tensor]        = []; 
 
     # Same as X_Test, but used for the test set.
     X_Test  : list[list[torch.Tensor]]  = [];  
+
+    # An n_Test element list whose i'th element is a torch.Tensor of shape (n_t_i) whose (0, j)
+    # element holds the time value for the j'th frame when we use the i'th combination of parameter 
+    # values.
     t_Test  : list[torch.Tensor]        = [];
 
     def __init__(self, 
@@ -595,7 +603,7 @@ class BayesianGLaSDI:
 
 
 
-    def get_new_sample_point(self) -> numpy.ndarray:
+    def A(self) -> numpy.ndarray:
         """
         This function finds the element of the testing set whose corresponding latent dynamics 
         gives the highest variance FOM time series. 
@@ -655,7 +663,7 @@ class BayesianGLaSDI:
 
         # Map the initial conditions for the FOM to initial conditions in the latent space.
         # Yields an n_test element list whose i'th element is an n_IC element list whose j'th
-        # element is an numpy.ndarray of shape (n_z) whose k'th element holds the k'th component
+        # element is an numpy.ndarray of shape (1, n_z) whose k'th element holds the k'th component
         # of the encoding of the initial condition for the j'th derivative of the latent dynamics 
         # corresponding to the i'th combination of parameter values.
         Z0 : list[list[numpy.ndarray]]  = model.latent_initial_conditions(self.param_space.test_space, self.physics);
@@ -692,18 +700,13 @@ class BayesianGLaSDI:
         
         for i in range(n_test):
             # Fetch the t_Grid for the i'th combination of parameter values.
-            t_Grid  : numpy.ndarray = self.t_Test[i];
+            t_Grid  : numpy.ndarray = self.t_Test[i].reshape(1, -1).detach().numpy();
             n_t_j   : int           = len(t_Grid);
-
-            # Reshape each element of the IC to have shape (1, n_z), which is what simulate expects
-            Z0_i     = Z0[i];
-            for d in range(n_IC):
-                Z0_i[d] = Z0_i[d].reshape(1, -1);
 
             # Simulate one sample at a time; store the resulting frames.           
             for j in range(self.n_samples):
                 LatentState_ij : list[numpy.ndarray] = self.latent_dynamics.simulate(   coefs   = coef_samples[i][j:(j + 1), :], 
-                                                                                        IC      = [Z0_i], 
+                                                                                        IC      = [Z0[i]], 
                                                                                         t_Grid  = [t_Grid]);
                 for k in range(n_IC):
                     LatentStates[i][k][j, :, :] = LatentState_ij[k].reshape(n_t_j, n_z);

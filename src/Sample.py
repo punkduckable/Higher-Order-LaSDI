@@ -141,29 +141,33 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     
     # Generate the fom solutions for the new training points. After we have generated them, we
     # append them to trainer's X_Train variable.
-    new_X               : list[torch.Tensor]    = trainer.physics.generate_solutions(new_train_params);
+    new_X_Train, new_t_Train    = trainer.physics.generate_solutions(new_train_params);
     if(trainer.X_Train[0].shape[0] == 0):
-        trainer.X_Train     = new_X;
+        trainer.X_Train         = new_X_Train;
+        trainer.t_Train_grid    = new_t_Train;
     else:
-        assert(len(new_X) == len(trainer.X_Train));
-        for i in range(len(new_X)):
-            trainer.X_Train[i]                  = torch.cat([trainer.X_Train[i], new_X[i]], dim = 0);
+        assert(len(new_X_Train) == len(trainer.X_Train));
+        for i in range(len(new_X_Train)):
+            trainer.X_Train.append(new_X_Train[i]);
+            trainer.t_Train.append(new_t_Train[i]);
 
-    assert(trainer.X_Train[0].shape[0] == trainer.param_space.n_train());
+    assert(len(trainer.X_Train[0]) == trainer.param_space.n_train());
 
     
     # Do the same thing for the testing points.
     if (new_tests > 0):
-        new_X           : list[torch.Tensor]    = trainer.physics.generate_solutions(new_test_params);
+        new_X_Test, new_t_Test  = trainer.physics.generate_solutions(new_test_params);
 
         if(trainer.X_Test[0].shape[0] == 0):
-            trainer.X_Test = new_X;
+            trainer.X_Test = new_X_Test;
+            trainer.t_Test = new_t_Test;
         else:
-            assert(len(new_X) == len(trainer.X_Test));
-            for i in range(len(new_X)):
-                trainer.X_Test[i]               = torch.cat([trainer.X_Test[i], new_X[i]], dim = 0);
+            assert(len(new_X_Test) == len(trainer.X_Test));
+            for i in range(len(new_X_Test)):
+                trainer.X_Test[i].append(new_X_Test[i]);
+                trainer.t_Test.append(new_t_Test[i]);
             
-        assert(trainer.X_Test[0].size(0) == trainer.param_space.n_test());
+        assert(len(trainer.X_Test[0]) == trainer.param_space.n_test());
 
 
     # ---------------------------------------------------------------------------------------------
