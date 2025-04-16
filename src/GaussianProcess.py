@@ -15,13 +15,14 @@ from    sklearn.gaussian_process            import  GaussianProcessRegressor;
 
 def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegressor]:
     """
-    Trains a GP for each column of Y. If Y has shape N x k, then we train k GP regressors. In this 
-    case, we assume that X has shape N x M. Thus, the Input to the GP is in \mathbb{R}^M. For each
-    k, we train a GP where the i'th row of X is the input and the i,k component of Y is the
-    corresponding target. Thus, we return a list of k GP Regressor objects, the k'th one of which 
-    makes predictions for the k'th coefficient in the latent dynamics. 
-
-    We assume each target coefficient is independent with each other.
+    Trains a GP for each column of Y. If Y has shape n_train x n_GPs, then we train k GP 
+    regressors. In this case, we assume that X has shape n_train x input_dim. Thus, the Input to 
+    the GP is in \mathbb{R}^input_dim. For each k, we train a GP where the i'th row of X is the 
+    input and the i,k component of Y is the corresponding target. We assume the target coefficients 
+    are independent.
+    
+    We return a list of n_GPs GP Regressor objects, the k'th one of which makes predictions for 
+    the k'th coefficient in the latent dynamics. 
 
 
     -----------------------------------------------------------------------------------------------
@@ -29,41 +30,42 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
     -----------------------------------------------------------------------------------------------
 
     X: A 2d numpy array of shape (n_train, input_dim), where n_train is the number of training 
-    examples and input_dim is the number of components in each input (e.g., the number of 
-    parameters)
+    examples and input_dim is the dimension of the input space to the GPs.
 
-    Y: A 2d numpy array of shape (n_train, n_coef), where n_train is the number of training 
-    examples and n_coef is the number of coefficients in the latent dynamics. 
+    Y: A 2d numpy array of shape (n_train, n_GPs), where n_train is the number of training 
+    examples and n_GPs is the number of GPs.
 
     
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
 
-    A list of trained GP regressor objects. If Y has k columns, then the returned list has k 
+    A list of trained GP regressor objects. If Y has n_GPs columns, then the returned list has k 
     elements. It's i'th element holds a trained GP regressor object whose training inputs are the 
     columns of X and whose corresponding target values are the elements of the i'th column of Y.
     """
 
-    # Determine the number of components (columns) of Y. Since this is a regression task, we will
-    # perform a GP regression fit on each component (column) of Y.
-    n_coef : int = 1 if (Y.ndim == 1) else Y.shape[1];
+    # Checks.
+    assert(isinstance(Y, numpy.ndarray));
+    assert(isinstance(X, numpy.ndarray));
+    assert(len(Y.shape)         == 2);
+    assert(len(X.shape)         == 2);
+    assert(X.shape[0]           == Y.shape[0]);
+
+    # Setup.
+    n_GPs   : int   = Y.shape[1];
 
     # Transpose Y so that each row corresponds to a particular coefficient. This allows us to 
-    # iterate over the coefficients by iterating through the rows of Y.
-    if (n_coef > 1):
-        Y = Y.T;
-
-    # Sklearn requires X to be a 2D array... so make sure this holds.
-    if X.ndim == 1:
-        X = X.reshape(-1, 1);
+    # iterate over the GPs by iterating through the rows of Y.
+    Y = Y.T;
 
     # Initialize a list to hold the trained GP objects.
     gp_list : list[GaussianProcessRegressor] = [];
 
-    # Cycle through the rows of Y (which we transposed... so this just cycles through the 
-    # coefficients)
-    for yk in Y:
+    # Fit the GPs
+    for i in range(n_GPs):
+        targets_i   : numpy.ndarray     = Y[i, :];
+
         # Make the kernel.
         # kernel = ConstantKernel() * Matern(length_scale_bounds = (0.01, 1e5), nu = 1.5)
         kernel  = ConstantKernel() * RBF(length_scale_bounds = (0.1, 1e5));
@@ -72,7 +74,7 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
         gp      = GaussianProcessRegressor(kernel = kernel, n_restarts_optimizer = 10, random_state = 1);
 
         # Fit it to the data (train), then add it to the list of trained GPs
-        gp.fit(X, yk);
+        gp.fit(X, targets_i);
         gp_list += [gp];
 
     # All done!
@@ -80,54 +82,54 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
 
 
 
-def eval_gp(gp_list : list[GaussianProcessRegressor], param_grid : numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray]:
+def eval_gp(gp_list : list[GaussianProcessRegressor], Inputs : numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray]:
     """
-    Computes the GPs predictive mean and standard deviation for points of the parameter space grid
+    Computes the mean and std of each GP's posterior distribution when evaluated at each 
+    combination of parameter values in Inputs.
 
 
     -----------------------------------------------------------------------------------------------
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    gp_list: a list of trained GP regressor objects. The number of elements in this list should 
-    match the number of columns in param_grid. The i'th element of this list is a GP regressor 
-    object that predicts the i'th coefficient. 
+    gp_list: a n_GPs element list of trained GP regressor objects. The i'th element of this list 
+    is a GP regressor object that predicts the i'th coefficient. 
     
-    param_grid: A 2d numpy.ndarray object of shape (number of parameter combination, number of 
-    parameters). The i,j element of this array specifies the value of the j'th parameter in the 
-    i'th combination of parameters. We use this as the testing set for the GP evaluation.
+    Inputs: A 2d numpy.ndarray object of shape (n_inputs, input_dim), where input_dim is the 
+    dimensionality of the input space for the GPs) and n_inputs is the number of inputs at which 
+    we want to evaluate the posterior distribution of the the GPs. The i,j element of this array 
+    specifies the value of the j'th parameter in the i'th combination of parameters. We use this 
+    as the testing set for the GP evaluation.
 
 
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------  
 
-    A two element tuple. Both are 2d numpy arrays of shape (number of parameter combinations, 
-    number of coefficients). The two arrays hold the predicted means and std's for each parameter
-    at each training example, respectively. 
+    A two element tuple: M and SD. Both are 2d numpy arrays of shape (n_inputs, n_GPs). They
+    hold the predicted means and std's for each parameter at each training example, respectively. 
     
-    Thus, the i,j element of the first return variable holds the predicted mean of the j'th 
-    coefficient in the latent dynamics at the i'th training example. Likewise, the i,j element of 
-    the second return variable holds the standard deviation in the predicted distribution for the 
-    j'th coefficient in the latent dynamics at the i'th combination of parameter values.
+    Thus, the i,j element of the M holds the predicted mean of the j'th GP's posterior distribution
+    at the i'th input. Likewise, the i,j element of SD holds the standard deviation of the posterior
+    distribution for the j'th GP evaluated at the i'th input.
     """
 
-    # Fetch the numbers coefficients. Since there is one GP Regressor per SINDy coefficient, this 
-    # just the length of the gp_list.
-    n_coef : int = len(gp_list);
+    # Checks
+    assert(isinstance(gp_list, list));
+    assert(isinstance(Inputs, numpy.ndarray));
+    assert(len(Inputs.shape) == 2);
 
-    # Fetch the number of parameters, make sure the grid is 2D. 
-    if (param_grid.ndim == 1):
-        param_grid = param_grid.reshape(1, -1);
-    n_points = param_grid.shape[0];
+    # Setup 
+    n_GPs       : int   = len(gp_list);
+    n_inputs    : int   = Inputs.shape[0];
+    pred_mean   : numpy.ndarray     = numpy.zeros([n_inputs, n_GPs]);
+    pred_std    : numpy.ndarray     = numpy.zeros([n_inputs, n_GPs]);
 
-    # Initialize arrays to hold the mean, STD.
-    pred_mean, pred_std = numpy.zeros([n_points, n_coef]), numpy.zeros([n_points, n_coef]);
-
-    # Cycle through the GPs (one for each coefficient in the SINDy coefficients!).
-    for k, gp in enumerate(gp_list):
-        # Make predictions using the parameters in the param_grid.
-        pred_mean[:, k], pred_std[:, k] = gp.predict(param_grid, return_std = True);
+    # Find the means and SDs of the posterior distribution for each GP evaluated at the 
+    # various inputs.
+    for i in range(n_GPs):
+        GP_i : GaussianProcessRegressor = gp_list[i];
+        pred_mean[:, i], pred_std[:, i] = GP_i.predict(Inputs, return_std = True);
 
     # All done!
     return pred_mean, pred_std;
@@ -135,63 +137,54 @@ def eval_gp(gp_list : list[GaussianProcessRegressor], param_grid : numpy.ndarray
 
 
 def sample_coefs(   gp_list     : list[GaussianProcessRegressor], 
-                    param       : numpy.ndarray, 
-                    n_samples   : int):
+                    Input       : numpy.ndarray, 
+                    n_samples   : int) -> numpy.ndarray:
     """
-    Generates sets of ODE (SINDy) coefficients sampled from the predictive distribution for those 
-    coefficients at the specified parameter value (parma). Specifically, for the k'th SINDy 
-    coefficient, we draw n_samples samples of the predictive distribution for the k'th coefficient
-    when param is the parameter. 
+    Generates n_samples samples of the posterior distributions of the GPs in gp_list evaluated at
+    the input specified by Input. 
     
 
     -----------------------------------------------------------------------------------------------
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    gp_list: a list of trained GP regressor objects. The number of elements in this list should 
-    match the number of columns in param_grid. The i'th element of this list is a GP regressor 
-    object that predicts the i'th coefficient. 
+    gp_list: a n_GPs element list of trained GP regressor objects.
 
-    param: A combination of parameter values. i.e., a single test example. We evaluate each GP in 
-    the gp_list at this parameter value (getting a prediction for each coefficient).
+    Input: An numpy.ndarray array with shape (1, input_dim) that holds a single combination of 
+    parameter values. i.e., a single test example. Here, input_dim is the dimension of the input 
+    space for the GPs. We evaluate the posterior distribution of each GP in gp_list at this input 
+    (getting a prediction for each GP).
 
-    n_samples: Number of samples of the predicted latent dynamics used to build ensemble of fom 
-    predictions. N_s in the paper. 
+    n_samples: Number of samples we draw from each GP's posterior distribution. 
     
 
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
 
-    A 2d numpy ndarray object called coef_samples. It has shape (n_samples, n_coef), where n_coef 
-    is the number of coefficients (length of gp_list). The i,j element of this list is the i'th 
-    sample of the j'th SINDy coefficient.
+    A 2d numpy ndarray object, coef_samples, with shape (n_samples, n_GPs) whose i,j element holds 
+    the i'th sample of the posterior distribution for the j'th GP evaluated at the Input.
     """
 
-    # Fetch the number of coefficients (since there is one GP Regressor per coefficient, this is
-    # just the length of the gp_list).
-    n_coef          : int           = len(gp_list);
+    # Checks.
+    assert(isinstance(gp_list, list));
+    assert(isinstance(Input, numpy.ndarray));
+    assert(len(Input.shape) == 2);
+    assert(Input.shape[0]   == 1);
 
-    # Initialize an array to hold the coefficient samples.
-    coef_samples    : numpy.ndarray = numpy.zeros([n_samples, n_coef]);
+    # Setup.
+    n_GPs           : int           = len(gp_list);
+    coef_samples    : numpy.ndarray = numpy.zeros([n_samples, n_GPs]);
 
-    # Make sure param is a 2d array with one row, we need this when evaluating the GP Regressor
-    # object.
-    if param.ndim == 1:
-        param = param.reshape(1, -1);
-    
-    # Make sure we only have a single sample.
-    n_points : int = param.shape[0];
-    assert(n_points == 1);
-
-    # Evaluate the predicted mean and std at the parameter value.
-    pred_mean, pred_std = eval_gp(gp_list, param);
-    pred_mean, pred_std = pred_mean[0], pred_std[0];
+    # Evaluate the predicted mean and std at the Input.
+    pred_mean, pred_std = eval_gp(gp_list, Input);
+    pred_mean   = pred_mean[0];
+    pred_std    = pred_std[0];
 
     # Cycle through the samples and coefficients. For each sample of the k'th coefficient, we draw
     # a sample from the normal distribution with mean pred_mean[k] and std pred_std[k].
     for s in range(n_samples):
-        for k in range(n_coef):
+        for k in range(n_GPs):
             coef_samples[s, k] = numpy.random.normal(pred_mean[k], pred_std[k]);
 
     # All done!
