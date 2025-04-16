@@ -184,66 +184,75 @@ def sample_roms(model           : torch.nn.Module,
     n_coefs     : int = len(gp_list);
     n_param     : int = len(t_Grid);
     n_IC        : int = latent_dynamics.n_IC;
+    n_z         : int = model.n_z;
 
+    # Make each element of t_Grid into a numpy.ndarray of shape (1, n_t(i)). This is what 
+    # simulate expects.
+    t_Grid_np : list[numpy.ndarray] = [];
+    for i in range(n_param):
+        if(isinstance(t_Grid[i], torch.Tensor)):
+            t_Grid_np.append(t_Grid[i].detach().numpy());
+        else:
+            t_Grid_np.append(t_Grid[i]);
+        
+        t_Grid_np[i] = t_Grid_np[i].reshape(1, -1);
+    
     # For each combination of parameter values in param_grid, fetch the corresponding initial 
-    # condition and then encode it. This gives us a list whose i'th element holds the encoding 
-    # of the i'th initial condition.
+    # condition and then encode it. This gives us a list whose i'th element is an n_IC element
+    # list whose j'th element is an array of shape (1, n_z) holding the IC for the j'th derivative
+    # of the latent state when we use the i'th combination of parameter values. 
     Z0      : list[list[numpy.ndarray]] = model.latent_initial_conditions(param_grid, physics);
+
 
     # Now, for each combination of parameters, draw n_samples samples from the posterior
     # distributions for each coefficient at that combination of parameters. We store these samples 
-    # in a list of numpy arrays. The k'th list element is a (n_sample, n_coef) array whose i, j 
+    # in an n_param element list whose k'th element is a (n_sample, n_coef) array whose i, j 
     # element stores the i'th sample from the posterior distribution for the j'th coefficient at 
     # the k'th combination of parameter values.
-    coef_samples : list[numpy.ndarray]  = [sample_coefs(gp_list = gp_list, Input = param_grid[i:(i + 1), :], n_samples = n_samples) for i in range(n_param)];
+    coefs_by_parameter  : list[numpy.ndarray]       = [sample_coefs(gp_list = gp_list, Input = param_grid[i:(i + 1), :], n_samples = n_samples) for i in range(n_param)];
 
-    # Simulate each set of dynamics forward in time. For each combination of parameter values,
-    # we cycle through the coefficient samples. For each set of coefficients, we simulate the 
-    # latent dynamics using those coefficients and using the IC for this combination of parameter
-    # values. This results in an n_IC element list of arrays of shape (n_t(i), n_z). We store 
-    # each sample in a collection of n_IC 3d arrays, each of shape (n_samples, n_t(i), n_z). We do 
-    # this for each combination of parameter values.
+    # Reorganize the coef samples into an n_samples element list whose i'th element is an 
+    # array of shape (n_param, n_coef) whose j, k element holds the i'th sample of the k'th 
+    # coefficient when we sample from the posterior distribution evaluated at the j'th combination
+    # of parameter values.
+    coefs_by_samples    : list[numpy.ndarray]   = [];
+    for k in range(n_samples):
+        coefs_by_samples.append(numpy.empty((n_param, n_coefs), dtype = numpy.float32));
+    
+    for i in range(n_param):
+        for k in range(n_samples):
+            coefs_by_samples[k][i, :] = coefs_by_parameter[i][k, :];
+
+
+    # Setup a list to hold the simulated dynamics. There are n_param parameters. For each 
+    # combination of parameter values, we have n_IC initial conditions. For each IC, we 
+    # have n_samples simulations, each of which has n_t_i frames, each of which has n_z components
+    # Thus, we need a n_param element list whose i'th element is a n_IC element list whose 
+    # j'th element is a 3d array of shape n_samples, n_t_i, n_z.
     LatentStates : list[list[numpy.ndarray]] = [];
     for i in range(n_param):
-        # The latent states for the i'th combination of parameter values should have shape 
-        # (n_samples, n_t(i), n_z).
-        if(isinstance(t_Grid[i], torch.Tensor)):
-            t_Grid_i    : numpy.ndarray = t_Grid[i].detach().numpy().reshape(-1, 1);
-        else:
-            t_Grid_i    : numpy.ndarray = t_Grid[i].reshape(-1, 1);
-        n_t_i : int =  t_Grid.shape[1];
-       
+        LatentStates_i  : list[numpy.ndarray]   = [];
+        n_t_i           : int                   = t_Grid_np[i].shape(1);
 
-        # Fetch the initial conditions when we use the i'th combination of parameter values.
-        # Reshape each element of the IC to have shape (1, n_z), which is what simulate expects
-        ith_ICs                 : list[numpy.ndarray]   = Z0[i];
-        for d in range(n_IC):
-            ith_ICs[d] = ith_ICs[d].reshape(1, -1);
-
-
-        # Set up a list to hold the results from the i'th combination of parameter values.
-        LatentStates_i : list[numpy.ndarray] = [];
         for j in range(n_IC):
             LatentStates_i.append(numpy.empty((n_samples, n_t_i, n_z), dtype = numpy.float32));
-        
-        coef_samples_ith_param  : numpy.ndarray = coef_samples[i];      # shape (n_samples, n_coef).
+        LatentStates.append(LatentStates_i);
 
 
-        # Cycle through the samples.
-        for j in range(n_samples):
-            # Fetch the j'th sample of the coefficients when we use the i'th combination of 
-            # parameter values.
-            jth_coef_sample_ith_param   : numpy.ndarray = coef_samples_ith_param[j:(j + 1), :];     # shape (1, n_coef)
-        
-            # Generate the latent trajectory when we use this set of coefficients.
-            LatentStates_ij : list[numpy.ndarray] = latent_dynamics.simulate(coefs = jth_coef_sample_ith_param, IC = [ith_ICs], t_Grid = [t_Grid_i])[0];
-        
-            # Now store the results in LatentStates_i
-            for d in range(n_IC):
-                LatentStates_i[d][j, :, :] = LatentStates_ij[d].reshape(n_t_i, n_z);  
-
-        # Append LatentStates_i to the list.
-        LatentStates.append(LatentStates_i);  
+    # Simulate each set of dynamics forward in time. We generate this one sample at a time. For 
+    # each sample, we use the k'th set of coefficients. There is one set of coefficients per 
+    # sample. For each sample, we use the same ICs and the same t_Grid.
+    for k in range(n_samples):
+        # This yields an n_param element list whose i'th element is an n_IC element list whose
+        # j'th element is an numpy.ndarray of shape (n_t_i, 1, n_z). We store this in the 
+        # (:, k, :) elements of LatentStates[i][j]
+        LatentStates_kth_sample : list[list[numpy.ndarray]] = latent_dynamics.simulate( coefs   = coefs_by_samples[k], 
+                                                                                        IC      = Z0,
+                                                                                        t_Grid  = t_Grid_np);
+    
+        for i in range(n_param):
+            for j in range(n_IC):
+                LatentStates[i][j][:, k, :] = LatentStates_kth_sample[i][j][:, 0, :];
 
     # All done!
     return LatentStates;
