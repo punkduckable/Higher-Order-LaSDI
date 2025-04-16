@@ -57,7 +57,7 @@ Replacing k_i[d:] with the new letter l_i gives
     y_{n + 1}       = y_n  + h y'_n + h^2 \sum_{i = 1}^{s} l_i \bar{b_i}
     y'_{n + 1}      = y'_n + h \sum_{i = 1}^{s} b_i l_i
 
-    l_i             = f(t_n + c_n h,   y_n + h c_i y'_n + h^2 \sum_{j = 1}^{i - 1} l_j \bar{a_{i,j}},   y'_n + h \sum_{j = 1}^{i - 1} a_{i,j} l_j)
+    l_i             = f(t_n + c_i h,   y_n + h c_i y'_n + h^2 \sum_{j = 1}^{i - 1} l_j \bar{a_{i,j}},   y'_n + h \sum_{j = 1}^{i - 1} a_{i,j} l_j)
 
     \bar{b_i}       = \sum_{k = i + 1}^{s} b_k a_{k,i}
     \bar{a_{i,j}}   = \sum_{k = j + 1}^{i - 1} a_{i,k} a_{k,j}
@@ -116,23 +116,19 @@ def RK1(f       : callable,
 
     Two numpy.ndarray or torch.Tensor objects: D, V. 
     
-    D and V have shape N + 1 x D.shape. The i'th row of D, V represent the displacement and the 
-    velocity at time i*h, respectively. Thus, if we denote the returned arrays by D and V, 
-    respectively, then 
-        D[i, ...] = y_i   \approx y (i h) 
-        V[i, ...] = y'_i  \approx y'(i h) 
+    Let N = times.size and t0 = times[0]. D and V have shape N x y0.shape. The i'th row of D, V 
+    represent the displacement and the velocity at time i*h, respectively. Thus,
+        D[i, ...] = y_i   \approx y (t0 + i h) 
+        V[i, ...] = y'_i  \approx y'(t0 + i h) 
     """
 
     # First, run checks.
-    assert(len(times.shape) == 1);
-    assert(y0.shape         == Dy0.shape);
-
     assert(isinstance(y0,       numpy.ndarray)  or isinstance(y0,       torch.Tensor));
     assert(isinstance(Dy0,      numpy.ndarray)  or isinstance(Dy0,      torch.Tensor));
     assert(isinstance(times,    numpy.ndarray));
-
-    assert(type(y0) == type(Dy0));
-
+    assert(type(y0)         == type(Dy0));
+    assert(len(times.shape) == 1);
+    assert(y0.shape         == Dy0.shape);
 
     # Next, fetch N.
     N : int = times.size;
@@ -227,19 +223,19 @@ def RK2(f       : callable,
 
     Two numpy.ndarray objects: D, V. 
     
-    Let N denote the length of times. If y takes values in \mathbb{R}^d, then D and V have shape 
-    N x d. The i'th row of D, V represent the displacement and the velocity at times[i], 
-    respectively. Thus, if we denote the returned arrays by D and V, respectively, then 
-        D[i, :] = y_i   \approx y (times[i]) 
-        V[i, :] = y'_i  \approx y'(times[i]) 
+    Let N = times.size and t0 = times[0]. D and V have shape N x y0.shape. The i'th row of D, V 
+    represent the displacement and the velocity at time i*h, respectively. Thus,
+        D[i, ...] = y_i   \approx y (t0 + i h) 
+        V[i, ...] = y'_i  \approx y'(t0 + i h) 
     """
 
     # First, run checks.
     assert(isinstance(y0,       numpy.ndarray)  or isinstance(y0,       torch.Tensor));
     assert(isinstance(Dy0,      numpy.ndarray)  or isinstance(Dy0,      torch.Tensor));
     assert(isinstance(times,    numpy.ndarray));
-
-    assert(type(y0) == type(Dy0));
+    assert(type(y0)         == type(Dy0));
+    assert(len(times.shape) == 1);
+    assert(y0.shape         == Dy0.shape);
 
     # Next, fetch N.
     N : int = times.size;
@@ -265,7 +261,7 @@ def RK2(f       : callable,
 
         # Compute l_1, l_2.
         l_1 = f(tn,         yn,             Dyn);
-        l_2 = f(tn + hn/2,  yn + hn*Dyn ,   Dyn + (hn/2)*l_1);
+        l_2 = f(tn + hn,    yn + hn*Dyn ,   Dyn + hn*l_1);
 
         # Now compute y{n + 1} and Dy{n + 1}.
         yn1     : numpy.ndarray | torch.Tensor  = yn + hn*Dyn + (hn*hn/2)*l_1;
@@ -338,8 +334,8 @@ def RK4(f       : callable,
 
     Dy0: The initial velocity (Dy0 = y'(0)).
 
-    times: A 1d numpy.ndarray object whose i'th element holds the i'th time value. We assume the
-    elements of this array form an increasing sequence.
+    times: A 1d numpy.ndarray of shape (N) whose i'th element holds the i'th time value. We assume 
+    the elements of this array form an increasing sequence.
 
 
     
@@ -349,22 +345,19 @@ def RK4(f       : callable,
 
     Two numpy.ndarray objects: D, V.
     
-    D and V have shape N + 1 x D.shape. The i'th row of D, V represent the displacement and the 
-    velocity at time i*h, respectively. Thus, if we denote the returned arrays by D and V, 
-    respectively, then 
-        D[i, ...] = y_i   \approx y (i h) 
-        V[i, ...] = y'_i  \approx y'(i h) 
+    Let N = times.size and t0 = times[0]. D and V have shape N x y0.shape. The i'th row of D, V 
+    represent the displacement and the velocity at time i*h, respectively. Thus,
+        D[i, ...] = y_i   \approx y (t0 + i h) 
+        V[i, ...] = y'_i  \approx y'(t0 + i h) 
     """
 
     # First, run checks.
-    assert(len(times.shape) == 1);
-    assert(y0.shape         == Dy0.shape);
-
     assert(isinstance(y0,       numpy.ndarray)  or isinstance(y0,       torch.Tensor));
     assert(isinstance(Dy0,      numpy.ndarray)  or isinstance(Dy0,      torch.Tensor));
     assert(isinstance(times,    numpy.ndarray));
-
-    assert(type(y0) == type(Dy0));
+    assert(type(y0)         == type(Dy0));
+    assert(len(times.shape) == 1);
+    assert(y0.shape         == Dy0.shape);
 
     # Next, fetch N.
     N : int = times.size;
