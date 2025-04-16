@@ -15,7 +15,6 @@ import  torch;
 import  numpy;
 from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 
-from    GPLaSDI                     import  BayesianGLaSDI;
 from    GaussianProcess             import  eval_gp, sample_coefs;
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;

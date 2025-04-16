@@ -20,9 +20,9 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # Sampling functions
 # -------------------------------------------------------------------------------------------------
 
-def Pick_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Result]:
+def Update_Train_Space(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Result]:
     """
-    This function uses greedy sampling to pick a new parameter point.
+    This function uses greedy sampling to update the trainer's train_space.
 
     
 
@@ -47,14 +47,14 @@ def Pick_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Res
     that we were able to pick a new sample without running into any problems. 
     """
 
-    # First, figure out which samples we need to run simulations for. 
-    if(trainer.X_Train[0].shape[0] == 0):
-        # If this is the initial step then trainer.X_Train will be empty, meaning that we need to 
-        # run a simulation for every combination of parameters in the train_space. 
-        new_sample  : numpy.ndarray = trainer.param_space.train_space;
-    else:
-        # If this is not the initial step, then we need to use greedy sampling to pick the new 
-        # combination of parameter values.
+    # Figure out if we need a new sample.
+    #
+    # If this is the first step, trainer.X_Train will be empty, meaning that we need to run a
+    # simulation for every combination of parameters in the train_space.
+    # 
+    # By contrast, if this is not the initial step, we need to use greedy sampling to pick a new
+    # combination of parameter values, then append it to the train space.
+    if(len(trainer.X_Train) != 0):
         new_sample  : numpy.ndarray = trainer.get_new_sample_point();
         trainer.param_space.appendTrainSpace(new_sample);
 
@@ -106,17 +106,19 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     # Determine how many testing, training samples we need to add to X_Train/X_Test
 
     # Figure out how many training parameters we have not generated solution trajectories for. 
-    if(trainer.X_Train[0].shape[0] == 0):
-        new_trains      : int                   = trainer.param_space.n_train();
+    if(len(trainer.X_Train) == 0):
+        num_train_current   : int   = 0;
+        num_train_new       : int   = trainer.param_space.n_train();
     else:
-        new_trains      : int                   = trainer.param_space.n_train() - trainer.X_Train[0].size(0);
-    assert(new_trains > 0);
-    LOGGER.info("Adding %d new parameter combinations to the training set (currently has %d)" % (new_trains, trainer.X_Train[0].shape[0]));
+        num_train_current   : int   = trainer.X_Train[0].size(0);
+        num_train_new       : int   = trainer.param_space.n_train() - num_train_current;
+    assert(num_train_new > 0);
+    LOGGER.info("Adding %d new parameter combinations to the training set (currently has %d)" % (num_train_new, num_train_current));
 
     # Fetch the parameters. We assume that if the user has added new training parameter 
     # combinations, that they appended these new parameters onto the end of param_space's 
     # train_space attribute.
-    new_train_params    : numpy.ndarray         = trainer.param_space.train_space[-new_trains:, :];
+    new_train_params    : numpy.ndarray         = trainer.param_space.train_space[-num_train_new:, :];
     for i in range(new_train_params.shape[0]):
         LOGGER.debug("new training combination %d is %s" % (i, str(new_train_params[i])));
 
@@ -124,14 +126,16 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     # Now do the same thing for testing parameters. Once again we assume that if the user added new
     # testing parameters, that they appended those parameters to the END of param_space's 
     # test_space attribute. 
-    if(trainer.X_Test[0].shape[0] == 0):
-        new_tests       : int                   = trainer.param_space.n_test();
+    if(len(trainer.X_Test) == 0):
+        num_test_current    : int   = 0;
+        num_test_new        : int   = trainer.param_space.n_test();
     else:
-        new_tests       : int                   = trainer.param_space.n_test() - trainer.X_Test[0].size(0);
-    LOGGER.info("Adding %d new parameter combinations to the testing set (currently has %d)" % (new_tests, trainer.X_Test[0].size(0)));
+        num_test_current    : int   = trainer.X_Test[0].size(0);
+        num_test_new        : int   = trainer.param_space.n_test() - num_test_current;
+    LOGGER.info("Adding %d new parameter combinations to the testing set (currently has %d)" % (num_test_new, num_test_current));
 
-    if (new_tests > 0):
-        new_test_params : numpy.ndarray         = trainer.param_space.test_space[-new_tests:, :];
+    if (num_test_new > 0):
+        new_test_params : numpy.ndarray         = trainer.param_space.test_space[-num_test_new:, :];
         for i in range(new_test_params.shape[0]):
             LOGGER.debug("new training combination %d is %s" % (i, str(new_test_params[i])));
 
@@ -143,9 +147,9 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     # append them to trainer's X_Train variable.
     new_X_Train, new_t_Train    = trainer.physics.generate_solutions(new_train_params);
     
-    if(trainer.X_Train[0].shape[0] == 0):
-        trainer.X_Train         = new_X_Train;
-        trainer.t_Train_grid    = new_t_Train;
+    if(len(trainer.X_Train) == 0):
+        trainer.X_Train : list[list[torch.Tensor]]  = new_X_Train;
+        trainer.t_Train : list[torch.Tensor]        = new_t_Train;
     else:
         assert(len(new_X_Train) == len(trainer.X_Train));
         for i in range(len(new_X_Train)):
@@ -156,12 +160,12 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
 
     
     # Do the same thing for the testing points.
-    if (new_tests > 0):
+    if (num_test_new > 0):
         new_X_Test, new_t_Test  = trainer.physics.generate_solutions(new_test_params);
 
-        if(trainer.X_Test[0].shape[0] == 0):
-            trainer.X_Test = new_X_Test;
-            trainer.t_Test = new_t_Test;
+        if(len(trainer.X_Test) == 0):
+            trainer.X_Test  : list[list[torch.Tensor]]  = new_X_Test;
+            trainer.t_Test  : list[torch.Tensor]        = new_t_Test;
         else:
             assert(len(new_X_Test) == len(trainer.X_Test));
             for i in range(len(new_X_Test)):

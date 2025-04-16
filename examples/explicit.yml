@@ -49,7 +49,9 @@ model:
 
 latent_dynamics:
   type:                     spring
-  coef_norm_order:        fro
+  coef_norm_order:          fro
+  spring:
+  sindy:
 
 physics:
   type:                     explicit

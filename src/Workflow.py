@@ -26,7 +26,7 @@ from    Physics             import  Physics;
 from    LatentDynamics      import  LatentDynamics;
 from    GPLaSDI             import  BayesianGLaSDI;
 from    Initialize          import  Initialize_Trainer;
-from    Sample              import  Run_Samples, Pick_Samples;
+from    Sample              import  Run_Samples, Update_Train_Space;
 from    Logging             import  Initialize_Logger, Log_Dictionary;
 
 # Set up the logger.
@@ -206,7 +206,7 @@ def step(trainer        : BayesianGLaSDI,
 
 
     elif (next_step is NextStep.PickSample):
-        result, next_step = Pick_Samples(trainer, config);
+        result, next_step = Update_Train_Space(trainer, config);
 
 
 
