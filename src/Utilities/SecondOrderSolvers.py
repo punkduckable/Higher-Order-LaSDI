@@ -26,10 +26,10 @@ In other words, we reduce the 2nd order ODE in \mathbb{R}^d to a first order one
 
 
 We can now apply the Runge-Kutta method to this equation. A general explicit s-step Runge-Kutta 
-method generates a sequence of time steps, { y_n }_{n \in \mathbb{N}} \subseteq \mathbb{R}^d 
+method generates a sequence of time steps, { z_n }_{n \in \mathbb{N}} \subseteq \mathbb{R}^d 
 using the following rule:
     z_{n + 1}       = z_n + h \sum_{i = 1}^{s} b_i k_i 
-    k_i             = g(t_n + c_n h,   z_n + h \sum_{j = 1}^{i - 1} a_{i,j} k_j)
+    k_i             = g(t_n + c_i h,   z_n + h \sum_{j = 1}^{i - 1} a_{i,j} k_j)
 Substituting in the definition of z and g gives
     y_{n + 1}       = y_n  + h \sum_{i = 1}^{s} b_i k_i[:d]                      
     y'_{n + 1}      = y'_n + h \sum_{i = 1}^{s} b_i k_i[d:]
@@ -81,8 +81,7 @@ def RK1(f       : callable,
         y''(t)          = f(t,   y(t),   y'(t)).
     Here, y takes values in \mathbb{R}^d. 
   
-    In this function, we implement the Forward Euler (RK1) scheme:
-     with the following coefficients:
+    In this function, we implement the Forward Euler (RK1) scheme with the following coefficients:
         c_1 = 0
         b_1 = 1
         
