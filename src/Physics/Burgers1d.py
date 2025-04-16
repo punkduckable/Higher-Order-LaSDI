@@ -104,7 +104,7 @@ class Burgers1D(Physics):
         assert(self.dx > 0.);
 
         # Set up X_Positions, which holds the spatial coordinate of each node (grid point).
-        self.X_Positions : numpy.ndarray = numpy.linspace(self.x_min, self.x_max, self.n_x, dtype = numpy.float32);
+        self.X_Positions : numpy.ndarray = numpy.linspace(self.x_min, self.x_max, self.n_x, dtype = numpy.float32).reshape(-1, 1);
 
         # ???
         self.maxk                   : int   = config['burgers1d']['maxk'];                  # TODO: ??? What is this ???
@@ -154,7 +154,7 @@ class Burgers1D(Physics):
         w   : float     = param[self.w_idx];  
 
         # Get the initial displacement.
-        u0  : numpy.ndarray     = a * numpy.exp(- self.x_grid ** 2 / 2 / w / w);
+        u0  : numpy.ndarray     = a * numpy.exp( -((self.X_Positions.reshape(-1)) ** 2) / 2 / w / w);
 
         # return [u0];
 
@@ -209,8 +209,8 @@ class Burgers1D(Physics):
         
         A two element tuple: X, t_Grid.
 
-        X is an 1 element list holding the displacement and velocity of the FOM solution when we 
-        use param. Each element is a 3d torch.Tensor object of shape (1, n_t, self.Frame_Shape),
+        X is a 2 element list holding the displacement and velocity of the FOM solution when we 
+        use param. Each element is a 3d torch.Tensor object of shape (1, n_t, self.Frame_Shape), 
         where n_t is the number of time steps when we solve the FOM using param for the IC 
         parameters.
 
@@ -259,7 +259,7 @@ class Burgers1D(Physics):
         #"""
 
         # All done!
-        return [new_X], t_Grid;
+        return new_X, t_Grid;
     
 
     

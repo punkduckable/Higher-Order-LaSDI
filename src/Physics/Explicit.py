@@ -122,8 +122,9 @@ class Explicit(Physics):
         w   : float             = param[self.w_idx];  
 
         # Compute the initial condition and return!
-        u0  : numpy.ndarray     = numpy.multiply(numpy.sin(2*self.x_grid), numpy.exp(-a*numpy.multiply(self.x_grid, self.x_grid)));
-        v0  : numpy.ndarray     = numpy.multiply(-1*numpy.cos(2*self.x_grid) + 0.1*w*numpy.cos(40*self.x_grid), numpy.exp(-a*numpy.multiply(self.x_grid, self.x_grid)));
+        X   : numpy.ndarray     = self.X_Positions.reshape(-1);
+        u0  : numpy.ndarray     = numpy.multiply(numpy.sin(2*X), numpy.exp(-a*numpy.multiply(X, X)));
+        v0  : numpy.ndarray     = numpy.multiply(-1*numpy.cos(2*X) + 0.1*w*numpy.cos(40*X), numpy.exp(-a*numpy.multiply(X, X)));
         return [u0, v0];
     
 
@@ -149,9 +150,10 @@ class Explicit(Physics):
         
         A two element tuple: X, t_Grid.
 
-        X is a 2 element list holding the displacement and velocity of the FOM solution when we use
-        param. Each element is a 3d torch.Tensor object of shape (1, n_t, self.Frame_Shape), where 
-        n_t is the number of time steps when we solve the FOM using param for the IC parameters.
+        X is a 2 element list holding the displacement and velocity of the FOM solution when we 
+        use param. Each element is a 3d torch.Tensor object of shape (1, n_t, self.Frame_Shape), 
+        where n_t is the number of time steps when we solve the FOM using param for the IC 
+        parameters.
 
         t_Grid is a 1d torch.Tensor object whose i'th element holds the i'th time value at which
         we have an approximation to the FOM solution (the time value associated with X[0, i, ...]).
@@ -167,7 +169,7 @@ class Explicit(Physics):
         t_Grid  : numpy.ndarray = numpy.linspace(0, t_max, n_t, dtype = numpy.float32);
 
         # Make the t, x meshgrids.
-        t_mesh, x_mesh          = numpy.meshgrid(t_Grid, self.x_grid, indexing = 'ij');
+        t_mesh, x_mesh          = numpy.meshgrid(t_Grid, self.X_Positions.reshape(-1), indexing = 'ij');
         t_mesh                  = torch.tensor(t_mesh);
         x_mesh                  = torch.tensor(x_mesh);
 

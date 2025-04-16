@@ -141,9 +141,10 @@ class Physics:
 
         A two element tuple: X, t_Grid.
          
-        X is a n_IC element list holding the displacement and velocity of the FOM solution when we use
-        param. Each element is a 3d torch.Tensor object of shape (1, n_t, self.Frame_Shape), where 
-        n_t is the number of time steps when we solve the FOM using param for the IC parameters.
+        X is an n_IC element list whose i'th element holds the i'th derivative of the FOM solution 
+        when we use param to define the initial condition function. Each element is a torch.Tensor
+        object of shape (1, n_t, self.Frame_Shape), where n_t is the number of time steps when we 
+        solve the FOM using param for the IC parameters.
 
         t_Grid is a 1d torch.Tensor object whose i'th element holds the i'th time value at which
         we have an approximation to the FOM solution (the time value associated with X[0, i, ...]).
