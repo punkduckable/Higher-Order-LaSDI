@@ -6,8 +6,10 @@ import  sys;
 import  os;
 Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
 LD_Path         : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
+Utilities_Path  : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
 sys.path.append(Physics_Path);
 sys.path.append(LD_Path);
+sys.path.append(Utilities_Path);
 
 import  torch;
 import  numpy;
@@ -25,8 +27,7 @@ from    Model                       import  Autoencoder, Autoencoder_Pair;
 # Simulate latent dynamics
 # -------------------------------------------------------------------------------------------------
 
-def average_rom(trainer         : BayesianGLaSDI,
-                model           : torch.nn.Module, 
+def average_rom(model           : torch.nn.Module, 
                 physics         : Physics, 
                 latent_dynamics : LatentDynamics, 
                 gp_list         : list[GaussianProcessRegressor], 
@@ -44,8 +45,6 @@ def average_rom(trainer         : BayesianGLaSDI,
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    trainer: A BayesianGLaSDI object that we use to train the model. 
-
     model: The actual model object that we use to map the ICs into the latent space.
 
     physics: A "Physics" object that stores the datasets for each parameter combination. 
@@ -53,9 +52,9 @@ def average_rom(trainer         : BayesianGLaSDI,
     latent_dynamics: A LatentDynamics object which describes how we specify the dynamics in the
     model's latent space.    
 
-    gp_list: a list of trained GP regressor objects. The number of elements in this list should 
-    match the number of columns in param_grid. The i'th element of this list is a GP regressor 
-    object that predicts the i'th coefficient. 
+    gp_list: An n_p element list of trained GP regressor objects. The number of elements in this 
+    list should match the number of columns in param_grid. The i'th element of this list is a GP 
+    regressor object that predicts the i'th coefficient. 
 
     param_grid: A 2d numpy.ndarray object of shape (n_param, n_p), where n_p is the number of 
     parameters and n_param is the number of combinations of parameter values. The i,j element of 
@@ -96,10 +95,13 @@ def average_rom(trainer         : BayesianGLaSDI,
 
     # Make each element of t_Grid into a numpy.ndarray of shape (1, n_t(i)). This is what 
     # simulate expects.
+    t_Grid_np : list[numpy.ndarray] = [];
     for i in range(n_param):
         if(isinstance(t_Grid[i], torch.Tensor)):
-            t_Grid[i] = t_Grid[i].detach().numpy();
-        t_Grid[i] = t_Grid[i].reshape(1, -1);
+            t_Grid_np.append(t_Grid[i].detach().numpy());
+        else:
+            t_Grid_np.append(t_Grid[i]);
+        t_Grid_np[i] = t_Grid_np[i].reshape(1, -1);
 
     # Simulate the laten dynamics! For each testing parameter, use the mean value of each posterior 
     # distribution to define the coefficients. 
@@ -123,18 +125,11 @@ def sample_roms(model           : torch.nn.Module,
                 latent_dynamics : LatentDynamics, 
                 gp_list         : list[GaussianProcessRegressor], 
                 param_grid      : numpy.ndarray, 
-                n_samples       : int) ->           list[numpy.ndarray]:
+                t_Grid          : list[numpy.ndarray] | list[torch.Tensor],
+                n_samples       : int) ->           list[list[numpy.ndarray]]:
     """
     This function samples the latent coefficients, solves the corresponding latent dynamics, and 
     then returns the resulting latent solutions. 
-    
-    Specifically, for each combination of parameter values in the param_grid, we draw n_samples 
-    samples of the latent coefficients (from the coefficient posterior distributions evaluated at 
-    that parameter value). This gives us a set of n_samples latent dynamics coefficients. For each 
-    set of coefficients, we solve the corresponding latent dynamics forward in time and store the 
-    resulting solution frames. We do this for each sample and each combination of parameter values,
-    resulting in an (n_param, n_sample, n_t, n_z) array of solution frames, which is what we 
-    return. Here, n_param is the number of combinations of parameter values.
 
     
     -----------------------------------------------------------------------------------------------
@@ -149,42 +144,50 @@ def sample_roms(model           : torch.nn.Module,
     latent_dynamics: A LatentDynamics object which describes how we specify the dynamics in the
     model's latent space. We use this to simulate the latent dynamics forward in time.
 
-    gp_list: a list of trained GP regressor objects. The number of elements in this list should 
-    match the number of columns in param_grid. The i'th element of this list is a GP regressor 
-    object that predicts the i'th coefficient. 
+    gp_list: An n_coefs element list of trained GP regressor objects. The number of elements in 
+    this list should match the number of columns in param_grid. The i'th element of this list is 
+    a GP regressor object that predicts the i'th coefficient. 
 
-    param_grid: A 2d numpy.ndarray object of shape (number of parameter combination, number of 
-    parameters). The i,j element of this array holds the value of the j'th parameter in the i'th 
-    combination of parameters. 
+    param_grid: A 2d numpy.ndarray object of shape (n_param, n_p), where n_p is the number of 
+    parameters and n_param is the number of combinations of parameter values. The i,j element of 
+    this array holds the value of the j'th parameter in the i'th combination of parameter values. 
 
     n_samples: The number of samples we want to draw from each posterior distribution for each 
     coefficient evaluated at each combination of parameter values.
-    
+
+    t_Grid: A n_param element list whose i'th entry is an numpy.ndarray or torch.Tensor object 
+    of shape (n_t(i)) or (1, n_t(i)) whose k'th specifies the k'th time value we want to find 
+    the latent states when we use the j'th initial conditions and the i'th set of coefficients.    
 
     
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
     
-    A list of numpy.ndarrays, each of size [n_test, n_samples, physics.n_t, model.n_z]. If the 
-    latent dynamics require n_ID initial conditions (latent_dynamics.n_ID = n_ID), then the 
-    returned list has n_ID elements, the d'th one of which is a 4d array whose i, j, k, l element 
-    holds the l'th component of the k'th frame of the solution to the d'th derivative of latent 
-    dynamics when we use the j'th sample of latent coefficients drawn from the posterior 
-    distribution for the i'th combination of parameter values (i'th row of param_grid).
+    An n_param element list whose i'th element is an n_IC element list whose j'th element is a 
+    3d numpy ndarray of shape (n_samples(i), n_t(i), n_z) whose p, q, r element holds the r'th 
+    component of the j'th derivative of the p,i latent solution at t_Grid[i][q]. The p,i latent 
+    solution is the solution the latent dynamics when the coefficients are the p'th sample of the
+    posterior distribution for the i'th combination of parameter values (which are stored in 
+    param_grid[i, :]).
     """
-
-    # The param grid needs to be two dimensional, with the first axis corresponding to which 
-    # instance of the parameter values we are using. If there is only one parameter, it may be 1d. 
-    # We can fix that by adding on an axis with size 1. 
-    if (param_grid.ndim == 1):
-        param_grid = param_grid.reshape(1, -1);
     
-    # Now fetch the number of combinations of parameter values (rows of param_grid).
-    n_param : int = param_grid.shape[0];
+    # Checks
+    assert(isinstance(gp_list, list));
+    assert(isinstance(t_Grid, list));
 
-    # For each parameter in param_grid, fetch the corresponding initial condition and then encode
-    # it. This gives us a list whose i'th element holds the encoding of the i'th initial condition.
+    assert(isinstance(param_grid, numpy.ndarray));
+    assert(len(param_grid.shape)    == 2);
+    assert(param_grid.shape[0]      == len(t_Grid));
+
+    # Setup 
+    n_coefs     : int = len(gp_list);
+    n_param     : int = len(t_Grid);
+    n_IC        : int = latent_dynamics.n_IC;
+
+    # For each combination of parameter values in param_grid, fetch the corresponding initial 
+    # condition and then encode it. This gives us a list whose i'th element holds the encoding 
+    # of the i'th initial condition.
     Z0      : list[list[numpy.ndarray]] = model.latent_initial_conditions(param_grid, physics);
 
     # Now, for each combination of parameters, draw n_samples samples from the posterior
@@ -192,45 +195,58 @@ def sample_roms(model           : torch.nn.Module,
     # in a list of numpy arrays. The k'th list element is a (n_sample, n_coef) array whose i, j 
     # element stores the i'th sample from the posterior distribution for the j'th coefficient at 
     # the k'th combination of parameter values.
-    coef_samples : list[numpy.ndarray]  = [sample_coefs(gp_list, param_grid[i], n_samples) for i in range(n_param)];
+    coef_samples : list[numpy.ndarray]  = [sample_coefs(gp_list = gp_list, Input = param_grid[i:(i + 1), :], n_samples = n_samples) for i in range(n_param)];
 
-    # Initialize a list to hold the solutions to the latent dynamics. This is a list of 4d numpy 
-    # arrays of shape (n_parm, n_samples, n_t, n_z). The i, j, k, l element of the d'th array holds
-    # the holds the l'th component of the  k'th frame of the d'th derivative of the solution to 
-    # the latent dynamics when we use the j'th sample of latent coefficients drawn from the 
-    # posterior distribution for the i'th combination of parameter values.
-    n_IC    : int                   = latent_dynamics.n_IC;
-    Zis     : list[numpy.ndarray]   = [];
-    for i in range(n_IC):
-        Zis.append(numpy.zeros([n_param, n_samples, physics.n_t, model.n_z]));
-
-    # For each testing parameter, cycle through the samples of the coefficients for that 
-    # combination of parameter values. For each set of coefficients, solve the corresponding latent 
-    # dynamics forward in time and store the resulting frames in Zis.
-    n_t : int = physics.n_t;
-    n_z : int = latent_dynamics.n_z; 
+    # Simulate each set of dynamics forward in time. For each combination of parameter values,
+    # we cycle through the coefficient samples. For each set of coefficients, we simulate the 
+    # latent dynamics using those coefficients and using the IC for this combination of parameter
+    # values. This results in an n_IC element list of arrays of shape (n_t(i), n_z). We store 
+    # each sample in a collection of n_IC 3d arrays, each of shape (n_samples, n_t(i), n_z). We do 
+    # this for each combination of parameter values.
+    LatentStates : list[list[numpy.ndarray]] = [];
     for i in range(n_param):
+        # The latent states for the i'th combination of parameter values should have shape 
+        # (n_samples, n_t(i), n_z).
+        if(isinstance(t_Grid[i], torch.Tensor)):
+            t_Grid_i    : numpy.ndarray = t_Grid[i].detach().numpy().reshape(-1, 1);
+        else:
+            t_Grid_i    : numpy.ndarray = t_Grid[i].reshape(-1, 1);
+        n_t_i : int =  t_Grid.shape[1];
+       
+
         # Fetch the initial conditions when we use the i'th combination of parameter values.
         # Reshape each element of the IC to have shape (1, n_z), which is what simulate expects
         ith_ICs                 : list[numpy.ndarray]   = Z0[i];
         for d in range(n_IC):
             ith_ICs[d] = ith_ICs[d].reshape(1, -1);
-        coef_samples_ith_param  : numpy.ndarray         = coef_samples[i];
 
+
+        # Set up a list to hold the results from the i'th combination of parameter values.
+        LatentStates_i : list[numpy.ndarray] = [];
+        for j in range(n_IC):
+            LatentStates_i.append(numpy.empty((n_samples, n_t_i, n_z), dtype = numpy.float32));
+        
+        coef_samples_ith_param  : numpy.ndarray = coef_samples[i];      # shape (n_samples, n_coef).
+
+
+        # Cycle through the samples.
         for j in range(n_samples):
             # Fetch the j'th sample of the coefficients when we use the i'th combination of 
             # parameter values.
-            jth_coef_sample_ith_param   : numpy.ndarray = coef_samples_ith_param[j, :];
+            jth_coef_sample_ith_param   : numpy.ndarray = coef_samples_ith_param[j:(j + 1), :];     # shape (1, n_coef)
         
             # Generate the latent trajectory when we use this set of coefficients.
-            Zij : list[numpy.ndarray] = latent_dynamics.simulate(coefs = jth_coef_sample_ith_param, IC = ith_ICs, times = physics.t_grid);
+            LatentStates_ij : list[numpy.ndarray] = latent_dynamics.simulate(coefs = jth_coef_sample_ith_param, IC = [ith_ICs], t_Grid = [t_Grid_i])[0];
         
-            # Now store the results in Zis. 
+            # Now store the results in LatentStates_i
             for d in range(n_IC):
-                Zis[d][i, j, :, :]  = Zij[d].reshape(n_t, n_z);
+                LatentStates_i[d][j, :, :] = LatentStates_ij[d].reshape(n_t_i, n_z);  
+
+        # Append LatentStates_i to the list.
+        LatentStates.append(LatentStates_i);  
 
     # All done!
-    return Zis;
+    return LatentStates;
 
 
 
