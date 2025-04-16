@@ -81,7 +81,7 @@ class BayesianGLaSDI:
     # derivative of the FOM solution when we use the i'th combination of parameter values. 
     X_Train : list[list[torch.Tensor]]  = [];  
 
-    # An n_Train element list whose i'th element is a torch.Tensor of shape (n_t_i) whose (0, j)
+    # An n_Train element list whose i'th element is a torch.Tensor of shape (n_t_i) whose j'th
     # element holds the time value for the j'th frame when we use the i'th combination of parameter 
     # values.
     t_Train : list[torch.Tensor]        = []; 
@@ -89,7 +89,7 @@ class BayesianGLaSDI:
     # Same as X_Test, but used for the test set.
     X_Test  : list[list[torch.Tensor]]  = [];  
 
-    # An n_Test element list whose i'th element is a torch.Tensor of shape (n_t_i) whose (0, j)
+    # An n_Test element list whose i'th element is a torch.Tensor of shape (n_t_i) whose j'th
     # element holds the time value for the j'th frame when we use the i'th combination of parameter 
     # values.
     t_Test  : list[torch.Tensor]        = [];

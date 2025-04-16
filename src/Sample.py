@@ -142,6 +142,7 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     # Generate the fom solutions for the new training points. After we have generated them, we
     # append them to trainer's X_Train variable.
     new_X_Train, new_t_Train    = trainer.physics.generate_solutions(new_train_params);
+    
     if(trainer.X_Train[0].shape[0] == 0):
         trainer.X_Train         = new_X_Train;
         trainer.t_Train_grid    = new_t_Train;

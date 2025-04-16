@@ -119,7 +119,7 @@ class Physics:
     
 
 
-    def solve(self, param : numpy.ndarray) -> tuple[list[torch.Tensor], numpy.ndarray]:
+    def solve(self, param : numpy.ndarray) -> tuple[list[torch.Tensor], torch.Tensor]:
         """
         The user should write an instance of this method for their specific Physics sub-class.
         This function should solve the underlying equation when the IC uses the parameters in 
@@ -130,7 +130,9 @@ class Physics:
         Arguments
         -------------------------------------------------------------------------------------------
 
-        param: A numpy.ndarray object holding the values of the initial condition parameters.
+        param: A numpy.ndarray object of shape (n_p), where n_p is the number of parameters in 
+        self's initial condition function. It holds the value of one combination of parameters 
+        for the initial condition.
 
                 
         -------------------------------------------------------------------------------------------
@@ -139,11 +141,11 @@ class Physics:
 
         A two element tuple: X, t_Grid.
          
-        X is a 2 element list holding the displacement and velocity of the FOM solution when we use
+        X is a n_IC element list holding the displacement and velocity of the FOM solution when we use
         param. Each element is a 3d torch.Tensor object of shape (1, n_t, self.Frame_Shape), where 
         n_t is the number of time steps when we solve the FOM using param for the IC parameters.
 
-        t_Grid is a 1d numpy.ndarray object whose i'th element holds the i'th time value at which
+        t_Grid is a 1d torch.Tensor object whose i'th element holds the i'th time value at which
         we have an approximation to the FOM solution (the time value associated with X[0, i, ...]).
         """
 
@@ -163,7 +165,7 @@ class Physics:
     
 
 
-    def generate_solutions(self, params : numpy.ndarray) -> tuple[list[list[torch.Tensor]], list[numpy.ndarray]]:
+    def generate_solutions(self, params : numpy.ndarray) -> tuple[list[list[torch.Tensor]], list[torch.Tensor]]:
         """
         Given 2d-array of params, generate solutions of size params.shape[0]. params.shape[1] must 
         match the required size of parameters for the specific physics.
@@ -191,7 +193,7 @@ class Physics:
         in param, n_t(i) is the number of time steps we used to generate the solution with the 
         i'th combination of parameter values (the length of the i'th element of t_Grid).
 
-        t_Grid is a list whose i'th element is a 1d numpy array housing the time steps from the 
+        t_Grid is a list whose i'th element is a 1d torch.Tensor housing the time steps from the 
         solution to the underlying equation when we use the i'th combination of parameter values.
         """
 
@@ -204,7 +206,7 @@ class Physics:
 
         # Cycle through the parameters.
         X       : list[list[torch.Tensor]]  = [];
-        t_Grid  : list[numpy.ndarray]       = [];
+        t_Grid  : list[torch.Tensor]       = [];
         for j in range(n_params):
             param   = params[j, :];
 

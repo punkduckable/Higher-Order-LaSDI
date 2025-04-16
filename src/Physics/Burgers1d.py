@@ -189,7 +189,7 @@ class Burgers1D(Physics):
         #"""
 
 
-    def solve(self, param : numpy.ndarray) -> tuple[list[torch.Tensor], numpy.ndarray]:
+    def solve(self, param : numpy.ndarray) -> tuple[list[torch.Tensor], torch.Tensor]:
         """
         Solves the 1d burgers equation when the IC uses the parameters in the param array.
 
@@ -209,24 +209,23 @@ class Burgers1D(Physics):
         
         A two element tuple: X, t_Grid.
 
-        X is an n_param element list whose i'th element is an n_IC element list whose j'th element
-        is a torch.Tensor object of shape (n_t(i), n_x[0], ... , n_x[ns- 1]) holding the j'th 
-        derivative of the FOM solution for the i'th combination of parameter values. Here, n_IC is 
-        the number of initial conditions needed to specify the IC, n_param is the number of rows 
-        in param, n_t(i) is the number of time steps we used to generate the solution with the 
-        i'th combination of parameter values (the length of the i'th element of t_Grid).
+        X is an 1 element list holding the displacement and velocity of the FOM solution when we 
+        use param. Each element is a 3d torch.Tensor object of shape (1, n_t, self.Frame_Shape),
+        where n_t is the number of time steps when we solve the FOM using param for the IC 
+        parameters.
 
-        t_Grid is a list whose i'th element is a 1d numpy array housing the time steps from the 
-        solution to the underlying equation when we use the i'th combination of parameter values.
+        t_Grid is a 1d torch.Tensor object whose i'th element holds the i'th time value at which
+        we have an approximation to the FOM solution (the time value associated with X[0, i, ...]).
         """
         
         # Fetch the initial condition.
         u0 : numpy.ndarray = self.initial_condition(param)[0];
         
-        # Compute dt. 
+        # Compute dt. Set up the t_Grid.
         n_t     : int           = self.config['burgers1d']['n_t'];
         t_max   : float         = self.config['burgers1d']['t_max']; 
         dt      : float         = t_max/(n_t - 1);
+        t_Grid  : torch.Tensor  = torch.linspace(0, t_max, n_t, dtype = torch.float32);
 
         """
         # Solve the PDE and then reshape the result to be a 3d tensor with a leading dimension of 
@@ -260,7 +259,7 @@ class Burgers1D(Physics):
         #"""
 
         # All done!
-        return new_X;
+        return [new_X], t_Grid;
     
 
     

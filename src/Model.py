@@ -758,7 +758,7 @@ class Autoencoder_Pair(torch.nn.Module):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        param_grid: A 2d numpy.ndarray object of shape (n_param, np), where n_p is the number of 
+        param_grid: A 2d numpy.ndarray object of shape (n_param, n_p), where n_p is the number of 
         parameters and n_param is the number of combinations of paramter values. The i,j element of 
         this array holds the value of the j'th parameter in the i'th combination of parameter 
         values.

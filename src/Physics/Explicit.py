@@ -128,7 +128,7 @@ class Explicit(Physics):
     
 
 
-    def solve(self, param : numpy.ndarray) -> tuple[list[torch.Tensor], numpy.ndarray]:
+    def solve(self, param : numpy.ndarray) -> tuple[list[torch.Tensor], torch.Tensor]:
         """
         Evaluates the function u(t, x) (see __init__ docstring) on the t, x grids using the 
         parameters in param.
@@ -149,15 +149,12 @@ class Explicit(Physics):
         
         A two element tuple: X, t_Grid.
 
-        X is an n_param element list whose i'th element is an n_IC element list whose j'th element
-        is a torch.Tensor object of shape (n_t(i), n_x[0], ... , n_x[ns- 1]) holding the j'th 
-        derivative of the FOM solution for the i'th combination of parameter values. Here, n_IC is 
-        the number of initial conditions needed to specify the IC, n_param is the number of rows 
-        in param, n_t(i) is the number of time steps we used to generate the solution with the 
-        i'th combination of parameter values (the length of the i'th element of t_Grid).
+        X is a 2 element list holding the displacement and velocity of the FOM solution when we use
+        param. Each element is a 3d torch.Tensor object of shape (1, n_t, self.Frame_Shape), where 
+        n_t is the number of time steps when we solve the FOM using param for the IC parameters.
 
-        t_Grid is a list whose i'th element is a 1d numpy array housing the time steps from the 
-        solution to the underlying equation when we use the i'th combination of parameter values.
+        t_Grid is a 1d torch.Tensor object whose i'th element holds the i'th time value at which
+        we have an approximation to the FOM solution (the time value associated with X[0, i, ...]).
         """
        
         # Fetch the parameter values.
@@ -193,7 +190,7 @@ class Explicit(Physics):
         V = V.reshape((1,) + V.shape);
 
         # All done!
-        return [U, V], t_Grid;
+        return [U, V], torch.Tensor(t_Grid);
         
 
     
