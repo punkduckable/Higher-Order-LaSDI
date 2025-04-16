@@ -210,12 +210,11 @@ class Burgers1D(Physics):
         A two element tuple: X, t_Grid.
 
         X is a 2 element list holding the displacement and velocity of the FOM solution when we 
-        use param. Each element is a 3d torch.Tensor object of shape (1, n_t, self.Frame_Shape), 
-        where n_t is the number of time steps when we solve the FOM using param for the IC 
-        parameters.
+        use param. Each element is a torch.Tensor object of shape (n_t, self.Frame_Shape), where 
+        n_t is the number of time steps when we solve the FOM using param for the IC parameters.
 
         t_Grid is a 1d torch.Tensor object whose i'th element holds the i'th time value at which
-        we have an approximation to the FOM solution (the time value associated with X[0, i, ...]).
+        we have an approximation to the FOM solution (the time value associated with X[i, ...]).
         """
         
         # Fetch the initial condition.
@@ -246,8 +245,8 @@ class Burgers1D(Physics):
         X       : torch.Tensor  = torch.Tensor(solver(u0, self.maxk, self.convergence_threshold, n_t - 1, self.n_x, dt, self.dx));
         V       : torch.Tensor  = Derivative1_Order4(X, h = dt);
         
-        X       : torch.Tensor  = X.reshape(1, n_t, self.n_x);
-        V       : torch.Tensor  = V.reshape(1, n_t, self.n_x);
+        X       : torch.Tensor  = X.reshape(n_t, self.n_x);
+        V       : torch.Tensor  = V.reshape(n_t, self.n_x);
 
         new_X   : list[torch.Tensor]    = [X, V];
 

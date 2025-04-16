@@ -54,8 +54,9 @@ def RK1(f       : callable,
     domain and co-domain are \mathbb{R} x \mathbb{R}^d and \mathbb{R}^d, respectively. Thus, we 
     assume that f(t, y(t)) = y'(t). 
 
-    y0: The initial position (y0 = y(t0)), where t0 = times[0].
-
+    y0: A 1d numpy.ndarray or torch.Tensor of shape (d) holding the initial position (y0 = y(t0)), 
+    where t0 = times[0].
+    
     times: A 1d numpy.ndarray object whose i'th element holds the i'th time value. We assume the 
     elements of this array form an increasing sequence.
 
@@ -139,7 +140,8 @@ def RK2(f       : callable,
     domain and co-domain are \mathbb{R} x \mathbb{R}^d and \mathbb{R}^d, respectively. Thus, we 
     assume that f(t, y(t)) = y'(t). 
 
-    y0: The initial position (y0 = y(t0)), where t0 = times[0].
+    y0: A 1d numpy.ndarray or torch.Tensor of shape (d) holding the initial position (y0 = y(t0)), 
+    where t0 = times[0].
 
     times: A 1d numpy.ndarray object whose i'th element holds the i'th time value. We assume the 
     elements of this array form an increasing sequence.
@@ -234,7 +236,8 @@ def RK4(f       : callable,
     domain and co-domain are \mathbb{R} x \mathbb{R}^d and \mathbb{R}^d, respectively. Thus, we 
     assume that f(t, y(t)) = y'(t). 
 
-    y0: The initial position (y0 = y(t0)), where t0 = times[0].
+    y0: A 1d numpy.ndarray or torch.Tensor of shape (d) holding the initial position (y0 = y(t0)), 
+    where t0 = times[0].
 
     times: A 1d numpy.ndarray object whose i'th element holds the i'th time value. We assume the 
     elements of this array form an increasing sequence.

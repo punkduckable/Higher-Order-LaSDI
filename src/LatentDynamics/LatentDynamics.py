@@ -131,7 +131,7 @@ class LatentDynamics:
     def simulate(   self,
                     coefs   : numpy.ndarray         | torch.Tensor, 
                     IC      : list[numpy.ndarray]   | list[torch.Tensor],
-                    t_Grid  : list[torch.Tensor]    | list[numpy.ndarray]) -> list[list[numpy.ndarray]]  | list[list[torch.Tensor]]:
+                    t_Grid  : list[numpy.ndarray]   | list[torch.Tensor]) -> list[list[numpy.ndarray]]  | list[list[torch.Tensor]]:
         """
         Time integrates the latent dynamics from multiple initial conditions for each combination
         of coefficients in coefs. 
@@ -154,10 +154,10 @@ class LatentDynamics:
         should hold the k'th initial condition for the j'th derivative of the latent state when
         we use the i'th combination of parameter values. 
 
-        t_Grid: A n_param element list whose i'th entry is a 2d numpy ndarray object of shape 
-        (n(i), n_t(i)) whose j, k entry specifies the k'th time value we want to find the latent 
-        states when we use the j'th initial conditions and the i'th set of coefficients. Each 
-        row of each array should have elements in ascending order. 
+        t_Grid: A n_param element list whose i'th entry is a 2d numpy.ndarray or torch.Tensor 
+        object of shape (n(i), n_t(i)) whose j, k entry specifies the k'th time value we want to 
+        find the latent states when we use the j'th initial conditions and the i'th set of 
+        coefficients. Each row of each array should have elements in ascending order. 
 
         
 

@@ -151,12 +151,10 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
         trainer.X_Train : list[list[torch.Tensor]]  = new_X_Train;
         trainer.t_Train : list[torch.Tensor]        = new_t_Train;
     else:
-        assert(len(new_X_Train) == len(trainer.X_Train));
-        for i in range(len(new_X_Train)):
-            trainer.X_Train.append(new_X_Train[i]);
-            trainer.t_Train.append(new_t_Train[i]);
+        trainer.X_Train : list[list[torch.Tensor]]  = trainer.X_Train + new_X_Train;
+        trainer.t_Train : list[torch.Tensor]        = trainer.t_Train + new_t_Train;
 
-    assert(len(trainer.X_Train[0]) == trainer.param_space.n_train());
+    assert(len(trainer.X_Train) == trainer.param_space.n_train());
 
     
     # Do the same thing for the testing points.
@@ -167,12 +165,10 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
             trainer.X_Test  : list[list[torch.Tensor]]  = new_X_Test;
             trainer.t_Test  : list[torch.Tensor]        = new_t_Test;
         else:
-            assert(len(new_X_Test) == len(trainer.X_Test));
-            for i in range(len(new_X_Test)):
-                trainer.X_Test[i].append(new_X_Test[i]);
-                trainer.t_Test.append(new_t_Test[i]);
+            trainer.X_Test : list[list[torch.Tensor]]   = trainer.X_Test + new_X_Test;
+            trainer.t_Test : list[torch.Tensor]         = trainer.t_Test + new_t_Test;
             
-        assert(len(trainer.X_Test[0]) == trainer.param_space.n_test());
+        assert(len(trainer.X_Test) == trainer.param_space.n_test());
 
 
     # ---------------------------------------------------------------------------------------------

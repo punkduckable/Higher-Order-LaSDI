@@ -14,10 +14,10 @@ import  logging;
 
 import  numpy;
 import  torch;
-from    scipy.integrate     import  odeint;
 
 from    LatentDynamics      import  LatentDynamics;
 from    FiniteDifference    import  Derivative1_Order4, Derivative1_Order2_NonUniform;
+from    FirstOrderSolvers   import  RK4;
 
 # Setup logger.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
@@ -220,7 +220,7 @@ class SINDy(LatentDynamics):
     def simulate(   self,
                     coefs   : numpy.ndarray             | torch.Tensor, 
                     IC      : list[list[numpy.ndarray]] | list[list[torch.Tensor]],
-                    t_Grid  : list[numpy.ndarray]) -> list[list[numpy.ndarray]]  | list[list[torch.Tensor]]:
+                    t_Grid  : list[numpy.ndarray]       | list[torch.Tensor]) -> list[list[numpy.ndarray]]  | list[list[torch.Tensor]]:
         """
         Time integrates the latent dynamics from multiple initial conditions for each combination
         of coefficients in coefs. 
@@ -242,10 +242,10 @@ class SINDy(LatentDynamics):
         should hold the k'th initial condition for the j'th derivative of the latent state when
         we use the i'th combination of parameter values. 
 
-        t_Grid: A n_param element list whose i'th entry is a 2d numpy ndarray object of shape 
-        (n(i), n_t(i)) whose j, k entry specifies the k'th time value we want to find the latent 
-        states when we use the j'th initial conditions and the i'th set of coefficients. Each 
-        row of each array should have elements in ascending order. 
+        t_Grid: A n_param element list whose i'th entry is a 2d numpy.ndarray or torch.Tensor 
+        object of shape (n(i), n_t(i)) whose j, k entry specifies the k'th time value we want to 
+        find the latent states when we use the j'th initial conditions and the i'th set of 
+        coefficients. Each row of each array should have elements in ascending order. 
 
 
         -------------------------------------------------------------------------------------------
@@ -272,7 +272,7 @@ class SINDy(LatentDynamics):
         assert(n_IC == 1);
         for i in range(n_param):
             assert(isinstance(IC[i], list));
-            assert(len(IC[i] == n_IC));
+            assert(len(IC[i]) == n_IC);
             assert(len(t_Grid[i].shape) == 2);
             for j in range(n_IC):
                 assert(len(IC[i][j].shape) == 2);
@@ -297,10 +297,9 @@ class SINDy(LatentDynamics):
 
                 # Call this function using them. This should return a 1 element holding the 
                 # the solution for the i'th combination of parameter values.
-                ith_Results : list[numpy.ndarray]   | list[torch.Tensor]    = self.simulate(
-                                                                                    coefs   = ith_coefs, 
-                                                                                    IC      = ith_IC, 
-                                                                                    times   = ith_t_Grid)[0];
+                ith_Results : list[numpy.ndarray]   | list[torch.Tensor]    = self.simulate(coefs   = ith_coefs, 
+                                                                                            IC      = ith_IC, 
+                                                                                            t_Grid  = ith_t_Grid)[0];
 
                 # Add these results to X.
                 Z.append(ith_Results);
@@ -314,14 +313,18 @@ class SINDy(LatentDynamics):
 
         # In this case, there is just one parameter. Extract t_Grid, which has shape 
         # (n(i), n_t(i)).
-        t_Grid  : numpy.ndarray = t_Grid[0];
+        t_Grid  : numpy.ndarray | torch.Tensor  = t_Grid[0];
+        if(isinstance(t_Grid, torch.Tensor)):
+            t_Grid = t_Grid.detach().numpy();
         n_i     : int           = t_Grid.shape[0];
         n_t_i   : int           = t_Grid.shape[1];
 
         # If we get here, then coefs has one row. In this case, each element of IC should 
         # have shape (n(i), n_z). First, reshape coefs as a matrix. Since we only allow for linear 
         # terms, there are n_z + 1 library terms and n_z equations, where n_z = self.n_z.
-        c_1 : numpy.ndarray = coefs.reshape([self.n_z + 1, self.n_z]).T;
+        c_1 : numpy.ndarray | torch.Tensor  = coefs.reshape([self.n_z + 1, self.n_z]).T;
+        if(isinstance(c_1, torch.Tensor)):
+            c_1 = c_1.detach().numpy();
 
         # Set up a lambda function to approximate dz_dt. In SINDy, we learn a coefficient matrix 
         # C such that the latent state evolves according to the dynamical system 
@@ -340,7 +343,7 @@ class SINDy(LatentDynamics):
         # should be a 1 element list whose lone element is a n_IC element = 1 element whose 
         # lone element is a 2d numpy.ndarray object with shape (n(i), n_z).
         for j in range(n_i):
-            X[:, j, :] = odeint(f, IC[0][0][j, :], t_Grid[j, :]);
+            X[:, j, :] = RK4(f, IC[0][0][j, :], t_Grid[j, :]);
         
         # All done!
         return [[X]];

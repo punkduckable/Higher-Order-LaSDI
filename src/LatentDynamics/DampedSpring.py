@@ -17,7 +17,7 @@ import  torch;
 
 from    LatentDynamics      import  LatentDynamics;
 from    FiniteDifference    import  Derivative1_Order4, Derivative2_Order4, Derivative1_Order2_NonUniform, Derivative2_Order2_NonUniform;
-from    Solvers             import  RK4;
+from    SecondOrderSolvers  import  RK4;
 
 
 # Setup Logger.
@@ -31,8 +31,8 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 
 class DampedSpring(LatentDynamics):
     def __init__(   self, 
-                    n_z             : int, 
-                    coef_order_norm :   str | float, 
+                    n_z             :   int, 
+                    coef_norm_order :   str | float, 
                     Uniform_t_Grid  :   bool) -> None:
         r"""
         Initializes a DampedSpring object. This is a subclass of the LatentDynamics class which 
@@ -64,7 +64,7 @@ class DampedSpring(LatentDynamics):
         # Run the base class initializer. The only thing this does is set the n_z and n_t 
         # attributes.;
         super().__init__(   n_z             = n_z,
-                            coef_norm_order = coef_order_norm,
+                            coef_norm_order = coef_norm_order,
                             Uniform_t_Grid  = Uniform_t_Grid);
         LOGGER.info("Initializing a SINDY object with n_z = %d, coef_norm_order = %s, Uniform_t_Grid = %s" % (  self.n_z, 
                                                                                                                 str(self.coef_norm_order), 
@@ -243,7 +243,7 @@ class DampedSpring(LatentDynamics):
     def simulate(   self,
                     coefs   : numpy.ndarray             | torch.Tensor, 
                     IC      : list[list[numpy.ndarray]] | list[list[torch.Tensor]],
-                    t_Grid  : list[numpy.ndarray]) -> list[list[numpy.ndarray]]  | list[list[torch.Tensor]]:
+                    t_Grid  : list[numpy.ndarray]       | list[torch.Tensor]) -> list[list[numpy.ndarray]]  | list[list[torch.Tensor]]:
         """
         Time integrates the latent dynamics from multiple initial conditions for each combination
         of coefficients in coefs. 
@@ -265,10 +265,10 @@ class DampedSpring(LatentDynamics):
         should hold the k'th initial condition for the j'th derivative of the latent state when
         we use the i'th combination of parameter values. 
 
-        t_Grid: A n_param element list whose i'th entry is a 2d numpy ndarray object of shape 
-        (n(i), n_t(i)) whose j, k entry specifies the k'th time value we want to find the latent 
-        states when we use the j'th initial conditions and the i'th set of coefficients. Each 
-        row of each array should have elements in ascending order. 
+        t_Grid: A n_param element list whose i'th entry is a 2d numpy.ndarray or torch.Tensor 
+        object of shape (n(i), n_t(i)) whose j, k entry specifies the k'th time value we want to 
+        find the latent states when we use the j'th initial conditions and the i'th set of 
+        coefficients. Each row of each array should have elements in ascending order. 
 
 
         -------------------------------------------------------------------------------------------
@@ -295,7 +295,7 @@ class DampedSpring(LatentDynamics):
         assert(n_IC == 2);
         for i in range(n_param):
             assert(isinstance(IC[i], list));
-            assert(len(IC[i] == n_IC));
+            assert(len(IC[i]) == n_IC);
             assert(len(t_Grid[i].shape) == 2);
             for j in range(n_IC):
                 assert(len(IC[i][j].shape) == 2);
@@ -322,10 +322,9 @@ class DampedSpring(LatentDynamics):
                 # Call this function using them. This should return a 2 element holding the 
                 # displacement and velocity of the solution for the i'th combination of 
                 # parameter values.
-                ith_Results : list[numpy.ndarray]   | list[torch.Tensor]    = self.simulate(
-                                                                                    coefs   = ith_coefs, 
-                                                                                    IC      = ith_IC, 
-                                                                                    times   = ith_t_Grid)[0];
+                ith_Results : list[numpy.ndarray]   | list[torch.Tensor]    = self.simulate(coefs   = ith_coefs, 
+                                                                                            IC      = ith_IC, 
+                                                                                            t_Grid  = ith_t_Grid)[0];
 
                 # Add these results to X.
                 Z.append(ith_Results);
@@ -339,7 +338,9 @@ class DampedSpring(LatentDynamics):
 
         # In this case, there is just one parameter. Extract t_Grid, which has shape 
         # (n(i), n_t(i)).
-        t_Grid  : numpy.ndarray = t_Grid[0];
+        t_Grid  : numpy.ndarray | torch.Tensor  = t_Grid[0];
+        if(isinstance(t_Grid, torch.Tensor)):
+            t_Grid = t_Grid.detach().numpy();
         n_i     : int           = t_Grid.shape[0];
         n_t_i   : int           = t_Grid.shape[1];
         

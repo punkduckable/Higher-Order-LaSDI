@@ -151,9 +151,8 @@ class Explicit(Physics):
         A two element tuple: X, t_Grid.
 
         X is a 2 element list holding the displacement and velocity of the FOM solution when we 
-        use param. Each element is a 3d torch.Tensor object of shape (1, n_t, self.Frame_Shape), 
-        where n_t is the number of time steps when we solve the FOM using param for the IC 
-        parameters.
+        use param. Each element is a torch.Tensor object of shape (n_t, self.Frame_Shape), where 
+        n_t is the number of time steps when we solve the FOM using param for the IC parameters.
 
         t_Grid is a 1d torch.Tensor object whose i'th element holds the i'th time value at which
         we have an approximation to the FOM solution (the time value associated with X[0, i, ...]).
@@ -170,8 +169,8 @@ class Explicit(Physics):
 
         # Make the t, x meshgrids.
         t_mesh, x_mesh          = numpy.meshgrid(t_Grid, self.X_Positions.reshape(-1), indexing = 'ij');
-        t_mesh                  = torch.tensor(t_mesh);
-        x_mesh                  = torch.tensor(x_mesh);
+        t_mesh                  = torch.tensor(t_mesh);         # shape (n_t, n_x)
+        x_mesh                  = torch.tensor(x_mesh);         # shape (n_t, n_x)
 
         # We know that
         #   u(t, x) = [sin(2x-t) + 0.1 sin(w t) cos(40x + 2t)] exp(-a x^2)
@@ -186,10 +185,6 @@ class Explicit(Physics):
                                              (0.1*w)*torch.multiply(torch.cos(w*t_mesh), torch.cos(40*x_mesh + 2*t_mesh)) -     #   0.1*w*cos(w t)cos(40x + 2t) - 
                                              0.2*torch.multiply(torch.sin(w*t_mesh), torch.sin(40*x_mesh + 2*t_mesh)),          #   0.2*sin(w t)sin(40x + 2t) ] *
                                              torch.exp(-a*torch.multiply(x_mesh, x_mesh)));                                     # exp(-a x^2)
-
-        # Give U, V them the correct shape.
-        U = U.reshape((1,) + U.shape);
-        V = V.reshape((1,) + V.shape);
 
         # All done!
         return [U, V], torch.Tensor(t_Grid);

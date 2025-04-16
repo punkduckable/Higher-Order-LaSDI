@@ -143,7 +143,7 @@ class Physics:
          
         X is an n_IC element list whose i'th element holds the i'th derivative of the FOM solution 
         when we use param to define the initial condition function. Each element is a torch.Tensor
-        object of shape (1, n_t, self.Frame_Shape), where n_t is the number of time steps when we 
+        object of shape (n_t, self.Frame_Shape), where n_t is the number of time steps when we 
         solve the FOM using param for the IC parameters.
 
         t_Grid is a 1d torch.Tensor object whose i'th element holds the i'th time value at which
@@ -188,7 +188,7 @@ class Physics:
         A two element tuple: X, t_Grid.
 
         X is an n_param element list whose i'th element is an n_IC element list whose j'th element
-        is a torch.Tensor object of shape (n_t(i), n_x[0], ... , n_x[ns- 1]) holding the j'th 
+        is a torch.Tensor object of shape (n_t(i), self.Frame_Shape) holding the j'th 
         derivative of the FOM solution for the i'th combination of parameter values. Here, n_IC is 
         the number of initial conditions needed to specify the IC, n_param is the number of rows 
         in param, n_t(i) is the number of time steps we used to generate the solution with the 
@@ -215,7 +215,6 @@ class Physics:
             new_X, new_t_Grid = self.solve(param);
 
             # Now, add this solution to the set of solutions.
-            assert(new_X[0].shape[0] == 1) # should contain one parameter case.
             X.append(new_X);
             t_Grid.append(new_t_Grid);
 

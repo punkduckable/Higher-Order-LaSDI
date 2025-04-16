@@ -102,9 +102,11 @@ def RK1(f       : callable,
     domain and co-domain are \mathbb{R} x \mathbb{R}^d x \mathbb{R}^d and \mathbb{R}^d, 
     respectively. Thus, we assume that f(t, y(t), y'(t)) = y''(t). 
 
-    y0: The initial displacement (y0 = y(t0)), where t0 = times[0].
+    y0: A 1d numpy.ndarray or torch.Tensor of shape (d) holding the initial displacement 
+    (i.e., y0 = y(0)).
 
-    Dy0: The initial velocity (Dy0 = y'(t0)), where t0 = times[0].
+    Dy0: A 1d numpy.ndarray or torch.Tensor of shape (d) holding the initial velocity 
+    (i.e., Dy0 = y'(0)).
 
     times: A 1d numpy.ndarray object whose i'th element holds the i'th time value. 
     We assume the elements of this array form an increasing sequence.
@@ -208,9 +210,11 @@ def RK2(f       : callable,
     domain and co-domain are \mathbb{R} x \mathbb{R}^d x \mathbb{R}^d and \mathbb{R}^d, 
     respectively. Thus, we assume that f(t, y(t), y'(t)) = y''(t). 
 
-    y0: The initial displacement (y0 = y(0)).
+    y0: A 1d numpy.ndarray or torch.Tensor of shape (d) holding the initial displacement 
+    (i.e., y0 = y(0)).
 
-    Dy0: The initial velocity (Dy0 = y'(0)).
+    Dy0: A 1d numpy.ndarray or torch.Tensor of shape (d) holding the initial velocity 
+    (i.e., Dy0 = y'(0)).
 
     times: A 1d numpy.ndarray object whose i'th element holds the i'th time value. We assume the
     elements of this array form an increasing sequence.
@@ -330,9 +334,11 @@ def RK4(f       : callable,
     domain and co-domain are \mathbb{R} x \mathbb{R}^d x \mathbb{R}^d and \mathbb{R}^d, 
     respectively. Thus, we assume that f(t, y(t), y'(t)) = y''(t). 
 
-    y0: The initial displacement (y0 = y(0)).
+    y0: A 1d numpy.ndarray or torch.Tensor of shape (d) holding the initial displacement 
+    (i.e., y0 = y(0)).
 
-    Dy0: The initial velocity (Dy0 = y'(0)).
+    Dy0: A 1d numpy.ndarray or torch.Tensor of shape (d) holding the initial velocity 
+    (i.e., Dy0 = y'(0)).
 
     times: A 1d numpy.ndarray of shape (N) whose i'th element holds the i'th time value. We assume 
     the elements of this array form an increasing sequence.
