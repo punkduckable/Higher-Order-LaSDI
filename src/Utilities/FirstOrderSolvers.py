@@ -6,14 +6,16 @@ import  numpy;
 import  torch;
 
 r"""
-The functions in this file implement Runge-Kutta solvers for a general first-order ODE of the 
-form:
+The functions in this file implement Runge-Kutta solvers for a general first-order ODE of the form:
+
     y'(t)          = f(t,   y(t)).
-Here, y takes values in \mathbb{R}^d. 
+
+Here, y takes values in some vector space, V. 
 
 We apply the Runge-Kutta method to this equation. A general explicit s-step Runge-Kutta method
-generates a sequence of time steps, { y_n }_{n \in \mathbb{N}} \subseteq \mathbb{R}^d using the 
-following rule:
+generates a sequence of time steps, { y_n }_{n \in \mathbb{N}} \subseteq V using the following
+rule:
+
     y_{n + 1}       = y_n + h \sum_{i = 1}^{s} b_i k_i 
     k_i             = f(t_n + c_i h,   y_n + h \sum_{j = 1}^{i - 1} a_{i,j} k_j)
 
@@ -32,7 +34,7 @@ def RK1(f       : callable,
     r"""
     This function implements a RK1 or Forward-Euler ODE solver for an ODE of the form:
         y'(t)          = f(t, y(t)).
-    Here, y takes values in \mathbb{R}^d. 
+    Here, y takes values in some vector space and f : \mathbb{R} x V -> V is some function. 
   
     In this function, we implement the Forward Euler (RK1) scheme with the following coefficients:
         c_1 = 0
@@ -51,13 +53,13 @@ def RK1(f       : callable,
     -----------------------------------------------------------------------------------------------
 
     f: The right-hand side of the ODE (see the top of this doc string). This is a function whose 
-    domain and co-domain are \mathbb{R} x \mathbb{R}^d and \mathbb{R}^d, respectively. Thus, we 
-    assume that f(t, y(t)) = y'(t). 
+    domain and co-domain are \mathbb{R} x V and V, respectively. Thus, we assume that 
+    f(t, y(t)) = y'(t). 
 
-    y0: A 1d numpy.ndarray or torch.Tensor of shape (d) holding the initial position (y0 = y(t0)), 
-    where t0 = times[0].
-    
-    times: A 1d numpy.ndarray object whose i'th element holds the i'th time value. We assume the 
+    y0: A numpy.ndarray or torch.Tensor holding the initial position (y0 = y(t0)), where 
+    t0 = times[0].
+
+    times: A 1ed numpy.ndarray object whose i'th element holds the i'th time value. We assume the 
     elements of this array form an increasing sequence.
 
     
@@ -113,7 +115,7 @@ def RK2(f       : callable,
     r"""
     This function implements a RK2 based ODE solver for a second-order ODE of the following form:
         y'(t)          = f(t, y(t)).
-    Here, y takes values in \mathbb{R}^d. 
+    Here, y takes values in some vector space. 
   
     In this function, we implement the classic RK2 scheme with the following coefficients:
         c_1 = 0
@@ -137,11 +139,11 @@ def RK2(f       : callable,
     -----------------------------------------------------------------------------------------------
 
     f: The right-hand side of the ODE (see the top of this doc string). This is a function whose 
-    domain and co-domain are \mathbb{R} x \mathbb{R}^d and \mathbb{R}^d, respectively. Thus, we 
-    assume that f(t, y(t)) = y'(t). 
+    domain and co-domain are \mathbb{R} x V and V, respectively. Thus, we assume that 
+    f(t, y(t)) = y'(t). 
 
-    y0: A 1d numpy.ndarray or torch.Tensor of shape (d) holding the initial position (y0 = y(t0)), 
-    where t0 = times[0].
+    y0: A numpy.ndarray or torch.Tensor holding the initial position (y0 = y(t0)), where 
+    t0 = times[0].
 
     times: A 1d numpy.ndarray object whose i'th element holds the i'th time value. We assume the 
     elements of this array form an increasing sequence.
@@ -200,7 +202,7 @@ def RK4(f       : callable,
     r"""
     This function implements a RK4 based ODE solver for a second-order ODE of the following form:
         y'(t)          = f(t,   y(t))
-    Here, y takes values in \mathbb{R}^d. 
+    Here, y takes values in some vector space. 
   
     In this function, we implement the classic RK4 scheme with the following coefficients:
         c_1 = 0
@@ -233,11 +235,11 @@ def RK4(f       : callable,
     -----------------------------------------------------------------------------------------------
 
     f: The right-hand side of the ODE (see the top of this doc string). This is a function whose 
-    domain and co-domain are \mathbb{R} x \mathbb{R}^d and \mathbb{R}^d, respectively. Thus, we 
-    assume that f(t, y(t)) = y'(t). 
+    domain and co-domain are \mathbb{R} x V and V, respectively. Thus, we assume that 
+    f(t, y(t)) = y'(t). 
 
-    y0: A 1d numpy.ndarray or torch.Tensor of shape (d) holding the initial position (y0 = y(t0)), 
-    where t0 = times[0].
+    y0: A numpy.ndarray or torch.Tensor holding the initial position (y0 = y(t0)), where 
+    t0 = times[0].
 
     times: A 1d numpy.ndarray object whose i'th element holds the i'th time value. We assume the 
     elements of this array form an increasing sequence.
