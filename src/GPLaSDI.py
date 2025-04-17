@@ -638,7 +638,7 @@ class BayesianGLaSDI:
 
 
 
-    def A(self) -> numpy.ndarray:
+    def get_new_sample_point(self) -> numpy.ndarray:
         """
         This function finds the element of the testing set whose corresponding latent dynamics 
         gives the highest variance FOM time series. 
@@ -712,7 +712,7 @@ class BayesianGLaSDI:
         # values in a 2d numpy.ndarray of shape (n_sample, n_coef), whose i, j element holds the 
         # i'th sample of the j'th coefficient. We store the arrays for different parameter values 
         # in a list of length n_test. 
-        coef_samples : list[numpy.ndarray] = [sample_coefs(gp_list, self.param_space.test_space[i], self.n_samples) for i in range(n_test)];
+        coef_samples : list[numpy.ndarray] = [sample_coefs(gp_list, self.param_space.test_space[i, :], self.n_samples) for i in range(n_test)];
 
         # Now, solve the latent dynamics forward in time for each set of coefficients in 
         # coef_samples. There are n_test combinations of parameter values, and we have n_samples 
@@ -740,11 +740,11 @@ class BayesianGLaSDI:
 
             # Simulate one sample at a time; store the resulting frames.           
             for j in range(self.n_samples):
-                LatentState_ij : list[numpy.ndarray] = self.latent_dynamics.simulate(   coefs   = coef_samples[i][j:(j + 1), :], 
-                                                                                        IC      = [Z0[i]], 
-                                                                                        t_Grid  = [t_Grid]);
+                LatentState_ij : list[list[numpy.ndarray]] = self.latent_dynamics.simulate( coefs   = coef_samples[i][j:(j + 1), :], 
+                                                                                            IC      = [Z0[i]], 
+                                                                                            t_Grid  = [t_Grid]);
                 for k in range(n_IC):
-                    LatentStates[i][k][j, :, :] = LatentState_ij[k].reshape(n_t_j, n_z);
+                    LatentStates[i][k][j, :, :] = LatentState_ij[0][k][:, 0, :];
 
         # Find the index of the parameter with the largest std.
         m_index : int = get_FOM_max_std(model, LatentStates);

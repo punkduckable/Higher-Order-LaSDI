@@ -150,7 +150,7 @@ def sample_coefs(   gp_list     : list[GaussianProcessRegressor],
 
     gp_list: a n_GPs element list of trained GP regressor objects.
 
-    Input: An numpy.ndarray array with shape (1, input_dim) that holds a single combination of 
+    Input: An numpy.ndarray array with shape (input_dim) that holds a single combination of 
     parameter values. i.e., a single test example. Here, input_dim is the dimension of the input 
     space for the GPs. We evaluate the posterior distribution of each GP in gp_list at this input 
     (getting a prediction for each GP).
@@ -169,15 +169,14 @@ def sample_coefs(   gp_list     : list[GaussianProcessRegressor],
     # Checks.
     assert(isinstance(gp_list, list));
     assert(isinstance(Input, numpy.ndarray));
-    assert(len(Input.shape) == 2);
-    assert(Input.shape[0]   == 1);
+    assert(len(Input.shape) == 1);
 
     # Setup.
     n_GPs           : int           = len(gp_list);
     coef_samples    : numpy.ndarray = numpy.zeros([n_samples, n_GPs]);
 
     # Evaluate the predicted mean and std at the Input.
-    pred_mean, pred_std = eval_gp(gp_list, Input);
+    pred_mean, pred_std = eval_gp(gp_list, Input.reshape(1, -1));
     pred_mean   = pred_mean[0];
     pred_std    = pred_std[0];
 

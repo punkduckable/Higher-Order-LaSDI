@@ -208,7 +208,7 @@ def sample_roms(model           : torch.nn.Module,
     # in an n_param element list whose k'th element is a (n_sample, n_coef) array whose i, j 
     # element stores the i'th sample from the posterior distribution for the j'th coefficient at 
     # the k'th combination of parameter values.
-    coefs_by_parameter  : list[numpy.ndarray]       = [sample_coefs(gp_list = gp_list, Input = param_grid[i:(i + 1), :], n_samples = n_samples) for i in range(n_param)];
+    coefs_by_parameter  : list[numpy.ndarray]       = [sample_coefs(gp_list = gp_list, Input = param_grid[i, :], n_samples = n_samples) for i in range(n_param)];
 
     # Reorganize the coef samples into an n_samples element list whose i'th element is an 
     # array of shape (n_param, n_coef) whose j, k element holds the i'th sample of the k'th 
@@ -311,7 +311,7 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
     assert(isinstance(LatentStates,         list));
     assert(isinstance(LatentStates[0],      list));
     assert(isinstance(LatentStates[0][0],   numpy.ndarray));
-    assert(len(LatentStates[0][0])          == 3);
+    assert(len(LatentStates[0][0].shape)    == 3);
 
     n_param : int   = len(LatentStates);
     n_IC    : int   = len(LatentStates[0]);
@@ -356,9 +356,9 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
             # Now decode the frames, one sample at a time.
             n_samples_i     : int           = Z_i.shape[0];
             n_t_i           : int           = Z_i.shape[1];
-            X_Pred_i        : numpy.ndarray = numpy.empty((n_samples_i, n_t_i, n_z), dtype = numpy.float32);
+            X_Pred_i        : numpy.ndarray = numpy.empty([n_samples_i, n_t_i] + model.reshape_shape, dtype = numpy.float32);
             for j in range(n_samples_i):
-                X_Pred_i[j, :, :] = model.Decode(Z_i[j, :, :]).detach().numpy();
+                X_Pred_i[j, ...] = model.Decode(Z_i[j, :, :]).detach().numpy();
 
             # Compute the standard deviation across the sample axis. This gives us an array of shape 
             # (n_t, n_FOM) whose i,j element holds the (sample) standard deviation of the j'th component 
@@ -399,10 +399,10 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
 
             n_samples_i : int           = Z_D_i.shape[0];
             n_t_i       : int           = Z_D_i.shape[1];
-            D_Pred_i    : numpy.ndarray = numpy.empty((n_samples_i, n_t_i, n_z), dtype = numpy.float32);
+            D_Pred_i    : numpy.ndarray = numpy.empty([n_samples_i, n_t_i] + model.reshape_shape, dtype = numpy.float32);
             for j in range(n_samples_i):
-                D_Pred_ij, _ = model.Decode(Latent_Displacement   = Z_D_i, Latent_Velocity    = Z_V_i);
-                D_Pred_i[j, :, :] = D_Pred_ij.detach().numpy();
+                D_Pred_ij, _ = model.Decode(Latent_Displacement   = Z_D_i[j, :, :], Latent_Velocity    = Z_V_i[j, :, :]);
+                D_Pred_i[j, ...] = D_Pred_ij.detach().numpy();
 
             # Compute the standard deviation across the sample axis. This gives us an array of 
             # shape (n_t, n_FOM) whose i,j element holds the (sample) standard deviation of the 

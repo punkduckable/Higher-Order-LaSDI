@@ -446,7 +446,7 @@ class Autoencoder(torch.nn.Module):
         for i in range(n_param):
             # Fetch the IC for the i'th set of parameters. Then map it to a tensor.
             u0 : numpy.ndarray  = physics.initial_condition(param_grid[i])[0];
-            u0                  = torch.Tensor(u0).reshape((1) + u0.shape);
+            u0                  = torch.Tensor(u0).reshape((1,) + u0.shape);
 
             # Encode the IC, then map the encoding to a numpy array.
             z0 : torch.Tensor   = self.Encode(u0);
@@ -794,8 +794,8 @@ class Autoencoder_Pair(torch.nn.Module):
             v0      : numpy.ndarray         = ICs[1];
             
             # Map the ICs to a tensor.
-            u0      = torch.Tensor(u0).reshape((1) + u0.shape);
-            v0      = torch.Tensor(v0).reshape((1) + v0.shape);
+            u0      = torch.Tensor(u0).reshape((1,) + u0.shape);
+            v0      = torch.Tensor(v0).reshape((1,) + v0.shape);
 
             # Encode the IC, then map the encoding to a numpy array.
             z0, Dz0 = self.Encode(  Displacement_Frames = u0, 

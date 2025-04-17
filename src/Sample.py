@@ -110,7 +110,7 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
         num_train_current   : int   = 0;
         num_train_new       : int   = trainer.param_space.n_train();
     else:
-        num_train_current   : int   = trainer.X_Train[0].size(0);
+        num_train_current   : int   = len(trainer.X_Train);
         num_train_new       : int   = trainer.param_space.n_train() - num_train_current;
     assert(num_train_new > 0);
     LOGGER.info("Adding %d new parameter combinations to the training set (currently has %d)" % (num_train_new, num_train_current));
@@ -130,7 +130,7 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
         num_test_current    : int   = 0;
         num_test_new        : int   = trainer.param_space.n_test();
     else:
-        num_test_current    : int   = trainer.X_Test[0].size(0);
+        num_test_current    : int   = len(trainer.X_Test);
         num_test_new        : int   = trainer.param_space.n_test() - num_test_current;
     LOGGER.info("Adding %d new parameter combinations to the testing set (currently has %d)" % (num_test_new, num_test_current));
 
