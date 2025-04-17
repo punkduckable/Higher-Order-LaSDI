@@ -70,6 +70,7 @@ def main():
 
     # Check if we are loading from a restart or not. If so, load it.
     use_restart : bool = config['workflow']['use_restart'];
+    restart_filename : str = None;
     if (use_restart == True):
         restart_filename : str = config['workflow']['restart_file'];
         LOGGER.debug("Loading from restart (%s)" % restart_filename);

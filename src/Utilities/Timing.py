@@ -13,10 +13,11 @@ from time import perf_counter;
 class Timer:
     def __init__(self):
         # Set instance variables
-        self.names      : dict  = {};   # Dictionary of named timers. key = name, value = index 
-        self.calls      : list  = [];   # k'th element = # of times we have called the k'th timer
-        self.times      : list  = [];   # k'th element = total time recorded by the k'th timer
-        self.starts     : list  = [];   # k'th element = start time for the k'th timer (if running)
+        self.names              : dict  = {};   # Dictionary of named timers. key = name, value = index 
+        self.calls              : list  = [];   # k'th element = # of times we have called the k'th timer
+        self.times              : list  = [];   # k'th element = total time recorded by the k'th timer
+        self.starts             : list  = [];   # k'th element = start time for the k'th timer (if running)
+        self.Max_Name_Length    : int   = 0;    # Used to format printing,
         return
         
     
@@ -51,6 +52,10 @@ class Timer:
             self.calls      += [0];
             self.times      += [0.0];
             self.starts     += [None];
+
+            # Update the max name length (used to format printign)
+            if(len(name) > self.Max_Name_Length):
+                self.Max_Name_Length = len(name);
         
         # Fetch the current timer's number.
         idx : int = self.names[name]
@@ -116,11 +121,11 @@ class Timer:
         """
         
         # Header
-        print("Function name\tCalls\tTotal time\tTime/call\n");
+        print("Function name" + " "*(self.Max_Name_Length - 13) + "\tCalls\tTotal time\tTime/call\n");
 
         # Cycle through timers.
         for name, idx in self.names.items():
-            print("%s\t%d\t%.3e\t%.3e\n" % (name, self.calls[idx], self.times[idx], self.times[idx] / self.calls[idx]));
+            print("%s\t%d\t%.3e\t%.3e\n" % (name + " "*(self.Max_Name_Length - len(name)), self.calls[idx], self.times[idx], self.times[idx] / self.calls[idx]));
         
         # All done!
         return;

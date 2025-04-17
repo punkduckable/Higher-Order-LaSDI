@@ -77,11 +77,11 @@ def optimizer_to(optim : Optimizer, device : str) -> None:
 
 class BayesianGLaSDI:
     # An n_Train element list. The i'th element is is an n_IC element list whose j'th element is a
-    # numpy ndarray of shape (nt(u), Frame_Shape) holding a sequence of samples of the j'th 
+    # numpy ndarray of shape (n_t(i), Frame_Shape) holding a sequence of samples of the j'th 
     # derivative of the FOM solution when we use the i'th combination of parameter values. 
     X_Train : list[list[torch.Tensor]]  = [];  
 
-    # An n_Train element list whose i'th element is a torch.Tensor of shape (n_t_i) whose j'th
+    # An n_Train element list whose i'th element is a torch.Tensor of shape (n_t(i)) whose j'th
     # element holds the time value for the j'th frame when we use the i'th combination of parameter 
     # values.
     t_Train : list[torch.Tensor]        = []; 
@@ -89,7 +89,7 @@ class BayesianGLaSDI:
     # Same as X_Test, but used for the test set.
     X_Test  : list[list[torch.Tensor]]  = [];  
 
-    # An n_Test element list whose i'th element is a torch.Tensor of shape (n_t_i) whose j'th
+    # An n_Test element list whose i'th element is a torch.Tensor of shape (n_t(i)) whose j'th
     # element holds the time value for the j'th frame when we use the i'th combination of parameter 
     # values.
     t_Test  : list[torch.Tensor]        = [];
@@ -255,7 +255,7 @@ class BayesianGLaSDI:
 
             t_Grid_i_Rollout = torch.empty((n_i, n_rollout), dtype = torch.float32);
             for k in range(n_rollout):
-                t_Grid_i_Rollout[:, k]  = t_Train_device[k:(k + n_i)];
+                t_Grid_i_Rollout[:, k]  = t_Train_device[i][k:(k + n_i)];
             t_Grid_rollout.append(t_Grid_i_Rollout);
 
         # Determine number of iterations we should run in this round of training.
@@ -279,7 +279,7 @@ class BayesianGLaSDI:
 
                     t_Grid_i_Rollout = torch.empty((n_i, n_rollout), dtype = torch.float32);
                     for k in range(n_rollout):
-                        t_Grid_i_Rollout[:, k]  = t_Train_device[k:(k + n_i)];
+                        t_Grid_i_Rollout[:, k]  = t_Train_device[i][k:(k + n_i)];
                     t_Grid_rollout.append(t_Grid_i_Rollout);
             
                 LOGGER.info("n_rollout is now %d" % n_rollout);
@@ -327,7 +327,7 @@ class BayesianGLaSDI:
                 
                 Z_Rollout_IC        : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 2 element list of (n_t - n_rollout, n_z) arrays.
                 Z_Rollout_Targets   : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 2 element list of (n_t - n_rollout, n_z) arrays.
-                X_Rollout_Targets   : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 2 element list of (n_t - n_rollout, n_x[0], ... n_x[-1]) arrays.
+                X_Rollout_Targets   : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 2 element list of (n_t - n_rollout, physics.Frame_Shape) arrays.
 
                 loss_recon_D        : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
                 loss_recon_V        : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
@@ -352,9 +352,11 @@ class BayesianGLaSDI:
                     # -----------------------------------------------------------------------------
                     # Forward pass
 
+                    self.timer.start("Forward Pass");
+
                     # Run the forward pass. This results in an n_train element list whose i'th 
                     # element is a 2 element list whose j'th element is a tensor of shape 
-                    # (n_t(i), n_x[0], ... , n_x[-1]) whose [k, ...] slice holds our prediction for 
+                    # (n_t(i), physics.Frame_Shape) whose [k, ...] slice holds our prediction for 
                     # the j'th time derivative of the FOM solution at time t_Grid[i][k] when we use 
                     # the i'th combination of parameter values. Here, n_t(i) is the number of time 
                     # steps in the solution for the i'th combination of parameter values. 
@@ -367,17 +369,25 @@ class BayesianGLaSDI:
                     D_Pred_i    : torch.Tensor          = X_Pred_i[0];
                     V_Pred_i    : torch.Tensor          = X_Pred_i[1];
 
+                    self.timer.end("Forward Pass");
+
 
                     # ----------------------------------------------------------------------------
                     # Reconstruction loss
+
+                    self.timer.start("Reconstruction Loss");
 
                     # Compute the reconstruction loss. 
                     loss_recon_D += self.MSE(D_i, D_Pred_i);
                     loss_recon_V += self.MSE(V_i, V_Pred_i);
 
+                    self.timer.end("Reconstruction Loss");
+
 
                     # --------------------------------------------------------------------------------
                     # Consistency losses
+                    
+                    self.timer.start("Consistency Loss");
 
                     # Make sure Z_V actually looks like the time derivative of Z_X. 
                     if(self.physics.Uniform_t_Grid == True):
@@ -397,9 +407,13 @@ class BayesianGLaSDI:
 
                     loss_consistency_X  : torch.Tensor      = loss_consistency_X + self.MSE(dD_Pred_i_dt, V_Pred_i);
 
+                    self.timer.end("Consistency Loss");
+
             
                     # ----------------------------------------------------------------------------
                     # Chain Rule Losses
+
+                    self.timer.start("Chain Rule Loss");
 
                     # First, we compute the X portion of the chain rule loss. This stems from the 
                     # fact that 
@@ -427,27 +441,35 @@ class BayesianGLaSDI:
                                                                 v       = V_i)[1];
                     loss_chain_rule_Z += self.MSE(Z_V_i, d_dx_Z_D__V);
 
+                    self.timer.end("Chain Rule Loss");
+
 
                     # ----------------------------------------------------------------------------
                     # Setup Rollout losses.
+
+                    self.timer.start("Rollout Loss");
 
                     # Select the latent states we want to use as initial conditions for the i'th 
                     # combination of parameter values. This should be any latent state other than
                     # the final n_rollout (so we can simulate forward n_rollout steps and still get
                     # valid target values). Each element of Z_Rollout_IC is a 2 element list of 
                     # numpy.ndarray objects of shape (n_t - n_rollout, n_z).
-                    Z_Rollout_IC.append([[Z_D_i[:(-n_rollout), :], Z_V_i[:(-n_rollout), :]]]);
+                    Z_Rollout_IC.append([Z_D_i[:(-n_rollout), :], Z_V_i[:(-n_rollout), :]]);
 
                     # Fetch the corresponding targets (the actual latent states n_rollout steps
                     # in the future).
                     Z_Rollout_Targets.append([Z_D_i[n_rollout:, :], Z_V_i[n_rollout:, :]]);
                 
                     # Finally, fetch the FOM targets (the FOM frames n_rollout steps in the future)
-                    X_Rollout_Targets.append(D_i[n_rollout:, ...], V_i[n_rollout:, ...]);
+                    X_Rollout_Targets.append([D_i[n_rollout:, ...], V_i[n_rollout:, ...]]);
+
+                    self.timer.end("Rollout Loss");
 
 
                 # --------------------------------------------------------------------------------
                 # Latent Dynamics, Coefficient losses
+
+                self.timer.start("Calibration");
 
                 # Compute the latent dynamics and coefficient losses. Also fetch the current latent
                 # dynamics coefficients for each training point. The latter is stored in a 2d array 
@@ -456,11 +478,14 @@ class BayesianGLaSDI:
                 # dynamics model. 
                 coefs, loss_LD, loss_coef       = LD.calibrate(Latent_States = Latent_States, t_Grid    = t_Train_device);
 
+                self.timer.end("Calibration");
+
 
                 # ---------------------------------------------------------------------------------
                 # Rollout loss. Note that we need the coefficients before we can compute this.
 
                 # Setup
+                self.timer.start("Rollout Loss");
                 loss_rollout_Z_D    : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
                 loss_rollout_Z_V    : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
                 loss_rollout_D      : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
@@ -471,7 +496,9 @@ class BayesianGLaSDI:
                 # n_t(i) - n_rollout, n_z). The p, q, r element of the j'th element should hold the 
                 # r'th component of the p'th frame of the j'th time derivative of the solution when 
                 # we use the p'th initial condition for the i'th combination of parameter values.
-                Z_Rollout           : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(coefs = coefs, IC = Z_Rollout_IC, t_Grid = t_Grid_rollout);            
+                Z_Rollout           : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(coefs   = coefs, 
+                                                                                                IC      = Z_Rollout_IC, 
+                                                                                                t_Grid  = t_Grid_rollout);            
 
                 # Now cycle through the training examples.
                 for i in range(n_train):
@@ -504,6 +531,8 @@ class BayesianGLaSDI:
                     loss_rollout_D   +=  self.MSE(D_Rollout_Target_i,   D_Rollout_Predict_i);
                     loss_rollout_V   +=  self.MSE(V_Rollout_Target_i,   V_Rollout_Predict_i);
 
+                self.timer.end("Rollout Loss");
+
 
                 # --------------------------------------------------------------------------------
                 # Total loss
@@ -530,6 +559,8 @@ class BayesianGLaSDI:
             # -------------------------------------------------------------------------------------
             # Backward Pass
 
+            self.timer.start("Backwards Pass");
+
             #  Run back propagation and update the model parameters. 
             loss.backward();
             self.optimizer.step();
@@ -544,9 +575,13 @@ class BayesianGLaSDI:
                 self.best_coefs : numpy.ndarray = coefs;
                 best_loss       : float         = loss.item();
 
+            self.timer.end("Backwards Pass");
+
 
             # -------------------------------------------------------------------------------------
             # Report Results from this iteration 
+
+            self.timer.start("Report");
 
             # Report the current iteration number and losses
             if(isinstance(model_device, Autoencoder)):
@@ -574,7 +609,7 @@ class BayesianGLaSDI:
             
                 LOGGER.debug(param_string);
 
-            # We have finished a training step, stop the timer.
+            self.timer.end("Report");
             self.timer.end("train_step");
         
         # We are ready to wrap up the training procedure.
