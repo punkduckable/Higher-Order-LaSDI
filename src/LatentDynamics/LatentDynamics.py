@@ -155,9 +155,16 @@ class LatentDynamics:
         we use the i'th combination of parameter values. 
 
         t_Grid: A n_param element list whose i'th entry is a 2d numpy.ndarray or torch.Tensor 
-        object of shape (n(i), n_t(i)) whose j, k entry specifies the k'th time value we want to 
-        find the latent states when we use the j'th initial conditions and the i'th set of 
-        coefficients. Each row of each array should have elements in ascending order. 
+        object. The i'th entry should either have shape (n(i), n_t(i)) or shape (n_t(i)). Use the
+        former case when we want to use different times for each initial condition and the latter
+        case when we want to use the same times for all initial conditions. 
+        
+        In the former case, the j,k array entry specifies k'th time value at which we solve for 
+        the latent state when we use the j'th initial condition and the i'th set of coefficients. 
+        Each row should be in ascending order. 
+        
+        In the latter case, the j'th entry should specify the j'th time value at which we solve for 
+        each latent state when we use the i'th combination of parameter values.
 
         
 

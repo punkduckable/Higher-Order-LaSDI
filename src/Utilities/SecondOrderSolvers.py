@@ -9,24 +9,23 @@ r"""
 The functions in this file implement Runge-Kutta solvers for a general second-order ODE of the 
 following form:
     y''(t)          = f(t,   y(t),   y'(t)).
-Here, y takes values in \mathbb{R}^d. 
+Here, y takes values in some vector space, V.
 
 To understand where our methods come from, let us first make a few substitutions. First, let 
-    z(t)            = (y(t), y'(t)) \in \mathbb{R}^{2d}. 
+    z(t)            = (y(t), y'(t)) \in V x V. 
 Then, 
     z'(t)           = (y'(t), y''(t))
                     = (y'(t), f(t,   y(t),   y'(t)))
                     = (y'(t), f(t,   z(t))).
-Now, let g : \mathbb{R} x \mathbb{R}^{2d} -> \mathbb{R}^{2d} be defined by
+Now, let g : \mathbb{R} x V x V -> V x V be defined by
     g(t, z(t))      = ( z[d + 1:2d], f(t, z(t)) ).
 Then,
     z'(t)           = g(t, z(t))
-In other words, we reduce the 2nd order ODE in \mathbb{R}^d to a first order one in 
-\mathbb{R}^{2d}. 
+In other words, we reduce the 2nd order ODE in V to a first order one in V x V. 
 
 
 We can now apply the Runge-Kutta method to this equation. A general explicit s-step Runge-Kutta 
-method generates a sequence of time steps, { z_n }_{n \in \mathbb{N}} \subseteq \mathbb{R}^d 
+method generates a sequence of time steps, { z_n }_{n \in \mathbb{N}} \subseteq V. 
 using the following rule:
     z_{n + 1}       = z_n + h \sum_{i = 1}^{s} b_i k_i 
     k_i             = g(t_n + c_i h,   z_n + h \sum_{j = 1}^{i - 1} a_{i,j} k_j)
@@ -74,12 +73,12 @@ transform it into a method for solving 2nd order ODEs.
 def RK1(f       : callable, 
         y0      : numpy.ndarray | torch.Tensor, 
         Dy0     : numpy.ndarray | torch.Tensor, 
-        times   : numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray] | tuple[torch.Tensor, torch.Tensor]:
+        t_Grid  : numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray] | tuple[torch.Tensor, torch.Tensor]:
     r"""
     This function implements a RK1 or Forward-Euler ODE solver for a second-order ODE of the 
     following form:
         y''(t)          = f(t,   y(t),   y'(t)).
-    Here, y takes values in \mathbb{R}^d. 
+    Here, y takes values in some vector space, V.
   
     In this function, we implement the Forward Euler (RK1) scheme with the following coefficients:
         c_1 = 0
@@ -99,16 +98,15 @@ def RK1(f       : callable,
     -----------------------------------------------------------------------------------------------
 
     f: The right-hand side of the ODE (see the top of this doc string). This is a function whose 
-    domain and co-domain are \mathbb{R} x \mathbb{R}^d x \mathbb{R}^d and \mathbb{R}^d, 
-    respectively. Thus, we assume that f(t, y(t), y'(t)) = y''(t). 
+    domain and co-domain are \mathbb{R} x V x V and V, respectively. Thus, we assume that 
+    f(t, y(t), y'(t)) = y''(t).
 
-    y0: A 1d numpy.ndarray or torch.Tensor of shape (d) holding the initial displacement 
-    (i.e., y0 = y(0)).
+    y0: A numpy.ndarray or torch.Tensor holding the initial displacement (i.e., y0 = y(t0)),  where
+    t0 = t_Grid[0].
 
-    Dy0: A 1d numpy.ndarray or torch.Tensor of shape (d) holding the initial velocity 
-    (i.e., Dy0 = y'(0)).
+    Dy0: A numpy.ndarray or torch.Tensor holding the initial velocity (i.e., Dy0 = y'(t0)).
 
-    times: A 1d numpy.ndarray object whose i'th element holds the i'th time value. 
+    t_Grid: A 1d numpy.ndarray object whose i'th element holds the i'th time value. 
     We assume the elements of this array form an increasing sequence.
 
     
@@ -118,8 +116,8 @@ def RK1(f       : callable,
 
     Two numpy.ndarray or torch.Tensor objects: D, V. 
     
-    Let N = times.size and t0 = times[0]. D and V have shape N x y0.shape. The i'th row of D, V 
-    represent the displacement and the velocity at time i*h, respectively. Thus,
+    Let N = tt_Gridmes.size and t0 = t_Grid[0]. D and V have shape N x y0.shape. The i'th row of 
+    D, V represent the displacement and the velocity at time i*h, respectively. Thus,
         D[i, ...] = y_i   \approx y (t0 + i h) 
         V[i, ...] = y'_i  \approx y'(t0 + i h) 
     """
@@ -127,13 +125,13 @@ def RK1(f       : callable,
     # First, run checks.
     assert(isinstance(y0,       numpy.ndarray)  or isinstance(y0,       torch.Tensor));
     assert(isinstance(Dy0,      numpy.ndarray)  or isinstance(Dy0,      torch.Tensor));
-    assert(isinstance(times,    numpy.ndarray));
+    assert(isinstance(t_Grid,   numpy.ndarray));
     assert(type(y0)         == type(Dy0));
-    assert(len(times.shape) == 1);
+    assert(len(t_Grid.shape) == 1);
     assert(y0.shape         == Dy0.shape);
 
     # Next, fetch N.
-    N : int = times.size;
+    N : int = t_Grid.size;
 
     # Initialize D, V.
     if(isinstance(y0, numpy.ndarray)):
@@ -149,10 +147,10 @@ def RK1(f       : callable,
     # Now, run the time stepping!
     for n in range(N - 1):
         # Fetch the current time, displacement, velocity.
-        tn  : float                         = times[n];
+        tn  : float                         = t_Grid[n];
         yn  : numpy.ndarray | torch.Tensor  = D[n, ...];
         Dyn : numpy.ndarray | torch.Tensor  = V[n, ...];
-        hn  : float                         = times[n + 1] - times[n];
+        hn  : float                         = t_Grid[n + 1] - t_Grid[n];
 
         # Compute l_1.
         l_1 = f(tn, yn, Dyn);
@@ -173,11 +171,11 @@ def RK1(f       : callable,
 def RK2(f       : callable, 
         y0      : numpy.ndarray | torch.Tensor, 
         Dy0     : numpy.ndarray | torch.Tensor, 
-        times   : numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray] | tuple[torch.Tensor, torch.Tensor]:
+        t_Grid  : numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray] | tuple[torch.Tensor, torch.Tensor]:
     r"""
     This function implements a RK2 based ODE solver for a second-order ODE of the following form:
         y''(t)          = f(t,   y(t),   y'(t)).
-    Here, y takes values in \mathbb{R}^d. 
+    Here, y takes values in some vector space, V.
   
     In this function, we implement the classic RK2 scheme with the following coefficients:
         c_1 = 0
@@ -207,16 +205,15 @@ def RK2(f       : callable,
     -----------------------------------------------------------------------------------------------
 
     f: The right-hand side of the ODE (see the top of this doc string). This is a function whose 
-    domain and co-domain are \mathbb{R} x \mathbb{R}^d x \mathbb{R}^d and \mathbb{R}^d, 
-    respectively. Thus, we assume that f(t, y(t), y'(t)) = y''(t). 
+    domain and co-domain are \mathbb{R} x V x V and V, respectively. Thus, we assume that 
+    f(t, y(t), y'(t)) = y''(t).
 
-    y0: A 1d numpy.ndarray or torch.Tensor of shape (d) holding the initial displacement 
-    (i.e., y0 = y(0)).
+    y0: A numpy.ndarray or torch.Tensor holding the initial displacement (i.e., y0 = y(t0)),  where
+    t0 = t_Grid[0].
 
-    Dy0: A 1d numpy.ndarray or torch.Tensor of shape (d) holding the initial velocity 
-    (i.e., Dy0 = y'(0)).
+    Dy0: A numpy.ndarray or torch.Tensor holding the initial velocity (i.e., Dy0 = y'(t0)).
 
-    times: A 1d numpy.ndarray object whose i'th element holds the i'th time value. We assume the
+    t_Grid: A 1d numpy.ndarray object whose i'th element holds the i'th time value. We assume the
     elements of this array form an increasing sequence.
 
 
@@ -227,7 +224,7 @@ def RK2(f       : callable,
 
     Two numpy.ndarray objects: D, V. 
     
-    Let N = times.size and t0 = times[0]. D and V have shape N x y0.shape. The i'th row of D, V 
+    Let N = t_Grid.size and t0 = t_Grid[0]. D and V have shape N x y0.shape. The i'th row of D, V 
     represent the displacement and the velocity at time i*h, respectively. Thus,
         D[i, ...] = y_i   \approx y (t0 + i h) 
         V[i, ...] = y'_i  \approx y'(t0 + i h) 
@@ -236,13 +233,13 @@ def RK2(f       : callable,
     # First, run checks.
     assert(isinstance(y0,       numpy.ndarray)  or isinstance(y0,       torch.Tensor));
     assert(isinstance(Dy0,      numpy.ndarray)  or isinstance(Dy0,      torch.Tensor));
-    assert(isinstance(times,    numpy.ndarray));
-    assert(type(y0)         == type(Dy0));
-    assert(len(times.shape) == 1);
-    assert(y0.shape         == Dy0.shape);
+    assert(isinstance(t_Grid,    numpy.ndarray));
+    assert(type(y0)             == type(Dy0));
+    assert(len(t_Grid.shape)    == 1);
+    assert(y0.shape             == Dy0.shape);
 
     # Next, fetch N.
-    N : int = times.size;
+    N : int = t_Grid.size;
 
     # Initialize D, V.
     if(isinstance(y0, numpy.ndarray)):
@@ -258,10 +255,10 @@ def RK2(f       : callable,
     # Now, run the time stepping!
     for n in range(N - 1):
         # Fetch the current time, displacement, velocity.
-        tn  : float                         = times[n];
+        tn  : float                         = t_Grid[n];
         yn  : numpy.ndarray | torch.Tensor  = D[n, :];
         Dyn : numpy.ndarray | torch.Tensor  = V[n, :];
-        hn  : float                         = times[n + 1] - times[n];
+        hn  : float                         = t_Grid[n + 1] - t_Grid[n];
 
         # Compute l_1, l_2.
         l_1 = f(tn,         yn,             Dyn);
@@ -283,11 +280,11 @@ def RK2(f       : callable,
 def RK4(f       : callable, 
         y0      : numpy.ndarray | torch.Tensor, 
         Dy0     : numpy.ndarray | torch.Tensor, 
-        times   : numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray] | tuple[torch.Tensor, torch.Tensor]:
+        t_Grid  : numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray] | tuple[torch.Tensor, torch.Tensor]:
     r"""
     This function implements a RK4 based ODE solver for a second-order ODE of the following form:
         y''(t)          = f(t,   y(t),   y'(t)).
-    Here, y takes values in \mathbb{R}^d. 
+    Here, y takes values in some vector space, V.
   
     In this function, we implement the classic RK4 scheme with the following coefficients:
         c_1 = 0
@@ -331,16 +328,15 @@ def RK4(f       : callable,
     -----------------------------------------------------------------------------------------------
 
     f: The right-hand side of the ODE (see the top of this doc string). This is a function whose 
-    domain and co-domain are \mathbb{R} x \mathbb{R}^d x \mathbb{R}^d and \mathbb{R}^d, 
-    respectively. Thus, we assume that f(t, y(t), y'(t)) = y''(t). 
+    domain and co-domain are \mathbb{R} x V x V and V, respectively. Thus, we assume that 
+    f(t, y(t), y'(t)) = y''(t).
 
-    y0: A 1d numpy.ndarray or torch.Tensor of shape (d) holding the initial displacement 
-    (i.e., y0 = y(0)).
+    y0: A numpy.ndarray or torch.Tensor holding the initial displacement (i.e., y0 = y(t0)),  where
+    t0 = t_Grid[0].
 
-    Dy0: A 1d numpy.ndarray or torch.Tensor of shape (d) holding the initial velocity 
-    (i.e., Dy0 = y'(0)).
+    Dy0: A numpy.ndarray or torch.Tensor holding the initial velocity (i.e., Dy0 = y'(t0)).
 
-    times: A 1d numpy.ndarray of shape (N) whose i'th element holds the i'th time value. We assume 
+    t_Grid: A 1d numpy.ndarray of shape (N) whose i'th element holds the i'th time value. We assume 
     the elements of this array form an increasing sequence.
 
 
@@ -351,7 +347,7 @@ def RK4(f       : callable,
 
     Two numpy.ndarray objects: D, V.
     
-    Let N = times.size and t0 = times[0]. D and V have shape N x y0.shape. The i'th row of D, V 
+    Let N = t_Grid.size and t0 = t_Grid[0]. D and V have shape N x y0.shape. The i'th row of D, V 
     represent the displacement and the velocity at time i*h, respectively. Thus,
         D[i, ...] = y_i   \approx y (t0 + i h) 
         V[i, ...] = y'_i  \approx y'(t0 + i h) 
@@ -360,13 +356,13 @@ def RK4(f       : callable,
     # First, run checks.
     assert(isinstance(y0,       numpy.ndarray)  or isinstance(y0,       torch.Tensor));
     assert(isinstance(Dy0,      numpy.ndarray)  or isinstance(Dy0,      torch.Tensor));
-    assert(isinstance(times,    numpy.ndarray));
+    assert(isinstance(t_Grid,   numpy.ndarray));
     assert(type(y0)         == type(Dy0));
-    assert(len(times.shape) == 1);
+    assert(len(t_Grid.shape) == 1);
     assert(y0.shape         == Dy0.shape);
 
     # Next, fetch N.
-    N : int = times.size;
+    N : int = t_Grid.size;
 
     # Initialize D, V.
     if(isinstance(y0, numpy.ndarray)):
@@ -382,10 +378,10 @@ def RK4(f       : callable,
     # Now, run the time stepping!
     for n in range(N - 1):
         # Fetch the current time, displacement, velocity.
-        tn  : float                         = times[n];
+        tn  : float                         = t_Grid[n];
         yn  : numpy.ndarray | torch.Tensor  = D[n, ...];
         Dyn : numpy.ndarray | torch.Tensor  = V[n, ...];
-        hn  : float                         = times[n + 1] - times[n];
+        hn  : float                         = t_Grid[n + 1] - t_Grid[n];
 
         # Compute l_1, l_2, l_3, l_4.
         l_1 = f(tn,         yn,                                 Dyn);

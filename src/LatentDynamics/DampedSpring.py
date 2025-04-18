@@ -266,9 +266,16 @@ class DampedSpring(LatentDynamics):
         we use the i'th combination of parameter values. 
 
         t_Grid: A n_param element list whose i'th entry is a 2d numpy.ndarray or torch.Tensor 
-        object of shape (n(i), n_t(i)) whose j, k entry specifies the k'th time value we want to 
-        find the latent states when we use the j'th initial conditions and the i'th set of 
-        coefficients. Each row of each array should have elements in ascending order. 
+        object. The i'th entry should either have shape (n(i), n_t(i)) or shape (n_t(i)). Use the
+        former case when we want to use different times for each initial condition and the latter
+        case when we want to use the same times for all initial conditions. 
+        
+        In the former case, the j,k array entry specifies k'th time value at which we solve for 
+        the latent state when we use the j'th initial condition and the i'th set of coefficients. 
+        Each row should be in ascending order. 
+        
+        In the latter case, the j'th entry should specify the j'th time value at which we solve for 
+        each latent state when we use the i'th combination of parameter values.
 
 
         -------------------------------------------------------------------------------------------
@@ -296,11 +303,13 @@ class DampedSpring(LatentDynamics):
         for i in range(n_param):
             assert(isinstance(IC[i], list));
             assert(len(IC[i]) == n_IC);
-            assert(len(t_Grid[i].shape) == 2);
+            assert(len(t_Grid[i].shape) == 2 or len(t_Grid[i].shape) == 1);
             for j in range(n_IC):
                 assert(len(IC[i][j].shape) == 2);
                 assert(type(coefs)          == type(IC[i][j]));
                 assert(IC[i][j].shape[1]    == self.n_z);
+                if(len(t_Grid[i].shape) == 2):
+                    assert(t_Grid[i].shape[0] == IC[i][j].shape[0]);
 
 
         # -----------------------------------------------------------------------------------------
@@ -337,16 +346,20 @@ class DampedSpring(LatentDynamics):
         # Evaluate for one combination of parameter values case.
 
         # In this case, there is just one parameter. Extract t_Grid, which has shape 
-        # (n(i), n_t(i)).
+        # (n(i), n_t(i)) or (n_t(i)).
         t_Grid  : numpy.ndarray | torch.Tensor  = t_Grid[0];
         if(isinstance(t_Grid, torch.Tensor)):
             t_Grid = t_Grid.detach().numpy();
-        n_i     : int           = t_Grid.shape[0];
-        n_t_i   : int           = t_Grid.shape[1];
+        n_t_i   : int           = t_Grid.shape[-1];
+        if(len(t_Grid.shape) == 1):
+            Same_t_Grid : bool = True;
+        else:
+            Same_t_Grid : bool = False;
         
         # coefs has shape (1, n_coefs). Each element of IC should have shape (n(i), n_z). 
         D0  : numpy.ndarray | torch.Tensor  = IC[0][0]; 
         V0  : numpy.ndarray | torch.Tensor  = IC[0][1];
+        n_i : int                           = D0.shape[0];
 
         # First, we need to extract -K, -C, and b from coefs. We know that coefs is the least 
         # squares solution to d2Z_dt2 = hstack[Z, dZdt, 1] E^T. Thus, we expect that.
@@ -370,19 +383,26 @@ class DampedSpring(LatentDynamics):
         if(isinstance(coefs, torch.Tensor)):
             f   = lambda t, z, dz_dt: b - torch.matmul(dz_dt, C.T)  - torch.matmul(z, K.T);
 
-        # Set up arrays to hold the results of each simulation.
-        if(isinstance(coefs, numpy.ndarray)):
-            D : numpy.ndarray   = numpy.empty((n_t_i, n_i, self.n_z), dtype = numpy.float32);
-            V : numpy.ndarray   = numpy.empty((n_t_i, n_i, self.n_z), dtype = numpy.float32);
-        elif(isinstance(coefs, torch.Tensor)):
-            D : torch.Tensor    = torch.empty((n_t_i, n_i, self.n_z), dtype = torch.float32);
-            V : torch.Tensor    = torch.empty((n_t_i, n_i, self.n_z), dtype = torch.float32);
-
-        # Solve the ODE forward in time. D and V should have shape (n_t, n, n_z).
-        for j in range(n_i):
-            D_j, V_j    = RK4(f = f, y0 = D0[j, :], Dy0 = V0[j, :], times = t_Grid[j, :]);
-            D[:, j, :]  = D_j;
-            V[:, j, :]  = V_j;
+        # Solve the ODE forward in time. D and V should have shape (n_t, n, n_z). If we use the 
+        # same t values for each IC, then we can exploit the fact that the latent dynamics are 
+        # autonomous to solve using each IC simultaneously. Otherwise, we need to run the latent
+        # dynamics one IC at a time. 
+        if(Same_t_Grid == True):
+            D, V = RK4(f = f, y0 = D0, Dy0 = V0, t_Grid = t_Grid);
+        else:
+            # Set up arrays to hold the results of each simulation.
+            if(isinstance(coefs, numpy.ndarray)):
+                D : numpy.ndarray   = numpy.empty((n_t_i, n_i, self.n_z), dtype = numpy.float32);
+                V : numpy.ndarray   = numpy.empty((n_t_i, n_i, self.n_z), dtype = numpy.float32);
+            elif(isinstance(coefs, torch.Tensor)):
+                D : torch.Tensor    = torch.empty((n_t_i, n_i, self.n_z), dtype = torch.float32);
+                V : torch.Tensor    = torch.empty((n_t_i, n_i, self.n_z), dtype = torch.float32);
+            
+            # Now cycle through the ICs.
+            for j in range(n_i):
+                D_j, V_j    = RK4(f = f, y0 = D0[j, :], Dy0 = V0[j, :], t_Grid = t_Grid[j, :]);
+                D[:, j, :]  = D_j;
+                V[:, j, :]  = V_j;
 
         # All done!
         return [[D, V]];
