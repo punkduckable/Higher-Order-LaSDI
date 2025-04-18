@@ -764,7 +764,7 @@ class BayesianGLaSDI:
 
 
             # Finally, create the target times.
-            t_Grid_rollout_targets.append(t_i[:n_rollout_frames_i].detach().numpy() + t_rollout_final_i*numpy.ones(n_rollout_frames_i, dtype = numpy.float32));
+            t_Grid_rollout_targets.append(t_i[:n_rollout_frames_i].detach().numpy() + (t_rollout_final_i - t_0_i)*numpy.ones(n_rollout_frames_i, dtype = numpy.float32));
 
 
         # -----------------------------------------------------------------------------------------
