@@ -278,6 +278,7 @@ class Autoencoder(torch.nn.Module):
         super().__init__();
         
         # Store information (for return purposes).
+        self.n_IC           : int       = 1;
         self.widths         : list[int] = widths;
         self.n_z            : int       = widths[-1];
         self.activation     : str       = activation;
@@ -449,8 +450,7 @@ class Autoencoder(torch.nn.Module):
             u0                  = torch.Tensor(u0).reshape((1,) + u0.shape);
 
             # Encode the IC, then map the encoding to a numpy array.
-            z0 : torch.Tensor   = self.Encode(u0);
-            z0 : numpy.ndarray  = z0.detach().numpy();
+            z0 : torch.Tensor   = self.Encode(u0).detach().numpy();
 
             # Append the new IC to the list of latent ICs
             Z0.append([z0]);
@@ -582,9 +582,10 @@ class Autoencoder_Pair(torch.nn.Module):
         # a flattened FOM frame as input).
         assert(numpy.prod(self.reshape_shape) == widths[0]);
 
-        # Fetch information about the domain/co-domain of each encoder layer.
+        # Fetch information about the domain/co-domain.
         self.widths     : list[int]     = widths
         self.n_z        : int           = widths[-1];
+        self.n_IC       : int           = 2;
 
         # Use the settings to set up the activation information for the encoder.
         self.activation : str           =  activation;

@@ -76,6 +76,7 @@ class Burgers1D(Physics):
         """
 
         # Checks
+        assert(isinstance(param_names, list));
         assert(len(param_names) == 2);
         assert('a' in param_names);
         assert('w' in param_names);
@@ -103,8 +104,8 @@ class Burgers1D(Physics):
         self.dx     = (self.x_max - self.x_min) / (self.n_x - 1);    # Spacing between grid points along the spatial axis.
         assert(self.dx > 0.);
 
-        # Set up X_Positions, which holds the spatial coordinate of each node (grid point).
-        self.X_Positions : numpy.ndarray = numpy.linspace(self.x_min, self.x_max, self.n_x, dtype = numpy.float32).reshape(-1, 1);
+        # Set up X_Positions. For the Burgers1D class, X_Positions is 1D and has shape (n_x).
+        self.X_Positions : numpy.ndarray = numpy.linspace(self.x_min, self.x_max, self.n_x, dtype = numpy.float32);
 
         # ???
         self.maxk                   : int   = config['burgers1d']['maxk'];                  # TODO: ??? What is this ???
@@ -149,12 +150,18 @@ class Burgers1D(Physics):
         i'th time derivative of the FOM state.
         """
 
+        # Checks.
+        assert(isinstance(param, numpy.ndarray));
+        assert(len(param.shape) == 1);
+        assert(param.shape[0]   == self.n_p);
+        
+    
         # Fetch the parameter values.
         a   : float     = param[self.a_idx];
         w   : float     = param[self.w_idx];  
 
         # Get the initial displacement.
-        u0  : numpy.ndarray     = a * numpy.exp( -((self.X_Positions.reshape(-1)) ** 2) / 2 / w / w);
+        u0  : numpy.ndarray     = a * numpy.exp( -((self.X_Positions) ** 2) / 2 / w / w);
 
         # return [u0];
 
@@ -216,7 +223,12 @@ class Burgers1D(Physics):
         t_Grid is a 1d torch.Tensor object whose i'th element holds the i'th time value at which
         we have an approximation to the FOM solution (the time value associated with X[i, ...]).
         """
+
+        assert(isinstance(param, numpy.ndarray));
+        assert(len(param.shape) == 1);
+        assert(param.shape[0]   == self.n_p);
         
+
         # Fetch the initial condition.
         u0 : numpy.ndarray = self.initial_condition(param)[0];
         

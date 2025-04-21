@@ -15,6 +15,7 @@ import  logging;
 import  numpy;
 import  torch; 
 
+from    LatentDynamics      import  LatentDynamics;
 from    SINDy               import  SINDy;
 from    DampedSpring        import  DampedSpring;
 from    ParameterSpace      import  ParameterSpace;
@@ -45,7 +46,7 @@ physics_dict    =  {'burgers1d' : Burgers1D,
 # Initialization functions
 # -------------------------------------------------------------------------------------------------
 
-def Initialize_Trainer(config : dict, restart_dict : dict = None):
+def Initialize_Trainer(config : dict, restart_dict : dict = None) -> tuple[BayesianGLaSDI, ParameterSpace, Physics, torch.nn.Module, LatentDynamics]:
     """
     Initialize a LaSDI object with a latent space model and physics object according to config 
     file. Currently only 'gplasdi' is available.
@@ -79,8 +80,24 @@ def Initialize_Trainer(config : dict, restart_dict : dict = None):
     Returns
     -----------------------------------------------------------------------------------------------
 
-    A "BayesianGLaSDI" object that has been initialized using the settings in config/is ready to 
-    begin training.
+    A five element tuple: trainer, param_space, physics, model, and latent_dynamics
+     
+    trainer: a "BayesianGLaSDI" object that has been initialized using the settings in config 
+    and is ready to begin training.
+
+    param_space: a ParameterSpace object which holds the combinations of parameters in the 
+    training and testing sets.
+     
+    physics: A Physics object that encodes the governing equation for the FOM model + allows us to
+    fetch the initial conditions for a particular combination of initial conditions.
+
+    model: The model we use to map between the FOM and ROM spaces. Specifically, the model can 
+    encode a snapshot/frame (measurement at a specific time) of the FOM solution to its 
+    corresponding ROM frame. It can also decode a ROM frame back to a FOM frame. The n_IC attribute
+    of this object must match that of latent_dynamics.
+
+    latent_dynamics: A LatentDynamics object which defines the dynamical system in model's latent
+    space. The n_IC attribute of this object must match the n_IC attribute of model.
     """
 
     # Fetch the trainer type. Note that only "gplasdi" is allowed.
@@ -100,21 +117,21 @@ def Initialize_Trainer(config : dict, restart_dict : dict = None):
     # Get the "physics" object we use to generate the fom dataset.
     physics : Physics   = Initialize_Physics(config, param_space.param_names);
 
-    # Get the Model (autoencoder). We try to learn dynamics that describe how the latent space of
+    # Get the model (autoencoder). We try to learn dynamics that describe how the latent space of
     # this model evolve over time. If we are using a restart file, then load the saved model 
     # parameters from file.
     if (restart_dict is not None):
         model_type : str    = config['model']['type'];
-        Model               = model_load_dict[model_type](restart_dict['model']);
+        model               = model_load_dict[model_type](restart_dict['model']);
     else: 
-        Model               = Initialize_Model(physics, config);
+        model               = Initialize_Model(physics, config);
 
     # Initialize the latent dynamics model. If we are using a restart file, then load the saved
     # latent dynamics from this file. 
     ld_type                 = config['latent_dynamics']['type'];
     assert(ld_type in config['latent_dynamics']);
     assert(ld_type in ld_dict);
-    latent_dynamics         = ld_dict[ld_type]( n_z             = Model.n_z, 
+    latent_dynamics         = ld_dict[ld_type]( n_z             = model.n_z, 
                                                 coef_norm_order = config['latent_dynamics']['coef_norm_order'],
                                                 Uniform_t_Grid  = physics.Uniform_t_Grid);
     if (restart_dict is not None):
@@ -122,18 +139,18 @@ def Initialize_Trainer(config : dict, restart_dict : dict = None):
 
     # Initialize the trainer object. If we are using a restart file, then load the 
     # trainer from that file.
-    trainer                 = trainer_dict[trainer_type](physics, Model, latent_dynamics, param_space, config['lasdi'][trainer_type]);
+    trainer                 = trainer_dict[trainer_type](physics, model, latent_dynamics, param_space, config['lasdi'][trainer_type]);
     if (restart_dict is not None):
         trainer.load(restart_dict['trainer']);
 
     # All done!
-    return trainer, param_space, physics, Model, latent_dynamics;
+    return trainer, param_space, physics, model, latent_dynamics;
 
 
 
 def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
     """
-    Initialize a Model (autoencoder) according to config file. 
+    Initialize a model (autoencoder) according to config file. 
     
 
     

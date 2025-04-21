@@ -85,10 +85,21 @@ class Physics:
 
         Nothing!
         """
-        
-        self.config         = config;
-        self.param_names    = param_names;
-        self.Uniform_t_Grid = Uniform_t_Grid;
+
+        # Checks
+        assert(isinstance(config, dict));
+        assert(isinstance(param_names, list));
+        assert(isinstance(Uniform_t_Grid, bool));
+
+        self.n_p            : int   = len(param_names);
+        for i in range(self.n_p):
+            assert(isinstance(param_names[i], str));
+    
+
+        # Setup.
+        self.config         : dict      = config;
+        self.param_names    : list[str] = param_names;
+        self.Uniform_t_Grid : bool      = Uniform_t_Grid;
         return;
     
 

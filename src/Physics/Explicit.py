@@ -50,6 +50,7 @@ class Explicit(Physics):
         """
 
         # Checks.
+        assert(isinstance(param_names, list));
         assert(len(param_names) == 2);
         assert('a' in param_names);
         assert('w' in param_names);
@@ -74,7 +75,7 @@ class Explicit(Physics):
         self.dx                     : float     = (self.x_max - self.x_min)/(self.n_x - 1);
         self.Frame_Shape            : list[int] = [self.n_x];                       # number of grid points along each spatial axis
 
-        # Set up X_Positions, which holds the spatial coordinate of each node (grid point).
+        # Set up X_Positions. For the Explicit class, X_Positions is 1D and has shape (n_x).
         self.X_Positions : numpy.ndarray = numpy.linspace(self.x_min, self.x_max, self.n_x, dtype = numpy.float32);
      
         # Determine which index corresponds to 'a' and 'w' (we pass an array of parameter values, 
@@ -117,12 +118,17 @@ class Explicit(Physics):
         derivative of the FOM state.
         """
 
+        # Checks.
+        assert(isinstance(param, numpy.ndarray));
+        assert(len(param.shape) == 1);
+        assert(param.shape[0]   == self.n_p);
+
         # Fetch the parameter values.
         a   : float             = param[self.a_idx];
         w   : float             = param[self.w_idx];  
 
         # Compute the initial condition and return!
-        X   : numpy.ndarray     = self.X_Positions.reshape(-1);
+        X   : numpy.ndarray     = self.X_Positions;
         u0  : numpy.ndarray     = numpy.multiply(numpy.sin(2*X), numpy.exp(-a*numpy.multiply(X, X)));
         v0  : numpy.ndarray     = numpy.multiply(-1*numpy.cos(2*X) + 0.1*w*numpy.cos(40*X), numpy.exp(-a*numpy.multiply(X, X)));
         return [u0, v0];
@@ -158,6 +164,10 @@ class Explicit(Physics):
         we have an approximation to the FOM solution (the time value associated with X[0, i, ...]).
         """
        
+        assert(isinstance(param, numpy.ndarray));
+        assert(len(param.shape) == 1);
+        assert(param.shape[0]   == self.n_p);
+
         # Fetch the parameter values.
         a   : float             = param[self.a_idx];
         w   : float             = param[self.w_idx]; 
@@ -168,7 +178,7 @@ class Explicit(Physics):
         t_Grid  : numpy.ndarray = numpy.linspace(0, t_max, n_t, dtype = numpy.float32);
 
         # Make the t, x meshgrids.
-        t_mesh, x_mesh          = numpy.meshgrid(t_Grid, self.X_Positions.reshape(-1), indexing = 'ij');
+        t_mesh, x_mesh          = numpy.meshgrid(t_Grid, self.X_Positions, indexing = 'ij');
         t_mesh                  = torch.tensor(t_mesh);         # shape (n_t, n_x)
         x_mesh                  = torch.tensor(x_mesh);         # shape (n_t, n_x)
 

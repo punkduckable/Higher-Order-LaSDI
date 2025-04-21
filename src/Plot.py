@@ -52,11 +52,13 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
                         x_grid  : numpy.ndarray, 
                         figsize : tuple[int]        = (15, 4)) -> None:
     """
-    This function plots a single fom solution, its reconstruction using model, and their 
-    difference. We assume the fom solution is SCALAR VALUED. Further, if the underlying physics
-    model requires n_IC initial conditions to initialize (n_IC'th order dynamics) then we produce
-    n_IC plots, the d'th one of which depicts the d'th derivative of the X_True and its 
-    reconstruction by model.
+    This function plots a single fom solution, its reconstruction under model, and the difference
+    between the two. We assume the fom solution is SCALAR VALUED and that the spatial portion of
+    the problem domain has just one dimension. 
+    
+    Further, if the underlying physics model requires n_IC initial conditions to initialize 
+    (n_IC'th order dynamics) then we produce n_IC plots, the d'th one of which depicts the d'th 
+    derivative of the X_True and its reconstruction by model.
 
      
 
@@ -64,9 +66,9 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    X_True: A list of torch.Tensor objects. The k'th element should be a torch.Tensor object 
-    of shape (n_t, n_x) whose i,j entry holds the value of the k'th time derivative of the fom 
-    solution at t_grid[i], x_grid[j].
+    X_True: An n_IC element list of torch.Tensor objects. The k'th element should be a torch.Tensor 
+    object of shape (n_t, n_x) whose i,j entry holds the value of the k'th time derivative of the 
+    fom solution at t_grid[i], x_grid[j].
     
     model: A model (i.e., autoencoder). We use this to map the FOM IC's (stored in Physics) to the 
     latent space using the model's encoder.
@@ -89,27 +91,26 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
     """
     
     # Run checks.
-    n_IC : int = len(X_True);
+    n_IC            : int       =  model.n_IC;
+    assert(isinstance(X_True, list));
+    assert(len(X_True)          == n_IC);
+    assert(isinstance(t_grid, numpy.ndarray));
+    assert(isinstance(x_grid, numpy.ndarray));
     assert(len(t_grid.shape)    == 1);
     assert(len(x_grid.shape)    == 1);
     n_t             : int       =  t_grid.size;
     n_x             : int       =  x_grid.size;
     assert(len(figsize)         == 2);
-
     for d in range(n_IC):
+        print("%d, %s" % (d, str(type(X_True[d]))));
+        assert(isinstance(X_True[d], torch.Tensor));
         assert(X_True[d].ndim       == 2);
         assert(X_True[d].shape[0]   == n_t);
         assert(X_True[d].shape[1]   == n_x);
 
 
-    LOGGER.info("Making a Reconstruction plot with n_t = %d and n_x = %d" % (n_t, n_x));
+    LOGGER.info("Making a Reconstruction plot with n_t = %d, n_x = %d, and n_IC = %d" % (n_t, n_x, n_IC));
 
-
-    # Reshape each element of X_Pred to have a leading dimension of 1 (the model expects 3d tensors
-    # whose leading axis corresponds to the number of parameter values. In our case, this should be
-    # one.)
-    for d in range(n_IC):
-        X_True[d] = X_True[d].reshape((1,) + X_True[d].shape);
 
     # Compute the predictions. 
     if(n_IC == 1):
@@ -119,11 +120,13 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
 
     # Map both the true and predicted solutions to numpy arrays.
     # also set up list to hold the difference between the prediction and true solutions.
-    Diff_X : list[numpy.ndarray] = [];
+    Diff_X      : list[numpy.ndarray]   = [];
+    X_True_np   : list[numpy.ndarray]   = [];
+    X_Pred_np   : list[numpy.ndarray]   = [];
     for d in range(n_IC):
-        X_True[d] = X_True[d].squeeze().numpy();
-        X_Pred[d] = X_Pred[d].squeeze().detach().numpy();
-        Diff_X.append(X_True[d] - X_Pred[d]);
+        X_True_np.append(X_True[d].squeeze().numpy());
+        X_Pred_np.append(X_Pred[d].squeeze().detach().numpy());
+        Diff_X.append(X_True_np[d] - X_Pred_np[d]);
 
 
     # Get bounds.
@@ -134,8 +137,8 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
     Diff_X_max  : list[float]   = [];
 
     for d in range(n_IC):
-        X_min.append(       min(numpy.min(X_True[d]), numpy.min(X_Pred[d])) - epsilon);
-        X_max.append(       max(numpy.max(X_True[d]), numpy.max(X_Pred[d])) + epsilon);
+        X_min.append(       min(numpy.min(X_True_np[d]), numpy.min(X_Pred_np[d])) - epsilon);
+        X_max.append(       max(numpy.max(X_True_np[d]), numpy.max(X_Pred_np[d])) + epsilon);
         Diff_X_min.append(  numpy.min(Diff_X[d]) - epsilon);
         Diff_X_max.append(  numpy.max(Diff_X[d]) + epsilon);
 
@@ -146,14 +149,14 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
         fig, ax  = plt.subplots(1, 5, width_ratios = [1, 0.05, 1, 1, 0.05], figsize = figsize);
         fig.tight_layout();
 
-        im0 = ax[0].contourf(t_grid, x_grid, X_True[d].T, levels = numpy.linspace(X_min[d], X_max[d], 200));  # Note: contourf(X, Y, Z) requires Z.shape = (Y.shape, X.shape) with Z[i, j] corresponding to Y[i] and X[j]
+        im0 = ax[0].contourf(t_grid, x_grid, X_True_np[d].T, levels = numpy.linspace(X_min[d], X_max[d], 200));  # Note: contourf(X, Y, Z) requires Z.shape = (Y.shape, X.shape) with Z[i, j] corresponding to Y[i] and X[j]
         ax[0].set_title("True");
         ax[0].set_xlabel("t");
         ax[0].set_ylabel("x");
 
         fig.colorbar(im0, cax = ax[1], format = "%0.2f", location = "left");
 
-        ax[2].contourf(t_grid, x_grid, X_Pred[d].T, levels = numpy.linspace(X_min[d], X_max[d], 200));            
+        ax[2].contourf(t_grid, x_grid, X_Pred_np[d].T, levels = numpy.linspace(X_min[d], X_max[d], 200));            
         ax[2].set_title("Prediction");
         ax[2].set_xlabel("t");
         ax[2].set_ylabel("x");

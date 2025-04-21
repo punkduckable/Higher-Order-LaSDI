@@ -105,7 +105,7 @@ class DampedSpring(LatentDynamics):
         -------------------------------------------------------------------------------------------
 
         Latent_States: An n_param (number of parameter combinations we want to calibrate) element
-        list. The i'th list element should be an n_IC element list whose j'th element is a 2d numpy 
+        list. The i'th list element should be an 2 element list whose j'th element is a 2d numpy 
         array of shape (n_t(i), n_z) whose p, q element holds the q'th component of the j'th 
         derivative of the latent state during the p'th time step (whose time value corresponds to 
         the p'th element of t_Grid) when we use the i'th combination of parameter values. 
@@ -141,8 +141,16 @@ class DampedSpring(LatentDynamics):
         assert(len(Latent_States)   == len(t_Grid));
 
         n_param : int   = len(t_Grid);
+        n_IC    : int   = 2;
+        n_z     : int   = self.n_z;
         for i in range(n_param):
-            assert(len(Latent_States[i]) == 2);
+            assert(isinstance(Latent_States[i], list));
+            assert(len(Latent_States[i]) == n_IC);
+
+            for j in range(n_IC):
+                assert(isinstance(Latent_States[i][j], torch.Tensor));
+                assert(len(Latent_States[i][j].shape)   == 2);
+                assert(Latent_States[i][j].shape[-1]    == n_z);
 
 
         # -----------------------------------------------------------------------------------------

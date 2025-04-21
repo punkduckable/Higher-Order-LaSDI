@@ -139,6 +139,8 @@ class BayesianGLaSDI:
 
         Nothing!
         """
+        
+        assert(latent_dynamics.n_IC == model.n_IC);
 
         LOGGER.info("Initializing a GPLaSDI object"); 
 
