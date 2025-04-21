@@ -155,7 +155,7 @@ class BayesianGLaSDI:
         self.n_samples              : int       = config['n_samples'];              # Number of samples to draw per coefficient per combination of parameters
         self.p_rollout_init         : float     = config['p_rollout_init'];         # The proportion of the simulated we simulate forward when computing the rollout loss.
         self.rollout_update_freq    : float     = config['rollout_update_freq'];    # We increase p_rollout after this many iterations.
-        self.dp_per_update          : float     = config['rollout_increase_amt'];   # We increase p_rollout by this much each time we increase it.
+        self.dp_per_update          : float     = config['dp_per_update'];          # We increase p_rollout by this much each time we increase it.
         self.n_iter                 : int       = config['n_iter'];                 # Number of iterations for one train and greedy sampling
         self.max_iter               : int       = config['max_iter'];               # We stop training if restart_iter goes above this number. 
         self.max_greedy_iter        : int       = config['max_greedy_iter'];        # We stop performing greedy sampling if restart_iter goes above this number.
@@ -274,7 +274,7 @@ class BayesianGLaSDI:
                 p_rollout  += self.dp_per_update;
                 p_rollout   = min(0.75, p_rollout);
 
-                LOGGER.info("p_rollout is now %d" % p_rollout);
+                LOGGER.info("p_rollout is now %f (increased %d)" % (p_rollout, self.dp_per_update));
 
                 self.timer.start("Rollout Setup");
                 t_Grid_rollout, n_rollout_frames, X_Rollout_Targets = self._rollout_setup(
