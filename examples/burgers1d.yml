@@ -4,13 +4,16 @@ lasdi:
     lr:                     0.001
     n_samples:              20
 
-    n_rollout_init:         1
-    iter_rollout_increase:  100
+    # Note that t_rollout is capped at 0.75 to ensure there are some frames to simulate forward.
+    p_rollout_init:         0.01
+    rollout_update_freq:    100
+    dp_per_update:          0.002
+
     rollout_increase_amt:   1
 
-    max_iter:               12000
-    n_iter:                 2000
-    max_greedy_iter:        12000
+    max_iter:               2000
+    n_iter:                 1000
+    max_greedy_iter:        2000
 
     loss_weights:
       recon:                1.0
