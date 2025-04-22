@@ -44,12 +44,15 @@ def average_rom(model           : torch.nn.Module,
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    model: The actual model object that we use to map the ICs into the latent space.
+    model: The actual model object that we use to map the ICs into the latent space. We assume that
+    physics, latent_dynamics, and model all have the same number of initial conditions.
 
-    physics: A "Physics" object that stores the datasets for each parameter combination. 
+    physics: A "Physics" object that stores the datasets for each parameter combination. We assume
+    that physics, latent_dynamics, and model all have the same number of initial conditions.
     
     latent_dynamics: A LatentDynamics object which describes how we specify the dynamics in the
-    model's latent space.    
+    model's latent space. We assume that physics, latent_dynamics, and model all have the same 
+    number of initial conditions.
 
     gp_list: An n_coef element list of trained GP regressor objects. The number of elements in this 
     list should match the number of columns in param_grid. The i'th element of this list is a GP 
@@ -85,10 +88,10 @@ def average_rom(model           : torch.nn.Module,
     assert(isinstance(t_Grid, list));
     assert(len(t_Grid)  == n_param);
 
-
-    # Other setup.
     n_IC    : int   = latent_dynamics.n_IC;
     n_z     : int   = latent_dynamics.n_z;
+    assert(model.n_IC       == n_IC);
+    assert(physics.n_IC     == n_IC);
 
 
     # For each parameter in param_grid, fetch the corresponding initial condition and then encode
@@ -145,12 +148,15 @@ def sample_roms(model           : torch.nn.Module,
     -----------------------------------------------------------------------------------------------
 
     model: A model (i.e., autoencoder). We use this to map the FOM IC's (stored in Physics) to the 
-    latent space using the model's encoder.
+    latent space using the model's encoder. We assume that physics, latent_dynamics, and model all 
+    have the same number of initial conditions.
 
-    physics: A "Physics" object that stores the ICs for each parameter combination. 
+    physics: A "Physics" object that stores the ICs for each parameter combination. We assume that 
+    physics, latent_dynamics, and model all have the same number of initial conditions.
     
     latent_dynamics: A LatentDynamics object which describes how we specify the dynamics in the
-    model's latent space. We use this to simulate the latent dynamics forward in time.
+    model's latent space. We use this to simulate the latent dynamics forward in time. We assume
+    that physics, latent_dynamics, and model all have the same number of initial conditions.
 
     gp_list: An n_coef element list of trained GP regressor objects whose i'th element is a GP
     regressor object that predicts the i'th coefficient. 
@@ -186,18 +192,18 @@ def sample_roms(model           : torch.nn.Module,
 
     assert(isinstance(param_grid, numpy.ndarray));
     assert(len(param_grid.shape)    == 2);
-    n_param : int                   = param_grid.shape[0];
-    n_p     : int                   = param_grid.shape[1];
+    n_param     : int               = param_grid.shape[0];
+    n_p         : int               = param_grid.shape[1];
 
     assert(len(t_Grid)              == n_param);
     for i in range(n_param):
         assert(isinstance(t_Grid[i], numpy.ndarray) or isinstance(t_Grid[i], torch.Tensor));
 
-
-    # Setup 
-    n_coef      : int = len(gp_list);
-    n_IC        : int = latent_dynamics.n_IC;
-    n_z         : int = model.n_z;
+    n_coef      : int               = len(gp_list);
+    n_IC        : int               = latent_dynamics.n_IC;
+    n_z         : int               = model.n_z;
+    assert(physics.n_IC             == n_IC);
+    assert(model.n_IC               == n_IC);
 
 
     # Make each element of t_Grid into a numpy.ndarray of shape (1, n_t(i)). This is what 

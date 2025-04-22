@@ -15,6 +15,8 @@ import  logging;
 import  numpy;
 import  torch; 
 
+import  Burgers;
+import  BurgersSecondOrder;
 from    LatentDynamics      import  LatentDynamics;
 from    SINDy               import  SINDy;
 from    DampedSpring        import  DampedSpring;
@@ -22,7 +24,6 @@ from    ParameterSpace      import  ParameterSpace;
 from    GPLaSDI             import  BayesianGLaSDI;
 from    Model               import  Autoencoder, load_Autoencoder, Autoencoder_Pair, load_Autoencoder_Pair;
 from    Physics             import  Physics;
-from    Burgers1d           import  Burgers1D;
 from    Explicit            import  Explicit;
 
 # Set up logger.
@@ -30,15 +31,16 @@ LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
 # Set up the dictionaries; we use this to allow the code to call different classes, functions 
 # depending on the settings.
-trainer_dict    =  {'gplasdi'   : BayesianGLaSDI};
-model_dict      =  {'ae'        : Autoencoder,
-                    'pair'      : Autoencoder_Pair};
-model_load_dict =  {'ae'        : load_Autoencoder,
-                    'pair'      : load_Autoencoder_Pair};
-ld_dict         =  {'sindy'     : SINDy, 
-                    'spring'    : DampedSpring};
-physics_dict    =  {'burgers1d' : Burgers1D,
-                    'explicit'  : Explicit};
+trainer_dict    =  {'gplasdi'               : BayesianGLaSDI};
+model_dict      =  {'ae'                    : Autoencoder,
+                    'pair'                  : Autoencoder_Pair};
+model_load_dict =  {'ae'                    : load_Autoencoder,
+                    'pair'                  : load_Autoencoder_Pair};
+ld_dict         =  {'sindy'                 : SINDy, 
+                    'spring'                : DampedSpring};
+physics_dict    =  {'Burgers'               : Burgers.Burgers,
+                    'BurgersSecondOrder'    : BurgersSecondOrder.Burgers,
+                    'Explicit'              : Explicit};
 
 
 

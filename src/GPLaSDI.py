@@ -25,7 +25,7 @@ from    Timing                      import  Timer;
 from    ParameterSpace              import  ParameterSpace;
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
-from    Simulate                    import  get_FOM_max_std;
+from    SolveROMs                   import  get_FOM_max_std;
 from    FiniteDifference            import  Derivative1_Order4, Derivative2_Order2_NonUniform;
 
 
@@ -140,7 +140,10 @@ class BayesianGLaSDI:
         Nothing!
         """
         
-        assert(latent_dynamics.n_IC == model.n_IC);
+        # Checks.
+        n_IC    : int           = latent_dynamics.n_IC;
+        assert(model.n_IC       == n_IC);
+        assert(physics.n_IC     == n_IC);
 
         LOGGER.info("Initializing a GPLaSDI object"); 
 

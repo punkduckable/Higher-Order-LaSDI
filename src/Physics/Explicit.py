@@ -69,6 +69,7 @@ class Explicit(Physics):
         assert('explicit' in config);
 
         # Set up spatial variables
+        self.n_IC                   : int       = 2;
         self.n_x                    : int       = config['explicit']['n_x'];    
         self.x_min                  : float     = config['explicit']['x_min'];
         self.x_max                  : float     = config['explicit']['x_max'];

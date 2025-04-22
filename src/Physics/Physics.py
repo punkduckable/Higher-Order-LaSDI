@@ -48,6 +48,10 @@ class Physics:
     # This allows us to use higher order finite difference schemes, for instance. 
     Uniform_t_Grid  : bool          = False;
 
+    # How many derivatives of the initial state do we need to fully specify the initial condition
+    # of the Physics?
+    n_IC            : int           = -1;
+
 
 
 
@@ -171,8 +175,9 @@ class Physics:
         effectively serialize self.
         """
 
-        dict_ : dict = {'config'        : self.config, 
-                        'param_names'   : self.param_names};
+        dict_ : dict = {'config'            : self.config, 
+                        'param_names'       : self.param_names,
+                        'Uniform_t_Grid'    : self.Uniform_t_Grid};
         return dict_;
     
 

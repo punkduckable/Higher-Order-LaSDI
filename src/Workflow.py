@@ -270,10 +270,16 @@ def Save(   param_space         : ParameterSpace,
     combinations during training.
     
     physics: The Physics object we use to define the fom model, fetch initial conditions, and 
-    generate fom solutions.
+    generate fom solutions. We assume that physics, latent_dynamics, and model all have the same 
+    number of initial conditions.
+
+    model: The torch.nn.Module object (autoencoder) we use to map between the FOM and ROM spaces.
+    We assume that physics, latent_dynamics, and model all have the same number of initial 
+    conditions.
 
     latent_dynamics: the LatentDynamics object we use to define the dynamics in model's latent 
-    space.
+    space. We assume that physics, latent_dynamics, and model all have the same number of initial 
+    conditions.
 
     trainer: The LaSDI object we use to train model using the data from physics and dynamics from
     latent_dynamics.
@@ -295,6 +301,12 @@ def Save(   param_space         : ParameterSpace,
 
     Nothing!
     """
+
+    # Checks.
+    n_IC    : int   = latent_dynamics.n_IC;
+    assert(model.n_IC       == n_IC);
+    assert(physics.n_IC     == n_IC);
+
 
     # Save restart (or final) file.
     date        = time.localtime();

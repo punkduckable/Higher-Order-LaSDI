@@ -422,7 +422,8 @@ class Autoencoder(torch.nn.Module):
         parameters.
 
         physics: A "Physics" object that, among other things, stores the IC for each combination of 
-        parameter values.
+        parameter values. This physics object should have the same number of initial conditions as 
+        self.
 
 
         -------------------------------------------------------------------------------------------
@@ -437,6 +438,9 @@ class Autoencoder(torch.nn.Module):
         If we let U0_i denote the FOM IC for the i'th set of parameters, then the i'th element of 
         the returned list is [self.encoder(U0_i)].
         """
+
+        # Checks.
+        assert(physics.n_IC     == self.n_IC);
 
         # Figure out how many combinations of parameter values there are.
         n_param     : int                   = param_grid.shape[0];
@@ -765,7 +769,8 @@ class Autoencoder_Pair(torch.nn.Module):
         values.
 
         physics: A "Physics" object that, among other things, allows us to calculate the IC for 
-        each combination of parameter values.
+        each combination of parameter values. This physics object should have the same number of 
+        initial conditions as self.
 
 
         -------------------------------------------------------------------------------------------
@@ -781,6 +786,9 @@ class Autoencoder_Pair(torch.nn.Module):
         combination of parameter values, then the i'th element of the returned list is the list 
         [self.encoder(U0_i, V0_i)[0], self.encoder(U0_i, V0_i)[1]].
         """
+
+        # Checks
+        assert(self.n_IC        == physics.n_IC);
 
         # Figure out how many combinations of parameter values there are.
         n_param     : int                   = param_grid.shape[0];
