@@ -169,6 +169,7 @@ def sample_coefs(   gp_list     : list[GaussianProcessRegressor],
     # Checks.
     assert(isinstance(gp_list, list));
     assert(isinstance(Input, numpy.ndarray));
+    assert(isinstance(n_samples, int));
     assert(len(Input.shape) == 1);
 
     # Setup.

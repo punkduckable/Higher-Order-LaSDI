@@ -102,7 +102,6 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
     n_x             : int       =  x_grid.size;
     assert(len(figsize)         == 2);
     for d in range(n_IC):
-        print("%d, %s" % (d, str(type(X_True[d]))));
         assert(isinstance(X_True[d], torch.Tensor));
         assert(X_True[d].ndim       == 2);
         assert(X_True[d].shape[0]   == n_t);
@@ -412,13 +411,30 @@ def Plot_GP2d(  p1_mesh         : numpy.ndarray,
     """
     
     # Checks
+    assert(isinstance(p1_mesh, numpy.ndarray));
+    assert(isinstance(p2_mesh, numpy.ndarray));
+    assert(isinstance(gp_mean, numpy.ndarray));
+    assert(isinstance(gp_std, numpy.ndarray));
+    assert(isinstance(param_train, numpy.ndarray));
+    assert(isinstance(param_names, list));
+    
     assert(p1_mesh.ndim         == 2);
     assert(p2_mesh.ndim         == 2);
+    assert(p1_mesh.shape        == p2_mesh.shape);
+    n1  : int   = p1_mesh.shape[0];
+    n2  : int   = p1_mesh.shape[1];
+    
     assert(gp_mean.ndim         == 3);
     assert(gp_std.ndim          == 3);
-    assert(param_train.ndim     == 2);
     assert(gp_mean.shape        == gp_std.shape);
+    assert(gp_mean.shape[0]     == n1);
+    assert(gp_mean.shape[1]     == n2);
+
+    assert(param_train.ndim     == 2);
     assert(len(param_names)     == 2);
+    for i in range(2):
+        assert(isinstance(param_names[i], str));
+    
 
     # First, determine how many coefficients there are.
     n_coef : int = gp_mean.shape[-1];   
@@ -556,10 +572,11 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     values: A 2d numpy ndarray object of shape (n1, n2), where n1 and n2 are the length of p1_grid
     and p2_grid, respectively (the number of p1, p2 values).
 
-    p1_grid: The set of possible values for the p1 parameter. This should be a 1d numpy ndarray 
-    whose i'th value holds the i'th value for the p1 parameter.
+    p1_grid: This is a numpy.ndarray of shape (n1) that holds the set of possible values for p1.
+    Specifically, the i'th element should hold the i'th value for the p1 parameter. 
 
-    p2_grid: The same thing as p1_grid, but for the p2 parameter. 
+    p2_grid: This is a numpy.ndarray of shape (n2) that holds the set of possible values for p2.
+    Specifically, the i'th element should hold the i'th value for the p2 parameter. 
 
     param_train: A 2d array of shape (n_train, 2) whose i, j element holds the value of the 
     j'th parameter when we use the i'th combination of testing parameters. We assume the first 
@@ -584,10 +601,15 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     """
 
     # Checks.
+    assert(isinstance(values, numpy.ndarray));
+    assert(isinstance(p1_grid, numpy.ndarray));
+    assert(isinstance(p2_grid, numpy.ndarray));
+
     assert(p1_grid.ndim     == 1);
     assert(p2_grid.ndim     == 1);
     assert(values.ndim      == 2);
     assert(param_train.ndim == 2);
+
     assert(len(figsize)     == 2);
     assert(len(param_names) == 2);
 
@@ -595,6 +617,7 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     n_p2    : int = len(p2_grid);
     assert(values.shape[0] == n_p1);
     assert(values.shape[1] == n_p2);
+    assert(param_train.shape[1]     == 2);
 
     # Setup.
     n_train : int   = param_train.shape[0];
