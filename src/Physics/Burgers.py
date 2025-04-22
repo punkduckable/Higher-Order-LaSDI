@@ -20,30 +20,12 @@ import  torch;
 from    Physics             import  Physics;
 
 
-######## REMOVE ME   ||
-######## REMOVE ME   ||
-######## REMOVE ME   ||
-######## REMOVE ME  \  /
-######## REMOVE ME   \/
-
-import  sys;
-import  os;
-Utilities_Path  : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
-sys.path.append(Utilities_Path);
-from    FiniteDifference    import  Derivative1_Order4;
-
-######## REMOVE ME   /\
-######## REMOVE ME  /  \
-######## REMOVE ME   ||
-######## REMOVE ME   ||
-######## REMOVE ME   ||
-
 
 # -------------------------------------------------------------------------------------------------
-# Burgers 1D class
+# Burgers class
 # -------------------------------------------------------------------------------------------------
 
-class Burgers1D(Physics):
+class Burgers(Physics):
     # Class variables
     a_idx = None; # parameter index for a
     w_idx = None; # parameter index for w
@@ -87,29 +69,28 @@ class Burgers1D(Physics):
                          Uniform_t_Grid = True);
 
         # The solution to Burgers' equation is scalar valued, so the qdim is 1. Likewise, since 
-        # there is only one spatial dimension in the 1D burgers example, dim is also 1.
+        # there is only one spatial dimension in the 1D Burgers example, dim is also 1.
         self.qdim           : int   = 1;
         self.spatial_dim    : int   = 1;
         
         # Make sure the config dictionary is actually for Burgers' equation.
-        assert('burgers1d' in config);
+        assert('Burgers' in config);
 
-        # Fetch variables from config. 
-        self.n_x                    : int       = config['burgers1d']['n_x'];
-        self.Frame_Shape            : list[int] = [self.n_x];                       # number of grid points along each spatial axis
-
-        # Fetch more variables from the config.
-        self.x_min  = config['burgers1d']['x_min'];   # Minimum value of the spatial variable in the problem domain
-        self.x_max  = config['burgers1d']['x_max'];   # Maximum value of the spatial variable in the problem domain
-        self.dx     = (self.x_max - self.x_min) / (self.n_x - 1);    # Spacing between grid points along the spatial axis.
+        # Other setup
+        self.n_IC           : int       = 1;
+        self.n_x            : int       = config['Burgers']['n_x'];
+        self.Frame_Shape    : list[int] = [self.n_x];                                   # number of grid points along each spatial axis
+        self.x_min          : float     = config['Burgers']['x_min'];                   # Minimum value of the spatial variable in the problem domain
+        self.x_max          : float     = config['Burgers']['x_max'];                   # Maximum value of the spatial variable in the problem domain
+        self.dx             : float     = (self.x_max - self.x_min) / (self.n_x - 1);   # Spacing between grid points along the spatial axis.
         assert(self.dx > 0.);
 
-        # Set up X_Positions. For the Burgers1D class, X_Positions is 1D and has shape (n_x).
+        # Set up X_Positions. For the Burgers class, X_Positions is 1D and has shape (n_x).
         self.X_Positions : numpy.ndarray = numpy.linspace(self.x_min, self.x_max, self.n_x, dtype = numpy.float32);
 
         # ???
-        self.maxk                   : int   = config['burgers1d']['maxk'];                  # TODO: ??? What is this ???
-        self.convergence_threshold  : float = config['burgers1d']['convergence_threshold'];
+        self.maxk                   : int   = config['Burgers']['maxk'];                  # TODO: ??? What is this ???
+        self.convergence_threshold  : float = config['Burgers']['convergence_threshold'];
 
         # Determine which index corresponds to 'a' and 'w' (we pass an array of parameter values, 
         # we need this information to figure out which element corresponds to which variable).
@@ -125,12 +106,10 @@ class Burgers1D(Physics):
         """
         Evaluates the initial condition along the spatial grid. For this class, we use the 
         following initial condition:
+
             u(0, x) = a*exp(-x^2 / (2*w^2))
+
         where a and w are the corresponding parameter values.
-
-        We also compute the velocity IC by solving forward a few time steps and the computing the 
-        time derivative using finite differences.
-
 
         -------------------------------------------------------------------------------------------
         Arguments
@@ -145,9 +124,9 @@ class Burgers1D(Physics):
         Returns 
         -------------------------------------------------------------------------------------------
 
-        A two element list of 1d numpy.ndarray objects, each of shape length self.n_x (the number 
-        of grid points along the spatial axis). The i'th element holds the initial state of the 
-        i'th time derivative of the FOM state.
+        A single element list whose only element is a numpy.ndarray object with the same shape 
+        as self.X_Positions. The i'th component of this array holds the value of the initial state
+        at x = self.X_Positions[i].
         """
 
         # Checks.
@@ -163,37 +142,8 @@ class Burgers1D(Physics):
         # Get the initial displacement.
         u0  : numpy.ndarray     = a * numpy.exp( -((self.X_Positions) ** 2) / 2 / w / w);
 
-        # return [u0];
+        return [u0];
 
-        #"""
-        ######## REMOVE ME   ||
-        ######## REMOVE ME   ||
-        ######## REMOVE ME   ||
-        ######## REMOVE ME  \  /
-        ######## REMOVE ME   \/
-
-        # Calculate dt.
-        n_t     : int           = self.config['burgers1d']['n_t'];
-        t_max   : float         = self.config['burgers1d']['t_max']; 
-        dt      : float         = t_max/(n_t - 1);
-
-        # Solve forward a few time steps.
-        D       : numpy.ndarray         = solver(u0, self.maxk, self.convergence_threshold, 5, self.n_x, dt, self.dx);
-        V       : numpy.ndarray         = Derivative1_Order4(torch.Tensor(D), h = dt);
-        
-        # Get the ICs from the solution.
-        u0                              = D[0, :];
-        v0                              = V[0, :];
-            
-        # All done!
-        return [u0, v0];
-    
-        ######## REMOVE ME   /\
-        ######## REMOVE ME  /  \
-        ######## REMOVE ME   ||
-        ######## REMOVE ME   ||
-        ######## REMOVE ME   ||
-        #"""
 
 
     def solve(self, param : numpy.ndarray) -> tuple[list[torch.Tensor], torch.Tensor]:
@@ -216,9 +166,10 @@ class Burgers1D(Physics):
         
         A two element tuple: X, t_Grid.
 
-        X is a 2 element list holding the displacement and velocity of the FOM solution when we 
-        use param. Each element is a torch.Tensor object of shape (n_t, self.Frame_Shape), where 
-        n_t is the number of time steps when we solve the FOM using param for the IC parameters.
+        X is a single element list whose only element is a torch.Tensor object of shape 
+        (n_t, self.Frame_Shape) holding the FOM solution when we use param to define the initial
+        condition function. Specifically, the [i, ...] sub-array of the returned array holds the 
+        FOM solution at t_Grid[i].
 
         t_Grid is a 1d torch.Tensor object whose i'th element holds the i'th time value at which
         we have an approximation to the FOM solution (the time value associated with X[i, ...]).
@@ -238,36 +189,10 @@ class Burgers1D(Physics):
         dt      : float         = t_max/(n_t - 1);
         t_Grid  : torch.Tensor  = torch.linspace(0, t_max, n_t, dtype = torch.float32);
 
-        """
         # Solve the PDE and then reshape the result to be a 3d tensor with a leading dimension of 
         # size 1.
         X       : torch.Tensor          = torch.Tensor(solver(u0, self.maxk, self.convergence_threshold, n_t - 1, self.n_x, dt, self.dx));        
         new_X   : list[torch.Tensor]    = [X.reshape(1, n_t, self.n_x)];
-        """
-
-        #"""
-        ######## REMOVE ME   ||
-        ######## REMOVE ME   ||
-        ######## REMOVE ME   ||
-        ######## REMOVE ME  \  /
-        ######## REMOVE ME   \/
-    
-        # Solve the PDE and then reshape the result to be a 3d tensor with a leading dimension of 
-        # size 1.
-        X       : torch.Tensor  = torch.Tensor(solver(u0, self.maxk, self.convergence_threshold, n_t - 1, self.n_x, dt, self.dx));
-        V       : torch.Tensor  = Derivative1_Order4(X, h = dt);
-        
-        X       : torch.Tensor  = X.reshape(n_t, self.n_x);
-        V       : torch.Tensor  = V.reshape(n_t, self.n_x);
-
-        new_X   : list[torch.Tensor]    = [X, V];
-
-        ######## REMOVE ME   /\
-        ######## REMOVE ME  /  \
-        ######## REMOVE ME   ||
-        ######## REMOVE ME   ||
-        ######## REMOVE ME   ||
-        #"""
 
         # All done!
         return new_X, t_Grid;
