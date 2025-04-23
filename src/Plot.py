@@ -20,7 +20,7 @@ from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
 from    Model                       import  Autoencoder, Autoencoder_Pair;
-from    Simulate                    import  sample_roms;
+from    SolveROMs                   import  sample_roms;
 
 
 # Set up the logger
@@ -180,7 +180,8 @@ def Plot_Prediction(model           : torch.nn.Module,
                     gp_list         : list[GaussianProcessRegressor], 
                     param_grid      : numpy.ndarray, 
                     n_samples       : int, 
-                    X_True          : list[numpy.ndarray], 
+                    X_True          : list[list[torch.Tensor]],
+                    t_Grid          : list[torch.Tensor],
                     figsize         : tuple[int]        = (14, 8))            -> None:
     """
     This function plots the mean and std (as a function of t, x) prediction of each derivative of
@@ -194,30 +195,37 @@ def Plot_Prediction(model           : torch.nn.Module,
     -----------------------------------------------------------------------------------------------
 
     model: A model (i.e., autoencoder). We use this to map the FOM IC's (stored in Physics) to the 
-    latent space using the model's encoder.
+    latent space using the model's encoder. We assume that model, physics, and latent_dynamics all 
+    have the same number of initial conditions. We assume that model.X_Position is a 1D array 
+    (i.e., we assume there is only one spatial dimension).
 
-    physics: A "Physics" object that stores the ICs for each parameter combination. 
+    physics: A "Physics" object that stores the ICs for each parameter combination. We assume that
+    model, physics, and latent_dynamics all have the same number of initial conditions.
     
     latent_dynamics: A LatentDynamics object which describes how we specify the dynamics in the
-    model's latent space. We use this to simulate the latent dynamics forward in time.
+    model's latent space. We use this to simulate the latent dynamics forward in time. We assume 
+    that model, physics, and latent_dynamics all have the same number of initial conditions.
 
     gp_list: a list of trained GP regressor objects. The number of elements in this list should 
     match the number of columns in param_grid. The i'th element of this list is a GP regressor 
     object that predicts the i'th coefficient. 
 
-    param_grid: A 2d numpy.ndarray object of shape (number of parameter combination, number of 
-    parameters). The i,j element of this array holds the value of the j'th parameter in the i'th 
-    combination of parameters. 
+    param_grid: A 2d numpy.ndarray object of shape (n_param, n_p) where n_p is the number of
+    parameters and n_param is the number of combinations of parameter values. The i,j element of 
+    this array holds the value of the j'th parameter in the i'th combination of parameters. 
 
     n_samples: The number of samples we want to draw from each posterior distribution for each 
     coefficient evaluated at each combination of parameter values.
 
-    X_True: A list of n_IC (where n_IC is the number of IC's needed to initialize the latent 
-    dynamics. This should also be latent_dynamics.n_IC). The d'th element should be a numpy ndarray 
-    object of shape (n_t, n_x), where n_t is the number of points we use to discretize the spatial
-    axis of the fom solution domain. The i,j element of the d'th element of X_True should hold 
-    the d'th derivative of the fom solution at the i'th time value and j'th spatial position.
-    
+    X_True: An n_param element list whose i'th element is an n_IC element list whose j'th element 
+    is a 2d torch.Tensor object of shape (n_t(i), n_x) whose p, q element holds the j'th 
+    derivative of the FOM solution at time t_Grid[i][p] and position physics.X_Positions[q] when
+    we use the i'th combination of parameter values to define the initial condition for the FOM.
+
+    t_Grid: A n_param element list whose i'th entry is an torch.Tensor object of shape (n_t(i))
+    whose p'th specifies the p'th time value we want to find the latent states when the initial 
+    condition uses the i'th combination of parameter values.
+
     figsize: a two element array specifying the width and height of the figure.
 
     
@@ -229,122 +237,171 @@ def Plot_Prediction(model           : torch.nn.Module,
     Nothing!
     """
 
+    # Run checks
+    assert(isinstance(X_True, list));
+    n_IC    : int   = latent_dynamics.n_IC;
+    n_param : int   = param_grid.shape[0];
+    n_p     : int   = param_grid.shape[1];
+    assert(model.n_IC                       == n_IC);
+    assert(physics.n_IC                     == n_IC);
+    assert(len(physics.X_Positions.shape)   == 1);
+    n_x : int = physics.X_Positions.shape[0];
+
+    assert(isinstance(t_Grid, list));
+    assert(len(t_Grid)  == n_param);
+    assert(len(X_True)  == n_param);
+    for i in range(n_param):
+        assert(isinstance(t_Grid[i], torch.Tensor));
+        assert(len(t_Grid[i].shape) == 1);
+        n_t_i : int = t_Grid[i].shape[0];
+    
+        assert(isinstance(X_True[i], list));
+        assert(len(X_True[i]) == n_IC);
+        for j in range(n_IC):
+            assert(isinstance(X_True[i][j], torch.Tensor));
+            assert(len(X_True[i][j].shape)  == 2);
+            assert(X_True[i][j].shape[0]    == n_t_i);
+            assert(X_True[i][j].shape[1]    == n_x);
+
+
+
     # ---------------------------------------------------------------------------------------------
     # Find the predicted solutions
     # ---------------------------------------------------------------------------------------------
 
-    # First generate the latent trajectories. Z is a list of n_IC arrays, each one of which is a 
-    # 4d array of shape (n_params, n_samples, n_t, n_z). Here, n_param is the number of 
-    # combinations of parameter values.
-    Latent_Trajectories : list[torch.Tensor] = sample_roms( 
-                                                model           = model, 
-                                                physics         = physics, 
-                                                latent_dynamics = latent_dynamics, 
-                                                gp_list         = gp_list, 
-                                                param_grid      = param_grid,
-                                                n_samples       = n_samples);
+    # First generate the latent trajectories. This is a an n_param element list whose i'th element
+    # is an n_IC element list whose j'th element is a 3d array of shape (n_t(i), n_samples, n_z). 
+    # Here, n_param is the number of combinations of parameter values.
+    LOGGER.info("Solving the latent dynamics using %d samples of the posterior distributions for %d combinations of parameter values" % (n_samples, n_param));
+    Latent_Trajectories : list[list[numpy.ndarray]] = sample_roms( 
+                                                        model           = model, 
+                                                        physics         = physics, 
+                                                        latent_dynamics = latent_dynamics, 
+                                                        gp_list         = gp_list, 
+                                                        param_grid      = param_grid,
+                                                        t_Grid          = t_Grid,
+                                                        n_samples       = n_samples);
 
-    # Make sure Z consists of a list of n_IC element.
-    n_IC : int = latent_dynamics.n_IC;
-    assert(len(Latent_Trajectories) == n_IC);
+    # Select one parameter combination to keep.
+    assert(len(Latent_Trajectories) == n_param);
+    n_z         : int           = model.n_z;
+    x_grid      : numpy.ndarray = physics.X_Positions; 
+    for i in range(n_param):
+        # ---------------------------------------------------------------------------------------------
+        # Checks
 
-    # Fetch latent dimension.
-    n_z : int = model.n_z;
-    LOGGER.info("Computing mean/std of predictions. The Latent Trajectories have a shape of (n_params, n_samples, n_t, n_z) = %s" % str(Latent_Trajectories[0].shape));
+        Latent_Trajectories_i_np    : list[numpy.ndarray]   = Latent_Trajectories[i];
+        X_True_i                    : list[torch.Tensor]    = X_True[i];
+        t_grid_i_np                 : numpy.ndarray         = t_Grid[i].detach().numpy();
 
-    # Only keep the predicted solutions when we use the first parameter value. Note that each
-    # element of Latent_Trajectories has shape (n_samples, n_t, n_z). Also map everything to 
-    # tensors.
-    for d in range(n_IC):
-        Latent_Trajectories[d] = torch.Tensor(Latent_Trajectories[d][0, :, :, :]);
+        # Checks.
+        assert(len(Latent_Trajectories_i_np) == n_IC);
+        assert(isinstance(Latent_Trajectories_i_np[0], numpy.ndarray));
+        assert(len(Latent_Trajectories_i_np[0].shape) == 3);
+        n_t_i : int     = Latent_Trajectories_i_np[0].shape[0];
 
-    # Now generate the predictions.
-    X_Pred = model.Decode(*Latent_Trajectories);
-    if(n_IC == 1):
-        X_Pred  : list[torch.Tensor]    = [X_Pred];
-    else:
-        X_Pred  : list[torch.Tensor]    = list(X_Pred);
-    assert(len(X_Pred) == n_IC);
-    LOGGER.debug("Predictions have shape %s" % str(X_Pred[0].shape));
+        for j in range(n_IC):
+            assert(isinstance(Latent_Trajectories_i_np[j], numpy.ndarray));
+            assert(len(Latent_Trajectories_i_np[j].shape) == 3);
+            assert(Latent_Trajectories_i_np[j].shape[0] == n_t_i);
+            assert(Latent_Trajectories_i_np[j].shape[1] == n_samples);
+            assert(Latent_Trajectories_i_np[j].shape[2] == n_z);
 
-    # Compute the mean, std of the predictions across the samples.
-    X_pred_mean : list[numpy.ndarray] = [];
-    X_pred_std  : list[numpy.ndarray] = [];
-    for d in range(n_IC):
-        X_Pred[d]       = X_Pred[d].detach().numpy();       # X_Pred[i] has shape (n_samples, n_t, n_z).
-        X_pred_mean.append( numpy.mean( X_Pred[d], 0));     # X_pred_mean[i] has shape (n_t, n_z).
-        X_pred_std.append(  numpy.std(  X_Pred[d], 0));
-
-    # Compute the solution residual (this will tell us how well the predicted solution satisfies 
-    # the underlying equation).
-    r, _ = physics.residual(X_pred_mean);
-
-    t_grid  : numpy.ndarray = physics.t_grid;
-    x_grid  : numpy.ndarray = physics.x_grid;
-    if (x_grid.ndim > 1):
-        raise RuntimeError('plot_prediction supports only 1D physics!');
+        LOGGER.info("Computing mean/std of predictions for combination number %d." % i);
+        LOGGER.info("The Latent Trajectories combination number %d has shape (n_t(%d), n_samples, n_z) = %s" % (i, i, str(Latent_Trajectories_i_np[0].shape)));
 
 
+        # ---------------------------------------------------------------------------------------------
+        # Generate the predictions
 
-    # ---------------------------------------------------------------------------------------------
-    # Plot!!!!
-    # ---------------------------------------------------------------------------------------------
+        # Map the latent trajectories to a list of tensors.
+        Latent_Trajectories_i   : list[torch.Tensor] = [];
+        for j in range(n_IC):
+            Latent_Trajectories_i.append(torch.Tensor(Latent_Trajectories_i_np[j]));
 
-    for d in range(n_IC):
-        LOGGER.debug("Generating plots for derivative %d" % d);
-        plt.figure(figsize = figsize);
-
-        # Plot each component of the d'th derivative of the latent state over time (across the 
-        # samples of the latent coefficients)
-        plt.subplot(231);
-        for s in range(n_samples):
-            for i in range(n_z):
-                plt.plot(t_grid, Latent_Trajectories[d][s, :, i], 'C' + str(i), alpha = 0.3);
-        plt.title('Latent Space');
-
-        # Plot the mean of the d'th derivative of the fom solution.
-        plt.subplot(232);
-        plt.contourf(t_grid, x_grid, X_pred_mean[d].T, 100, cmap = plt.cm.jet);   # Note: contourf(X, Y, Z) requires Z.shape = (Y.shape, X.shape) with Z[i, j] corresponding to Y[i] and X[j].
-        plt.colorbar();
-        plt.xlabel("t");
-        plt.ylabel("x");
-        plt.title('Decoder Mean Prediction');
+        # Decode the latent predictions, one sample at a time.
+        X_Pred_i        : list[torch.Tensor]    = [];
+        for j in range(n_IC):
+            X_Pred_i.append(torch.empty((n_t_i, n_samples, n_x), dtype = torch.float32));
         
-        # Plot the std of the d'th derivative of the fom solution.
-        plt.subplot(233);
-        plt.contourf(t_grid, x_grid, X_pred_std[d].T, 100, cmap = plt.cm.jet);
-        plt.colorbar();
-        plt.xlabel("t");
-        plt.ylabel("x");
-        plt.title('Decoder Standard Deviation');
+        for j in range(n_samples):
+            Latent_Trajectories_ij   : list[torch.Tensor] = [];
+            for k in range(n_IC):
+                Latent_Trajectories_ij.append(Latent_Trajectories_i[k][:, j, :]);
+            
+            X_Pred_ij   : torch.Tensor | list[torch.Tensor] = model.Decode(*Latent_Trajectories_ij);
+            if(n_IC == 1):
+                X_Pred_i[0][:, j, :] = X_Pred_ij
+            else:
+                for k in range(n_IC):
+                    X_Pred_i[k][:, j, :] = X_Pred_ij[k];
 
-        # Plot the d'th derivative of the true fom solution.
-        plt.subplot(234);
-        plt.contourf(t_grid, x_grid, X_True[d].T, 100, cmap = plt.cm.jet);
-        plt.colorbar();
-        plt.xlabel("t");
-        plt.ylabel("x");
-        plt.title('Ground Truth');
+        # Map the predictions and targets to numpy arrays (the plotting functions require this!)
+        X_Pred_i_np : list[numpy.ndarray] = [];
+        X_True_i_np : list[numpy.ndarray] = [];
+        for j in range(n_IC):
+            X_Pred_i_np.append(X_Pred_i[j].detach().numpy());
+            X_True_i_np.append(X_True_i[j].detach().numpy());
 
-        # Plot the error between the mean predicted d'th derivative and the true d'th derivative of
-        # the fom solution.
-        plt.subplot(235);
-        error = numpy.abs(X_True[d] - X_pred_mean[d]);
-        plt.contourf(t_grid, x_grid, error.T, 100, cmap = plt.cm.jet);
-        plt.colorbar();
-        plt.xlabel("t");
-        plt.ylabel("x");
-        plt.title('Absolute Error');
 
-        # Finally, plot the residual.
-        plt.subplot(236);
-        plt.contourf(t_grid, x_grid, r.T, 100, cmap = plt.cm.jet);
-        plt.colorbar();
-        plt.xlabel("t");
-        plt.ylabel("x");
-        plt.title('Residual');
+        # Compute the mean, std of the predictions across the samples.
+        X_pred_i_mean_np : list[numpy.ndarray] = [];
+        X_pred_i_std_np : list[numpy.ndarray] = [];
+        for j in range(n_IC):
+            X_pred_i_mean_np.append( numpy.mean( X_Pred_i_np[j], axis = 1)); # X_Pred_i_mean[i] has shape (n_t, n_z).
+            X_pred_i_std_np.append(  numpy.std(  X_Pred_i_np[j], axis = 1));
 
-        plt.tight_layout();
+
+        # ---------------------------------------------------------------------------------------------
+        # Plot!!!!
+
+        for j in range(n_IC):
+            LOGGER.debug("Generating plots for derivative %d, parameter combination %d" % (j, i));
+            plt.figure(figsize = figsize);
+
+            # Plot each component of the d'th derivative of the latent state over time (across the 
+            # samples of the latent coefficients)
+            plt.subplot(231);
+            for s in range(n_samples):
+                for i in range(n_z):
+                    plt.plot(t_grid_i_np, Latent_Trajectories_i[j][:, s, i], 'C' + str(i), alpha = 0.3);
+            plt.title('Latent Space');
+
+            # Plot the mean of the d'th derivative of the fom solution.
+            plt.subplot(232);
+            plt.contourf(t_grid_i_np, x_grid, X_pred_i_mean_np[j].T, 100, cmap = plt.cm.jet);   # Note: contourf(X, Y, Z) requires Z.shape = (Y.shape, X.shape) with Z[i, j] corresponding to Y[i] and X[j].
+            plt.colorbar();
+            plt.xlabel("t");
+            plt.ylabel("x");
+            plt.title('Decoder Mean Prediction');
+            
+            # Plot the std of the d'th derivative of the fom solution.
+            plt.subplot(233);
+            plt.contourf(t_grid_i_np, x_grid, X_pred_i_std_np[j].T, 100, cmap = plt.cm.jet);
+            plt.colorbar();
+            plt.xlabel("t");
+            plt.ylabel("x");
+            plt.title('Decoder Standard Deviation');
+
+            # Plot the d'th derivative of the true fom solution.
+            plt.subplot(234);
+            plt.contourf(t_grid_i_np, x_grid, X_True_i_np[j].T, 100, cmap = plt.cm.jet);
+            plt.colorbar();
+            plt.xlabel("t");
+            plt.ylabel("x");
+            plt.title('Ground Truth');
+
+            # Plot the error between the mean predicted d'th derivative and the true d'th derivative of
+            # the fom solution.
+            plt.subplot(235);
+            error = numpy.abs(X_True_i_np[j] - X_pred_i_mean_np[j]);
+            plt.contourf(t_grid_i_np, x_grid, error.T, 100, cmap = plt.cm.jet);
+            plt.colorbar();
+            plt.xlabel("t");
+            plt.ylabel("x");
+            plt.title('Absolute Error');
+
+            plt.tight_layout();
 
     # All done!
     plt.show();
