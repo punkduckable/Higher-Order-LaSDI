@@ -184,15 +184,13 @@ class Burgers(Physics):
         u0 : numpy.ndarray = self.initial_condition(param)[0];
         
         # Compute dt. Set up the t_Grid.
-        n_t     : int           = self.config['burgers1d']['n_t'];
-        t_max   : float         = self.config['burgers1d']['t_max']; 
+        n_t     : int           = self.config['Burgers']['n_t'];
+        t_max   : float         = self.config['Burgers']['t_max']; 
         dt      : float         = t_max/(n_t - 1);
         t_Grid  : torch.Tensor  = torch.linspace(0, t_max, n_t, dtype = torch.float32);
 
-        # Solve the PDE and then reshape the result to be a 3d tensor with a leading dimension of 
-        # size 1.
-        X       : torch.Tensor          = torch.Tensor(solver(u0, self.maxk, self.convergence_threshold, n_t - 1, self.n_x, dt, self.dx));        
-        new_X   : list[torch.Tensor]    = [X.reshape(1, n_t, self.n_x)];
+        # Solve the PDE!
+        new_X   : torch.Tensor  = [torch.Tensor(solver(u0, self.maxk, self.convergence_threshold, n_t - 1, self.n_x, dt, self.dx))];        
 
         # All done!
         return new_X, t_Grid;
@@ -233,8 +231,8 @@ class Burgers(Physics):
         X_hist = X_hist[0];
 
         # Compute dt. 
-        n_t     : int           = self.config['burgers1d']['n_t'];
-        t_max   : float         = self.config['burgers1d']['t_max']; 
+        n_t     : int           = self.config['Burgers']['n_t'];
+        t_max   : float         = self.config['Burgers']['t_max']; 
         dt      : float         = t_max/(n_t - 1);
 
         # First, approximate the spatial and temporal derivatives.
