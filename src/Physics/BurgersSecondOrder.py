@@ -212,8 +212,7 @@ class Burgers(Physics):
         dt      : float         = t_max/(n_t - 1);
         t_Grid  : torch.Tensor  = torch.linspace(0, t_max, n_t, dtype = torch.float32);
     
-        # Solve the PDE and then reshape the result to be a 3d tensor with a leading dimension of 
-        # size 1.
+        # Solve the PDE!
         X       : torch.Tensor  = torch.Tensor(solver(u0, self.maxk, self.convergence_threshold, n_t - 1, self.n_x, dt, self.dx));
         V       : torch.Tensor  = Derivative1_Order4(X, h = dt);
         
