@@ -297,30 +297,143 @@ class BayesianGLaSDI:
 
             # Different kinds of models have different losses.
             if(isinstance(model_device, Autoencoder)):
-                # Compute the reconstructions.
-                Z       : list[list[torch.Tensor]]  = [];
-                X_Pred  : list[list[torch.Tensor]]  = [];
+                # Setup. 
+                Latent_States       : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_t_i, n_z) arrays.
 
-                for i in range(n_train):
-                    Z.append([model_device.Encoder(*(X_Train_device[i]))]);
-                    X_Pred.append([model_device.Decoder(*(Z[i]))]);
+                loss_recon          : torch.Tensor  = torch.zeros(1, dtype = torch.float32);
+    
+                Z_Rollout_IC        : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_rollout_frames[i], n_z) arrays.
+                Z_Rollout_Targets   : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_rollout_frames[i], n_z) arrays.
 
-                # Compute the reconstruction loss. 
-                loss_recon      : torch.Tensor          = torch.zeros(1, dtype = torch.float32);
+                loss_rollout_FOM    : torch.Tensor  = torch.zeros(1, dtype = torch.float32);
+                loss_rollout_ROM    : torch.Tensor  = torch.zeros(1, dtype = torch.float32);
+
+
+                # Cycle through the combinations of parameter values
                 for i in range(n_train):
-                    loss_recon  += self.MSE(X_Train_device[i][0], X_Pred[i][0]);
+                    # Setup. 
+                    X_i         : torch.Tensor  = X_Train_device[i][0];
+                    t_Grid_i    : torch.Tensor  = t_Train_device[i];
+                    n_t_i       : int           = t_Grid_i.shape[0];
+
+
+                    # -----------------------------------------------------------------------------
+                    # Forward pass
+
+                    self.timer.start("Forward Pass");
+
+                    # Run the forward pass. This results in an n_train element list whose i'th 
+                    # element is a 1 element list whose only element is a tensor of shape 
+                    # (n_t(i), physics.Frame_Shape) whose [k, ...] slice holds our prediction for 
+                    # the FOM solution at time t_Grid[i][k] when we use the i'th combination of 
+                    # parameter values. Here, n_t(i) is the number of time steps in the solution 
+                    # for the i'th combination of parameter values. 
+                    Z_i         : torch.Tensor  = model_device.Encode(X_i);
+                    Latent_States.append([Z_i]);
+                    X_Pred_i    : torch.Tensor  = model_device.Decode(Z_i);
+
+                    self.timer.end("Forward Pass");
+
+
+                    # ----------------------------------------------------------------------------
+                    # Reconstruction loss
+
+                    self.timer.start("Reconstruction Loss");
+                    loss_recon += self.MSE(X_i, X_Pred_i);
+                    self.timer.end("Reconstruction Loss");
+
+
+                    # ----------------------------------------------------------------------------
+                    # Setup Rollout losses.
+
+                    self.timer.start("Rollout Setup");
+
+                    # Select the latent states we want to use as initial conditions for the i'th 
+                    # combination of parameter values. This should be the first 
+                    # n_rollout_frames[i] frames (n_rollout_frames[i] is computed such that if we 
+                    # simulate the first n_rollout_frames[i] frames, the final times are less than 
+                    # the final time for this combination of parameter values. Each element of 
+                    # Z_Rollout_IC is a 1 element list of torch.Tensor objects of shape 
+                    # (n_rollout_frames[i], n_z).
+                    Z_Rollout_IC.append([Z_i[:n_rollout_frames[i], :]]);
+
+                    # Fetch the corresponding target by encoding the FOM targets using the 
+                    # current encoder.
+                    Z_Rollout_Targets.append([model_device.Encode(X_Rollout_Targets[i][0])]);
+                
+                    self.timer.end("Rollout Setup");
+
+
+                # --------------------------------------------------------------------------------
+                # Latent Dynamics, Coefficient losses
+
+                self.timer.start("Calibration");
 
                 # Compute the latent dynamics and coefficient losses. Also fetch the current latent
-                # dynamics coefficients for each training point. The latter is stored in a 3d array 
-                # called "coefs" of shape (n_train, N_z, N_l), where N_{\mu} = n_train = number of 
-                # training parameter combinations, N_z = latent space dimension, and N_l = number of 
-                # terms in the SINDy library.
-                coefs, loss_LD, loss_coef       = LD.calibrate(Latent_States    = Z,
-                                                               t_Grid           = t_Train_device);
+                # dynamics coefficients for each training point. The latter is stored in a 2d array 
+                # called "coefs" of shape (n_train, n_coefs), where n_train = number of training 
+                # parameter parameters and n_coefs denotes the number of coefficients in the latent
+                # dynamics model. 
+                coefs, loss_LD, loss_coef       = LD.calibrate(Latent_States = Latent_States, t_Grid    = t_Train_device);
+
+                self.timer.end("Calibration");
+
+
+                # ---------------------------------------------------------------------------------
+                # Rollout loss. Note that we need the coefficients before we can compute this.
+
+                # Setup
+                self.timer.start("Rollout Loss");
+
+                # Simulate the frames forward in time. This should return an n_param element list
+                # whose i'th element is a 1 element list whose only element has shape (n_t_i, 
+                # n_rollout_frames[i], n_z) whose p, q, r element of the should hold the r'th component of the p'th frame of the j'th time derivative of the solution
+                # when we use the p'th initial condition for the i'th combination of parameter 
+                # values.
+                #
+                # Note that the latent dynamics are autonomous. Further, because we are simulating 
+                # each IC for the same amount of time, the specific values of the time are
+                # irreverent. The simulate function exploits this by solving one big IVP for each 
+                # combination of parameter values, rather than n(i) smaller ones. 
+                Z_Rollout           : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(coefs   = coefs, 
+                                                                                                IC      = Z_Rollout_IC, 
+                                                                                                t_Grid  = t_Grid_rollout);            
+
+                # Now cycle through the training examples.
+                for i in range(n_train):
+                    # Fetch the latent displacement/velocity for the i'th combination of parameter
+                    # values. 
+                    Z_Rollout_i             : torch.Tensor          = Z_Rollout[i][0];              # shape = (len(t_Grid_rollout[i]), n_rollout_frames[i], n_z)
+
+                    # The final frame from each simulation is the prediction. 
+                    Z_Rollout_Predict_i     : torch.Tensor          = Z_Rollout_i[-1, :, :];        # shape = (n_rollout_frames[i], n_z)
+
+                    # Now fetch the corresponding targets.
+                    Z_Rollout_Targets_i     : list[torch.Tensor]    = Z_Rollout_Targets[i][0];      # shape = (n_rollout_frames[i], n_z)
+
+                    # Decode the latent predictions to get FOM predictions.
+                    X_Rollout_Predict_i     : torch.Tensor          = model_device.Decode(Z_Rollout_Predict_i);
+                
+                    # Get the corresponding FOM targets.
+                    X_Rollout_Target_i      : list[torch.Tensor]    = X_Rollout_Targets[i][0];      # shape = (n_rollout_frames[i], physics.Frame_Shape)
+                
+                    # Compute the losses for the i'th combination of parameter values!
+                    loss_rollout_ROM +=  self.MSE(Z_Rollout_Targets_i, Z_Rollout_Predict_i);
+                    loss_rollout_FOM +=  self.MSE(X_Rollout_Predict_i, X_Rollout_Target_i);
+
+                self.timer.end("Rollout Loss");
+
+
+                # --------------------------------------------------------------------------------
+                # Total loss
+
+                loss_rollout    : torch.Tensor  = loss_rollout_ROM + loss_rollout_FOM;
+
 
                 # Compute the final loss.
                 loss = (self.loss_weights['recon']  * loss_recon + 
                         self.loss_weights['LD']     * loss_LD + 
+                        self.loss_weights['rollout']* loss_rollout + 
                         self.loss_weights['coef']   * loss_coef);
 
 
@@ -493,11 +606,10 @@ class BayesianGLaSDI:
                 loss_rollout_V      : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
 
                 # Simulate the frames forward in time. This should return an n_param element list
-                # whose i'th element is a 2 element list whose j'th element has shape (n+i, 
-                # n_rollout_frames[i], n_z) whose p, q, r element of the j'th element should hold 
-                # the r'th component of the p'th frame of the j'th time derivative of the solution
-                # when we use the p'th initial condition for the i'th combination of parameter 
-                # values.
+                # whose i'th element is a 2 element list whose j'th element has shape (n_t_i, 
+                # n_rollout_frames[i], n_z) whose p, q, r element should hold the r'th component 
+                # of the p'th frame of the j'th time derivative of the solution when we use the 
+                # p'th initial condition for the i'th combination of parameter values.
                 #
                 # Note that the latent dynamics are autonomous. Further, because we are simulating 
                 # each IC for the same amount of time, the specific values of the time are
@@ -512,8 +624,8 @@ class BayesianGLaSDI:
                     # Fetch the latent displacement/velocity for the i'th combination of parameter
                     # values. 
                     Z_Rollout_i             : list[torch.Tensor]    = Z_Rollout[i];
-                    Z_D_Rollout_i           : torch.Tensor          = Z_Rollout_i[0];               # shape = (n, n_rollout_frames[i], n_z)
-                    Z_V_Rollout_i           : torch.Tensor          = Z_Rollout_i[1];               # shape = (n, n_rollout_frames[i], n_z)
+                    Z_D_Rollout_i           : torch.Tensor          = Z_Rollout_i[0];               # shape = (len(t_Grid_rollout[i]), n_rollout_frames[i], n_z)
+                    Z_V_Rollout_i           : torch.Tensor          = Z_Rollout_i[1];               # shape = (len(t_Grid_rollout[i]), n_rollout_frames[i], n_z)
 
                     # The final frame from each simulation is the prediction. 
                     Z_D_Rollout_Predict_i   : torch.Tensor          = Z_D_Rollout_i[-1, :, :];      # shape = (n_rollout_frames[i], n_z)
@@ -694,9 +806,9 @@ class BayesianGLaSDI:
         solution.
 
         X_Rollout_Targets is an n_param element list whose i'th element is an n_IC element list
-        whose j'th element is a numpy.ndarray of shape (n_rollout_frames, ...) whose (k, ...) element 
-        specifies the target for the j'th time derivative of the k'th frame we rollout for the 
-        i'th combination of parameter values.
+        whose j'th element is a numpy.ndarray of shape (n_rollout_frames[i], physics.Frame_Shape) 
+        whose (k, ...) element specifies the target for the j'th time derivative of the k'th frame 
+        we rollout for the i'th combination of parameter values.
         """
 
         # Checks
@@ -718,8 +830,8 @@ class BayesianGLaSDI:
             n_t_i : int = t[i].shape[0];
             for j in range(n_IC):
                 assert(isinstance(X[i][j], torch.Tensor));
-                assert(len(X[i][j].shape)   == 2);
                 assert(X[i][j].shape[0]     == n_t_i);
+
 
         # Other setup.        
         t_Grid_rollout          : list[torch.Tensor]    = [];   # n_train element list whose i'th element is 1d array of times for rollout solve.
@@ -782,7 +894,7 @@ class BayesianGLaSDI:
             X_Train_i               : list[torch.Tensor]    = X[i];
             t_Train_i               : numpy.ndarray         = t[i].detach().numpy();
             
-            t_Targets_i             : numpy.ndarray         = t_Grid_rollout_targets[i];
+            t_Targets_i             : numpy.ndarray         = t_Grid_rollout_targets[i];        # shape = (n_rollout_frames[i])
 
             X_Rollout_Targets_i     : list[torch.Tensor]    = [];
             for j in range(n_IC):
@@ -793,7 +905,7 @@ class BayesianGLaSDI:
 
                 # Evaluate the interpolation at the final rollout times for the i'th combination of
                 # parameter values.
-                X_Rollout_Targets_i.append(torch.from_numpy(X_Train_ij_interp(t_Targets_i)).to(dtype = torch.float32));
+                X_Rollout_Targets_i.append(torch.from_numpy(X_Train_ij_interp(t_Targets_i)).to(dtype = torch.float32)); 
             X_Rollout_Targets.append(X_Rollout_Targets_i);
     
 
