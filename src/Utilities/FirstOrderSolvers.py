@@ -30,7 +30,7 @@ the Runge-Kutta method.
 
 def RK1(f       : callable, 
         y0      : numpy.ndarray | torch.Tensor, 
-        times   : numpy.ndarray) -> numpy.ndarray | torch.Tensor:
+        t_Grid  : numpy.ndarray) -> numpy.ndarray | torch.Tensor:
     r"""
     This function implements a RK1 or Forward-Euler ODE solver for an ODE of the form:
         y'(t)          = f(t, y(t)).
@@ -57,9 +57,9 @@ def RK1(f       : callable,
     f(t, y(t)) = y'(t). 
 
     y0: A numpy.ndarray or torch.Tensor holding the initial position (y0 = y(t0)), where 
-    t0 = times[0].
+    t0 = t_Grid[0].
 
-    times: A 1ed numpy.ndarray object whose i'th element holds the i'th time value. We assume the 
+    t_Grid: A 1ed numpy.ndarray object whose i'th element holds the i'th time value. We assume the 
     elements of this array form an increasing sequence.
 
     
@@ -67,18 +67,18 @@ def RK1(f       : callable,
     Returns
     -----------------------------------------------------------------------------------------------
 
-    A numpy.ndarray or torch.Tensor object, Y, of shape N x y0.shape, where N = times.size. The 
-    i'th row of Y represent the solution at time i*h. Thus, if t0 = times[0], then
+    A numpy.ndarray or torch.Tensor object, Y, of shape N x y0.shape, where N = t_Grid.size. The 
+    i'th row of Y represent the solution at time i*h. Thus, if t0 = t_Grid[0], then
         Y[i, ...] = y_i   \approx y(t0 + i h) 
     """
 
     # First, run checks.
     assert(isinstance(y0,       numpy.ndarray)  or isinstance(y0,       torch.Tensor));
-    assert(isinstance(times,    numpy.ndarray));
-    assert(len(times.shape) == 1);
+    assert(isinstance(t_Grid,   numpy.ndarray));
+    assert(len(t_Grid.shape) == 1);
 
     # Next, fetch N.
-    N : int = times.size;
+    N : int = t_Grid.size;
 
     # Initialize Y
     if(isinstance(y0, numpy.ndarray)):
@@ -91,9 +91,9 @@ def RK1(f       : callable,
     # Now, run the time stepping!
     for n in range(N - 1):
         # Fetch the current time, displacement, velocity.
-        tn  : float                         = times[n];
+        tn  : float                         = t_Grid[n];
         yn  : numpy.ndarray | torch.Tensor  = Y[n, ...];
-        hn  : float                         = times[n + 1] - times[n];
+        hn  : float                         = t_Grid[n + 1] - t_Grid[n];
 
         # Compute k_1.
         k1 = f(tn, yn);
@@ -111,7 +111,7 @@ def RK1(f       : callable,
 
 def RK2(f       : callable, 
         y0      : numpy.ndarray | torch.Tensor, 
-        times   : numpy.ndarray) -> numpy.ndarray | torch.Tensor:
+        t_Grid  : numpy.ndarray) -> numpy.ndarray | torch.Tensor:
     r"""
     This function implements a RK2 based ODE solver for a second-order ODE of the following form:
         y'(t)          = f(t, y(t)).
@@ -143,9 +143,9 @@ def RK2(f       : callable,
     f(t, y(t)) = y'(t). 
 
     y0: A numpy.ndarray or torch.Tensor holding the initial position (y0 = y(t0)), where 
-    t0 = times[0].
+    t0 = t_Grid[0].
 
-    times: A 1d numpy.ndarray object whose i'th element holds the i'th time value. We assume the 
+    t_Grid: A 1d numpy.ndarray object whose i'th element holds the i'th time value. We assume the 
     elements of this array form an increasing sequence.
 
     
@@ -153,18 +153,18 @@ def RK2(f       : callable,
     Returns
     -----------------------------------------------------------------------------------------------
     
-    A numpy.ndarray or torch.Tensor object, Y, of shape N x y0.shape, where N = times.size. The 
-    i'th row of Y represent the solution at time i*h. Thus, if t0 = times[0], then
+    A numpy.ndarray or torch.Tensor object, Y, of shape N x y0.shape, where N = t_Grid.size. The 
+    i'th row of Y represent the solution at time i*h. Thus, if t0 = t_Grid[0], then
         Y[i, ...] = y_i   \approx y(t0 + i h) 
     """
 
     # First, run checks.
-    assert(len(times.shape) == 1);
+    assert(len(t_Grid.shape) == 1);
     assert(isinstance(y0,       numpy.ndarray)  or isinstance(y0,       torch.Tensor));
-    assert(isinstance(times,    numpy.ndarray));
+    assert(isinstance(t_Grid,   numpy.ndarray));
 
     # Next, fetch N.
-    N : int = times.size;
+    N : int = t_Grid.size;
 
     # Initialize Y
     if(isinstance(y0, numpy.ndarray)):
@@ -177,9 +177,9 @@ def RK2(f       : callable,
     # Now, run the time stepping!
     for n in range(N - 1):
         # Fetch the current time, displacement, velocity.
-        tn  : float                         = times[n];
+        tn  : float                         = t_Grid[n];
         yn  : numpy.ndarray | torch.Tensor  = Y[n, :];
-        hn  : float                         = times[n + 1] - times[n];
+        hn  : float                         = t_Grid[n + 1] - t_Grid[n];
 
         # Compute k_1, k_2.
         k_1 = f(tn,         yn);
@@ -198,7 +198,7 @@ def RK2(f       : callable,
 
 def RK4(f       : callable, 
         y0      : numpy.ndarray | torch.Tensor, 
-        times   : numpy.ndarray) -> numpy.ndarray | torch.Tensor:
+        t_Grid  : numpy.ndarray) -> numpy.ndarray | torch.Tensor:
     r"""
     This function implements a RK4 based ODE solver for a second-order ODE of the following form:
         y'(t)          = f(t,   y(t))
@@ -239,9 +239,9 @@ def RK4(f       : callable,
     f(t, y(t)) = y'(t). 
 
     y0: A numpy.ndarray or torch.Tensor holding the initial position (y0 = y(t0)), where 
-    t0 = times[0].
+    t0 = t_Grid[0].
 
-    times: A 1d numpy.ndarray object whose i'th element holds the i'th time value. We assume the 
+    t_Grid: A 1d numpy.ndarray object whose i'th element holds the i'th time value. We assume the 
     elements of this array form an increasing sequence.
 
     
@@ -249,18 +249,18 @@ def RK4(f       : callable,
     Returns
     -----------------------------------------------------------------------------------------------
     
-    A numpy.ndarray or torch.Tensor object, Y, of shape N x y0.shape, where N = times.size. The 
-    i'th row of Y represent the solution at time i*h. Thus, if t0 = times[0], then
+    A numpy.ndarray or torch.Tensor object, Y, of shape N x y0.shape, where N = t_Grid.size. The 
+    i'th row of Y represent the solution at time i*h. Thus, if t0 = t_Grid[0], then
         Y[i, ...] = y_i   \approx y(t0 + i h) 
     """
 
     # First, run checks.
-    assert(len(times.shape) == 1);
+    assert(len(t_Grid.shape) == 1);
     assert(isinstance(y0,       numpy.ndarray)  or isinstance(y0,       torch.Tensor));
-    assert(isinstance(times,    numpy.ndarray));
+    assert(isinstance(t_Grid,   numpy.ndarray));
 
     # Next, fetch N.
-    N : int = times.size;
+    N : int = t_Grid.size;
 
     # Initialize Y
     if(isinstance(y0, numpy.ndarray)):
@@ -273,9 +273,9 @@ def RK4(f       : callable,
     # Now, run the time stepping!
     for n in range(N - 1):
         # Fetch the current time, displacement, velocity.
-        tn  : float                         = times[n];
+        tn  : float                         = t_Grid[n];
         yn  : numpy.ndarray | torch.Tensor  = Y[n, :];
-        hn  : float                         = times[n + 1] - times[n];
+        hn  : float                         = t_Grid[n + 1] - t_Grid[n];
 
         # Compute k_1, k_1, k_1, k_1.
         k_1 = f(tn,         yn);
