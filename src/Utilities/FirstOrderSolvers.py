@@ -84,7 +84,7 @@ def RK1(f       : callable,
     if(isinstance(y0, numpy.ndarray)):
         Y : numpy.ndarray = numpy.empty((N,) + y0.shape, dtype = numpy.float32);
     elif(isinstance(y0, torch.Tensor)):
-        Y : torch.Tensor = torch.empty((N,) + y0.shape, dtype = torch.Tensor);
+        Y : torch.Tensor = torch.empty((N,) + y0.shape, dtype = torch.float32);
 
     Y[0, ...] = y0;
 
@@ -170,7 +170,7 @@ def RK2(f       : callable,
     if(isinstance(y0, numpy.ndarray)):
         Y : numpy.ndarray = numpy.empty((N,) + y0.shape, dtype = numpy.float32);
     elif(isinstance(y0, torch.Tensor)):
-        Y : torch.Tensor = torch.empty((N,) + y0.shape, dtype = torch.Tensor);
+        Y : torch.Tensor = torch.empty((N,) + y0.shape, dtype = torch.float32);
 
     Y[0, ...] = y0;
 
@@ -266,7 +266,7 @@ def RK4(f       : callable,
     if(isinstance(y0, numpy.ndarray)):
         Y : numpy.ndarray = numpy.empty((N,) + y0.shape, dtype = numpy.float32);
     elif(isinstance(y0, torch.Tensor)):
-        Y : torch.Tensor = torch.empty((N,) + y0.shape, dtype = torch.Tensor);
+        Y : torch.Tensor = torch.empty((N,) + y0.shape, dtype = torch.float32);
 
     Y[0, ...] = y0;
 
