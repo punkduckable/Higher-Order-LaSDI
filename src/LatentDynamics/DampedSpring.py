@@ -381,17 +381,17 @@ class DampedSpring(LatentDynamics):
         b   : numpy.ndarray | torch.Tensor = E[:, 2*self.n_z].reshape(1, -1);
 
         # Set up a lambda function to approximate (d^2/dt^2)z(t) \approx -K z(t) - C (d/dt)z(t) + b.
-        # In this case, we expect dz_dt and z to have shape (n, n_z). Thus, matmul(z, K.T) will have 
-        # shape (n, n_z). The i'th row of this should hold the z portion of the rhs of the latent
-        # dynamics for the i'th IC. Similar results hold for dot(dz_dt, C.T). The final result 
-        # should have shape (n, n_z). The i'th row should hold the rhs of the latent dynamics 
-        # for the i'th IC.
+        # In this case, we expect dz_dt and z to have shape (n(i), n_z). Thus, matmul(z, K.T) will 
+        # have shape (n(i), n_z). The i'th row of this should hold the z portion of the rhs of the 
+        # latent dynamics for the i'th IC. Similar results hold for dot(dz_dt, C.T). The final 
+        # result should have shape (n(i), n_z). The i'th row should hold the rhs of the latent 
+        # dynamics for the i'th IC.
         if(isinstance(coefs, numpy.ndarray)):
             f   = lambda t, z, dz_dt: b - numpy.matmul(dz_dt, C.T)  - numpy.matmul(z, K.T);
         if(isinstance(coefs, torch.Tensor)):
             f   = lambda t, z, dz_dt: b - torch.matmul(dz_dt, C.T)  - torch.matmul(z, K.T);
 
-        # Solve the ODE forward in time. D and V should have shape (n_t, n, n_z). If we use the 
+        # Solve the ODE forward in time. D and V should have shape (n_t, n(i), n_z). If we use the 
         # same t values for each IC, then we can exploit the fact that the latent dynamics are 
         # autonomous to solve using each IC simultaneously. Otherwise, we need to run the latent
         # dynamics one IC at a time. 

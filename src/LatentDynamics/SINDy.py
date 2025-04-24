@@ -188,7 +188,7 @@ class SINDy(LatentDynamics):
         # Evaluate for one combination of parameter values case.
 
         t_Grid  : torch.Tensor  = t_Grid[0];
-        Z       : torch.Tensor  = Latent_States[0];
+        Z       : torch.Tensor  = Latent_States[0][0];
         n_t     : int           = len(t_Grid);
 
         # First, compute the time derivatives. Which method we use depends on if we have a uniform 
@@ -288,11 +288,13 @@ class SINDy(LatentDynamics):
         for i in range(n_param):
             assert(isinstance(IC[i], list));
             assert(len(IC[i]) == n_IC);
-            assert(len(t_Grid[i].shape) == 2);
+            assert(len(t_Grid[i].shape) == 2 or len(t_Grid[i].shape) == 1);
             for j in range(n_IC):
                 assert(len(IC[i][j].shape) == 2);
                 assert(type(coefs)          == type(IC[i][j]));
                 assert(IC[i][j].shape[1]    == self.n_z);
+                if(len(t_Grid[i].shape) == 2):
+                    assert(t_Grid[i].shape[0] == IC[i][j].shape[0]);
 
 
         # -----------------------------------------------------------------------------------------
@@ -327,38 +329,59 @@ class SINDy(LatentDynamics):
         # Evaluate for one combination of parameter values case.
 
         # In this case, there is just one parameter. Extract t_Grid, which has shape 
-        # (n(i), n_t(i)).
+        # (n(i), n_t(i)) or (n_t(i)).
         t_Grid  : numpy.ndarray | torch.Tensor  = t_Grid[0];
         if(isinstance(t_Grid, torch.Tensor)):
             t_Grid = t_Grid.detach().numpy();
-        n_i     : int           = t_Grid.shape[0];
-        n_t_i   : int           = t_Grid.shape[1];
+        n_t_i   : int           = t_Grid.shape[-1];
+        if(len(t_Grid.shape) == 1):
+            Same_t_Grid : bool = True;
+        else:
+            Same_t_Grid : bool = False;
 
-        # If we get here, then coefs has one row. In this case, each element of IC should 
-        # have shape (n(i), n_z). First, reshape coefs as a matrix. Since we only allow for linear 
-        # terms, there are n_z + 1 library terms and n_z equations, where n_z = self.n_z.
-        c_1 : numpy.ndarray | torch.Tensor  = coefs.reshape([self.n_z + 1, self.n_z]).T;
-        if(isinstance(c_1, torch.Tensor)):
-            c_1 = c_1.detach().numpy();
+        # coefs has shape (1, n_coefs). Each element of IC should have shape (n(i), n_z). 
+        Z0  : numpy.ndarray | torch.Tensor  = IC[0][0]; 
+        n_i : int                           = Z0.shape[0];
 
-        # Set up a lambda function to approximate dz_dt. In SINDy, we learn a coefficient matrix 
-        # C such that the latent state evolves according to the dynamical system 
-        #   z'(t) = C \Phi(z(t)), 
-        # where \Phi(z(t)) is the library of terms. Note that the zero column of C corresponds 
-        # to the constant library term, 1. 
-        f   = lambda z, t : c_1[:, 1:] @ z + c_1[:, 0];
+        # First, we need to extract the matrix of coefficients. We know that coefs is the least 
+        # squares solution to dZ_dt = hstack[1, Z] E^T. 
+        E   : numpy.ndarray | torch.Tensor = coefs.reshape([self.n_z + 1, self.n_z]).T;
 
-        # Set up an array to hold the results of each simulation.
+        # Extract A and b. Note that we need to reshape b to have shape (1, n_z) to enable
+        # broadcasting.
+        b   : numpy.ndarray | torch.Tensor = E[:, 0 ].reshape(1, -1);
+        A   : numpy.ndarray | torch.Tensor = E[:, 1:];
+
+
+        # Set up a lambda function to approximate 
+        #   z'(t) \approx b + A z(t)
+        # In this case, we expect dz_dt and z to have shape (n(i), n_z). Thus, matmul(z, A.T) will 
+        # have shape (n(i), n_z). The i'th row of this should hold the z portion of the rhs of the 
+        # latent dynamics for the i'th IC. Similar results hold for dot(dz_dt, C.T). The final 
+        # result should have shape (n, n_z). The i'th row should hold the rhs of the latent 
+        # dynamics for the i'th IC.
         if(isinstance(coefs, numpy.ndarray)):
-            X : numpy.ndarray   = numpy.empty((n_t_i, n_i, self.n_z), dtype = numpy.float32);
-        elif(isinstance(coefs, torch.Tensor)):
-            X : torch.Tensor    = torch.empty((n_t_i, n_i, self.n_z), dtype = torch.float32);
+            f   = lambda t, z: b + numpy.matmul(z, A.T);
+        if(isinstance(coefs, torch.Tensor)):
+            f   = lambda t, z: b + torch.matmul(z, A.T);
 
-        # Solve the ODE forward in time for each set of initial conditions. Remember that IC
-        # should be a 1 element list whose lone element is a n_IC element = 1 element whose 
-        # lone element is a 2d numpy.ndarray object with shape (n(i), n_z).
-        for j in range(n_i):
-            X[:, j, :] = RK4(f, IC[0][0][j, :], t_Grid[j, :]);
+        # Solve the ODE forward in time. X should have shape (n_t, n(i), n_z). If we use the 
+        # same t values for each IC, then we can exploit the fact that the latent dynamics are 
+        # autonomous to solve using each IC simultaneously. Otherwise, we need to run the latent
+        # dynamics one IC at a time. 
+        if(Same_t_Grid == True):
+            Z : torch.Tensor | numpy.ndarray = RK4(f = f, y0 = Z0, t_Grid = t_Grid);
+        else:
+            # Set up arrays to hold the results of each simulation.
+            if(isinstance(coefs, numpy.ndarray)):
+                Z : numpy.ndarray   = numpy.empty((n_t_i, n_i, self.n_z), dtype = numpy.float32);
+            elif(isinstance(coefs, torch.Tensor)):
+                Z : torch.Tensor    = torch.empty((n_t_i, n_i, self.n_z), dtype = torch.float32);
+            
+            # Now cycle through the ICs.
+            for j in range(n_i):
+                Z_j         = RK4(f = f, y0 = Z0[j, :], t_Grid = t_Grid[j, :]);
+                Z[:, j, :]  = Z_j;
         
         # All done!
-        return [[X]];
+        return [[Z]];
