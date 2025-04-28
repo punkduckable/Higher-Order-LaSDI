@@ -13,6 +13,7 @@ sys.path.append(LD_Path);
 sys.path.append(util_Path);
 
 import  numpy;
+import  scipy;
 from    scipy.sparse.linalg import  spsolve;
 from    scipy.sparse        import  spdiags;
 import  torch;
@@ -42,12 +43,14 @@ class Burgers(Physics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        config: A dictionary housing the settings for the Burgers object. This should be the 
-        "physics" sub-dictionary of the configuration file. 
+        config: dict
+            A dictionary housing the settings for the Burgers object. This should be the 
+            "physics" sub-dictionary of the configuration file. 
 
-        param_names: A list of strings. There should be one list item for each parameter. The i'tj
-        element of this list should be a string housing the name of the i'th parameter. For the 
-        Burgers class, this should have two elements: a and w. 
+        param_names: list[str]
+            There should be one list item for each parameter. The i'tj
+            element of this list should be a string housing the name of the i'th parameter. For the 
+            Burgers class, this should have two elements: a and w. 
 
         
         -------------------------------------------------------------------------------------------
@@ -115,18 +118,18 @@ class Burgers(Physics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        param: A 1d numpy.ndarray object with two elements corresponding to the values of the w 
-        and a parameters. self.a_idx and self.w_idx tell us which index corresponds to which 
-        variable.
+        param: numpy.ndarray, shape (2)
+            The two elements correspond to the values of the w and a parameters. self.a_idx and 
+            self.w_idx tell us which index corresponds to which variable.
         
 
         -------------------------------------------------------------------------------------------
         Returns 
         -------------------------------------------------------------------------------------------
 
-        A single element list whose only element is a numpy.ndarray object with the same shape 
-        as self.X_Positions. The i'th component of this array holds the value of the initial state
-        at x = self.X_Positions[i].
+        u0 : list[numpy.ndarray], len = 1
+            Lone element has same shape as self.X_Positions. The i'th component of this array 
+            holds the value of the initial state at x = self.X_Positions[i].
         """
 
         # Checks.
@@ -155,24 +158,25 @@ class Burgers(Physics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        param: A 1d numpy.ndarray object with two elements corresponding to the values of the w 
-        and a parameters. self.a_idx and self.w_idx tell us which index corresponds to which 
-        variable.
+        param: numpy.ndarray, shape = (2)
+            Holds the values of the w and a parameters. self.a_idx and self.w_idx tell us which 
+            index corresponds to which variable.
         
 
         -------------------------------------------------------------------------------------------
         Returns 
         -------------------------------------------------------------------------------------------
         
-        A two element tuple: X, t_Grid.
+        X, t_Grid
 
-        X is a single element list whose only element is a torch.Tensor object of shape 
-        (n_t, self.Frame_Shape) holding the FOM solution when we use param to define the initial
-        condition function. Specifically, the [i, ...] sub-array of the returned array holds the 
-        FOM solution at t_Grid[i].
+        X: list[torch.Tensor], len = 1
+            Lone element has shape = (n_t, self.Frame_Shape), holds the FOM solution when we use
+            param to define the initial condition function. Specifically, the [i, ...] sub-array 
+            of the returned array holds the FOM solution at t_Grid[i].
 
-        t_Grid is a 1d torch.Tensor object whose i'th element holds the i'th time value at which
-        we have an approximation to the FOM solution (the time value associated with X[i, ...]).
+        t_Grid: torch.Tensor, shape = (n_t)
+            i'th element holds the i'th time value at which we have an approximation to the FOM 
+            solution (the time value associated with X[i, ...]).
         """
 
         assert(isinstance(param, numpy.ndarray));
@@ -190,7 +194,11 @@ class Burgers(Physics):
         t_Grid  : torch.Tensor  = torch.linspace(0, t_max, n_t, dtype = torch.float32);
 
         # Solve the PDE!
-        new_X   : torch.Tensor  = [torch.Tensor(solver(u0, self.maxk, self.convergence_threshold, n_t - 1, self.n_x, dt, self.dx))];        
+        new_X   : torch.Tensor  = [torch.Tensor(solver(u0                       = u0, 
+                                                       t_Grid                   = t_Grid, 
+                                                       Dx                       = self.dx, 
+                                                       maxk                     = self.maxk, 
+                                                       convergence_threshold    = self.convergence_threshold))];        
 
         # All done!
         return new_X, t_Grid;
@@ -207,20 +215,26 @@ class Burgers(Physics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        X_hist: A single element list of 2d numpy.ndarray object of shape (n_t, n_x), where n_t is 
-        the number of points along the temporal axis (this is specified by the configuration file) 
-        and n_x is the number of points along the spatial axis. The i,j element of the d'th array 
-        should have the j'th component of the d'th derivative of the fom solution at the i'th time 
-        step.
+        X_hist: list[numpy.ndarray], len = 1
+            A single element list of 2d numpy.ndarray object of shape (n_t, n_x), where n_t is 
+            the number of points along the temporal axis (this is specified by the configuration 
+            file) and n_x is the number of points along the spatial axis. The i,j element of the 
+            d'th array should have the j'th component of the d'th derivative of the fom solution 
+            at the i'th time step.
 
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        A two element tuple. The first is a numpy.ndarray object of shape (n_t - 2, n_x - 2) whose 
-        i, j element holds the residual at the i + 1'th temporal grid point and the j + 1'th 
-        spatial grid point. 
+        r, e
+         
+        r : numpy.ndarray, shape = (n_t - 2, n_x - 2)
+            i, j element holds the residual at the i + 1'th temporal grid point and the j + 1'th 
+            spatial grid point. 
+
+        e : float
+            the norm of r.
         """
 
         # Run checks.
@@ -237,8 +251,8 @@ class Burgers(Physics):
 
         # First, approximate the spatial and temporal derivatives.
         # first axis is time index, and second index is spatial index.
-        dUdx    : numpy.ndarray     = numpy.empty_like(X_hist);
-        dUdt    : numpy.ndarray     = numpy.empty_like(X_hist);
+        dUdx    : numpy.ndarray = numpy.empty_like(X_hist);
+        dUdt    : numpy.ndarray = numpy.empty_like(X_hist);
 
         dUdx[:, :-1]    = (X_hist[:, 1:] - X_hist[:, :-1]) / self.dx;   # Use forward difference for all but the last time value.
         dUdx[:, -1]     = dUdx[:, -2];                                  # Use backwards difference for the last time value
@@ -256,76 +270,234 @@ class Burgers(Physics):
 
 
 # -------------------------------------------------------------------------------------------------
-# Helper functions
+# Solve Burgers' equation
 # -------------------------------------------------------------------------------------------------
 
-def residual_burgers(un, uw, c, idxn1):
+def residual_burgers(   un          : numpy.ndarray, 
+                        un1_guess   : numpy.ndarray, 
+                        c           : float, 
+                        idx_m1      : numpy.ndarray) -> numpy.ndarray:
+    """
+    Compute the nonlinear residual for the Burgers update.
 
-    '''
+    The residual r_i at the i'th interior point is defined by
+    
+    r_i = -u^n_i + u^{n + 1, guess}_i + Dt u^{n + 1, guess}*(u^{n + 1, guess}_i - u^{n + 1, guess}_{i - 1})/Dx
+    
+    Here, u^n_i denotes the solution to Burgers equation at the n'th time step and i'th spatial
+    grid point. Likewise, u^{n + 1, guess}_i denotes our current guess for the solution at the 
+    n+1'th time step. If u^{n + 1, guess} is a good approximation to u^{n + 1}, then we would 
+    expect
+    
+        -u^n_i + u^{n + 1, guess}_i                        \approx     Dt (d/dt)u^{n + 1}_i
+        (u^{n + 1, guess}_i - u^{n + 1, guess}_{i - 1})/Dx \approx     (d/dx)u^{n + 1}_i
 
-    Compute 1D Burgers equation residual for generating the data
-    from https://github.com/LLNL/gLaSDI and https://github.com/LLNL/LaSDI
+    meaning that
 
-    '''
+        r_i \approx Dt (d/dt)u^{n + 1}_i + Dt u^{n + 1}_i (d/dx)u^{n + 1}_i
+        \approx 0
 
-    f = c * (uw ** 2 - uw * uw[idxn1]);
-    r = -un + uw + f;
+    
+    
+    -----------------------------------------------------------------------------------------------
+    Parameters
+    -----------------------------------------------------------------------------------------------
 
+    un : ndarray, shape (n_x - 1)
+        Solution at previous time level (u^n), excluding the final periodic point.
+    
+    un1_guess : ndarray, shape (n_x - 1)
+        Current Newton iterate for the next time level (u^{n + 1,guess}), excluding final point.
+    
+    c : float
+        A CFL-like number c = Dt / Dx.
+
+    idx_m1 : ndarray of int, shape (n_x - 1)
+        Array of indices such that un1_guess[idx_m1[i]] == un1_guess[i + 1] (with periodic wrap at 
+        the end).
+
+    
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    r : ndarray, shape (n_x-1)
+        The residual vector for the Newton update.
+    """
+
+    # Checks.
+    assert(isinstance(un,           numpy.ndarray));
+    assert(isinstance(un1_guess,    numpy.ndarray));
+    assert(isinstance(idx_m1,       numpy.ndarray));
+    assert(len(un.shape)            == 1);
+    assert(un.shape                 == un1_guess.shape);
+    assert(un.shape                 == idx_m1.shape);
+
+    # Compute flux difference term: f[i]    = c * (un1_guess[i]^2 - un1_guess[i] * un1_guess[i - 1])
+    #                                       = c * un1_guess[i]( un1_guess[i] - un1_guess[i - 1])
+    #                                       = Dt * un1_guess[i] * ( un1_guess[i] - un1_guess[i - 1])/Dx
+    #                                       \approx Dt * un1_guess[i] * (d/dx)un1_guess[i]
+    f : numpy.ndarray = c * (un1_guess**2 - un1_guess * un1_guess[idx_m1]);
+    
+    # Residual is u^n - u^{n + 1, guess} - f
+    r : numpy.ndarray = -un + un1_guess + f;
     return r;
 
 
 
-def jacobian(u, c, idxn1, n_x):
+def jacobian(   u       : numpy.ndarray, 
+                c       : float, 
+                idx_m1  : numpy.ndarray, 
+                n_x     : int) -> scipy.sparse.csr_matrix:
+    """
+    Assemble the Jacobian matrix of the Burgers residual w.r.t. the new-time iterate.
 
-    '''
+    The Jacobian J is a (n_x - 1) x (n_x - 1) sparse matrix with
+      - diagonal entries        J_{i,i}         = 1 + c*(2*u_i - u_{i + 1})
+      - sub-diagonal entries    J_{i,i - 1}     = -c * u_i   (for i > 0)
+    plus a periodic coupling    J_{0, n_x - 2}  = -c * u_0.
 
-    Compute 1D Burgers equation jacobian for generating the data
-    from https://github.com/LLNL/gLaSDI and https://github.com/LLNL/LaSDI
 
-    '''
+    -----------------------------------------------------------------------------------------------
+    Parameters
+    -----------------------------------------------------------------------------------------------
 
-    diag_comp           = 1.0 + c * (2 * u - u[idxn1]);
+    u : numpy.ndarray, shape (n_x-1)
+        Current Newton iterate for u^{n+1}, excluding the final periodic point.
+    
+    c : float
+        CFL-like number Dt / Dx.
+    
+    idx_m1 : numpy.ndarray of int, shape (n_x-1)
+        Next-index mapping for periodic wrap.
+    
+    n_x : int
+        Total number of spatial grid points (including the periodic endpoint).
+
+
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    J : scipy.sparse.csr_matrix, shape (n_x-1, n_x-1)
+        Sparse Jacobian matrix of the residual.
+    """
+
+    # Checks.
+    assert(isinstance(u,           numpy.ndarray));
+    assert(isinstance(idx_m1,      numpy.ndarray));
+    assert(len(u.shape)            == 1);
+    assert(u.shape                 == idx_m1.shape);
+
+    # Diagonal: dr_i / du_i = 1 + c*(2*u_i - u_{i + 1})
+    diag_comp           = 1.0 + c * (2 * u - u[idx_m1]);
+
+    # Sub-diagonal (i,i-1): ∂r_i / ∂u_{i-1} = -c * u_i (for interior points)
     subdiag_comp        = numpy.ones(n_x - 1);
     subdiag_comp[:-1]   = -c * u[1:];
-    data                = numpy.array([diag_comp, subdiag_comp]);
-    J                   = spdiags(data, [0, -1], n_x - 1, n_x - 1, format = 'csr');
-    J[0, -1]            = -c * u[0];
 
+    # Stack bands: band 0 (diag), band -1 (sub-diag)
+    data                = numpy.vstack([diag_comp, subdiag_comp]);
+    J                   = spdiags(data, [0, -1], n_x - 1, n_x - 1, format = 'csr');
+
+    # Enforce periodic wrap: coupling from u_{n_x - 2} to r_0
+    J[0, -1] = -c * u[0];
     return J;
 
 
+    
+def solver(u0                       : numpy.ndarray,
+           t_Grid                   : numpy.ndarray,
+           Dx                       : float,
+           maxk                     : int,
+           convergence_threshold    : float):
+    """
+    Solves 1D Burgers equation on a uniform spatial-temporal grid.
 
-def solver(u0, maxk, convergence_threshold, n_t, n_x, Dt, Dx):
-    '''
+    -----------------------------------------------------------------------------------------------
+    Arguments:
+    -----------------------------------------------------------------------------------------------
 
-    Solves 1D Burgers equation for generating the data
-    from https://github.com/LLNL/gLaSDI and https://github.com/LLNL/LaSDI
+    u0: numpy.ndarray, shape (n_x)
+        j'th component holds the value of the initial condition to Burgers equation at the j'th 
+        position along the spatial grid. 
 
-    '''
+    t_Gird: numpy.ndarray, shape (n_t)
+        i'th value holds the position of the i'th temporal gridline. 
 
-    c = Dt / Dx;
+    Dx: int
+        The grid spacing between spatial gridlines.
 
-    idxn1       = numpy.zeros(n_x - 1, dtype = 'int');
-    idxn1[1:]   = numpy.arange(n_x - 2);
-    idxn1[0]    = n_x - 2;
+    maxk: int 
+        The maximum number of corrections we are willing to make at each time step.
+        If the relative residual at a time step fails to drop below the convergence_threshold in 
+        maxk steps, then we move onto the next time step.
 
-    u           = numpy.zeros((n_t + 1, n_x));
-    u[0]        = u0;
+    convergence_threshold: float 
+        Specifying the maximum allowed relative residual at each time step. Once the residual drops 
+        below this (or the iteration number passes maxk), we move onto the next time step.
 
-    for n in range(n_t):
-        uw = u[n, :-1].copy();
-        r = residual_burgers(u[n, :-1], uw, c, idxn1);
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
 
+    r : numpy.ndarray, shape (n_t, n_x)
+        i, j entry holds the solution to Burgers' equation at (t_Grid[i], j*Dx).
+    """
+
+    # Checks.
+    
+
+    # Extract n_x, n_t.
+    n_x         : int   = u0.shape[0];
+    n_t         : int   = t_Grid.shape[0];
+
+    # Build index array for idx_m1[idx_m1][i + 1] == idx_m1[i] (and periodic)
+    idx_m1              = numpy.zeros(n_x - 1, dtype = numpy.int32);
+    idx_m1[1:]          = numpy.arange(n_x - 2);    # 1 -> 0, 2 -> 1, ..., n_x - 2 -> n_x - 3
+    idx_m1[0]           = n_x - 2;                  # wrap around for periodic BC
+
+    # Allocate solution array: rows time levels 0 ... n_t, cols spatial points 0 ... n_x - 1
+    u                   = numpy.zeros((n_t, n_x), dtype = numpy.float32);
+    u[0, :]             = u0;
+
+    # Time-stepping loop
+    for n in range(n_t - 1):
+        # Compute c = Dt/Dx for this time step.
+        Dt_n        : float = (t_Grid[n + 1] - t_Grid[n]).item();
+        c_n         : float = Dt_n / Dx;
+
+        # Initialize the Newton guess un1_guess for time level n + 1 (exclude the last periodic point)
+        un1_guess = u[n, :-1].copy();
+
+        # Compute initial residual
+        r : numpy.ndarray = residual_burgers(un = u[n, :-1], un1_guess = un1_guess, c = c_n, idx_m1 = idx_m1);
+
+        # Newton iterations
         for k in range(maxk):
-            J = jacobian(uw, c, idxn1, n_x);
-            duw = spsolve(J, -r);
-            uw = uw + duw;
-            r = residual_burgers(u[n, :-1], uw, c, idxn1);
+            # Build Jacobian at current guess
+            J       : numpy.ndarray = jacobian(u = un1_guess, c = c_n, idx_m1 = idx_m1, n_x = n_x);
 
-            rel_residual = numpy.linalg.norm(r) / numpy.linalg.norm(u[n, :-1]);
+            # Solve Newton correction J * dun1 = -r
+            dun1    : numpy.ndarray = spsolve(J, -r);
+
+            # Update guess
+            un1_guess = un1_guess + dun1;
+
+            # Recompute residual
+            r : numpy.ndarray = residual_burgers(un = u[n, :-1], un1_guess = un1_guess, c = c_n, idx_m1 = idx_m1);
+
+            # Check convergence: relative residual drop
+            rel_residual : numpy.ndarray = numpy.linalg.norm(r) / numpy.linalg.norm(u[n, :-1]);
             if rel_residual < convergence_threshold:
-                u[n + 1, :-1] = uw.copy();
-                u[n + 1, -1] = u[n + 1, 0];
-                break;
+                # Accept update and enforce periodic BC
+                u[n + 1, :-1] = un1_guess;
+                u[n + 1, -1]  = un1_guess[0];
+                break
+
+        else:
+            # If maxk reached without convergence, still write out the last iterate
+            u[n + 1, :-1] = un1_guess;
+            u[n + 1, -1]  = un1_guess[0];
 
     return u;
