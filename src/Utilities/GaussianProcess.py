@@ -29,20 +29,26 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    X: A 2d numpy array of shape (n_train, input_dim), where n_train is the number of training 
-    examples and input_dim is the dimension of the input space to the GPs.
+    X : numpy.ndarray, shape = (n_train, input_dim) 
+        For each column of Y, we treat the rows of X and entry of the column of Y as samples of 
+        the input and target random variables, respectively. We fit a GP on this data. Thus, 
+        n_train is the number of training examples and input_dim is the dimension of the input 
+        space to the GPs. 
 
-    Y: A 2d numpy array of shape (n_train, n_GPs), where n_train is the number of training 
-    examples and n_GPs is the number of GPs.
-
+    Y : numpy.ndarray, shape = (n_train, n_GPs)
+        For each column of Y, we treat the rows of X and entry of the column of Y as samples of 
+        the input and target random variables, respectively. We fit a GP on this data. Thus, 
+        n_train is the number of training examples and input_dim is the dimension of the input 
+        space to the GPs. 
+    
     
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
 
-    A list of trained GP regressor objects. If Y has n_GPs columns, then the returned list has k 
-    elements. It's i'th element holds a trained GP regressor object whose training inputs are the 
-    columns of X and whose corresponding target values are the elements of the i'th column of Y.
+    gp_list : list[GaussianProcessRegressor], len = n_GPs
+        The j'th element holds a trained GP regressor object whose training inputs are the 
+        rows of X and whose corresponding target values are the elements of the j'th column of Y.
     """
 
     # Checks.
@@ -92,26 +98,30 @@ def eval_gp(gp_list : list[GaussianProcessRegressor], Inputs : numpy.ndarray) ->
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    gp_list: a n_GPs element list of trained GP regressor objects. The i'th element of this list 
-    is a GP regressor object that predicts the i'th coefficient. 
+    gp_list : list[GaussianProcessRegressor], len = n_GPs
+       a list of trained GP regressor objects. The i'th element of this list is a GP regressor 
+       object whose domain includes the rows of Inputs.
     
-    Inputs: A 2d numpy.ndarray object of shape (n_inputs, input_dim), where input_dim is the 
-    dimensionality of the input space for the GPs) and n_inputs is the number of inputs at which 
-    we want to evaluate the posterior distribution of the the GPs. The i,j element of this array 
-    specifies the value of the j'th parameter in the i'th combination of parameters. We use this 
-    as the testing set for the GP evaluation.
+    Inputs: torch.Tensor, shape = (n_inputs, input_dim)
+        We evaluate each Gaussian Process in gp_list at each row of Inputs. Thus, the i'th row
+        represents the i'th input to the Gaussian Processes. Here, input_dim is the dimensionality 
+        of the input space for the GPs) and n_inputs is the number of inputs at which we want to 
+        evaluate the posterior distribution of the the GPs. 
 
 
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------  
 
-    A two element tuple: M and SD. Both are 2d numpy arrays of shape (n_inputs, n_GPs). They
-    hold the predicted means and std's for each parameter at each training example, respectively. 
+    M, SD 
+
+    M : numpy.ndarray, shape = (n_inputs, n_GPs)
+        the i,j element of the M holds the predicted mean of the j'th GP's posterior distribution
+        at the i'th row of Inputs.
     
-    Thus, the i,j element of the M holds the predicted mean of the j'th GP's posterior distribution
-    at the i'th input. Likewise, the i,j element of SD holds the standard deviation of the posterior
-    distribution for the j'th GP evaluated at the i'th input.
+    SD : numpy.ndarray, shape = (n_inputs, n_GPs)
+        the i,j element of SD holds the standard deviation of the posterior distribution for the 
+        j'th GP evaluated at the i'th row of Inputs.
     """
 
     # Checks
@@ -148,22 +158,26 @@ def sample_coefs(   gp_list     : list[GaussianProcessRegressor],
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    gp_list: a n_GPs element list of trained GP regressor objects.
+    gp_list : list[GaussianProcessRegressor], len n_GPs
+         A list of trained GP regressor objects. They should all use the same input space (which 
+         contains Input).
 
-    Input: An numpy.ndarray array with shape (input_dim) that holds a single combination of 
-    parameter values. i.e., a single test example. Here, input_dim is the dimension of the input 
-    space for the GPs. We evaluate the posterior distribution of each GP in gp_list at this input 
-    (getting a prediction for each GP).
+    Input : numpy.ndarray, shape = (input_dim)
+        holds a single combination of parameter values. i.e., a single test example. Here, 
+        input_dim is the dimension of the input space for the GPs. We evaluate the posterior 
+        distribution of each GP in gp_list at this input (getting a prediction for each GP).
 
-    n_samples: Number of samples we draw from each GP's posterior distribution. 
+    n_samples : int
+        The number of samples we draw from each GP's posterior distribution. 
     
 
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
 
-    A 2d numpy ndarray object, coef_samples, with shape (n_samples, n_GPs) whose i,j element holds 
-    the i'th sample of the posterior distribution for the j'th GP evaluated at the Input.
+    coef_samples : numpy.ndarray, shape = (n_samples, n_GPs)
+        i,j element holds the i'th sample of the posterior distribution for the j'th GP evaluated 
+        at the Input.
     """
 
     # Checks.
