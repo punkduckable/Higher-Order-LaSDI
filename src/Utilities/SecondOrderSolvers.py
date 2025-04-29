@@ -8,28 +8,40 @@ import  torch;
 r"""
 The functions in this file implement Runge-Kutta solvers for a general second-order ODE of the 
 following form:
+
     y''(t)          = f(t,   y(t),   y'(t)).
+
 Here, y takes values in some vector space, V.
 
 To understand where our methods come from, let us first make a few substitutions. First, let 
+
     z(t)            = (y(t), y'(t)) \in V x V. 
-Then, 
+
+Then,
+
     z'(t)           = (y'(t), y''(t))
                     = (y'(t), f(t,   y(t),   y'(t)))
                     = (y'(t), f(t,   z(t))).
+
 Now, let g : \mathbb{R} x V x V -> V x V be defined by
+
     g(t, z(t))      = ( z[d + 1:2d], f(t, z(t)) ).
+
 Then,
+
     z'(t)           = g(t, z(t))
+
 In other words, we reduce the 2nd order ODE in V to a first order one in V x V. 
 
 
 We can now apply the Runge-Kutta method to this equation. A general explicit s-step Runge-Kutta 
 method generates a sequence of time steps, { z_n }_{n \in \mathbb{N}} \subseteq V. 
 using the following rule:
+
     z_{n + 1}       = z_n + h \sum_{i = 1}^{s} b_i k_i 
     k_i             = g(t_n + c_i h,   z_n + h \sum_{j = 1}^{i - 1} a_{i,j} k_j)
 Substituting in the definition of z and g gives
+
     y_{n + 1}       = y_n  + h \sum_{i = 1}^{s} b_i k_i[:d]                      
     y'_{n + 1}      = y'_n + h \sum_{i = 1}^{s} b_i k_i[d:]
 
@@ -39,20 +51,27 @@ Substituting in the definition of z and g gives
     
 If we substitute the 3rd equation into the 1st and assume that \sum_{i = 1}^{s} b_i = 1, 
 then we find that
+
     y_{n + 1}       = y_n + h\sum_{i = 1}^{s} b_i [ y'_n + h \sum_{j = 1}^{i - 1} a_{i,j} k_j[d:] ]
                     = y_n + h y'_n [ \sum_{i = 1}^{s} b_i ] + h^2 \sum_{i = 1}^{s} \sum_{j = 1}^{i - 1} b_i a_{i,j} k_j[d:]
                     = y_n + h y'_n + h^2 \sum_{j = 1}^{s} k_j[d:] \sum_{i = j + 1}^{s} b_i a_{i,j} 
                     = y_n + h y'_n + h^2 \sum_{j = 1}^{s} k_j[d:] \bar{b_j},
 where
+
     \bar{b_j}       = \sum_{k = j + 1}^{s} b_k a_{k,j}.
+
 Likewise, if we substitute the 3rd equation into the 4th and assume that 
 c_i = \sum_{j = 1}^{i - 1} a_{i,j} then we find that
+
     k_i[d:]         = f(t_n + c_n h,   y_n + h c_i y'_n + h^2 \sum_{j = 1}^{i - 1} k_j[d:] \bar{a_{i,j}},   y'_n + h \sum_{j = 1}^{i - 1} a_{i,j} k_j[d:]),
+
 where
+
     \bar{a_{i,j}}   = \sum_{k = j + 1}^{i - 1} a_{i,k} a_{k,j}
 
 
 Replacing k_i[d:] with the new letter l_i gives
+
     y_{n + 1}       = y_n  + h y'_n + h^2 \sum_{i = 1}^{s} l_i \bar{b_i}
     y'_{n + 1}      = y'_n + h \sum_{i = 1}^{s} b_i l_i
 
@@ -60,6 +79,7 @@ Replacing k_i[d:] with the new letter l_i gives
 
     \bar{b_i}       = \sum_{k = i + 1}^{s} b_k a_{k,i}
     \bar{a_{i,j}}   = \sum_{k = j + 1}^{i - 1} a_{i,k} a_{k,j}
+
 Thus, given an s-step Runge-Kutta method with coefficients c_1, ... , c_s, b_1, ... , b_s, 
 and { a_{i,j} : i = 1, 2, ... , s, j = 1, 2, ... , i - 1}, we can use the equations above to
 transform it into a method for solving 2nd order ODEs. 
@@ -77,19 +97,24 @@ def RK1(f       : callable,
     r"""
     This function implements a RK1 or Forward-Euler ODE solver for a second-order ODE of the 
     following form:
+    
         y''(t)          = f(t,   y(t),   y'(t)).
+    
     Here, y takes values in some vector space, V.
   
     In this function, we implement the Forward Euler (RK1) scheme with the following coefficients:
+    
         c_1 = 0
         b_1 = 1
         
     Substituting these coefficients into the equations above gives \bar{b_i} = \bar{a_{i,j}} = 0
     for each i,j. Thus, 
+
         y_{n + 1}       = y_n  + h y'_n 
         y'_{n + 1}      = y'_n + h l_1
 
-        l_1             = f(t_n,        y_n,                            y'_n)
+        l_1             = f(t_n, y_n, y'_n)
+    
     This is the method we implement.
 
 
@@ -97,17 +122,22 @@ def RK1(f       : callable,
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    f: The right-hand side of the ODE (see the top of this doc string). This is a function whose 
-    domain and co-domain are \mathbb{R} x V x V and V, respectively. Thus, we assume that 
-    f(t, y(t), y'(t)) = y''(t).
+    f : callable
+        The right-hand side of the ODE (see the top of this doc string). This is a function whose 
+        domain and co-domain are \mathbb{R} x V x V and V, respectively. Thus, we assume that 
+        f(t, y(t), y'(t)) = y''(t).
 
-    y0: A numpy.ndarray or torch.Tensor holding the initial displacement (i.e., y0 = y(t0)),  where
-    t0 = t_Grid[0].
+    y0 : numpy.ndarray or torch.Tensor, shape = Dy0.shape
+        A numpy.ndarray or torch.Tensor holding the initial displacement (i.e., y0 = y(t0)), where
+        t0 = t_Grid[0]. Must have the same type as Dy0.
 
-    Dy0: A numpy.ndarray or torch.Tensor holding the initial velocity (i.e., Dy0 = y'(t0)).
+    Dy0: numpy.ndarray or torch.Tensor, shape = y0.shape
+        A numpy.ndarray or torch.Tensor holding the initial velocity (i.e., Dy0 = y'(t0)). Must 
+        have the same type as y0.
 
-    t_Grid: A 1d numpy.ndarray object whose i'th element holds the i'th time value. 
-    We assume the elements of this array form an increasing sequence.
+    t_Grid : numpy.ndarray, shape = (n_t)
+        i'th element holds the i'th time value. We assume the elements of this array form an 
+        increasing sequence.
 
     
     -----------------------------------------------------------------------------------------------
@@ -116,10 +146,13 @@ def RK1(f       : callable,
 
     Two numpy.ndarray or torch.Tensor objects: D, V. 
     
-    Let N = tt_Gridmes.size and t0 = t_Grid[0]. D and V have shape N x y0.shape. The i'th row of 
-    D, V represent the displacement and the velocity at time i*h, respectively. Thus,
-        D[i, ...] = y_i   \approx y (t0 + i h) 
-        V[i, ...] = y'_i  \approx y'(t0 + i h) 
+    D : numpy.ndarray or torch.Tensor, shape = (n_t,) + y0.shape
+        D[i] an approximation to the displacement at time t_Grid[i]. Thus, D[i] \approx 
+        y(t_Grid[i). Will have the same type as y0/Dy0.
+    
+    V : numpy.ndarray or torch.Tensor, shape = (n_t,) + Dy0.shape
+        V[i] holds an approximation to the velocity at time t_Grid[i]. Thus, V[i] \approx 
+        y'(t_Grid[i). Will have the same type as y0/Dy0.
     """
 
     # First, run checks.
@@ -174,10 +207,13 @@ def RK2(f       : callable,
         t_Grid  : numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray] | tuple[torch.Tensor, torch.Tensor]:
     r"""
     This function implements a RK2 based ODE solver for a second-order ODE of the following form:
+
         y''(t)          = f(t,   y(t),   y'(t)).
+
     Here, y takes values in some vector space, V.
   
     In this function, we implement the classic RK2 scheme with the following coefficients:
+
         c_1 = 0
         c_2 = 1
 
@@ -187,10 +223,12 @@ def RK2(f       : callable,
         a_{2,1}         = 1
     
     Substituting these coefficients into the equations above gives
+
         \bar{b_1}       = b_2 a_{2,1}                           = 1/2
         \bar{b_2}                                               = 0
     
     \bar{a_{i,j}} = 0 for all i, j. Thus,
+
         y_{n + 1}       = y_n  + h y'_n + (h^2/2) l_1
         y'_{n + 1}      = y'_n + (h/2)( l_1 + l_2 )
 
@@ -204,30 +242,37 @@ def RK2(f       : callable,
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    f: The right-hand side of the ODE (see the top of this doc string). This is a function whose 
-    domain and co-domain are \mathbb{R} x V x V and V, respectively. Thus, we assume that 
-    f(t, y(t), y'(t)) = y''(t).
+    f : callable
+        The right-hand side of the ODE (see the top of this doc string). This is a function whose 
+        domain and co-domain are \mathbb{R} x V x V and V, respectively. Thus, we assume that 
+        f(t, y(t), y'(t)) = y''(t).
 
-    y0: A numpy.ndarray or torch.Tensor holding the initial displacement (i.e., y0 = y(t0)),  where
-    t0 = t_Grid[0].
+    y0 : numpy.ndarray or torch.Tensor, shape = Dy0.shape
+        A numpy.ndarray or torch.Tensor holding the initial displacement (i.e., y0 = y(t0)), where
+        t0 = t_Grid[0]. Must have the same type as Dy0.
 
-    Dy0: A numpy.ndarray or torch.Tensor holding the initial velocity (i.e., Dy0 = y'(t0)).
+    Dy0: numpy.ndarray or torch.Tensor, shape = y0.shape
+        A numpy.ndarray or torch.Tensor holding the initial velocity (i.e., Dy0 = y'(t0)). Must 
+        have the same type as y0.
 
-    t_Grid: A 1d numpy.ndarray object whose i'th element holds the i'th time value. We assume the
-    elements of this array form an increasing sequence.
-
+    t_Grid : numpy.ndarray, shape = (n_t)
+        i'th element holds the i'th time value. We assume the elements of this array form an 
+        increasing sequence.
 
     
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
 
-    Two numpy.ndarray objects: D, V. 
+    Two numpy.ndarray or torch.Tensor objects: D, V. 
     
-    Let N = t_Grid.size and t0 = t_Grid[0]. D and V have shape N x y0.shape. The i'th row of D, V 
-    represent the displacement and the velocity at time i*h, respectively. Thus,
-        D[i, ...] = y_i   \approx y (t0 + i h) 
-        V[i, ...] = y'_i  \approx y'(t0 + i h) 
+    D : numpy.ndarray or torch.Tensor, shape = (n_t,) + y0.shape
+        D[i] an approximation to the displacement at time t_Grid[i]. Thus, D[i] \approx 
+        y(t_Grid[i). Will have the same type as y0/Dy0.
+    
+    V : numpy.ndarray or torch.Tensor, shape = (n_t,) + Dy0.shape
+        V[i] holds an approximation to the velocity at time t_Grid[i]. Thus, V[i] \approx 
+        y'(t_Grid[i). Will have the same type as y0/Dy0.
     """
 
     # First, run checks.
@@ -283,10 +328,13 @@ def RK4(f       : callable,
         t_Grid  : numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray] | tuple[torch.Tensor, torch.Tensor]:
     r"""
     This function implements a RK4 based ODE solver for a second-order ODE of the following form:
+
         y''(t)          = f(t,   y(t),   y'(t)).
+
     Here, y takes values in some vector space, V.
   
     In this function, we implement the classic RK4 scheme with the following coefficients:
+
         c_1 = 0
         c_2 = 1/2
         c_3 = 1/2
@@ -302,6 +350,7 @@ def RK4(f       : callable,
         a_{4,3}         = 1
     
     Substituting these coefficients into the equations above gives
+
         \bar{b_1}       = 1/6
         \bar{b_2}       = 1/6
         \bar{b_3}       = 1/6
@@ -312,6 +361,7 @@ def RK4(f       : callable,
         \bar{a_{4,2}}   = a_{4,3} a_{3,2}                       = 1/2
     
     and \bar{a_{i,j}} = 0 for all other i, j. Thus,
+    
         y_{n + 1}       = y_n  + h y'_n + (h^2/6)[ l_1 + l_2 + l_3 ]
         y'_{n + 1}      = y'_n + h [ l_1/6 + l_2/3 + l_3/3 + l_4/6 ]
 
@@ -327,30 +377,37 @@ def RK4(f       : callable,
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    f: The right-hand side of the ODE (see the top of this doc string). This is a function whose 
-    domain and co-domain are \mathbb{R} x V x V and V, respectively. Thus, we assume that 
-    f(t, y(t), y'(t)) = y''(t).
+    f : callable
+        The right-hand side of the ODE (see the top of this doc string). This is a function whose 
+        domain and co-domain are \mathbb{R} x V x V and V, respectively. Thus, we assume that 
+        f(t, y(t), y'(t)) = y''(t).
 
-    y0: A numpy.ndarray or torch.Tensor holding the initial displacement (i.e., y0 = y(t0)),  where
-    t0 = t_Grid[0].
+    y0 : numpy.ndarray or torch.Tensor, shape = Dy0.shape
+        A numpy.ndarray or torch.Tensor holding the initial displacement (i.e., y0 = y(t0)), where
+        t0 = t_Grid[0]. Must have the same type as Dy0.
 
-    Dy0: A numpy.ndarray or torch.Tensor holding the initial velocity (i.e., Dy0 = y'(t0)).
+    Dy0: numpy.ndarray or torch.Tensor, shape = y0.shape
+        A numpy.ndarray or torch.Tensor holding the initial velocity (i.e., Dy0 = y'(t0)). Must 
+        have the same type as y0.
 
-    t_Grid: A 1d numpy.ndarray of shape (N) whose i'th element holds the i'th time value. We assume 
-    the elements of this array form an increasing sequence.
-
+    t_Grid : numpy.ndarray, shape = (n_t)
+        i'th element holds the i'th time value. We assume the elements of this array form an 
+        increasing sequence.
 
     
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
 
-    Two numpy.ndarray objects: D, V.
+    Two numpy.ndarray or torch.Tensor objects: D, V. 
     
-    Let N = t_Grid.size and t0 = t_Grid[0]. D and V have shape N x y0.shape. The i'th row of D, V 
-    represent the displacement and the velocity at time i*h, respectively. Thus,
-        D[i, ...] = y_i   \approx y (t0 + i h) 
-        V[i, ...] = y'_i  \approx y'(t0 + i h) 
+    D : numpy.ndarray or torch.Tensor, shape = (n_t,) + y0.shape
+        D[i] an approximation to the displacement at time t_Grid[i]. Thus, D[i] \approx 
+        y(t_Grid[i). Will have the same type as y0/Dy0.
+    
+    V : numpy.ndarray or torch.Tensor, shape = (n_t,) + Dy0.shape
+        V[i] holds an approximation to the velocity at time t_Grid[i]. Thus, V[i] \approx 
+        y'(t_Grid[i). Will have the same type as y0/Dy0.
     """
 
     # First, run checks.

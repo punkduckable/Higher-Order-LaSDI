@@ -15,6 +15,7 @@ def Derivative1_Order2_NonUniform(X : torch.Tensor, t_Grid : torch.Tensor) -> to
 
     We use the following finite difference techniques to compute the derivative (see 
     "DeriveFiniteDifference.ipynb" for a derivation).
+    
         f'(x) = (1/h){                                  - [(2a + b)/(a(a + b))]f(x) + [(a + b)/(ab)]f(x + h)   - [a/(b(a + b))]f(x + 2h) } + O(h^2)
         f'(x) = (1/h){ -[(2a + b)/(a(a + b))]f(x - h)   + [(b - a)/(ab)]f(x)        - [a/(b(a + b))]f(x + h)   }
 
@@ -22,20 +23,21 @@ def Derivative1_Order2_NonUniform(X : torch.Tensor, t_Grid : torch.Tensor) -> to
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    X: A torch.Tensor object representing a time sequence. We assume that X has shape [Nt, ...] 
-    and that X[i, ...] represents the value of some function at the i'th time step. Specifically, 
-    we assume that X[i, ...] is the value of some function, X, at time t_Grid[i]
+    X : torch.Tensor, shape = [Nt, ...]
+        A torch.Tensor object representing a time sequence. X[i, ...] represents the value of some 
+        function at the i'th time step. Specifically, we assume that X[i, ...] is the value of some 
+        function, X, at time t_Grid[i]
 
-    t_Grid: A 1d torch.Tensor of shape Nt. The i'th element of this array should hold the time 
-    of the i'th time step.
+    t_Grid : torch.Tensor, shape = (Nt)
+        The i'th element of this Tensor should hold the time of the i'th time step.
 
     
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
 
-    A torch.Tensor object with the same shape as X whose i'th row holds an O(h^2) approximation of 
-    the time derivative of X at the i'th time step.   
+    dX_dt : torch.Tensor, shape = X.shape
+        i'th row holds an O(h^2) approximation of the time derivative of X at the i'th time step.   
     """
 
     # Checks
@@ -102,6 +104,7 @@ def Derivative1_Order2(X : torch.Tensor, h : float) -> torch.Tensor:
 
     We use the following finite difference techniques to compute the derivative (see 
     "DeriveFiniteDifference.ipynb" for a derivation).
+    
         f'(x)   = (1/h)[                - (3/2)f(x) +   (2)f(x + h) - (1/2)f(x + 2h) ]  + O(h^2)
         f'(x)   = (1/h)[ (1/2)f(x - h)              + (1/2)f(x + h)                  ]  + O(h^2)
 
@@ -110,20 +113,21 @@ def Derivative1_Order2(X : torch.Tensor, h : float) -> torch.Tensor:
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    X: A torch.Tensor object representing a time sequence. We assume that X has shape [Nt, ...] 
-    and that X[i, ...] represents the value of some function at the i'th time step. Specifically, 
-    we assume that X[i, ...] is the value of some function, X, at time t_0 + i*h.
+    X : torch.Tensor, shape = [Nt, ...]
+        A torch.Tensor object representing a time sequence. X[i, ...] represents the value of some 
+        function at the i'th time step. Specifically, we assume that X[i, ...] is the value of some 
+        function, X, at time t_0 + i*h.
 
-    h: The time step size.
+    h : float
+        The time step size.
 
-
-
+    
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
 
-    A torch.Tensor object with the same shape as X whose i'th row holds an O(h^2) approximation of 
-    the time derivative of X at the i'th time step. 
+    dX_dt : torch.Tensor, shape = X.shape
+        i'th row holds an O(h^2) approximation of the time derivative of X at the i'th time step.  
     """
 
     # For this scheme to work, X must contain at least 3 rows.
@@ -157,28 +161,31 @@ def Derivative1_Order4(X : torch.Tensor, h : float) -> torch.Tensor:
     
     We use the following finite difference techniques to compute the derivative (see 
     "DeriveFiniteDifference.ipynb" for a derivation).
+
         f'(x) = (1/h)[                                  - (25/12)f(x)   + (4)f(x + h)   - (3)f(x + 2h)      + (4/3)f(x + 3h)    - (1/4)f(x + 4h)]   + O(h^4)
         f'(x) = (1/h)[                  -(1/4)f(x - h)  - (5/6)f(x)     + (2/3)f(x + h) - (1/12)f(x + 2h)                                       ]   + O(h^4)
         f'(x) = (1/h)[ (1/12)f(x - 2h)  - (2/3)f(x - h)                 + (2/3)f(x + h) - (1/12)f(x + 2h)                                       ]   + O(h^4)
+    
     
     -----------------------------------------------------------------------------------------------
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    X: A torch.Tensor object representing a time sequence. We assume that X has shape [Nt, ...] 
-    and that X[i, ...] represents the value of some function at the i'th time step. Specifically, 
-    we assume that X[i, ...] is the value of some function, X, at time t_0 + i*h.
+    X : torch.Tensor, shape = [Nt, ...]
+        A torch.Tensor object representing a time sequence. X[i, ...] represents the value of some 
+        function at the i'th time step. Specifically, we assume that X[i, ...] is the value of some 
+        function, X, at time t_0 + i*h.
 
-    h: The time step size.
-
+    h : float
+        The time step size.
 
     
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
 
-    A torch.Tensor object with the same shape as X whose i'th row holds an O(h^4) approximation of 
-    the time derivative of X at the i'th time step. 
+    dX_dt : torch.Tensor, shape = X.shape
+        i'th row holds an O(h^4) approximation of the time derivative of X at the i'th time step.  
     """
 
     # For this scheme to work, X must contain at least 5 rows.
@@ -215,6 +222,7 @@ def Derivative2_Order2_NonUniform(X : torch.Tensor, t_Grid : torch.Tensor) -> to
     
     We use the following finite difference techniques to compute the derivative (see 
     "DeriveFiniteDifference.ipynb" for a derivation).
+
         f''(x) = (1/h^2)[                                                 ([-2(3a + 2b + c)]/[a(a +b)(a + b + c)])                 f(x) - ([-2(2a + 2b + c)]/[ab(b + c)])  f(x + a) + ([2(2a + b + c)]/[ab(b + c)])       f(x + a + b)   - ([2(2a + b)]/[(a + b + c)(b + c)c])f(x + a + b + c)  ] + O(h^2)
         f''(x) = (1/h^2)[ ([2(2b + c)]/[a(a + b)(a + b + c)]) f(x - a)  - ([2(b(a + 2b + 3c) + c^2 - a^2)]/[ba(b + c)(a + b + c)]) f(x) +     ([2(b + c - a)]/[bc(a + b)]) f(x + b) + ([-2(b - a)]/[c(b + c)(a + b + c)]) f(x + b + c)                                                          ] + O(h^2)
     
@@ -223,21 +231,21 @@ def Derivative2_Order2_NonUniform(X : torch.Tensor, t_Grid : torch.Tensor) -> to
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    X: A torch.Tensor object representing a time sequence. We assume that X has shape [Nt, ...] 
-    and that X[i, ...] represents the value of some function at the i'th time step. Specifically, 
-    we assume that X[i, ...] is the value of some function, x, at time t_0 + t_Grid[i].
+    X : torch.Tensor, shape = [Nt, ...]
+        A torch.Tensor object representing a time sequence. X[i, ...] represents the value of some 
+        function at the i'th time step. Specifically, we assume that X[i, ...] is the value of some 
+        function, X, at time t_0 + i*h.
 
-    t_Grid: A 1d torch.Tensor of shape Nt. The i'th element of this array should hold the time 
-    of the i'th time step.
-
+    t_Grid : torch.Tensor, shape = (Nt)
+        The i'th element of this Tensor should hold the time of the i'th time step.
 
     
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
 
-    A torch.Tensor object with the same shape as X whose i'th row holds an O(h^2) approximation of 
-    the time derivative of x at the i'th time step (that is, it approximates x''(t_Grid[i])).
+    d2X_dt2 : torch.Tensor, shape = X.shape
+        i'th row holds an O(h^2) approximation of the time derivative of X at the i'th time step.  
     """
 
     # Checks. 
@@ -345,28 +353,29 @@ def Derivative2_Order2(X : torch.Tensor, h : float) -> torch.Tensor:
     
     We use the following finite difference techniques to compute the derivative (see 
     "DeriveFiniteDifference.ipynb" for a derivation).
+
         f''(x) = (1/h^2)[             (2)f(x) -  (5)f(x + h)   + (4)f(x + 2h)   - f(x + 3h) ] + O(h^2)
         f''(x) = (1/h^2)[ f(x - h)  - (2)f(x) +     f(x + h)                                ] + O(h^2)
     
-
     -----------------------------------------------------------------------------------------------
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    X: A torch.Tensor object representing a time sequence. We assume that X has shape [Nt, ...] 
-    and that X[i, ...] represents the value of some function at the i'th time step. Specifically, 
-    we assume that X[i, ...] is the value of some function, x, at time t_0 + i*h.
+    X : torch.Tensor, shape = [Nt, ...]
+        A torch.Tensor object representing a time sequence. X[i, ...] represents the value of some 
+        function at the i'th time step. Specifically, we assume that X[i, ...] is the value of some 
+        function, X, at time t_0 + i*h.
 
-    h: The time step size.
-
+    h : float
+        The time step size.
 
     
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
 
-    A torch.Tensor object with the same shape as X whose i'th row holds an O(h^2) approximation of 
-    the time derivative of x at the i'th time step (that is, it approximates x''(t_0 + i h)).
+    d2X_dt2 : torch.Tensor, shape = X.shape
+        i'th row holds an O(h^2) approximation of the time derivative of X at the i'th time step. 
     """
 
     # For this scheme to work, X must contain at least 4 rows.
@@ -403,6 +412,7 @@ def Derivative2_Order4(X : torch.Tensor, h : float) -> torch.Tensor:
 
     We use the following finite difference techniques to compute the derivative (see 
     "DeriveFiniteDifference.ipynb" for a derivation).
+    
         f''(x) = (1/h^2)[                                     (15/4)f(x)    - (12 + 5/6)f(x + h)    + (17 + 5/6)f(x + 2h)   - (13)f(x + 3h)     + (5 + 1/12)f(x + 4h)   - (5/6)f(x + 5h) ]  + O(h^4)
         f''(x) = (1/h^2)[                     (5/6)f(x - h) - (5/4)f(x)     - (1/3)f(x + h)         + (7/6)f(x + 2h)        - (1/2)f(x + 3h)    + (1/12)f(x + 4h)]                          + O(h^4)
         f''(x) = (1/h^2)[ -(1/12)f(x - 2h)  + (4/3)f(x - h) - (5/2)f(x)     + (4/3)f(x + h)         - (1/12)f(x + 2h)]                                                                      + O(h^4)
@@ -412,20 +422,21 @@ def Derivative2_Order4(X : torch.Tensor, h : float) -> torch.Tensor:
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    X: A torch.Tensor object representing a time sequence. We assume that X has shape [Nt, ...] 
-    and that X[i, ...] represents the value of some function at the i'th time step. Specifically, 
-    we assume that X[i, ...] is the value of some function, x, at time t_0 + i*h.
+    X : torch.Tensor, shape = [Nt, ...]
+        A torch.Tensor object representing a time sequence. X[i, ...] represents the value of some 
+        function at the i'th time step. Specifically, we assume that X[i, ...] is the value of some 
+        function, X, at time t_0 + i*h.
 
-    h: The time step size.
-
+    h : float
+        The time step size.
 
     
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
 
-    A torch.Tensor object with the same shape as X whose i'th row holds an O(h^4) approximation of 
-    the time derivative of x at the i'th time step (that is, it approximates x''(t_0 + i h)).
+    d2X_dt2 : torch.Tensor, shape = X.shape
+        i'th row holds an O(h^4) approximation of the time derivative of X at the i'th time step. 
     """
 
     # For this scheme to work, X must contain at least 6 rows.
