@@ -190,8 +190,11 @@ class Burgers(Physics):
         # Compute dt. Set up the t_Grid.
         n_t     : int           = self.config['Burgers']['n_t'];
         t_max   : float         = self.config['Burgers']['t_max']; 
-        dt      : float         = t_max/(n_t - 1);
         t_Grid  : torch.Tensor  = torch.linspace(0, t_max, n_t, dtype = torch.float32);
+        if(self.Uniform_t_Grid == False):
+            r               : float = 0.2*(t_Grid[1] - t_Grid[0]);
+            t_adjustments           = numpy.random.uniform(low = -r, high = r, size = (n_t - 2));
+            t_Grid[1:-1]            = t_Grid[1:-1] + t_adjustments;
 
         # Solve the PDE!
         new_X   : torch.Tensor  = [torch.Tensor(solver(u0                       = u0, 
