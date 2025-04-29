@@ -1,0 +1,67 @@
+lasdi:
+  type:                     gplasdi
+  gplasdi:
+    lr:                     0.001
+    n_samples:              20
+
+    # Note that t_rollout is capped at 0.75 to ensure there are some frames to simulate forward.
+    p_rollout_init:         0.0
+    rollout_update_freq:    100
+    dp_per_update:          0.002
+
+    max_iter:               6000
+    n_iter:                 2000
+    max_greedy_iter:        6000
+
+    loss_weights:
+      recon:                1.0
+      chain_rule:           1.0
+      LD:                   0.5
+      rollout:              0.5
+      coef:                 0.0001
+      consistency:          1.0
+
+workflow:
+  use_restart:              false
+  restart_file:             restarts/burgers1d.restart.npy
+
+parameter_space:
+  parameters:
+    - name:                 a
+      min:                  0.9
+      max:                  1.1
+      test_space_type:      uniform
+      sample_size:          5
+      log_scale:            false
+    - name:                 w
+      test_space_type:      list
+      list:                 [0.9, 0.95, 1.0, 1.05, 1.1]
+  test_space:
+    type:                   grid
+
+model:
+  type:                     pair
+  ae:
+    hidden_widths:          [100]
+    latent_dimension:       5
+  pair:
+    hidden_widths:          [250, 100, 100, 100]
+    latent_dimension:       5  
+
+latent_dynamics:
+  type:                     spring
+  coef_norm_order:          fro
+  spring:
+  sindy:
+
+physics:
+  type:                     Explicit
+  Explicit:
+    n_t:                    501
+    t_max:                  1.
+    n_x:                    1001
+    x_min:                  -3.
+    x_max:                  3.
+    uniform_t_grid:         false
+
+
