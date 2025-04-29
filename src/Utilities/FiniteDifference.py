@@ -1,5 +1,4 @@
 import  torch;
-import  numpy;
 
 """
 The functions in this file implement various finite difference approximations for first and second
@@ -39,8 +38,9 @@ def Derivative1_Order2_NonUniform(X : torch.Tensor, t_Grid : torch.Tensor) -> to
     the time derivative of X at the i'th time step.   
     """
 
-
-    # For this scheme to work, X must contain at least 3 rows.
+    # Checks
+    assert(isinstance(t_Grid, torch.Tensor));
+    assert(isinstance(X, torch.Tensor));
     assert(X.shape[0]           >= 3);
     assert(len(t_Grid.shape)    == 1);
     assert(len(t_Grid)          == X.shape[0]);
@@ -65,15 +65,15 @@ def Derivative1_Order2_NonUniform(X : torch.Tensor, t_Grid : torch.Tensor) -> to
     a  : torch.Tensor = t_Grid[1:(Nt - 1)]    - t_Grid[0:(Nt - 2)];
     b  : torch.Tensor = t_Grid[2:(Nt)]        - t_Grid[1:(Nt - 1)];
 
-    c0  : torch.Tensor = numpy.divide(-1*b,   numpy.multiply(a, a + b));
-    c1  : torch.Tensor = numpy.divide(b - a, numpy.multiply(a, b));
-    c2  : torch.Tensor = numpy.divide(a,      numpy.multiply(b, a + b));
+    c0  : torch.Tensor = torch.divide(-1*b,   torch.multiply(a, a + b));
+    c1  : torch.Tensor = torch.divide(b - a,  torch.multiply(a, b));
+    c2  : torch.Tensor = torch.divide(a,      torch.multiply(b, a + b));
 
     c0 = c0.reshape([-1] + [1]*(len(X.shape) - 1));
     c1 = c1.reshape([-1] + [1]*(len(X.shape) - 1));
     c2 = c2.reshape([-1] + [1]*(len(X.shape) - 1));
 
-    dX_dt[1:(Nt - 1), ...] = numpy.multiply(c0, X[0:(Nt - 2), ...]) +  torch.multiply(c1, X[1:(Nt - 1), ...]) + torch.multiply(c2, X[2:Nt, ...]);
+    dX_dt[1:(Nt - 1), ...] = torch.multiply(c0, X[0:(Nt - 2), ...]) +  torch.multiply(c1, X[1:(Nt - 1), ...]) + torch.multiply(c2, X[2:Nt, ...]);
 
 
     # Compute the derivative for the final time step.
@@ -127,6 +127,7 @@ def Derivative1_Order2(X : torch.Tensor, h : float) -> torch.Tensor:
     """
 
     # For this scheme to work, X must contain at least 3 rows.
+    assert(isinstance(X, torch.Tensor));
     assert(X.shape[0] >= 3);
 
     # Initialize a tensor to hold the time derivative.
@@ -181,6 +182,7 @@ def Derivative1_Order4(X : torch.Tensor, h : float) -> torch.Tensor:
     """
 
     # For this scheme to work, X must contain at least 5 rows.
+    assert(isinstance(X, torch.Tensor));
     assert(X.shape[0] >= 5);
 
     # Initialize a tensor to hold the time derivative.
@@ -238,8 +240,13 @@ def Derivative2_Order2_NonUniform(X : torch.Tensor, t_Grid : torch.Tensor) -> to
     the time derivative of x at the i'th time step (that is, it approximates x''(t_Grid[i])).
     """
 
-    # For this scheme to work, X must contain at least 4 rows.
+    # Checks. 
+    assert(isinstance(t_Grid,   torch.Tensor));
+    assert(isinstance(X,        torch.Tensor));
     assert(X.shape[0] >= 4);
+    assert(len(t_Grid.shape)    == 1);
+    assert(len(t_Grid)          == X.shape[0]);
+
 
     # Initialize a tensor to hold the time derivative.
     d2X_dt2 : torch.Tensor  = torch.empty_like(X);
@@ -270,14 +277,14 @@ def Derivative2_Order2_NonUniform(X : torch.Tensor, t_Grid : torch.Tensor) -> to
     #   c0      =  2(b(a + 2b + 3c) + c^2 - a^2))   / (ba(b + c)(a + b + c))
     #   c1      =  2(b + c - a)                     / (bc(a + b))
     #   c2      = -2(b - a)                         / (c(b + c)(a + b + c))
-    a       : numpy.ndarray = t_Grid[1:(Nt - 2)]    - t_Grid[0:(Nt - 3)];
-    b       : numpy.ndarray = t_Grid[2:(Nt - 1)]    - t_Grid[1:(Nt - 2)];
-    c       : numpy.ndarray = t_Grid[3:Nt]          - t_Grid[2:(Nt - 1)];
+    a       : torch.Tensor = t_Grid[1:(Nt - 2)]    - t_Grid[0:(Nt - 3)];
+    b       : torch.Tensor = t_Grid[2:(Nt - 1)]    - t_Grid[1:(Nt - 2)];
+    c       : torch.Tensor = t_Grid[3:Nt]          - t_Grid[2:(Nt - 1)];
 
-    a_b     : numpy.ndarray = a + b;
-    b_c     : numpy.ndarray = b + c;
-    a_b_c   : numpy.ndarray = a_b + c;
-    bb_bc   : numpy.ndarray = numpy.multiply(b, b_c);
+    a_b     : torch.Tensor = a + b;
+    b_c     : torch.Tensor = b + c;
+    a_b_c   : torch.Tensor = a_b + c;
+    bb_bc   : torch.Tensor = torch.multiply(b, b_c);
 
     cm1 : float     = torch.divide( 2*(2*b + c), torch.multiply(a, torch.multiply(a_b, a_b_c)));
     c0  : float     = torch.divide(-2*(torch.multiply(b, (a + 2*b + 3*c)) + torch.multiply(c, c) - torch.multiply(a, a)), torch.multiply(a, torch.multiply(bb_bc,   a_b_c)));
@@ -363,6 +370,7 @@ def Derivative2_Order2(X : torch.Tensor, h : float) -> torch.Tensor:
     """
 
     # For this scheme to work, X must contain at least 4 rows.
+    assert(isinstance(X, torch.Tensor));
     assert(X.shape[0] >= 4);
 
     # Initialize a tensor to hold the time derivative.
@@ -421,6 +429,7 @@ def Derivative2_Order4(X : torch.Tensor, h : float) -> torch.Tensor:
     """
 
     # For this scheme to work, X must contain at least 6 rows.
+    assert(isinstance(X, torch.Tensor));
     assert(X.shape[0] >= 6);
 
     # Initialize a tensor to hold the time derivative.
