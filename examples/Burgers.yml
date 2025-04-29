@@ -11,9 +11,9 @@ lasdi:
 
     rollout_increase_amt:   1
 
-    max_iter:               400
-    n_iter:                 200
-    max_greedy_iter:        400
+    max_iter:               900
+    n_iter:                 300
+    max_greedy_iter:        900
 
     loss_weights:
       recon:                1.0
@@ -70,4 +70,6 @@ physics:
     x_max:                  3.
     maxk:                   10
     convergence_threshold:  0.00000001
+    uniform_t_grid:         false
+
 
