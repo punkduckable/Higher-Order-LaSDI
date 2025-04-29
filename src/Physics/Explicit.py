@@ -28,6 +28,7 @@ class Explicit(Physics):
         """
         This is the initializer for the Explicit class. This class essentially acts as a wrapper
         around the following function of t and x:
+            
             u(t, x) = [sin(2x-t) + 0.1 sin(w t) cos( 40x + 2t)] exp(-a x^2)
 
         
@@ -35,11 +36,12 @@ class Explicit(Physics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        config: A dictionary housing the settings for the Explicit object. This should be the 
-        "physics" sub-dictionary of the configuration file. 
+        config: dict 
+            A dictionary housing the settings for the Explicit object. This should be the "physics" 
+            sub-dictionary of the configuration file. 
 
-        param_names: A list of strings. There should be one list item for each parameter. The 
-        i'th element of this list should be a string housing the name of the i'th parameter. 
+        param_names: list[str], len = 2
+            i'th element be a string housing the name of the i'th parameter. 
 
         
         -------------------------------------------------------------------------------------------
@@ -58,21 +60,21 @@ class Explicit(Physics):
         # Call the super class initializer.
         super().__init__(config         = config, 
                          param_names    = param_names, 
-                         Uniform_t_Grid = True);
+                         Uniform_t_Grid = config['Explicit']['uniform_t_grid']);
         
         # The functions we deal with are scalar valued. Likewise, since there is only one spatial 
         # dimension, dim is also 1. 
         self.qdim           : int   = 1;
         self.spatial_dim    : int   = 1;
 
-        # Make sure the config dictionary is actually for the explicit physics model.
-        assert('explicit' in config);
+        # Make sure the config dictionary is actually for the Explicit physics model.
+        assert('Explicit' in config);
 
         # Set up spatial variables
         self.n_IC                   : int       = 2;
-        self.n_x                    : int       = config['explicit']['n_x'];    
-        self.x_min                  : float     = config['explicit']['x_min'];
-        self.x_max                  : float     = config['explicit']['x_max'];
+        self.n_x                    : int       = config['Explicit']['n_x'];    
+        self.x_min                  : float     = config['Explicit']['x_min'];
+        self.x_max                  : float     = config['Explicit']['x_max'];
         self.dx                     : float     = (self.x_max - self.x_min)/(self.n_x - 1);
         self.Frame_Shape            : list[int] = [self.n_x];                       # number of grid points along each spatial axis
 
@@ -92,11 +94,16 @@ class Explicit(Physics):
     def initial_condition(self, param : numpy.ndarray) -> list[numpy.ndarray]:
         """
         Evaluates the initial condition along the spatial grid. In this case,
+        
             u(t, x) = [sin(2x-t) + 0.1 sin(w t) cos( 40x + 2t)] exp(-a x^2)
+        
         Thus,
+            
             v(t, x) = (d/dt)u(t, x)
                     = [-cos(2x - t) + 0.1 w cos(w t) cos( 40 x + 2t) - 0.2 sin(w t)sin( 40x + 2t) ] exp(-a x^2)
+        
         Which means that
+        
             u(0, x) = [sin(2x)]exp(-a x^2)
             v(0, x) = [-cos(2x) + 0.1 w cos( 40 x) ]exp(-a x^2)
 
@@ -105,18 +112,19 @@ class Explicit(Physics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        param: A 1d numpy.ndarray object with two elements corresponding to the values of the w 
-        and a parameters. self.a_idx and self.w_idx tell us which index corresponds to which 
-        variable.
+        param : numpy.ndarray, shape = (2)
+            The two elements corresponding to the values of the w and a parameters. self.a_idx and 
+            self.w_idx tell us which index corresponds to which variable.
         
 
         -------------------------------------------------------------------------------------------
         Returns 
         -------------------------------------------------------------------------------------------
 
-        A list of 1d numpy.ndarray objects, each of shape length self.n_x (the number of grid 
-        points along the spatial axis). The i'th element holds the initial state of the i'th time 
-        derivative of the FOM state.
+        X0 : list[numpy.ndarray], len = self.n_x
+           i'th element has shape self.n_x (the number of grid points along the spatial axis) and
+            holds the i'th derivative of the initial state when we use param to define the initial
+            condition.
         """
 
         # Checks.
@@ -146,23 +154,26 @@ class Explicit(Physics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        param: A 1d numpy.ndarray object with two elements corresponding to the values of the w 
-        and a parameters. self.a_idx and self.w_idx tell us which index corresponds to which 
-        variable.
+        param : numpy.ndarray, shape = (2)
+            The two elements correspond to the values of the w and a parameters. self.a_idx and 
+            self.w_idx tell us which index corresponds to which variable.
         
 
         -------------------------------------------------------------------------------------------
         Returns 
         -------------------------------------------------------------------------------------------
         
-        A two element tuple: X, t_Grid.
+        X, t_Grid.
 
-        X is a 2 element list holding the displacement and velocity of the FOM solution when we 
-        use param. Each element is a torch.Tensor object of shape (n_t, self.Frame_Shape), where 
-        n_t is the number of time steps when we solve the FOM using param for the IC parameters.
+        X : list[torch.Tensor]
+            Holds the displacement and velocity of the FOM solution when we use param to define
+            the initial condition. Each element is a torch.Tensor object of shape 
+            (n_t, self.Frame_Shape), where n_t is the number of time steps when we solve the FOM 
+            using param for the IC parameters.
 
-        t_Grid is a 1d torch.Tensor object whose i'th element holds the i'th time value at which
-        we have an approximation to the FOM solution (the time value associated with X[0, i, ...]).
+        t_Grid : torch.Tensor, shape = (n_t)
+            i'th element holds the i'th time value at which we have an approximation to the FOM 
+            solution (the time value associated with X[0, i, ...]).
         """
        
         assert(isinstance(param, numpy.ndarray));
@@ -173,10 +184,15 @@ class Explicit(Physics):
         a   : float             = param[self.a_idx];
         w   : float             = param[self.w_idx]; 
 
-        # Make the t_grid
-        n_t     : int           = self.config['explicit']['n_t'];
-        t_max   : float         = self.config['explicit']['t_max']; # We solve from t = 0 to t = t_max. 
+        # Make the t_grid. If we are not using uniform t spacing, then add a random perturbation to 
+        # the intermediate time steps.
+        n_t     : int           = self.config['Explicit']['n_t'];
+        t_max   : float         = self.config['Explicit']['t_max']; # We solve from t = 0 to t = t_max. 
         t_Grid  : numpy.ndarray = numpy.linspace(0, t_max, n_t, dtype = numpy.float32);
+        if(self.Uniform_t_Grid == False):
+            r               : float = 0.2*(t_Grid[1] - t_Grid[0]);
+            t_adjustments           = numpy.random.uniform(low = -r, high = r, size = (n_t - 2));
+            t_Grid[1:-1]            = t_Grid[1:-1] + t_adjustments;
 
         # Make the t, x meshgrids.
         t_mesh, x_mesh          = numpy.meshgrid(t_Grid, self.X_Positions, indexing = 'ij');
@@ -188,11 +204,11 @@ class Explicit(Physics):
         # Thus,
         #   v(t, x) = (d/dt)u(t, x)
         #            = [-cos(2x - t) + 0.1 w cos(w t) cos(40x + 2t) - 0.2 sin(w t)sin(40x + 2t) ] exp(-a x^2)
-        U   : torch.Tensor  = torch.multiply(torch.sin(2*x_mesh - t_mesh) +                                                     # [ sin(2x - t)
+        U   : torch.Tensor  = torch.multiply(torch.sin(2.*x_mesh - t_mesh) +                                                    # [ sin(2x - t)
                                              0.1*torch.multiply(torch.sin(w*t_mesh), torch.cos(40*x_mesh + 2*t_mesh)),          #   0.1*sin(w t)cos(40x + 2t) ]*
                                              torch.exp(-a*torch.multiply(x_mesh, x_mesh)));                                     # exp(-a x*2)
         
-        V   : torch.Tensor  = torch.multiply(-1*torch.cos(2*x_mesh - t_mesh) +                                                  # [ -2 cos(2x - t) + 
+        V   : torch.Tensor  = torch.multiply(-torch.cos(2.*x_mesh - t_mesh) +                                                # [ - cos(2x - t) + 
                                              (0.1*w)*torch.multiply(torch.cos(w*t_mesh), torch.cos(40*x_mesh + 2*t_mesh)) -     #   0.1*w*cos(w t)cos(40x + 2t) - 
                                              0.2*torch.multiply(torch.sin(w*t_mesh), torch.sin(40*x_mesh + 2*t_mesh)),          #   0.2*sin(w t)sin(40x + 2t) ] *
                                              torch.exp(-a*torch.multiply(x_mesh, x_mesh)));                                     # exp(-a x^2)
@@ -213,19 +229,25 @@ class Explicit(Physics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        X_hist: A list of 2d numpy.ndarray object of shape (n_t, n_x), where n_t is the number of 
-        points along the temporal axis (this is specified by the configuration file) and n_x is the 
-        number of points along the spatial axis. The i,j element of the d'th array should have the 
-        j'th component of the d'th derivative of the fom solution at the i'th time step.
+        X_hist: list[numpy.ndarray], len = n_IC
+            d'th element is a 2d numpy.ndarray object of shape (n_t, n_x), where n_t is the number of 
+            points along the temporal axis (this is specified by the configuration file) and n_x is the 
+            number of points along the spatial axis. The i,j element of the d'th array should have the 
+            j'th component of the d'th derivative of the fom solution at the i'th time step.
 
         
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        A two element tuple. The first is a numpy.ndarray object of shape (n_t - 2, n_x - 2) whose 
-        i, j element holds the residual at the i + 1'th temporal grid point and the j + 1'th 
-        spatial grid point. 
+        r, e
+        
+        r : numpy.ndarray, shape = (n_t - 2, n_x - 2)
+            i, j element holds the residual at the i + 1'th temporal grid point and the j + 1'th 
+            spatial grid point. 
+        
+        e : float
+            the norm of r.
         """
 
         # Run checks.
