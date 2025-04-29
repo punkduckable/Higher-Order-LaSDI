@@ -32,7 +32,8 @@ class Timer:
         Arguments
         -------------------------------------------------------------------------------------------
 
-        name: A string specifying the name of the timer you want to start.
+        name : str
+            Specifies the name of the timer you want to start.
 
 
         -------------------------------------------------------------------------------------------
@@ -82,7 +83,8 @@ class Timer:
         Arguments
         -------------------------------------------------------------------------------------------
 
-        name: A string specifying the name of the timer you want to stop.
+        name : str 
+            The name of the timer you want to stop.
 
 
         -------------------------------------------------------------------------------------------
@@ -151,18 +153,20 @@ class Timer:
         Returns
         -------------------------------------------------------------------------------------------
 
-        A dictionary housing the names, calls, and times attributes of self. The returned 
-        dictionary has three keys:
-            - names
-            - calls
-            - times
-        
-        names is a dictionary with string keys whose corresponding values are integer indexes. If a 
-        particular timer was the k'th one added to self, then it's value in names will be k. 
+        param_dict : dictionary 
+            A dictionary housing the names, calls, and times attributes of self. The returned 
+            dictionary has three keys:
+                - names
+                - calls
+                - times
+            
+            names is a dictionary with string keys whose corresponding values are integer indexes. 
+            If a particular timer was the k'th one added to self, then it's value in names will be 
+            k. 
 
-        calls is a list whose k'th element specifies how many times the k'th timer was stopped.
+            calls is a list whose k'th element specifies how many times the k'th timer was stopped.
 
-        times is a list whose k'th element specifies the total time recorded on the k'th timer.
+            times is a list whose k'th element specifies the total time recorded on the k'th timer.
         """
 
         # Make sure that no timers are currently running.
@@ -195,13 +199,14 @@ class Timer:
         Arguments
         -------------------------------------------------------------------------------------------
 
-        dict_: This should be a dictionary with three keys:
-            - names
-            - calls
-            - times
-        the corresponding values should be the names, calls, and times attributes of another timer
-        object, respectively. We replace self's attributes with those the values in dict_. dict_ 
-        should be the dictionary returned by calling export on a timer object.
+        dict_ : dictionary
+            A dictionary with three keys:
+                - names
+                - calls
+                - times
+            the corresponding values should be the names, calls, and times attributes of another 
+            timer object, respectively. We replace self's attributes with those the values in 
+            dict_. dict_ should be the dictionary returned by calling export on a timer object.
 
 
         -------------------------------------------------------------------------------------------
