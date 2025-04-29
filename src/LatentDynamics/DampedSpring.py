@@ -37,7 +37,9 @@ class DampedSpring(LatentDynamics):
         r"""
         Initializes a DampedSpring object. This is a subclass of the LatentDynamics class which 
         implements the following latent dynamics
-            z''(t) = -K z(t) - C z'(t) + b
+        
+                z''(t) = -K z(t) - C z'(t) + b
+        
         Here, z is the latent state. K \in \mathbb{R}^{n x n} represents a generalized spring 
         matrix, C represents a damping matrix, and b is an offset/constant forcing function. 
         In this expression, K, C, and b are the model's coefficients. There is a separate set of
@@ -48,17 +50,29 @@ class DampedSpring(LatentDynamics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        n_z: The number of dimensions in the latent space, where the latent dynamics takes place.
-        
-        coef_norm_order: A string or float specifying which norm we want to use when computing
-        the coefficient loss. We pass as the "p" argument to torch.norm. 
+        n_z : int
+            The number of dimensions in the latent space, where the latent dynamics takes place.
 
-        Uniform_t_Grid: A boolean which, if True, specifies that for each parameter value, the 
-        times corresponding to the frames of the solution for that parameter value will be 
-        uniformly spaced. In other words, the first frame corresponds to time t0, the second to 
-        t0 + h, the k'th to t0 + (k - 1)h, etc (note that h may depend on the parameter value, but
-        it needs to be constant for a specific parameter value). The value of this setting 
-        determines which finite difference method we use to compute time derivatives. 
+        coef_norm_order : float, 'inf', 'fro'
+            Specifies which norm we want to use when computing the coefficient loss. We pass this 
+            as the "p" argument to torch.norm. If it's a float, coef_norm_order = p \in \mathbb{R}, 
+            then we use the corresponding l^p norm. If it is "inf" or "fro", we use the infinity 
+            or Frobenius norm, respectively. 
+
+        Uniform_t_Grid : bool 
+            If True, then for each parameter value, the times corresponding to the frames of the 
+            solution for that parameter value will be uniformly spaced. In other words, the first 
+            frame corresponds to time t0, the second to t0 + h, the k'th to t0 + (k - 1)h, etc 
+            (note that h may depend on the parameter value, but it needs to be constant for a 
+            specific parameter value). The value of this setting determines which finite difference 
+            method we use to compute time derivatives. 
+
+            
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+        
+        Nothing!
         """
 
         # Run the base class initializer. The only thing this does is set the n_z and n_t 
@@ -93,7 +107,9 @@ class DampedSpring(LatentDynamics):
         identical, just with different coefficients for each instance of the leading dimension of 
         Z). In this case, we assume the i'th row of Z holds the latent state t_0 + i*dt. We use 
         We assume that the latent state is governed by an ODE of the form
-            z''(t) = -K z(t) - C z'(t) + b
+        
+                z''(t) = -K z(t) - C z'(t) + b
+        
         We find K, C, and b corresponding to the dynamical system that best agrees with the 
         snapshots in the rows of Z (the K, C, and b which minimize the mean square difference 
         between the left and right hand side of this equation across the snapshots in the rows 
@@ -104,35 +120,37 @@ class DampedSpring(LatentDynamics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Latent_States: An n_param (number of parameter combinations we want to calibrate) element
-        list. The i'th list element should be an 2 element list whose j'th element is a 2d numpy 
-        array of shape (n_t(i), n_z) whose p, q element holds the q'th component of the j'th 
-        derivative of the latent state during the p'th time step (whose time value corresponds to 
-        the p'th element of t_Grid) when we use the i'th combination of parameter values. 
+        Latent_States : list[list[torch.Tensor]], len = n_param
+            The i'th list element is a 2 element list whose j'th element is a 2d numpy array of 
+            shape (n_t(i), n_z) whose p, q element holds the q'th component of the j'th derivative 
+            of the latent state during the p'th time step (whose time value corresponds to the p'th 
+            element of t_Grid) when we use the i'th combination of parameter values. 
         
-        t_Grid: An n_param element list of 1d torch.Tensor objects. The i'th element should be a 
-        1d tensor of length n_t(i) whose j'th element holds the time value corresponding to the 
-        j'th frame when we use the i'th combination of parameter values.
-
+        t_Grid : list[torch.Tensor], len = n_param
+            i'th element should be a 1d tensor of shape (n_t(i)) whose j'th element holds the time 
+            value corresponding to the j'th frame when we use the i'th combination of parameter 
+            values.
 
         
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        Three variables: coefs, loss_sindy, and loss_coef. 
+        coefs, loss_sindy, loss_coef. 
         
-        coefs holds the coefficients. It is a matrix of shape (n_train, n_coef), where n_train 
-        is the number of parameter combinations in the training set and n_coef is the number of 
-        coefficients in the latent dynamics. The i,j entry of this array holds the value of the 
-        j'th coefficient when we use the i'th combination of parameter values.
+        coefs : torch.Tensor, shape = (n_train, n_coef)
+            A matrix of shape (n_train, n_coef), where n_train is the number of parameter 
+            combinations in the training set and n_coef is the number of coefficients in the latent 
+            dynamics. The i,j entry of this array holds the value of the j'th coefficient when we 
+            use the i'th combination of parameter values.
 
-        loss_sindy holds the total SINDy loss. It is a single element tensor whose lone entry holds
-        the sum of the SINDy losses across the set of combinations of parameters in the training 
-        set. 
+        loss_sindy : torch.Tensor, shape = []
+            A 0-dimensional tensor whose lone element holds the sum of the SINDy losses across the 
+            set of combinations of parameters in the training set. 
 
-        loss_coef is a single element tensor whose lone element holds the sum of the L1 norms of 
-        the coefficients across the set of combinations of parameters in the training set.
+        loss_coef : torch.Tensor, shape = [] 
+            A 0-dimensional tensor whose lone element holds the sum of the L1 norms of the 
+            coefficients across the set of combinations of parameters in the training set.
         """
 
         # Run checks.
@@ -261,40 +279,41 @@ class DampedSpring(LatentDynamics):
         Arguments
         -------------------------------------------------------------------------------------------
         
-        coefs: A two dimensional numpy.ndarray or torch.Tensor objects of shape (n_param, n_coef)
-        whose i'th row represents the optimal set of coefficients when we use the i'th combination 
-        of parameter values. We inductively call simulate on each row of coefs. 
+        coefs : numpy.ndarray or torch.Tensor, shape = (n_param, n_coef)
+            i'th row represents the optimal set of coefficients when we use the i'th combination 
+            of parameter values. We inductively call simulate on each row of coefs. 
 
-        IC: An n_param element list whose i'th element is an n_IC element list whose j'th element
-        is a 2d numpy.ndarray or torch.Tensor object of shape (n(i), n_z). Here, n(i) is the 
-        number of initial conditions (for a fixed set of coefficients) we want to simulate forward 
-        using the i'th set of coefficients. Further, n_z is the latent dimension. If you want to 
-        simulate a single IC, for the i'th set of coefficients, then n(i) == 1. IC[i][j][k, :] 
-        should hold the k'th initial condition for the j'th derivative of the latent state when
-        we use the i'th combination of parameter values. 
+        IC : list[list[numpy.ndarray]] or list[list[torch.Tensor]], len = n_param
+            i'th element is an n_IC element list whose j'th element is a 2d numpy.ndarray or 
+            torch.Tensor object of shape (n(i), n_z). Here, n(i) is the number of initial 
+            conditions (for a fixed set of coefficients) we want to simulate forward using the i'th 
+            set of coefficients. Further, n_z is the latent dimension. If you want to simulate a 
+            single IC, for the i'th set of coefficients, then n(i) == 1. IC[i][j][k, :] should hold 
+            the k'th initial condition for the j'th derivative of the latent state when we use the 
+            i'th combination of parameter values. 
 
-        t_Grid: A n_param element list whose i'th entry is a 2d numpy.ndarray or torch.Tensor 
-        object. The i'th entry should either have shape (n(i), n_t(i)) or shape (n_t(i)). Use the
-        former case when we want to use different times for each initial condition and the latter
-        case when we want to use the same times for all initial conditions. 
+        t_Grid : list[numpy.ndarray] or list[torch.Tensor], len = n_param
+            i'th entry is a 2d numpy.ndarray or torch.Tensor whose shape is either (n(i), n_t(i)) 
+            or shape (n_t(i)). The shape should be 2d if we want to use different times for each 
+            initial condition and 1d if we want to use the same times for all initial conditions. 
         
-        In the former case, the j,k array entry specifies k'th time value at which we solve for 
-        the latent state when we use the j'th initial condition and the i'th set of coefficients. 
-        Each row should be in ascending order. 
+            In the former case, the j,k array entry specifies k'th time value at which we solve for 
+            the latent state when we use the j'th initial condition and the i'th set of 
+            coefficients. Each row should be in ascending order. 
         
-        In the latter case, the j'th entry should specify the j'th time value at which we solve for 
-        each latent state when we use the i'th combination of parameter values.
+            In the latter case, the j'th entry should specify the j'th time value at which we solve 
+            for each latent state when we use the i'th combination of parameter values.
 
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------        
         
-        An n_param element list whose i'th item is a list of length n_IC whose j'th entry is a 3d 
-        array of shape (n_t(i), n(i), n_z). The p, q, r entry of this array should hold the r'th 
-        component of the p'th frame of the j'th tine derivative of the solution to the latent 
-        dynamics when we use the q'th initial condition for the i'th combination of parameter 
-        values.
+        Z : list[list[numpy.ndarray]] or list[list[torch.Tensor]], len = n_parm
+            i'th element is a list of length n_IC whose j'th entry is a 3d array of shape 
+            (n_t(i), n(i), n_z). The p, q, r entry of this array should hold the r'th component of 
+            the p'th frame of the j'th tine derivative of the solution to the latent dynamics when 
+            we use the q'th initial condition for the i'th combination of parameter values.
         """
 
         # Run checks.
