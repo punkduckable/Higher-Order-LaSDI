@@ -68,21 +68,22 @@ class Physics:
         Arguments
         -------------------------------------------------------------------------------------------
 
-        cfg: A dictionary housing the settings for the Physics object. This should be the "physics"
-        sub-dictionary of the main configuration file. 
+        config: dict 
+            A dictionary housing the settings for the Explicit object. This should be the "physics" 
+            sub-dictionary of the configuration file. 
 
-        param_names: A list of strings. There should be one list item for each parameter. The i'th 
-        element of this list should be a string housing the name of the i'th parameter.
+        param_names: list[str], len = 2
+            i'th element be a string housing the name of the i'th parameter. 
 
-        Uniform_t_Grid: A boolean which, if True, specifies that for each parameter value, the 
-        times corresponding to the frames of the solution for that parameter value will be 
-        uniformly spaced. In other words, the first frame corresponds to time t0, the second to 
-        t0 + h, the k'th to t0 + (k - 1)h, etc (note that h may depend on the parameter value, but
-        it needs to be constant for a specific parameter value). The value of this setting 
-        determines which finite difference method we use to compute time derivatives. 
+        Uniform_t_Grid: bool
+            If True, then for each parameter value, the times corresponding to the frames of the 
+            solution for that parameter value will be uniformly spaced. In other words, the first 
+            frame corresponds to time t0, the second to t0 + h, the k'th to t0 + (k - 1)h, etc 
+            (note that h may depend on the parameter value, but it needs to be constant for a 
+            specific parameter value). The value of this setting determines which finite difference 
+            method we use to compute time derivatives. 
 
 
-        
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
@@ -118,16 +119,17 @@ class Physics:
         Arguments
         -------------------------------------------------------------------------------------------
 
-        param: A 1d numpy.ndarray object holding the value of self's parameters (necessary to 
-        specify the IC).
+        param: 1d numpy.ndarray, shape = (n_p)
+            i'th element holds the value of self's i'th parameter. 
         
 
         -------------------------------------------------------------------------------------------
         Returns 
         -------------------------------------------------------------------------------------------
 
-        A list of numpy.ndarray objects of shape self.Frame_Shape. The i'th element of this list 
-        holds the initial state of the i'th time derivative of the FOM state.
+        u0: list[numpy.ndarray], len = self.n_IC
+            i'th element has shape shape self.Frame_Shape and holds initial state of the i'th time 
+            derivative of the FOM state.
         """
 
         raise RuntimeError("Abstract method Physics.initial_condition!");
@@ -145,24 +147,26 @@ class Physics:
         Arguments
         -------------------------------------------------------------------------------------------
 
-        param: A numpy.ndarray object of shape (n_p), where n_p is the number of parameters in 
-        self's initial condition function. It holds the value of one combination of parameters 
-        for the initial condition.
+        param: numpy.ndarray, shape = (n_p)
+           Holds the value of one combination of parameters for the initial condition. Here, n_p 
+           is the number of parameters in self's initial condition function.
 
                 
         -------------------------------------------------------------------------------------------
         Returns 
         -------------------------------------------------------------------------------------------
 
-        A two element tuple: X, t_Grid.
+        X, t_Grid.
          
-        X is an n_IC element list whose i'th element holds the i'th derivative of the FOM solution 
-        when we use param to define the initial condition function. Each element is a torch.Tensor
-        object of shape (n_t, self.Frame_Shape), where n_t is the number of time steps when we 
-        solve the FOM using param for the IC parameters.
+        X : list[torch.Tensor], len = n_IC
+            i'th element holds the i'th derivative of the FOM solution when we use param to define 
+            the initial condition function. Each element is a torch.Tensor object of shape 
+            (n_t, self.Frame_Shape), where n_t is the number of time steps when we solve the FOM 
+            using param for the IC parameters.
 
-        t_Grid is a 1d torch.Tensor object whose i'th element holds the i'th time value at which
-        we have an approximation to the FOM solution (the time value associated with X[0, i, ...]).
+        t_Grid : torch.Tensor, shape = (n_t)
+            i'th element holds the i'th time value at which we have an approximation to the FOM 
+            solution (the time value associated with X[0, i, ...]).
         """
 
         raise RuntimeError("Abstract method Physics.solve!");
@@ -184,34 +188,37 @@ class Physics:
 
     def generate_solutions(self, params : numpy.ndarray) -> tuple[list[list[torch.Tensor]], list[torch.Tensor]]:
         """
-        Given 2d-array of params, generate solutions of size params.shape[0]. params.shape[1] must 
-        match the required size of parameters for the specific physics.
+        For each row of params, solve the underlying physics using that row to define the initial 
+        condition function. 
 
 
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
 
-        param: a 2d numpy.ndarray object of shape (n_param, n_p), where n_param is the number of 
-        combinations of parameters we want to test and n_p denotes the number of parameters in 
-        self's initial condition function.
+        param : numpy.ndarray, shape = (n_param, n_p)
+            i, j entry specifies the value of the j'th parameter in the i'th combination of 
+            parameters. n_param is the number of parameters in self's initial condition function.
 
         
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
         
-        A two element tuple: X, t_Grid.
+        X, t_Grid.
 
-        X is an n_param element list whose i'th element is an n_IC element list whose j'th element
-        is a torch.Tensor object of shape (n_t(i), self.Frame_Shape) holding the j'th 
-        derivative of the FOM solution for the i'th combination of parameter values. Here, n_IC is 
-        the number of initial conditions needed to specify the IC, n_param is the number of rows 
-        in param, n_t(i) is the number of time steps we used to generate the solution with the 
-        i'th combination of parameter values (the length of the i'th element of t_Grid).
+        X : list[list[torch.Tensor]], len = n_param
+            i'th element is an n_IC element list whose j'th element is a torch.Tensor object of 
+            shape (n_t(i), self.Frame_Shape) holding the j'th derivative of the FOM solution for 
+            the i'th combination of parameter values. Here, n_IC is the number of initial 
+            conditions needed to specify the IC, n_param is the number of rows in param, n_t(i) is 
+            the number of time steps we used to generate the solution with the i'th combination of 
+            parameter values (the length of the i'th element of t_Grid).
 
-        t_Grid is a list whose i'th element is a 1d torch.Tensor housing the time steps from the 
-        solution to the underlying equation when we use the i'th combination of parameter values.
+        t_Grid : list[torch.Tensor], len = n_param
+            i'th element is a 1d torch.Tensor of shape (n_t(i)) housing the time steps from the 
+            solution to the underlying equation when we use the i'th combination of parameter 
+            values to define the initial condition.
         """
 
         # Make sure we have a 2d grid of parameter values.
@@ -238,29 +245,3 @@ class Physics:
 
         # All done!
         return X, t_Grid;
-
-
-
-    def residual(self, Xhist : numpy.ndarray, t_Grid : numpy.ndarray) -> tuple[numpy.ndarray, float]:
-        """
-        The user should write an instance of this method for their specific Physics sub-class.
-        This function should compute the PDE residual (difference between the left and right hand 
-        side of of the underlying physics equation when we substitute in the solution in Xhist).
-
-
-        -------------------------------------------------------------------------------------------
-        Arguments
-        -------------------------------------------------------------------------------------------
-
-        Xhist: A (ns + 1)-dimensional numpy.ndarray object of shape (n_t, self.Frame_Shape), where 
-        n_t is the length of t_Grid.
-
-        -------------------------------------------------------------------------------------------
-        Returns
-        -------------------------------------------------------------------------------------------
-
-        A two element tuple. The first is a numpy.ndarray object holding the residual on the 
-        spatial and temporal grid. The second should be a float holding the norm of the residual.
-        """
-
-        raise RuntimeError("Abstract method Physics.residual!");

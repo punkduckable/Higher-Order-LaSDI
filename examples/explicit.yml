@@ -4,9 +4,10 @@ lasdi:
     lr:                     0.001
     n_samples:              20
 
-    n_rollout_init:         1
-    iter_rollout_increase:  100
-    rollout_increase_amt:   1
+    # Note that t_rollout is capped at 0.75 to ensure there are some frames to simulate forward.
+    p_rollout_init:         0.002
+    rollout_update_freq:    100
+    dp_per_update:          0.002
 
     max_iter:               6000
     n_iter:                 2000
@@ -15,7 +16,7 @@ lasdi:
     loss_weights:
       recon:                1.0
       chain_rule:           1.0
-      ld:                   0.5
+      LD:                   0.5
       rollout:              0.5
       coef:                 0.0001
       consistency:          1.0
@@ -54,12 +55,13 @@ latent_dynamics:
   sindy:
 
 physics:
-  type:                     explicit
-  explicit:
-    n_t:                    501
+  type:                     Explicit
+  Explicit:
+    n_t:                    1001
     t_max:                  1.
     n_x:                    1001
     x_min:                  -3.
     x_max:                  3.
+    uniform_t_grid:         false
 
 
