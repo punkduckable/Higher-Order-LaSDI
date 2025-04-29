@@ -26,7 +26,7 @@ from    ParameterSpace              import  ParameterSpace;
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
 from    SolveROMs                   import  get_FOM_max_std;
-from    FiniteDifference            import  Derivative1_Order4, Derivative2_Order2_NonUniform;
+from    FiniteDifference            import  Derivative1_Order4, Derivative1_Order2_NonUniform;
 
 
 # Setup Logger
@@ -509,7 +509,7 @@ class BayesianGLaSDI:
                         h               : float             = t_Grid_i[1] - t_Grid_i[0];
                         dZ_Di_dt        : torch.Tensor      = Derivative1_Order4(X = Z_D_i, h = h);
                     else:
-                        dZ_Di_dt        : torch.Tensor      = Derivative2_Order2_NonUniform(X = Z_D_i, t_Grid = t_Grid_i);
+                        dZ_Di_dt        : torch.Tensor      = Derivative1_Order2_NonUniform(X = Z_D_i, t_Grid = t_Grid_i);
                     
                     loss_consistency_Z  : torch.Tensor      = loss_consistency_Z + self.MSE(dZ_Di_dt, Z_V_i);
 
@@ -518,7 +518,7 @@ class BayesianGLaSDI:
                         h               : float             = t_Grid_i[1] - t_Grid_i[0];
                         dD_Pred_i_dt    : torch.Tensor      = Derivative1_Order4(X = D_Pred_i, h = h);
                     else:
-                        dZ_Di_dt        : torch.Tensor      = Derivative2_Order2_NonUniform(X = D_Pred_i, t_Grid = t_Grid_i);
+                        dD_Pred_i_dt    : torch.Tensor      = Derivative1_Order2_NonUniform(X = D_Pred_i, t_Grid = t_Grid_i);
 
                     loss_consistency_X  : torch.Tensor      = loss_consistency_X + self.MSE(dD_Pred_i_dt, V_Pred_i);
 
