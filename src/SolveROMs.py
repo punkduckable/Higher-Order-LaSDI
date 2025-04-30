@@ -44,38 +44,42 @@ def average_rom(model           : torch.nn.Module,
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    model: The actual model object that we use to map the ICs into the latent space. We assume that
-    physics, latent_dynamics, and model all have the same number of initial conditions.
+    model : torch.nn.Module
+        The actual model object that we use to map the ICs into the latent space. physics, 
+        latent_dynamics, and model should have the same number of initial conditions.
 
-    physics: A "Physics" object that stores the datasets for each parameter combination. We assume
-    that physics, latent_dynamics, and model all have the same number of initial conditions.
+    physics : Physics
+        Allows us to get the latent IC solution for each combination of parameter values. physics, 
+        latent_dynamics, and model should have the same number of initial conditions.
     
-    latent_dynamics: A LatentDynamics object which describes how we specify the dynamics in the
-    model's latent space. We assume that physics, latent_dynamics, and model all have the same 
-    number of initial conditions.
+    latent_dynamics : LatentDynamics
+        describes how we specify the dynamics in the model's latent space. We assume that 
+        physics, latent_dynamics, and model all have the same number of initial conditions.
 
-    gp_list: An n_coef element list of trained GP regressor objects. The number of elements in this 
-    list should match the number of columns in param_grid. The i'th element of this list is a GP 
-    regressor object that predicts the i'th coefficient. 
+    gp_list : list[], len = n_coef
+        An n_coef element list of trained GP regressor objects. The i'th element of this list is 
+        a GP regressor object that predicts the i'th coefficient. 
 
-    param_grid: A 2d numpy.ndarray object of shape (n_param, n_p), where n_p is the number of 
-    parameters and n_param is the number of combinations of parameter values. The i,j element of 
-    this array holds the value of the j'th parameter in the i'th combination of parameter values. 
+    param_grid : numpy.ndarray, shape = (n_param, n_p)
+        i,j element holds the value of the j'th parameter in the i'th combination of parameter 
+        values. Here, n_p is the number of parameters and n_param is the number of combinations
+        of parameter values.
 
-    t_Grid: A n_param element list whose i'th entry is a 2d numpy.ndarray or torch.Tensor object 
-    of shape (n_t(i)) or (1, n_t(i)) whose k'th or (0, k)'th entry specifies the k'th time value 
-    we want to find the latent states when we use the j'th initial conditions and the i'th set of
-    coefficients.
+    t_Grid : list[torch.Tensor], len = n_param
+        i'th element is a 2d numpy.ndarray or torch.Tensor object of shape (n_t(i)) or (1, n_t(i)) 
+        whose k'th or (0, k)'th entry specifies the k'th time value we want to find the latent 
+        states when we use the j'th initial conditions and the i'th set of coefficients.
 
     
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
     
-    An n_param element list whose i'th element is a 2d numpy ndarray object of shape (n_t_i, n_z) 
-    whose j, k element holds the k'th component of the latent solution at the j'th time step when 
-    we the means of the posterior distribution for the i'th combination of parameter values to 
-    define the latent dynamics.
+    Zis : list[numpy.ndarray], len = n_param
+        i'th element is a 2d numpy.ndarray object of shape (n_t_i, n_z) whose j, k element holds 
+        the k'th component of the latent solution at the j'th time step when we the means of the 
+        posterior distribution for the i'th combination of parameter values to define the latent 
+        dynamics.
     """
 
     # Checks. 
@@ -147,43 +151,49 @@ def sample_roms(model           : torch.nn.Module,
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    model: A model (i.e., autoencoder). We use this to map the FOM IC's (which we can get from 
-    physics) to the latent space using the model's encoder. We assume that physics, 
-    latent_dynamics, and model all have the same number of initial conditions.
+    model : torch.nn.Module
+        A model (i.e., autoencoder). We use this to map the FOM IC's (which we can get from 
+        physics) to the latent space using the model's encoder. physics, latent_dynamics, and 
+        model should have the same number of initial conditions.
 
-    physics: A "Physics" object that allows us to find the IC for a particular combination of 
-    parameter values. We assume that physics, latent_dynamics, and model all have the same number 
-    of initial conditions.
+    physics : Physics
+        allows us to find the IC for a particular combination of parameter values. physics, 
+        latent_dynamics, and model should have the same number of initial conditions.
     
-    latent_dynamics: A LatentDynamics object which describes how we specify the dynamics in the
-    model's latent space. We use this to simulate the latent dynamics forward in time. We assume
-    that physics, latent_dynamics, and model all have the same number of initial conditions.
+    latent_dynamics : LatentDynamics
+        describes how we specify the dynamics in the model's latent space. We use this to simulate 
+        the latent dynamics forward in time. physics, latent_dynamics, and model should have the
+        same number of initial conditions.
 
-    gp_list: An n_coef element list of trained GP regressor objects whose i'th element is a GP
-    regressor object that predicts the i'th coefficient. 
+    gp_list : list[GaussianProcessRegressor], len = n_coef
+        i'th element is a trained GP regressor object that predicts the i'th coefficient. 
 
-    param_grid: A 2d numpy.ndarray object of shape (n_param, n_p), where n_p is the number of 
-    parameters and n_param is the number of combinations of parameter values. The i,j element of 
-    this array holds the value of the j'th parameter in the i'th combination of parameter values. 
+    param_grid : numpy.ndarray, shape = (n_param, n_p)
+        i,j element of holds the value of the j'th parameter in the i'th combination of parameter 
+        values. Here, n_p is the number of parameters and n_param is the number of combinations 
+        of parameter values. 
 
-    n_samples: The number of samples we want to draw from each posterior distribution for each 
-    coefficient evaluated at each combination of parameter values.
+    n_samples : int
+        The number of samples we want to draw from each posterior distribution for each coefficient
+        evaluated at each combination of parameter values.
 
-    t_Grid: A n_param element list whose i'th entry is an numpy.ndarray or torch.Tensor object 
-    of shape (n_t(i)) or (1, n_t(i)) whose k'th specifies the k'th time value we want to find 
-    the latent states when we use the j'th initial conditions and the i'th set of coefficients.    
+    t_Grid : list[numpy.ndarray] or list[torch.Tensor], len = n_param
+        i'th entry is an numpy.ndarray or torch.Tensor of shape (n_t(i)) or (1, n_t(i)) whose k'th 
+        element specifies the k'th time value we want to find the latent states when we use the 
+        j'th initial conditions and the i'th set of coefficients.    
 
     
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
     
-    An n_param element list whose i'th element is an n_IC element list whose j'th element is a 
-    3d numpy ndarray of shape (n_t(i), n_samples, n_z) whose p, q, r element holds the r'th 
-    component of the j'th derivative of the q,i latent solution at t_Grid[i][p]. The q,i latent 
-    solution is the solution the latent dynamics when the coefficients are the q'th sample of the
-    posterior distribution for the i'th combination of parameter values (which are stored in 
-    param_grid[i, :]).
+    LatentStates : list[list[numpy.ndarray]], len = n_param
+        i'th element is an n_IC element list whose j'th element is a 3d numpy ndarray of shape 
+        (n_t(i), n_samples, n_z) whose p, q, r element holds the r'th component of the j'th 
+        derivative of the q,i latent solution at t_Grid[i][p]. The q,i latent solution is the 
+        solution the latent dynamics when the coefficients are the q'th sample of the posterior 
+        distribution for the i'th combination of parameter values (which are stored in 
+        param_grid[i, :]).
     """
     
     # Checks
@@ -311,22 +321,25 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    model: The model. We assume the solved dynamics (whose frames are stored in Zis) 
-    take place in the model's latent space. We use this to decode the solution frames.
+    model : torch.nn.Module
+        The model. We assume the solved dynamics (whose frames are stored in Zis) 
+        take place in the model's latent space. We use this to decode the solution frames.
 
-    LatentStates: An n_param element list whose i'th element is an n_IC element list whose j'th
-    element is a 3d tensor of shape (n_samples, n_t(i), n_z) whose p, q, r element holds the 
-    r'th component of the j'th component of the latent solution at the q'th time step when we solve 
-    the latent dynamics using the p'th set of coefficients we got by sampling the posterior 
-    distribution for the i'th combination of parameter values. 
+    LatentStates : list[list[torch.Tensor]], len = n_param
+        i'th element is an n_IC element list whose j'th element is a 3d tensor of shape 
+        (n_samples, n_t(i), n_z) whose p, q, r element holds the r'th component of the j'th 
+        component of the latent solution at the q'th time step when we solve the latent dynamics 
+        using the p'th set of coefficients we got by sampling the posterior distribution for the 
+        i'th combination of parameter values. 
 
 
     -----------------------------------------------------------------------------------------------
     Returns:
     -----------------------------------------------------------------------------------------------
 
-    An integer. The index of the testing parameter that gives the largest standard deviation. 
-    See the description above for details.
+    m_index : int
+        The index of the testing parameter that gives the largest standard deviation. See the 
+        description above for details.
     """
     
     # Run checks.

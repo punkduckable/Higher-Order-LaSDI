@@ -30,21 +30,27 @@ def Update_Train_Space(trainer : BayesianGLaSDI, config : dict) -> tuple[NextSte
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    trainer: A BayesianGLaSDI object that we use for training. We sample a new training point 
-    from this trainer.
+    trainer : BayesianGLaSDI
+        A BayesianGLaSDI object that we use for training. We sample a new training point 
+        from this trainer.
 
-    config: This should be a dictionary that we loaded from a .yml file. It should house all the 
-    settings we expect to use to generate the data and train the models.
+    config : dict
+        This should be a dictionary that we loaded from a .yml file. It should house all the 
+        settings we expect to use to generate the data and train the models.
     
 
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
 
-    A tuple: (NextStep.RunSample, Result.Success). The first returned value, NextStep.RunSample, 
-    indicates that we have a new sample and need to generate the FOM solution using the 
-    corresponding parameter values for the IC/physics. The second returned value, Result.Success, indicates 
-    that we were able to pick a new sample without running into any problems. 
+    NextStep.RunSample, Result.Success
+
+    NextStep.RunSample : NextStep
+        indicates that we have a new sample and need to generate the FOM solution using the 
+        corresponding parameter values for the IC/physics. 
+    
+    Result.Success : Result 
+        indicates that we were able to pick a new sample without running into any problems. 
     """
 
     # Figure out if we need a new sample.
@@ -84,10 +90,12 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    trainer: A BayesianGLaSDI object that we use for training. 
+    trainer : BayesianGLaSDI
+        A BayesianGLaSDI object that we use for training. 
 
-    config: This should be a dictionary that we loaded from a .yml file. It should house all the 
-    settings we expect to use to generate the data and train the models.
+    config : dict
+        This should be a dictionary that we loaded from a .yml file. It should house all the 
+        settings we expect to use to generate the data and train the models.
 
     
 
@@ -95,10 +103,14 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     Returns
     -----------------------------------------------------------------------------------------------
 
-    A tuple: (NextStep.Train, Result.Success). The first returned value, NextStep.Train, 
-    indicates that we have generated the FOM solution for the new training point and need to 
-    resume training. The second return value, Result.Success, indicates that we were able to 
-    generate the FOM solution without running into any problems. 
+    NextStep.Train, Result.Success
+
+    NextStep.Train : NextStep
+        indicates that we have generated the FOM solution for the new training point and need to 
+        resume training. 
+    
+    Result.Success : Result 
+        indicates that we were able to pick a new sample without running into any problems. 
     """
     
 
