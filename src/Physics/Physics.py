@@ -160,9 +160,8 @@ class Physics:
          
         X : list[torch.Tensor], len = n_IC
             i'th element holds the i'th derivative of the FOM solution when we use param to define 
-            the initial condition function. Each element is a torch.Tensor object of shape 
-            (n_t, self.Frame_Shape), where n_t is the number of time steps when we solve the FOM 
-            using param for the IC parameters.
+            the FOM. Each element is a torch.Tensor object of shape (n_t, self.Frame_Shape), where 
+            n_t is the number of time steps when we solve the FOM using param.
 
         t_Grid : torch.Tensor, shape = (n_t)
             i'th element holds the i'th time value at which we have an approximation to the FOM 
@@ -188,8 +187,7 @@ class Physics:
 
     def generate_solutions(self, params : numpy.ndarray) -> tuple[list[list[torch.Tensor]], list[torch.Tensor]]:
         """
-        For each row of params, solve the underlying physics using that row to define the initial 
-        condition function. 
+        For each row of params, solve the underlying physics using that row to define the FOM.
 
 
         -------------------------------------------------------------------------------------------
@@ -218,7 +216,7 @@ class Physics:
         t_Grid : list[torch.Tensor], len = n_param
             i'th element is a 1d torch.Tensor of shape (n_t(i)) housing the time steps from the 
             solution to the underlying equation when we use the i'th combination of parameter 
-            values to define the initial condition.
+            values to define FOM.
         """
 
         # Make sure we have a 2d grid of parameter values.

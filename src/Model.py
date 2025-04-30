@@ -64,28 +64,32 @@ class MultiLayerPerceptron(torch.nn.Module):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        widths: A list of integers specifying the widths of the layers (including the 
-        dimensionality of the domain of each layer, as well as the co-domain of the final layer).
-        Suppose this list has N elements. Then the network will have N - 1 layers. The i'th layer 
-        maps from \mathbb{R}^{widths[i]} to \mathbb{R}^{widths[i + 1]}. Thus, the i'th 
-        element of this list represents the domain of the i'th layer AND the co-domain of the 
-        i-1'th layer.
+        widths : list[int]
+            A list of integers specifying the widths of the layers (including the 
+            dimensionality of the domain of each layer, as well as the co-domain of the final 
+            layer). Suppose this list has N elements. Then the network will have N - 1 layers. 
+            The i'th layer maps from \mathbb{R}^{widths[i]} to \mathbb{R}^{widths[i + 1]}. Thus, 
+            the i'th element of this list represents the domain of the i'th layer AND the 
+            co-domain of the i-1'th layer.
 
-        activation: A string specifying which activation function we want to use at the end of each 
-        layer (except the final one). We use the same activation for each layer. 
+        activation : str
+            A string specifying which activation function we want to use at the end of each 
+            layer (except the final one). We use the same activation for each layer. 
 
-        reshape_index: This argument specifies if we should reshape the network's input or output 
-        (or neither). If the user specifies reshape_index, then it must be either 0 or -1. Further, 
-        in this case, they must also specify reshape_shape (you need to specify both together). If
-        it is 0, then reshape_shape specifies how we reshape the input before passing it through 
-        the network (the input to the first layer). If reshape_index is -1, then reshape_shape 
-        specifies how we reshape the network output before returning it (the output to the last 
-        layer). 
+        reshape_index : int
+            This argument specifies if we should reshape the network's input or output 
+            (or neither). If the user specifies reshape_index, then it must be either 0 or -1. 
+            Further, in this case, they must also specify reshape_shape (you need to specify both 
+            together). If it is 0, then reshape_shape specifies how we reshape the input before 
+            passing it through the network (the input to the first layer). If reshape_index is -1, 
+            then reshape_shape specifies how we reshape the network output before returning it 
+            (the output to the last layer). 
 
-        reshape_shape: This is a list of k integers specifying the final k dimensions of the shape
-        of the input to the first layer (if reshape_index == 0) or the output of the last layer 
-        (if reshape_index == -1). You must specify this argument if and only if you specify 
-        reshape_index. 
+        reshape_shape : list[int] 
+            This is a list of k integers specifying the final k dimensions of the shape of the 
+            input to the first layer (if reshape_index == 0) or the output of the last layer 
+            (if reshape_index == -1). You must specify this argument if and only if you specify 
+            reshape_index. 
 
 
 
@@ -96,19 +100,15 @@ class MultiLayerPerceptron(torch.nn.Module):
         Nothing!
         """
 
-        # Run checks.
-        # Make sure the reshape index is either 0 (input to 1st layer) or -1 (output of last 
-        # layer). Also make sure that that product of the dimensions in the reshape_shape match
-        # the input dimension for the 1st layer (if reshape_index == 0) or the output dimension of
-        # the last layer (if reshape_index == 1). 
-        # 
-        # Why do we need the later condition? Well, suppose that reshape_shape has a length of k. 
-        # If reshape_index == 0, then we squeeze the final k dimensions of the input and feed that 
-        # into the first layer. Thus, in this case, we need the last dimension of the squeezed 
-        # array to match the input domain of the first layer. On the other hand, reshape_index == -1 
-        # then we reshape the final dimension of the output to match the reshape_shape. Thus, in 
-        # both cases, we need the product of the components of reshape_shape to match a 
-        # corresponding element of widths.
+        # Checks
+        assert(isinstance(reshape_shape, list));
+        for i in range(len(reshape_shape)):
+            assert(isinstance(reshape_shape[i], int));
+            assert(reshape_shape[i] > 0);
+        assert(isinstance(widths, list));
+        for i in range(len(widths)):
+            assert(isinstance(widths[i], int));
+            assert(widths[i] > 0);
         assert((reshape_index is None) or (reshape_index in [0, -1]));
         assert((reshape_shape is None) or (numpy.prod(reshape_shape) == widths[reshape_index]));
 
@@ -154,18 +154,20 @@ class MultiLayerPerceptron(torch.nn.Module):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        X: A tensor holding a batch of inputs. We pass this tensor through the network's layers 
-        and then return the result. If self.reshape_index == 0 and self.reshape_shape has k
-        elements, then the final k elements of X's shape must match self.reshape_shape. 
+        X : torch.Tensor
+            A tensor holding a batch of inputs. We pass this tensor through the network's layers 
+            and then return the result. If self.reshape_index == 0 and self.reshape_shape has k
+            elements, then the final k elements of X's shape must match self.reshape_shape. 
 
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        The image of X under the network's layers. If self.reshape_index == -1 and 
-        self.reshape_shape has k elements, then we reshape the output so that the final k elements
-        of its shape match those of self.reshape_shape.
+        X_Pred : torch.Tensor, shape = X.Shape
+            The image of X under the network's layers. If self.reshape_index == -1 and 
+            self.reshape_shape has k elements, then we reshape the output so that the final k 
+            elements of its shape match those of self.reshape_shape.
         """
 
         # If the reshape_index is 0, we need to reshape X before passing it through the first 
@@ -253,17 +255,20 @@ class Autoencoder(torch.nn.Module):
         Arguments
         -------------------------------------------------------------------------------------------
         
-        reshape_shape: This is a list of k integers specifying the final k dimensions of the shape
-        of the input to the first layer (if reshape_index == 0) or the output of the last layer 
-        (if reshape_index == -1). 
+        reshape_shape : list[int]
+            This is a list of k integers specifying the final k dimensions of the shape of the 
+            input to the first layer (if reshape_index == 0) or the output of the last layer (if 
+            reshape_index == -1). 
         
-        widths: A list of integers specifying the widths of the layers in the encoder. We use the 
-        revere of this list to specify the widths of the layers in the decoder. See the docstring 
-        for the MultiLayerPerceptron class for details on how Widths defines a network.
+        widths : list[int]
+            A list of integers specifying the widths of the layers in the encoder. We use the 
+            revere of this list to specify the widths of the layers in the decoder. See the 
+            docstring for the MultiLayerPerceptron class for details on how Widths defines a 
+            network.
 
-        activation: A string specifying which activation function we want to use at the end of each 
-        layer (except the final one) in the encoder and decoder. We use the same activation for 
-        each layer. 
+        activation : str
+            specifies which activation function we want to use at the end of each layer (except 
+            the final one) in the encoder and decoder. We use the same activation for each layer. 
 
 
 
@@ -273,6 +278,16 @@ class Autoencoder(torch.nn.Module):
 
         Nothing!
         """
+
+        # Checks
+        assert(isinstance(reshape_shape, list));
+        for i in range(len(reshape_shape)):
+            assert(isinstance(reshape_shape[i], int));
+            assert(reshape_shape[i] > 0);
+        assert(isinstance(widths, list));
+        for i in range(len(widths)):
+            assert(isinstance(widths[i], int));
+            assert(widths[i] > 0);
 
         # Run the superclass initializer.
         super().__init__();
@@ -316,16 +331,16 @@ class Autoencoder(torch.nn.Module):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        X: A torch.Tensor object of shape (n_Frames, self.reshape_shape), where, n_Frames is the number of 
-        frames we want to encode and reshape_shape specifies the shape of each frame. 
+        X : torch.Tensor, shape = (n_Frames,) + self.reshape_shape
+            X[i, ...] holds the i'th frame we want to encode. 
 
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        A torch.Tensor of shape (n_Frames, self.n_z) whose i,j element holds the j'th component 
-        of the encoding of the i'th FOM frame.
+        Z : torch.Tensor, shape = (n_Frasmes, self.n_z)
+            i,j element holds the j'th component of the encoding of the i'th FOM frame.
         """
 
         # Check that the inputs have the correct shape.
@@ -346,16 +361,16 @@ class Autoencoder(torch.nn.Module):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Z: A torch.Tensor of shape (n_Frames, self.n_z) whose i,j element holds the j'th component of 
-        the encoding of the i'th frame.
+        Z : torch.Tensor, shape = (n_Frames, self.n_z)
+           i,j element holds the j'th component of the encoding of the i'th frame.
      
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        A torch.Tensor object, R, of shape (n_Frames, self.reshape_shape). R[i ...] represents the 
-        reconstruction of the i'th FOM frame.
+        R : torch.Tensor, shpe = (n_Frames,) + self.reshape_shape
+            R[i ...] represents the reconstruction of the i'th FOM frame.
         """
 
         # Check that the input has the correct shape. 
@@ -373,21 +388,21 @@ class Autoencoder(torch.nn.Module):
         Z through the decoder; hopefully producing a vector that approximates X.
         
 
-
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
 
-        X: A tensor holding a batch of inputs. We pass this tensor through the encoder + decoder 
-        and then return the result.
+        X : torch.Tensor, shape = (n_Frames,) + self.reshape_shape
+            A tensor holding a batch of inputs. We pass this tensor through the encoder + decoder 
+            and then return the result.
 
-        
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        The image of X under the encoder and decoder. 
+        Y : torch.Tensor, shape = X.shape
+            The image of X under the encoder and decoder. 
         """
 
         # Encoder the input
@@ -406,40 +421,44 @@ class Autoencoder(torch.nn.Module):
                                     physics        : Physics) -> list[list[numpy.ndarray]]:
         """
         This function maps a set of initial conditions for the FOM to initial conditions for the 
-        latent space dynamics. Specifically, we take in a set of possible parameter values. For each 
-        set of parameter values, we recover the FOM IC (from physics), then map this FOM IC to a 
-        latent space IC (by encoding it). We do this for each parameter combination and then return a 
-        list housing the latent space ICs.
+        latent space dynamics. Specifically, we take in a set of possible parameter values. For 
+        each set of parameter values, we recover the FOM IC (from physics), then map this FOM IC to 
+        a latent space IC (by encoding it). We do this for each parameter combination and then 
+        return a list housing the latent space ICs.
 
         
-        -----------------------------------------------------------------------------------------------
+        -------------------------------------------------------------------------------------------
         Arguments
-        -----------------------------------------------------------------------------------------------
+        -------------------------------------------------------------------------------------------
 
-        param_grid: A 2d numpy.ndarray object of shape (n_param, n_p), where n_param is the number 
-        of combinations of parameter values and n_p is the number of parameters (in each combination).
-        The i,j element of this array holds the value of the j'th parameter in the i'th combination of 
-        parameters.
+        param_grid : numpy.ndarray, shape = (n_param, n_p)
+            i,j element of this array holds the value of the j'th parameter in the i'th combination of 
+            parameters. Here, n_param is the number of combinations of parameter values and n_p is the 
+            number of parameters (in each combination).
 
-        physics: A "Physics" object that, among other things, stores the IC for each combination of 
-        parameter values. This physics object should have the same number of initial conditions as 
-        self.
+        physics : Physics
+            A "Physics" object that, among other things, stores the IC for each combination of 
+            parameter values. This physics object should have the same number of initial conditions as 
+            self.
 
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
         
-        An n_param element list whose i'th element is an n_IC element list whose j'th element is an 
-        numpy.ndarray of shape (1, n_z) whose k'th element holds the k'th component of the encoding of
-        the initial condition for the j'th derivative of the latent dynamics corresponding to the 
-        i'th combination of parameter values.
+        Z0 : list[list[numpy.ndarray]], len = n_param
+            An n_param element list whose i'th element is an n_IC element list whose j'th element 
+            is an numpy.ndarray of shape (1, n_z) whose k'th element holds the k'th component of 
+            the encoding of the initial condition for the j'th derivative of the latent dynamics 
+            corresponding to the i'th combination of parameter values.
         
-        If we let U0_i denote the FOM IC for the i'th set of parameters, then the i'th element of 
-        the returned list is [self.encoder(U0_i)].
+            If we let U0_i denote the FOM IC for the i'th set of parameters, then the i'th element of 
+            the returned list is [self.encoder(U0_i)].
         """
 
         # Checks.
+        assert(isinstance(param_grid, numpy.ndarray));
+        assert(len(param_grid.shape) == 2);
         assert(physics.n_IC     == self.n_IC);
 
         # Figure out how many combinations of parameter values there are.
@@ -497,21 +516,21 @@ def load_Autoencoder(dict_ : dict) -> Autoencoder:
     version of one). The Autoencoder that we recreate should be an identical copy of the object 
     that generated dict_.
 
-
     
     -----------------------------------------------------------------------------------------------
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    dict_: This should be a dictionary returned by an Autoencoder's export method.
+    dict_: dict
+        This should be a dictionary returned by an Autoencoder's export method.
 
     
-
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
 
-    An Autoencoder object that is identical to the one that created dict_!
+    AE : Autoencoder 
+        An Autoencoder object that is identical to the one that created dict_!
     """
 
     LOGGER.info("De-serializing an Autoencoder..." );
@@ -555,22 +574,39 @@ class Autoencoder_Pair(torch.nn.Module):
         in time. We encode D and V separately; each gets its own autoencoder with distinct weights. 
 
 
-
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
         
-        reshape_shape: This is a list of k integers specifying the final k dimensions of the shape
-        of the input to the first layer (if reshape_index == 0) or the output of the last layer 
-        (if reshape_index == -1). 
+        reshape_shape : list[int], len = k
+            specifies the final k dimensions of the shape of the input to the first layer (if 
+            reshape_index == 0) or the output of the last layer (if reshape_index == -1). 
 
-        widths: A list of integers specifying the widths of the layers in each encoder. See 
-        Autoencoder docstring.
+        widths : list[int]
+            specifies the widths of the layers in each encoder. See Autoencoder docstring.
 
-        activation: A string specifying which activation function we want to use at the end of each 
-        layer (except the final one) in each autoencoder. We use the same activation for each 
-        layer. 
+        activation : str
+            specifies which activation function we want to use at the end of each 
+            layer (except the final one) in each autoencoder. We use the same activation for each 
+            layer. 
+    
+            
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        Nothing!
         """
+
+        # Checks.
+        assert(isinstance(reshape_shape, list));
+        for i in range(len(reshape_shape)):
+            assert(isinstance(reshape_shape[i], int));
+            assert(reshape_shape[i] > 0);
+        assert(isinstance(widths, list));
+        for i in range(len(widths)):
+            assert(isinstance(widths[i], int));
+            assert(widths[i] > 0);
 
         # Call the super class initializer.
         super().__init__();
@@ -618,30 +654,35 @@ class Autoencoder_Pair(torch.nn.Module):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Displacement_Frames: A torch.Tensor object of shape (N_Frames, self.reshape_shape), where 
-        N_Frames is the number of frames we want to encode and reshape_shape specifies the shape of 
-        each frame. Displacement_Frames[i, ...] represents the displacement portion of the i'th FOM
-        frame. 
+        Displacement_Frames : torch.Tensor, shape = (N_Frames,) + self.reshape_shape
+            Displacement_Frames[i, ...] represents the displacement portion of the i'th FOM frame.
+            Here, N_Frames is the number of frames we want to encode and reshape_shape specifies 
+            the shape of each frame. 
 
-        Velocity_Frames: A torch.Tensor object of shape (N_Frames, self.reshape_shape), where 
-        N_Frames is the number of frames we want to encode for each parameter combination and 
-        reshape_shape specifies the shape of each frame. Velocity_Frames[i, j, ...] represents 
-        the velocity portion of the i'th FOM frame.
+        Velocity_Frames : torch.Tensor, shape = (N_Frames,) + self.reshape_shape
+            Velocity_Frames[i, ...] represents the velocity portion of the i'th FOM frame. Here, 
+            N_Frames is the number of frames we want to encode for each parameter combination and 
+            reshape_shape specifies the shape of each frame. 
         
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        A two element tuple, [Latent_Displacement, Latent_Velocity]. Latent_Displacement and 
-        Latent_Velocity are torch.Tensor objects of shape (N_Frames, self.n_z). 
+        Latent_Displacement, Latent_Velocity
+        
+        Latent_Displacement : torch.Tensor, shape = (N_Frames, self.n_z))
+            Latent_Displacement[i, :] represents the encoding of the displacement portion of the 
+            i'th FOM frame
 
-        Latent_Displacement[i, :] represents the encoding of the displacement portion of the i'th 
-        FOM frame while Latent_Velocity[i, :] represents the encoding of the velocity portion of 
-        the i'th FOM frame.
+        Latent_Velocity : torch.Tensor, shape = (N_Frames, self.n_z))
+            Latent_Velocity[i, :] represents the encoding of the velocity portion of the i'th FOM 
+            frame.
         """
 
         # Check that we have the same number of displacement, velocity frames.
+        assert(isinstance(Displacement_Frames, torch.Tensor));
+        assert(isinstance(Velocity_Frames, torch.Tensor));
         assert(len(Displacement_Frames.shape)       ==  len(self.reshape_shape) + 1);
         assert(Displacement_Frames.shape            ==  Velocity_Frames.shape);
         assert(list(Displacement_Frames.shape[1:])  ==  self.reshape_shape);
@@ -666,28 +707,33 @@ class Autoencoder_Pair(torch.nn.Module):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Latent_Displacement: A torch.Tensor object of shape (N_Frames, self.n_z) whose i,j element
-        represents the j'th component of the encoding of the displacement portion of the i'th FOM 
-        frame.
+        Latent_Displacement : torch.Tensor, shape = (N_Frames, self.n_z)
+            i,j element represents the j'th component of the encoding of the displacement portion 
+            of the i'th FOM frame.
 
-        Latent_Velocity: A torch.Tensor object of shape (N_Frames, self.n_z) whose i,j element
-        represents the j'th component of the encoding of the velocity portion of the i'th FOM
-        frame.
+        Latent_Velocity : torch.Tensor, shape = (N_Frames, self.n_z)
+            i,j element represents the j'th component of the encoding of the velocity portion of 
+            the i'th FOM frame.
      
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        A two element tuple, [Reconstructed_Displacement, Reconstructed_Velocity]. Each is a 
-        torch.Tensor object of shape (N_Frames, self.reshape_shape). 
+        Reconstructed_Displacement, Reconstructed_Velocity
+         
+        Reconstructed_Displacement : torch.Tensor, shape = (N_Frames,) + self.reshape_shape
+            Reconstructed_Displacement[i, ...] represents the reconstruction of the displacement 
+            portion of the i'th FOM frame. 
 
-        Reconstructed_Displacement[i, ...] represents the reconstruction of the displacement 
-        portion of the i'th FOM frame. Likewise, Reconstructed_Velocity[i, ...] represents the 
-        reconstruction of the velocity portion of i'th FOM frame.
+        Reconstructed_Velocity : torch.Tensor, shape = (N_Frames,) + self.reshape_shape
+            Reconstructed_Velocity[i, ...] represents the reconstruction of the velocity portion 
+            of i'th FOM frame.
         """
 
         # Check that we have the same number of displacement, velocity frames.
+        assert(isinstance(Latent_Displacement, torch.Tensor));
+        assert(isinstance(Latent_Velocity, torch.Tensor));
         assert(len(Latent_Displacement.shape)   == 2);
         assert(Latent_Velocity.shape            == Latent_Displacement.shape);
     
@@ -711,27 +757,30 @@ class Autoencoder_Pair(torch.nn.Module):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Displacement_Frames: A torch.Tensor object of shape (n_Frames, self.reshape_shape), where 
-        n_Frames is the number of frames we want to encode and reshape_shape specifies the shape 
-        of each frame. Displacement_Frames[i, ...] represents the displacement portion of FOM 
-        solution at the i'th time value.
+        Displacement_Frames : torch.Tensor, shape = (N_Frames,) + self.reshape_shape
+            Displacement_Frames[i, ...] represents the displacement portion of the i'th FOM frame.
+            Here, N_Frames is the number of frames we want to encode and reshape_shape specifies 
+            the shape of each frame. 
 
-        Velocity_Frames: A torch.Tensor object of shape (n_Frames, self.reshape_shape), where 
-        n_Frames is the number of frames we want to encode and reshape_shape specifies the shape 
-        of each frame. Velocity_Frames[i, ...] represents the velocity portion of FOM solution at 
-        the i'th time value.
+        Velocity_Frames : torch.Tensor, shape = (N_Frames,) + self.reshape_shape
+            Velocity_Frames[i, ...] represents the velocity portion of the i'th FOM frame. Here, 
+            N_Frames is the number of frames we want to encode for each parameter combination and 
+            reshape_shape specifies the shape of each frame. 
 
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        A two element tuple, [Reconstructed_Displacement, Reconstructed_Velocity]. Each is a 
-        torch.Tensor object of shape (n_Frames, self.reshape_shape). 
+        Reconstructed_Displacement, Reconstructed_Velocity
 
-        Reconstructed_Displacement[i, ...] represents the reconstruction of the displacement 
-        portion of the i'th frame. Likewise, Reconstructed_Velocity[i, ...] represents the 
-        reconstruction of the velocity portion of the i'th frame.
+        Reconstructed_Displacement : torch.Tensor, shape = (N_Frames,) + self.reshape_shape
+            Reconstructed_Displacement[i, ...] represents the reconstruction of the displacement 
+            portion of the i'th FOM frame. 
+
+        Reconstructed_Velocity : torch.Tensor, shape = (N_Frames,) + self.reshape_shape
+            Reconstructed_Velocity[i, ...] represents the reconstruction of the velocity portion 
+            of i'th FOM frame.
         """
 
         # Encode the displacement, velocity frames
@@ -763,31 +812,34 @@ class Autoencoder_Pair(torch.nn.Module):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        param_grid: A 2d numpy.ndarray object of shape (n_param, n_p), where n_p is the number of 
-        parameters and n_param is the number of combinations of paramter values. The i,j element of 
-        this array holds the value of the j'th parameter in the i'th combination of parameter 
-        values.
+        param_grid : numpy.ndarray, shape = (n_param, n_p)
+            i,j element of this array holds the value of the j'th parameter in the i'th combination 
+            of parameter values. Here, n_p is the number of parameters and n_param is the number
+            of combinations of parameter values.
 
-        physics: A "Physics" object that, among other things, allows us to calculate the IC for 
-        each combination of parameter values. This physics object should have the same number of 
-        initial conditions as self.
+        physics : Physics
+            allows us to calculate the IC for each combination of parameter values. This physics 
+            object should have the same number of initial conditions as self.
 
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        An n_param element list whose i'th element is an n_IC element list whose j'th element is an 
-        numpy.ndarray of shape (1, n_z) whose k'th element holds the k'th component of the encoding 
-        of the initial condition for the j'th derivative of the latent dynamics corresponding to 
-        the i'th combination of parameter values.
-            
-        If we let (U0_i, V0_i) denote the initial FOM displacement and velocity for the i'th 
-        combination of parameter values, then the i'th element of the returned list is the list 
-        [self.encoder(U0_i, V0_i)[0], self.encoder(U0_i, V0_i)[1]].
+        Z0 : list[list[numpy.ndarray]], len = n_param
+            i'th element is an n_IC element list whose j'th element is an numpy.ndarray of shape 
+            (1, n_z) whose k'th element holds the k'th component of the encoding of the initial
+            condition for the j'th derivative of the latent dynamics corresponding to the i'th 
+            combination of parameter values.
+                
+            If we let (U0_i, V0_i) denote the initial FOM displacement and velocity for the i'th 
+            combination of parameter values, then the i'th element of the returned list is the list 
+            [self.encoder(U0_i, V0_i)[0], self.encoder(U0_i, V0_i)[1]].
         """
 
         # Checks
+        assert(isinstance(param_grid, numpy.ndarray));
+        assert(len(param_grid.shape) == 2);
         assert(self.n_IC        == physics.n_IC);
 
         # Figure out how many combinations of parameter values there are.
@@ -856,7 +908,8 @@ def load_Autoencoder_Pair(dict_ : dict) -> Autoencoder_Pair:
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    dict_: This should be a dictionary returned by a Autoencoder_Pair's export method.
+    dict_ : dict
+        This should be a dictionary returned by a Autoencoder_Pair's export method.
 
     
 
@@ -864,7 +917,8 @@ def load_Autoencoder_Pair(dict_ : dict) -> Autoencoder_Pair:
     Returns
     -----------------------------------------------------------------------------------------------
 
-    A Autoencoder_Pair object that is identical to the one that created dict_!
+    AEP : Autoencoder_Pair
+        A Autoencoder_Pair object that is identical to the one that created dict_!
     """
 
     LOGGER.info("De-serializing an Autoencoder_Pair..." );

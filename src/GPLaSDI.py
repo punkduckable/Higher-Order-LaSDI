@@ -48,9 +48,11 @@ def optimizer_to(optim : Optimizer, device : str) -> None:
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    optim: The optimizer whose device we want to change.
+    optim : Optimizer
+        The optimizer whose device we want to change.
 
-    device: The device we want to move optim onto. 
+    device : str
+        The device we want to move optim onto. 
 
 
     -----------------------------------------------------------------------------------------------
@@ -115,22 +117,24 @@ class BayesianGLaSDI:
         Arguments
         -------------------------------------------------------------------------------------------
 
-        physics: A "Physics" object that we use to fetch the FOM initial conditions (which we 
-        encode into latent ICs). Each Physics object has a corresponding PDE with parameters, and a 
-        way to generate a solution to that equation given a particular set of parameter values (and 
-        an IC, BCs). We use this object to generate FOM solutions which we then use to train the
-        model/latent dynamics.
+        physics : Physics
+            Encodes the FOM model. It allows us to fetch the FOM solution and/or initial conditions 
+            for a particular combination of parameters. We use this object to generate FOM 
+            solutions which we then use to train the model and latent dynamics.
          
-        model: An model object that we use to compress the FOM state to a reduced, latent state.
+        model : torch.nn.Module
+            use to compress the FOM state to a reduced, latent state.
 
-        latent_dynamics: A LatentDynamics object which describes how we specify the dynamics in the
-        model's latent space.
+        latent_dynamics : LatentDynamics
+            A LatentDynamics object which describes how we specify the dynamics in the model's 
+            latent space.
 
-        param_space: A Parameter space object which holds the set of testing and training 
-        parameters. 
+        param_space: ParameterSpace
+            holds the set of testing and training parameters. 
 
-        config: A dictionary housing the LaSDI settings. This should be the 'lasdi' sub-dictionary 
-        of the config file.
+        config: dict
+            houses the LaSDI settings. This should be the 'lasdi' sub-dictionary of the config 
+            file.
 
         
         -------------------------------------------------------------------------------------------
@@ -372,8 +376,8 @@ class BayesianGLaSDI:
                 # Compute the latent dynamics and coefficient losses. Also fetch the current latent
                 # dynamics coefficients for each training point. The latter is stored in a 2d array 
                 # called "coefs" of shape (n_train, n_coefs), where n_train = number of training 
-                # parameter parameters and n_coefs denotes the number of coefficients in the latent
-                # dynamics model. 
+                # combinations of parameters and n_coefs denotes the number of coefficients in the 
+                # latent dynamics model. 
                 coefs, loss_LD, loss_coef       = LD.calibrate(Latent_States = Latent_States, t_Grid    = t_Train_device);
 
                 self.timer.end("Calibration");
@@ -387,7 +391,8 @@ class BayesianGLaSDI:
 
                 # Simulate the frames forward in time. This should return an n_param element list
                 # whose i'th element is a 1 element list whose only element has shape (n_t_i, 
-                # n_rollout_frames[i], n_z) whose p, q, r element of the should hold the r'th component of the p'th frame of the j'th time derivative of the solution
+                # n_rollout_frames[i], n_z) whose p, q, r element of the should hold the r'th 
+                # component of the p'th frame of the j'th time derivative of the solution
                 # when we use the p'th initial condition for the i'th combination of parameter 
                 # values.
                 #
@@ -772,43 +777,48 @@ class BayesianGLaSDI:
         Arguments
         -------------------------------------------------------------------------------------------
 
-        t: An n_param element list whose i'th element is a 1d torch.Tensor of shape (n_t_i) whose 
-        j'th element specifies the time of the j'th frame in the FOM solution for the i'th 
-        combination of parameter values.
+        t: : list[torch.Tensor], len = n_param
+            i'th element is a 1d torch.Tensor of shape (n_t_i) whose j'th element specifies the 
+            time of the j'th frame in the FOM solution for the i'th combination of parameter 
+            values.
 
-        X: An n_param element list whose i'th element is a n_IC element list whose j'th element 
-        is a torch.Tensor of shape (n_t_i, ...) whose k'th element specifies the value of the 
-        j'th time derivative of the FOM frame when using the i'th combination of parameter values.
+        X : list[list[torch.Tensor]], len = n_param
+            i'th element is a n_IC element list whose j'th element is a torch.Tensor of shape 
+            (n_t_i, ...) whose k'th element specifies the value of the j'th time derivative of the 
+            FOM frame when using the i'th combination of parameter values.
 
-        p_rollout: A number between 0 and 1 specifying the ratio of the rollout time for a 
-        particular combination of parameter values to the length of the time interval for that 
-        combination of parameter values.
+        p_rollout : float
+            A number between 0 and 1 specifying the ratio of the rollout time for a particular 
+            combination of parameter values to the length of the time interval for that combination 
+            of parameter values.
 
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
         
-        A four element tuple: t_Grid_rollout, n_rollout_frames, and X_Rollout_Targets
+        t_Grid_rollout, n_rollout_frames, X_Rollout_Targets
 
-        t_Grid_rollout is an n_param element list whose i'th element is a 1d array whose j'th entry 
-        holds the j'th time at which we want to rollout the first frame for the i'th combination of
-        parameter values. Why do we do this? When we rollout the latent states, we take advantage 
-        of the fact that the governing dynamics is autonomous. Specifically, the actual at which 
-        times we solve the ODE do not matter. All that matters is amount of time we solve for. This 
-        allows us to use the same time grid for all latent states that we rollout, which 
-        dramatically improves runtime. 
+        t_Grid_rollout : list[torch.Tensor], len = n_param
+            i'th element is a 1d array whose j'th entry holds the j'th time at which we want to 
+            rollout the first frame for the i'th combination of parameter values. Why do we do 
+            this? When we rollout the latent states, we take advantage of the fact that the 
+            governing dynamics is autonomous. Specifically, the actual at which times we solve the 
+            ODE do not matter. All that matters is amount of time we solve for. This allows us to 
+            use the same time grid for all latent states that we rollout, which dramatically 
+            improves runtime. 
 
-        n_rollout_frames is an n_param element list whose i'th element specifies how many frames we 
-        from the FOM solution for the i'th combination of parameter values we can rollout. 
-        Specifically, the first n_rollout_frames[i] frames from the i'th FOM solution are such that 
-        the time for each frame after rollout will be less than the final time for that FOM 
-        solution.
+        n_rollout_frames : list[int], len = n_param
+            i'th element specifies how many frames we from the FOM solution for the i'th 
+            combination of parameter values we can rollout. Specifically, the first 
+            n_rollout_frames[i] frames from the i'th FOM solution are such that the time for 
+            each frame after rollout will be less than the final time for that FOM solution.
 
-        X_Rollout_Targets is an n_param element list whose i'th element is an n_IC element list
-        whose j'th element is a numpy.ndarray of shape (n_rollout_frames[i], physics.Frame_Shape) 
-        whose (k, ...) element specifies the target for the j'th time derivative of the k'th frame 
-        we rollout for the i'th combination of parameter values.
+        X_Rollout_Targets : list[list[torch.Tensor]], len = n_param
+            i'th element is an n_IC element list whose j'th element is a numpy.ndarray of shape 
+            (n_rollout_frames[i], physics.Frame_Shape) whose (k, ...) element specifies the target 
+            for the j'th time derivative of the k'th frame we rollout for the i'th combination of 
+            parameter values.
         """
 
         # Checks
@@ -952,8 +962,9 @@ class BayesianGLaSDI:
         Returns
         -------------------------------------------------------------------------------------------
 
-        a 2d numpy ndarray object of shape (1, n_p) whose (0, j) element holds the value of 
-        the j'th parameter in the new sample. Here, n_p is the number of parameters.
+        new_sample : numpy.ndarray, shape = (1, n_p)
+            (0, j) element holds the value of the j'th parameter in the new sample. Here, n_p is 
+            the number of parameters.
         """
 
         self.timer.start("new_sample");
@@ -1042,9 +1053,11 @@ class BayesianGLaSDI:
         Returns
         -------------------------------------------------------------------------------------------
 
-        A dictionary housing most of the internal variables in self. You can pass this dictionary 
-        to self (after initializing it using ParameterSpace, model, and LatentDynamics 
-        objects) to make a GLaSDI object whose internal state matches that of self.
+        dict_ : dict
+            A dictionary housing most of the internal variables in self. You can pass this 
+            dictionary to self (after initializing it using ParameterSpace, model, and 
+            LatentDynamics objects) to make a GLaSDI object whose internal state matches that of 
+            self.
         """
 
         dict_ = {'X_Train'          : self.X_Train, 
@@ -1075,10 +1088,11 @@ class BayesianGLaSDI:
         Arguments 
         -------------------------------------------------------------------------------------------
 
-        dict_: This should be a dictionary returned by calling the export method on another 
-        GLaSDI object. We use this to make self hav the same internal state as the object that 
-        generated dict_. 
-        
+        dict_ : dict 
+            This should be a dictionary returned by calling the export method on another 
+            GLaSDI object. We use this to make self hav the same internal state as the object that 
+            generated dict_. 
+            
 
         -------------------------------------------------------------------------------------------
         Returns  
