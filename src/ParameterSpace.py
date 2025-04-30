@@ -34,17 +34,23 @@ def get_1dspace_from_list(param_dict : dict) -> tuple[int, numpy.ndarray]:
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    param_dict: A dictionary specifying one of the parameters. We should fetch this from the 
-    configuration yaml file. It must have a "list" key whose corresponding value is a list of 
-    floats. 
+    param_dict : dict
+        Defines the set of allowed values for a single parameter. We should fetch this from the 
+        configuration yml file. It must have a "list" key whose corresponding value is a list of 
+        floats. 
 
 
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
 
-    Two arguments: n_values and paramRange. paramRange is a 1d numpy ndarray (whose ith value is 
-    the i'th element of param_dict["list"]). n_values is the length of paramRange. 
+    n_values, paramRange
+     
+    n_values : int
+      the length of paramRange (see below).
+    
+    paramRange : numpy.ndarray, shape = (n_values)
+        a 1d numpy ndarray (whose ith value is the i'th element of param_dict["list"]).
     """
 
     # In this case, the parameter dictionary should have a "list" attribute which should list the 
@@ -81,19 +87,24 @@ def create_uniform_1dspace(param_dict : dict) -> tuple[int, numpy.ndarray]:
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    param_dict: A dictionary specifying one of the parameters. We should fetch this from the 
-    configuration yaml file. It must have a "min", "max", "sample_size", and "log_scale" 
-    keys (see above).
+    param_dict : dict 
+        Defines the set of allowed values for a single parameter. We should fetch this from the 
+        configuration yml file. It must have a "min", "max", "sample_size", and "log_scale" 
+        keys (see above).
 
 
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
 
-    Two arguments: n_values and paramRange. paramRange is a 1d numpy ndarray (whose ith value is 
-    the i'th possible value of the parameter. Thus, paramRange[0] = param_dict["min"] and 
-    paramRange[-1] = param_dict["max"]). n_values is the length of paramRange or, equivalently 
-    param_dict["sample_size"]. 
+    n_values, paramRange
+
+    n_values : int
+        the length of paramRange (see below). Equivalently, n_values = param_dict["sample_size"]. 
+    
+    paramRange : numpy.ndarray, shape = (n_param)
+        ith value is the i'th possible value of the parameter. paramRange[0] = param_dict["min"]
+        and paramRange[-1] = param_dict["max"]).
     """
 
     # Fetch the number of samples and the min/max value for this parameter.
@@ -147,14 +158,22 @@ class ParameterSpace:
         Arguments
         -------------------------------------------------------------------------------------------
 
-        config: This is a dictionary that houses the settings we want to use to run the code. This 
-        should have been read from a yaml file. We assume it contains the following keys. If one 
-        or more keys are tabbed over relative to one key above them, then the one above is a 
-        dictionary and the ones below should be keys within that dictionary.
-            - parameter_space
-                - parameters (this should have at least one parameter defined!)
-            - test_space
-                - type (should be "grid")
+        config : dict
+            houses the settings we want to use to run the code. This should have been read from a 
+            yml file. We assume it contains the following keys. If one or more keys are tabbed 
+            over relative to one key above them, then the one above is a dictionary and the ones 
+            below should be keys within that dictionary.
+                - parameter_space
+                    - parameters (this should have at least one parameter defined!)
+                - test_space
+                    - type (should be "grid")
+
+        
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        Nothing!
         """
 
         # Make sure the configuration dictionary has a "parameter_space" setting. This should house 
@@ -194,19 +213,11 @@ class ParameterSpace:
 
 
     def n_train(self) -> int:
-        """
-        Returns the number of combinations of parameters in the training set.
-        """
-
         return self.train_space.shape[0];
     
 
 
     def n_test(self) -> int:
-        """
-        Returns the number of combinations of parameters in the testing set.
-        """
-
         return self.test_space.shape[0];
 
 
@@ -230,13 +241,14 @@ class ParameterSpace:
         Returns
         -------------------------------------------------------------------------------------------
 
-        A 2d array of shape ((2)^k, k), where k is the number of parameters (k == len(self.param_list)).
-        The i'th column is the flattened i'th mesh_grid array we when we create a mesh grid using 
-        the min and max value of each parameter as the argument. See "createHyperMeshGrid" for 
-        details. 
+        hyper_mesh_grid : numpy.ndarray, shape = (2^n_p, n_p)
+            here, n_p = the number of parameters = len(self.param_list)). The i'th column is of
+            hyper_mesh_grid is a flattened i'th mesh_grid array we when we create a mesh grid using 
+            the min and max value of each parameter as the argument. See "createHyperMeshGrid" for 
+            details. 
         
-        Specifically, we return exactly what "createHyperGridSpace" returns. See the doc-string 
-        for that function for further details. 
+            Specifically, we return exactly what "createHyperGridSpace" returns. See the doc-string 
+            for that function for further details. 
         """
 
         # We need to know the min and max value for each parameter to set up the grid of possible 
@@ -280,18 +292,21 @@ class ParameterSpace:
         Returns
         -------------------------------------------------------------------------------------------
 
-        A three element tuple. 
+        gridSizes, mesh_grids, hyper_mesh_grid
         
-        The first is a list whose i'th element specifies the number of distinct values of the i'th 
-        parameter we consider (this is the length of the i'th element of "paramRanges" below).
+        gridSizes : list[int]
+            i'th element specifies the number of distinct values of the i'th parameter we consider 
+            (this is the length of the i'th element of "paramRanges" below).
 
-        The second is a a tuple of k numpy ndarrays (where k = len(self.param_list)), the i'th one 
-        of which is a k-dimensional array with shape (N0, ... , N{k - 1}), where Ni = 
-        self.param_list[i].size whose i(0), ... , i(k - 1) element specifies the value of the i'th 
-        parameter in the i(0), ... , i(k - 1)'th unique combination of parameter values.
+        mesh_grids : tuple[numpy.ndarray], len = n_p
+            i'th element is a a n_p-dimension array of shape (N0, ... , N{k - 1}), where Ni = 
+            self.param_list[i].size whose i(0), ... , i(k - 1) element specifies the value of the 
+            i'th parameter in the i(0), ... , i(k - 1)'th unique combination of parameter values.
+            here, n_p = len(self.param_list).
 
-        The third one is a 2d array of parameter values. It has shape (M, k), where 
-        M = \prod_{i = 0}^{k - 1} self.param_list[i].size. 
+        hyper_mesh_grid : numpy.ndarray, shape = (M, n_p)
+            flattened version of mesh_grid returned by createHyperGridSpace. Here, 
+            M = \prod_{i = 0}^{k - 1} self.param_list[i].size
         """
 
         # Set up arrays to hold the parameter values + number of parameter values for each 
@@ -336,23 +351,23 @@ class ParameterSpace:
         Arguments
         -------------------------------------------------------------------------------------------
 
-        param_ranges: list of numpy 1d arrays, each corresponding to 1d parameter grid space. The 
-        i'th element of this list should be a 2-element numpy.ndarray object housing the max and 
-        min value for the i'th parameter. The list size should equal the number of parameters. 
+        param_ranges : list[numpy.ndarray], len = n_p
+            i'th element is a 2-element numpy.ndarray object housing the max and min-min value 
+            for the i'th parameter value. Here, n_p is the number of parameters. 
                         
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        the "paramSpaces" tuple. This is a tuple of numpy ndarray objects, the i'th one of which 
-        gives the grid of parameter values for the i'th parameter. Specifically, if there are 
-        k parameters and if param_range[i].size = Ni, then the j'th return array has shape 
-        (N0, ... , N{k - 1}) and the i(0), ... , i(k - 1) element of this array houses the i(j)'th 
-        value of the j'th parameter.
+        paramSpaces : tuple[numpy.ndarray], len = n_p
+            i'th element is a grid of parameter values for the i'th parameter. Specifically, if 
+            there are n_p parameters and if param_range[i].size = Ni, then the i'th return array 
+            has shape (N0, ... , N{k - 1}) and the j(0), ... , j(k - 1) element of this array 
+            houses the j(i)'th value of the i'th parameter.
 
-        Thus, if there are k parameters, the returned tuple has k elements, each one of 
-        which is an array of shape (N0, ... , N{k - 1}).
+            Thus, if there are n_p parameters, the returned tuple has n_p elements, each one of 
+            which is an ndarray of shape (N0, ... , N{k - 1}).
         """
 
         # Fetch the ranges, add them to a tuple (this is what the meshgrid function needs).
@@ -382,18 +397,19 @@ class ParameterSpace:
         Arguments
         -------------------------------------------------------------------------------------------
 
-        mesh_grids: tuple of numpy nd arrays, corresponding to each parameter. This should ALWAYS
-        be the output of the "CreateHyperMeshGrid" function. See the return section of that 
-        function's docstring for details.
+        mesh_grids : tuple[numpy.ndarray], len = n_p
+            i'th elenent is a numpy.ndarray of shape (N0, ... , N{n_p - 1}), where N0 is the number 
+            of allowed values for the i'th parameter. mesh_grids should be the output of the 
+            "CreateHyperMeshGrid" function. See that function's doc-string for details. 
     
         
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
         
-        The param_grid. This is a 2d numpy.ndarray object of shape (grid size, number of 
-        parameters). If each element of mesh_grids is a numpy.ndarray object of shape (N(1), ... , 
-        N(k)) (k parameters), then (grid size) = N(1)*N(2)*...*N(k) and (number of parameters) = k.
+        param_grid : numpy.ndarray, shape = (M, n_p)
+            i, j entry holds the value of the j'th parameter in the i'th combination of parameter 
+            values. If mesh_grids has shape (N(0), ... , N(n_p - 1)), then M = N(0)*...*N(n_p - 1).
         """
 
         # For each parameter, we flatten its mesh_grid into a 1d array (of length (grid size)). We
@@ -422,8 +438,9 @@ class ParameterSpace:
         Arguments
         -------------------------------------------------------------------------------------------
 
-        param: A 1d numpy ndarray object. It should have shape (self.n_p) and should hold a 
-        parameter value that we want to add to the training set.
+        param : numpy.ndarray, shape = self.n_p
+            i'th element holds the value of a i'th parameter. We add this combination of parameter
+            values to the training space.
 
 
 
@@ -461,23 +478,36 @@ class ParameterSpace:
         Returns
         -------------------------------------------------------------------------------------------
 
-        A dictionary with 4 keys. Below is a list of the keys with a short description of each 
-        corresponding value. 
-            train_space: self.train_space, a 2d array of shape (n_train, n_p) whose i,j element 
-            holds the value of the j'th parameter in the i'th training case.
+        dict_ : dict
+            Below is a list of the keys with a short description of each corresponding value. 
 
-            test_space: self.test_space, a 2d array of shape (n_test, n_p) whose i,j element 
-            holds the value of the j'th parameter in the i'th testing case.
+            n_p : int 
+                the number of parameters
 
-            test_grid_sizes: A list whose i'th element specifies how many distinct parameter values
-            we use for the i'th parameter. 
+            param_names : list[str], len = n_p
+                i'th element specifies the name of the i'th parameter.
+            
+            param_list = self.param_list : list[dict]
+                i'th element holds the dictionary used to define the i'th parameter.
 
-            test_meshgrid: a tuple of n_p numpy.ndarray array objects whose i'th element is a
-            n_p-dimensional array whose i(1), i(2), ... , i(n_p) element holds the value of 
-            the i'th parameter in the i(1), ... , i(n_p) combination of parameter values in the 
-            testing test. 
+            train_space = self.train_space : numpy.ndarray, shape = (n_train, n_p)
+                i, j element holds the value of the j'th parameter in the i'th combination of 
+                parameters in the training set.
 
-            n_init_train: The number of combinations of training parameters in the training set.     
+            test_space = self.test_space : numpy.ndarray, shape = (n_test, n_p)
+                i,j element holds the value of the j'th parameter in the i'th testing case.
+
+            test_grid_sizes : list[int], len = n_p
+                i'th element specifies how many distinct parameter values we use for the i'th 
+                parameter. 
+
+            test_meshgrid : tuple[numpy.ndarray], len = n_p
+                i'th element is a n_p-dimensional array whose i(1), i(2), ... , i(n_p) element 
+                holds the value of the i'th parameter in the i(1), ... , i(n_p) combination of 
+                parameter values in the testing test. 
+
+            n_init_train : int
+                The number of combinations of training parameters in the training set.     
         """
 
         # Build the dictionary
@@ -506,14 +536,18 @@ class ParameterSpace:
         Arguments
         -------------------------------------------------------------------------------------------
 
-        dict_: This should be a dictionary with the following keys: 
-            - train_space
-            - test_space
-            - test_grid_sizes
-            - test_meshgrid
-            - n_init_train
-        This dictionary should have been returned by the export method. We use the values in this 
-        dictionary to set up self.
+        dict_ : dictionary
+            This should be a dictionary with the following keys: 
+                - n_p
+                - param_list
+                - param_names
+                - train_space
+                - test_space
+                - test_grid_sizes
+                - test_meshgrid
+                - n_init_train
+            This dictionary should have been returned by the export method. We use the values in this 
+            dictionary to set up self.
 
         
         -------------------------------------------------------------------------------------------
