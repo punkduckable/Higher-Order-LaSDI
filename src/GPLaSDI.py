@@ -343,7 +343,7 @@ class BayesianGLaSDI:
                     # Reconstruction loss
 
                     self.timer.start("Reconstruction Loss");
-                    loss_recon += self.MSE(X_i, X_Pred_i);
+                    loss_recon = loss_recon + self.MSE(X_i, X_Pred_i);
                     self.timer.end("Reconstruction Loss");
 
 
@@ -423,8 +423,8 @@ class BayesianGLaSDI:
                     X_Rollout_Target_i      : list[torch.Tensor]    = X_Rollout_Targets[i][0];      # shape = (n_rollout_frames[i], physics.Frame_Shape)
                 
                     # Compute the losses for the i'th combination of parameter values!
-                    loss_rollout_ROM +=  self.MSE(Z_Rollout_Targets_i, Z_Rollout_Predict_i);
-                    loss_rollout_FOM +=  self.MSE(X_Rollout_Predict_i, X_Rollout_Target_i);
+                    loss_rollout_ROM  = loss_rollout_ROM + self.MSE(Z_Rollout_Targets_i, Z_Rollout_Predict_i);
+                    loss_rollout_FOM  = loss_rollout_FOM + self.MSE(X_Rollout_Predict_i, X_Rollout_Target_i);
 
                 self.timer.end("Rollout Loss");
 
@@ -498,8 +498,8 @@ class BayesianGLaSDI:
                     self.timer.start("Reconstruction Loss");
 
                     # Compute the reconstruction loss. 
-                    loss_recon_D += self.MSE(D_i, D_Pred_i);
-                    loss_recon_V += self.MSE(V_i, V_Pred_i);
+                    loss_recon_D  = loss_recon_D + self.MSE(D_i, D_Pred_i);
+                    loss_recon_V  = loss_recon_V + self.MSE(V_i, V_Pred_i);
 
                     self.timer.end("Reconstruction Loss");
 
@@ -549,7 +549,7 @@ class BayesianGLaSDI:
                                                                 func    = lambda Z_D : model_device.Displacement_Autoencoder.Decode(Z_D), 
                                                                 inputs  = Z_D_i, 
                                                                 v       = Z_V_i)[1];
-                    loss_chain_rule_X += self.MSE(V_i, d_dz_D_Pred__Z_V_i);
+                    loss_chain_rule_X = loss_chain_rule_X + self.MSE(V_i, d_dz_D_Pred__Z_V_i);
 
                     # Next, we compute the Z portion of the chain rule loss:
                     #       (d/dt)Z(t) \approx (d/dt)\phi_E,D(D(t))
@@ -559,7 +559,7 @@ class BayesianGLaSDI:
                                                                 func    = lambda D : model_device.Displacement_Autoencoder.Encode(D),
                                                                 inputs  = D_i, 
                                                                 v       = V_i)[1];
-                    loss_chain_rule_Z += self.MSE(Z_V_i, d_dx_Z_D__V);
+                    loss_chain_rule_Z = loss_chain_rule_Z + self.MSE(Z_V_i, d_dx_Z_D__V);
 
                     self.timer.end("Chain Rule Loss");
 
@@ -650,10 +650,10 @@ class BayesianGLaSDI:
                     V_Rollout_Target_i      : torch.Tensor          = X_Rollout_Target_i[1];
                 
                     # Compute the losses for the i'th combination of parameter values!
-                    loss_rollout_Z_D +=  self.MSE(Z_D_Rollout_Target_i, Z_D_Rollout_Predict_i);
-                    loss_rollout_Z_V +=  self.MSE(Z_V_Rollout_Target_i, Z_V_Rollout_Predict_i);
-                    loss_rollout_D   +=  self.MSE(D_Rollout_Target_i,   D_Rollout_Predict_i);
-                    loss_rollout_V   +=  self.MSE(V_Rollout_Target_i,   V_Rollout_Predict_i);
+                    loss_rollout_Z_D  = loss_rollout_Z_D + self.MSE(Z_D_Rollout_Target_i, Z_D_Rollout_Predict_i);
+                    loss_rollout_Z_V  = loss_rollout_Z_V + self.MSE(Z_V_Rollout_Target_i, Z_V_Rollout_Predict_i);
+                    loss_rollout_D    = loss_rollout_D + self.MSE(D_Rollout_Target_i,   D_Rollout_Predict_i);
+                    loss_rollout_V    = loss_rollout_V + self.MSE(V_Rollout_Target_i,   V_Rollout_Predict_i);
 
                 self.timer.end("Rollout Loss");
 
