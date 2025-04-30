@@ -233,7 +233,7 @@ class Explicit(Physics):
             d'th element is a 2d numpy.ndarray object of shape (n_t, n_x), where n_t is the number of 
             points along the temporal axis (this is specified by the configuration file) and n_x is the 
             number of points along the spatial axis. The i,j element of the d'th array should have the 
-            j'th component of the d'th derivative of the fom solution at the i'th time step.
+            j'th component of the d'th derivative of the FOM solution at the i'th time step.
 
         
         -------------------------------------------------------------------------------------------

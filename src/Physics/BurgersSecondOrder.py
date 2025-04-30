@@ -185,22 +185,23 @@ class Burgers(Physics):
         param: numpy.ndarray, shape = (2)
             Holds the values of the w and a parameters. self.a_idx and self.w_idx tell us which 
             index corresponds to which variable.
+        
 
-            
         -------------------------------------------------------------------------------------------
         Returns 
         -------------------------------------------------------------------------------------------
         
-        X, t_Grid.
+        X, t_Grid
 
-        X: is a 2 element list holding the displacement and velocity of the FOM solution when we 
-        use param to define the initial condition function. Each element is a torch.Tensor object 
-        of shape (n_t, self.Frame_Shape), where n_t is the number of time steps when we solve the 
-        FOM using param for the IC parameters.
+        X: list[torch.Tensor], len = 2
+            i'th element has shape = (n_t, self.Frame_Shape), holds the i'th derivative of the FOM 
+            solution when we use param to define the initial condition function. Specifically, the 
+            [j, ...] sub-array of the returned array holds the i'th derivative of the FOM solution 
+            at t_Grid[j].
 
-        t_Grid is a 1d torch.Tensor object whose i'th element holds the i'th time value at which
-        we have an approximation to the FOM solution (the time value associated with X[0][i, ...]
-        and X[1][i, ...]).
+        t_Grid: torch.Tensor, shape = (n_t)
+            i'th element holds the i'th time value at which we have an approximation to the FOM 
+            solution (the time value associated with X[i, ...]).
         """
 
         assert(isinstance(param, numpy.ndarray));
@@ -250,20 +251,25 @@ class Burgers(Physics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        X_hist: A single element list of 2d numpy.ndarray object of shape (n_t, n_x), where n_t is 
-        the number of points along the temporal axis (this is specified by the configuration file) 
-        and n_x is the number of points along the spatial axis. The i,j element of the d'th array 
-        should have the j'th component of the d'th derivative of the fom solution at the i'th time 
-        step.
+        X_hist : list[numpy.ndarray], len = 2
+            d'th element has shape (n_t, n_x), where n_t is the number of points along the 
+            temporal axis (this is specified by the configuration file) and n_x is the number of 
+            points along the spatial axis. The i,j element of the d'th array should hold the j'th 
+            component of the d'th derivative of the FOM solution at the i'th time step.
 
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        A two element tuple. The first is a numpy.ndarray object of shape (n_t - 2, n_x - 2) whose 
-        i, j element holds the residual at the i + 1'th temporal grid point and the j + 1'th 
-        spatial grid point. 
+        r, e
+
+        r : numpy.ndarray, shape = (n_t - 2, n_x - 2)
+            i, j element holds the residual at the i + 1'th temporal grid point and the j + 1'th 
+            spatial grid point. 
+
+        e : float 
+            The norm of r. 
         """
 
         # Run checks.
