@@ -59,47 +59,52 @@ def Initialize_Trainer(config : dict, restart_dict : dict = None) -> tuple[Bayes
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    config: This should be a dictionary that we loaded from a .yml file. It should house all the 
-    settings we expect to use to generate the data and train the models. We expect this dictionary 
-    to contain the following keys (if a key is within a dictionary that is specified by another 
-    key, then we tab the sub-key relative to the dictionary key): 
-        - physics           (used by "initialize_physics")
-            - type
-        - latent_dynamics   (how we parameterize the latent dynamics; e.g. SINDy)
-            - type
-        - lasdi
-            - type
+    config: dict
+        The dictionary that we loaded from a .yml file. It should house all the settings we expect 
+        to use to generate the data and train the models. We expect this dictionary to contain the 
+        following keys (if a key is within a dictionary that is specified by another key, then we 
+        tab the sub-key relative to the dictionary key): 
+            - physics           (used by "initialize_physics")
+                - type
+            - latent_dynamics   (how we parameterize the latent dynamics; e.g. SINDy)
+                - type
+            - lasdi
+                - type
 
-    restart_dict: The dictionary returned by numpy.load when we load from a restart. This should
-    contain the following keys:
-        - parameter_space
-        - model
-        - latent_dynamics
-        - trainer
+    restart_dict : dict
+        The dictionary returned by numpy.load when we load from a restart. This should
+        contain the following keys:
+            - parameter_space
+            - model
+            - latent_dynamics
+            - trainer
             
     
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
 
-    A five element tuple: trainer, param_space, physics, model, and latent_dynamics
+    trainer, param_space, physics, model, latent_dynamics
      
-    trainer: a "BayesianGLaSDI" object that has been initialized using the settings in config 
-    and is ready to begin training.
+    trainer : BayesianGLaSDI
+        Should have been initialized using the settings in config and is ready to begin training.
 
-    param_space: a ParameterSpace object which holds the combinations of parameters in the 
-    training and testing sets.
+    param_space : ParameterSpace
+        holds the combinations of parameters in the testing and training sets.
      
-    physics: A Physics object that encodes the governing equation for the FOM model + allows us to
-    fetch the initial conditions for a particular combination of initial conditions.
+    physics : Physics
+        Encodes the FOM model. It allows us to fetch the FOM solution and/or initial conditions 
+        for a particular combination of parameters.
 
-    model: The model we use to map between the FOM and ROM spaces. Specifically, the model can 
-    encode a snapshot/frame (measurement at a specific time) of the FOM solution to its 
-    corresponding ROM frame. It can also decode a ROM frame back to a FOM frame. The n_IC attribute
-    of this object must match that of latent_dynamics.
+    model : torch.nn.Module
+        The model we use to map between the FOM and ROM spaces. Specifically, the model can 
+        encode a snapshot/frame (measurement at a specific time) of the FOM solution to its 
+        corresponding ROM frame. It can also decode a ROM frame back to a FOM frame. The n_IC 
+        attribute of this object must match that of latent_dynamics.
 
-    latent_dynamics: A LatentDynamics object which defines the dynamical system in model's latent
-    space. The n_IC attribute of this object must match the n_IC attribute of model.
+    latent_dynamics : LatentDynamics
+        Defines the dynamical system in model's latent space. The n_IC attribute of this object 
+        must match the n_IC attribute of model.
     """
 
     # Fetch the trainer type. Note that only "gplasdi" is allowed.
@@ -116,7 +121,7 @@ def Initialize_Trainer(config : dict, restart_dict : dict = None) -> tuple[Bayes
     if (restart_dict is not None):
         param_space.load(restart_dict['parameter_space']);
     
-    # Get the "physics" object we use to generate the fom dataset.
+    # Get the "physics" object we use to generate the FOM dataset.
     physics : Physics   = Initialize_Physics(config, param_space.param_names);
 
     # Get the model (autoencoder). We try to learn dynamics that describe how the latent space of
@@ -160,16 +165,17 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    physics: A "Physics" object that allows us to generate the fom dataset. Each Physics object has 
-    a corresponding PDE with parameters, and a way to generate a solution to that equation given
-    a particular set of parameter values (and an IC, BCs).
+    physics : Physics
+        Encodes the FOM model. It allows us to fetch the FOM solution and/or initial conditions 
+        for a particular combination of parameters. 
 
-    config: This should be a dictionary that we loaded from a .yml file. It should house all the 
-    settings we expect to use to generate the data and train the models. We expect this dictionary 
-    to contain the following keys (if a key is within a dictionary that is specified by another 
-    key, then we tab the sub-key relative to the dictionary key): 
-        - model
-            - type
+    config : dict
+        This should be a dictionary that we loaded from a .yml file. It should house all the 
+        settings we expect to use to generate the data and train the models. We expect this 
+        dictionary to contain the following keys (if a key is within a dictionary that is specified 
+        by another key, then we tab the sub-key relative to the dictionary key): 
+            - model
+                - type
     
        
     
@@ -177,9 +183,10 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
     Returns
     -----------------------------------------------------------------------------------------------
 
-    A torch.nn.Module object that acts as the trainable model in the gplasdi framework. This model 
-    should have a latent space of some form. We learn a set of dynamics to describe how this latent
-    space evolves over time. 
+    model : torch.nn.Module
+        A torch.nn.Module object that acts as the trainable model in the gplasdi framework. This 
+        model should have a latent space of some form. We learn a set of dynamics to describe how 
+        this latent space evolves over time. 
     """
 
 
@@ -201,7 +208,7 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
 
         # Now build the widths attribute + fetch Frame_Shape from physics.
         Frame_Shape         : list[int]         = physics.Frame_Shape;
-        space_dim           : int               = numpy.prod(Frame_Shape);
+        space_dim           : int               = numpy.prod(Frame_Shape).item();
         widths              : list[int]         = [space_dim] + hidden_widths + [n_z];
 
         # Now build the model!
@@ -218,29 +225,33 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
 def Initialize_Physics(config: dict, param_names : list[str]) -> Physics:
     '''
     Initialize a physics FOM model according to config file.
-    Currently only 'burgers1d' is available.
 
     
-
     -----------------------------------------------------------------------------------------------
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    config: This should be a dictionary that we loaded from a .yml file. It should house all the 
-    settings we expect to use to generate the data and train the models. We expect this dictionary 
-    to contain the following keys (if a key is within a dictionary that is specified by another 
-    key, then we tab the sub-key relative to the dictionary key): 
-        - physics 
-            - type
+    config : dict
+        A dictionary we loaded from a .yml file. It should house all the settings we expect to use 
+        to generate the data and train the models. We expect this dictionary to contain the 
+        following keys (if a key is within a dictionary that is specified by another key, then we 
+        tab the sub-key relative to the dictionary key): 
+            - physics 
+                - type
 
-    param_names: A list housing the names of the parameters in the physics model. There should be an
-    entry in the configuration file for each named parameter. 
+    param_names : list[str], len  = n_p
+        A list housing the names of the parameters in the physics model. There should be an entry 
+        in the configuration file for each named parameter. 
             
+    
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
 
-    A "Physics" object initialized using the parameters in the config['physics'] dictionary. 
+    physics : Physics
+        Encodes the FOM model. It allows us to fetch the FOM solution and/or initial conditions 
+        for a particular combination of parameters. Initialized using the n_p parameters in the 
+        config['physics'] dictionary. 
     '''
 
     # First, determine what kind of "physics" object we want to load.

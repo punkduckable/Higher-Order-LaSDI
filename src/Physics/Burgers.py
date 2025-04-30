@@ -171,8 +171,8 @@ class Burgers(Physics):
 
         X: list[torch.Tensor], len = 1
             Lone element has shape = (n_t, self.Frame_Shape), holds the FOM solution when we use
-            param to define the initial condition function and/or physics. Specifically, the 
-            [i, ...] sub-array of the returned array holds the FOM solution at t_Grid[i].
+            param to define the FOM. Specifically, the [i, ...] sub-array of the returned array 
+            holds the FOM solution at t_Grid[i].
 
         t_Grid: torch.Tensor, shape = (n_t)
             i'th element holds the i'th time value at which we have an approximation to the FOM 

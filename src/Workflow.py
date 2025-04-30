@@ -146,7 +146,7 @@ def step(trainer        : BayesianGLaSDI,
          use_restart    : bool = False):
     """
     This function runs the next step of the training procedure. Depending on what we have done, 
-    that next step could be training, picking new samples, generating fom solutions, or 
+    that next step could be training, picking new samples, generating FOM solutions, or 
     collecting samples. 
 
     
@@ -269,8 +269,8 @@ def Save(   param_space         : ParameterSpace,
     param_space: The parameter space object we use to fetch the training and testing parameter 
     combinations during training.
     
-    physics: The Physics object we use to define the fom model, fetch initial conditions, and 
-    generate fom solutions. We assume that physics, latent_dynamics, and model all have the same 
+    physics: The Physics object we use to define the FOM model, fetch initial conditions, and 
+    generate FOM solutions. We assume that physics, latent_dynamics, and model all have the same 
     number of initial conditions.
 
     model: The torch.nn.Module object (autoencoder) we use to map between the FOM and ROM spaces.

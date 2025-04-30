@@ -52,8 +52,8 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
                         x_grid  : numpy.ndarray, 
                         figsize : tuple[int]        = (15, 4)) -> None:
     """
-    This function plots a single fom solution, its reconstruction under model, and the difference
-    between the two. We assume the fom solution is SCALAR VALUED and that the spatial portion of
+    This function plots a single FOM solution, its reconstruction under model, and the difference
+    between the two. We assume the FOM solution is SCALAR VALUED and that the spatial portion of
     the problem domain has just one dimension. 
     
     Further, if the underlying physics model requires n_IC initial conditions to initialize 
@@ -68,15 +68,15 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
 
     X_True: An n_IC element list of torch.Tensor objects. The k'th element should be a torch.Tensor 
     object of shape (n_t, n_x) whose i,j entry holds the value of the k'th time derivative of the 
-    fom solution at t_grid[i], x_grid[j].
+    FOM solution at t_grid[i], x_grid[j].
     
     model: A model (i.e., autoencoder). We use this to map the FOM IC's (stored in Physics) to the 
     latent space using the model's encoder.
 
-    t_grid, x_value: The set of t and x values at which we have evaluated the fom solution, 
-    respectively. Specifically, we assume that the k'th element of fom_frame is a torch.Tensor 
+    t_grid, x_value: The set of t and x values at which we have evaluated the FOM solution, 
+    respectively. Specifically, we assume that the k'th element of X_True is a torch.Tensor 
     object of shape (n_t, n_x) where n_t = t_grid.size and n_x = x_grid.size. We assume that the 
-    i, j element of the k'th element of fom_frame represents the fom solution at t = t_grid[i] and 
+    i, j element of the k'th element of X_True represents the FOM solution at t = t_grid[i] and 
     x = x_grid[j].
 
     figsize: a two element array specifying the width and height of the figure.
@@ -144,7 +144,7 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
 
     # Now... plot the results!
     for d in range(n_IC):
-        LOGGER.debug("Generating plot for time derivative %d of the fom solution" % d);
+        LOGGER.debug("Generating plot for time derivative %d of the FOM solution" % d);
         fig, ax  = plt.subplots(1, 5, width_ratios = [1, 0.05, 1, 1, 0.05], figsize = figsize);
         fig.tight_layout();
 
@@ -185,7 +185,7 @@ def Plot_Prediction(model           : torch.nn.Module,
                     figsize         : tuple[int]        = (14, 8))            -> None:
     """
     This function plots the mean and std (as a function of t, x) prediction of each derivative of
-    the fom solution. We also plot each sample of each component of the latent trajectories over 
+    the FOM solution. We also plot each sample of each component of the latent trajectories over 
     time.
 
 
@@ -220,7 +220,7 @@ def Plot_Prediction(model           : torch.nn.Module,
     X_True: An n_param element list whose i'th element is an n_IC element list whose j'th element 
     is a 2d torch.Tensor object of shape (n_t(i), n_x) whose p, q element holds the j'th 
     derivative of the FOM solution at time t_Grid[i][p] and position physics.X_Positions[q] when
-    we use the i'th combination of parameter values to define the initial condition for the FOM.
+    we use the i'th combination of parameter values to define the FOM.
 
     t_Grid: A n_param element list whose i'th entry is an torch.Tensor object of shape (n_t(i))
     whose p'th specifies the p'th time value we want to find the latent states when the initial 
@@ -367,7 +367,7 @@ def Plot_Prediction(model           : torch.nn.Module,
                     plt.plot(t_grid_i_np, Latent_Trajectories_i[j][:, s, i], 'C' + str(i), alpha = 0.3);
             plt.title('Latent Space');
 
-            # Plot the mean of the d'th derivative of the fom solution.
+            # Plot the mean of the d'th derivative of the FOM solution.
             plt.subplot(232);
             plt.contourf(t_grid_i_np, x_grid, X_pred_i_mean_np[j].T, 100, cmap = plt.cm.jet);   # Note: contourf(X, Y, Z) requires Z.shape = (Y.shape, X.shape) with Z[i, j] corresponding to Y[i] and X[j].
             plt.colorbar();
@@ -375,7 +375,7 @@ def Plot_Prediction(model           : torch.nn.Module,
             plt.ylabel("x");
             plt.title('Decoder Mean Prediction');
             
-            # Plot the std of the d'th derivative of the fom solution.
+            # Plot the std of the d'th derivative of the FOM solution.
             plt.subplot(233);
             plt.contourf(t_grid_i_np, x_grid, X_pred_i_std_np[j].T, 100, cmap = plt.cm.jet);
             plt.colorbar();
@@ -383,7 +383,7 @@ def Plot_Prediction(model           : torch.nn.Module,
             plt.ylabel("x");
             plt.title('Decoder Standard Deviation');
 
-            # Plot the d'th derivative of the true fom solution.
+            # Plot the d'th derivative of the true FOM solution.
             plt.subplot(234);
             plt.contourf(t_grid_i_np, x_grid, X_True_i_np[j].T, 100, cmap = plt.cm.jet);
             plt.colorbar();
@@ -392,7 +392,7 @@ def Plot_Prediction(model           : torch.nn.Module,
             plt.title('Ground Truth');
 
             # Plot the error between the mean predicted d'th derivative and the true d'th derivative of
-            # the fom solution.
+            # the FOM solution.
             plt.subplot(235);
             error = numpy.abs(X_True_i_np[j] - X_pred_i_mean_np[j]);
             plt.contourf(t_grid_i_np, x_grid, error.T, 100, cmap = plt.cm.jet);

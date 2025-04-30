@@ -122,9 +122,8 @@ class Explicit(Physics):
         -------------------------------------------------------------------------------------------
 
         X0 : list[numpy.ndarray], len = self.n_x
-           i'th element has shape self.n_x (the number of grid points along the spatial axis) and
-            holds the i'th derivative of the initial state when we use param to define the initial
-            condition.
+            i'th element has shape self.n_x (the number of grid points along the spatial axis) and
+            holds the i'th derivative of the initial state when we use param to define the FOM.
         """
 
         # Checks.
@@ -167,9 +166,8 @@ class Explicit(Physics):
 
         X : list[torch.Tensor]
             Holds the displacement and velocity of the FOM solution when we use param to define
-            the initial condition. Each element is a torch.Tensor object of shape 
-            (n_t, self.Frame_Shape), where n_t is the number of time steps when we solve the FOM 
-            using param for the IC parameters.
+            the FOM. Each element is a torch.Tensor object of shape (n_t, self.Frame_Shape), where 
+            n_t is the number of time steps when we solve the FOM using param.
 
         t_Grid : torch.Tensor, shape = (n_t)
             i'th element holds the i'th time value at which we have an approximation to the FOM 

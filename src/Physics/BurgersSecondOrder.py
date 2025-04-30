@@ -134,7 +134,7 @@ class Burgers(Physics):
         u0 : list[numpy.ndarray], len = 2
             i'th element is a ndarray with the same shape as self.X_Positions whose j'th element 
             holds the i'th derivative of the initial state at the position self.X_Positions[j] when 
-            we use param to define the initial condition functions.
+            we use param to define the FOM.
         """
 
         # Checks.
@@ -193,13 +193,12 @@ class Burgers(Physics):
         
         X, t_Grid
 
-        X: list[torch.Tensor], len = 2
+        X : list[torch.Tensor], len = 2
             i'th element has shape = (n_t, self.Frame_Shape), holds the i'th derivative of the FOM 
-            solution when we use param to define the initial condition function. Specifically, the 
-            [j, ...] sub-array of the returned array holds the i'th derivative of the FOM solution 
-            at t_Grid[j].
+            solution when we use param to define the FOM. Specifically, the [j, ...] sub-array of 
+            the returned array holds the i'th derivative of the FOM solution at t_Grid[j].
 
-        t_Grid: torch.Tensor, shape = (n_t)
+        t_Grid : torch.Tensor, shape = (n_t)
             i'th element holds the i'th time value at which we have an approximation to the FOM 
             solution (the time value associated with X[i, ...]).
         """
