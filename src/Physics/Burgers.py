@@ -171,8 +171,8 @@ class Burgers(Physics):
 
         X: list[torch.Tensor], len = 1
             Lone element has shape = (n_t, self.Frame_Shape), holds the FOM solution when we use
-            param to define the initial condition function. Specifically, the [i, ...] sub-array 
-            of the returned array holds the FOM solution at t_Grid[i].
+            param to define the initial condition function and/or physics. Specifically, the 
+            [i, ...] sub-array of the returned array holds the FOM solution at t_Grid[i].
 
         t_Grid: torch.Tensor, shape = (n_t)
             i'th element holds the i'th time value at which we have an approximation to the FOM 
@@ -222,7 +222,7 @@ class Burgers(Physics):
             A single element list of 2d numpy.ndarray object of shape (n_t, n_x), where n_t is 
             the number of points along the temporal axis (this is specified by the configuration 
             file) and n_x is the number of points along the spatial axis. The i,j element of the 
-            d'th array should have the j'th component of the d'th derivative of the fom solution 
+            d'th array should have the j'th component of the d'th derivative of the FOM solution 
             at the i'th time step.
 
 
