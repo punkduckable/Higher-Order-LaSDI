@@ -61,26 +61,28 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
     derivative of the X_True and its reconstruction by model.
 
      
-
     -----------------------------------------------------------------------------------------------
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    X_True: An n_IC element list of torch.Tensor objects. The k'th element should be a torch.Tensor 
-    object of shape (n_t, n_x) whose i,j entry holds the value of the k'th time derivative of the 
-    FOM solution at t_grid[i], x_grid[j].
+    X_True : list[torch.Tensor], len = n_IC
+       k'th element is a torch.Tensor object of shape (n_t, n_x) whose i,j entry holds the value 
+       of the k'th time derivative of the FOM solution at t_grid[i], x_grid[j].
     
-    model: A model (i.e., autoencoder). We use this to map the FOM IC's (stored in Physics) to the 
-    latent space using the model's encoder.
+    model : torch.nn.Module
+        The model we use to map the FOM IC's (stored in Physics) to the latent space using the 
+        model's encoder.
 
-    t_grid, x_value: The set of t and x values at which we have evaluated the FOM solution, 
-    respectively. Specifically, we assume that the k'th element of X_True is a torch.Tensor 
-    object of shape (n_t, n_x) where n_t = t_grid.size and n_x = x_grid.size. We assume that the 
-    i, j element of the k'th element of X_True represents the FOM solution at t = t_grid[i] and 
-    x = x_grid[j].
-
-    figsize: a two element array specifying the width and height of the figure.
-
+    t_grid : numpy.ndarray, shape = (n_t)
+        We assume the user has evaluated the FOM solution on a spatio-temporal grid. t_grid[i] 
+        specifies the position of the i'th gridline along the t-axis.
+    
+    x_grid : numpy.ndarray, shape = (n_x)
+        We assume the user has evaluated the FOM solution on a spatio-temporal grid. x_grid[i] 
+        specifies the position of the i'th gridline along the x-axis.
+    
+    figsize : tuple[int], len = 2
+        specifies the width and height of the figure.
 
     
     -----------------------------------------------------------------------------------------------
@@ -100,6 +102,7 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
     assert(len(x_grid.shape)    == 1);
     n_t             : int       =  t_grid.size;
     n_x             : int       =  x_grid.size;
+    assert(isinstance(figsize, tuple));
     assert(len(figsize)         == 2);
     for d in range(n_IC):
         assert(isinstance(X_True[d], torch.Tensor));
@@ -189,45 +192,46 @@ def Plot_Prediction(model           : torch.nn.Module,
     time.
 
 
-    
     -----------------------------------------------------------------------------------------------
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    model: A model (i.e., autoencoder). We use this to map the FOM IC's (stored in Physics) to the 
-    latent space using the model's encoder. We assume that model, physics, and latent_dynamics all 
-    have the same number of initial conditions. We assume that model.X_Position is a 1D array 
-    (i.e., we assume there is only one spatial dimension).
+    model : torch.nn.Module
+        The model we use to map the FOM IC's (stored in Physics) to the latent space using the 
+        model's encoder. model, physics, and latent_dynamics should have the same number of initial
+        conditions.
 
-    physics: A "Physics" object that stores the ICs for each parameter combination. We assume that
-    model, physics, and latent_dynamics all have the same number of initial conditions.
+    physics : Physics
+        The Physics object. We use this to get the IC for each combination of parameter values.
+        model, physics, and latent_dynamics should have the same number of initial conditions.
     
-    latent_dynamics: A LatentDynamics object which describes how we specify the dynamics in the
-    model's latent space. We use this to simulate the latent dynamics forward in time. We assume 
-    that model, physics, and latent_dynamics all have the same number of initial conditions.
+    latent_dynamics : LatentDynamics
+        use this to simulate the latent dynamics forward in time for each combination of parameter
+        values. Model, physics, and latent_dynamics should have the same number of initial 
+        conditions.
 
-    gp_list: a list of trained GP regressor objects. The number of elements in this list should 
-    match the number of columns in param_grid. The i'th element of this list is a GP regressor 
-    object that predicts the i'th coefficient. 
+    gp_list : list[GaussianProcessRegressor], len = n_p
+        The i'th element of this list is a GP regressor object that predicts the i'th coefficient. 
 
-    param_grid: A 2d numpy.ndarray object of shape (n_param, n_p) where n_p is the number of
-    parameters and n_param is the number of combinations of parameter values. The i,j element of 
-    this array holds the value of the j'th parameter in the i'th combination of parameters. 
+    param_grid : numpy.ndarray, shape = (n_param, n_p)
+        The i,j element of this array holds the value of the j'th parameter in the i'th combination
+        of parameters. Here, n_p is the number of parameters and n_param is the number of 
+        combinations of parameter values. 
 
-    n_samples: The number of samples we want to draw from each posterior distribution for each 
-    coefficient evaluated at each combination of parameter values.
+    n_samples : int
+        The number of samples we want to draw from each posterior distribution for each coefficient 
+        evaluated at each combination of parameter values.
 
-    X_True: An n_param element list whose i'th element is an n_IC element list whose j'th element 
-    is a 2d torch.Tensor object of shape (n_t(i), n_x) whose p, q element holds the j'th 
-    derivative of the FOM solution at time t_Grid[i][p] and position physics.X_Positions[q] when
-    we use the i'th combination of parameter values to define the FOM.
-
-    t_Grid: A n_param element list whose i'th entry is an torch.Tensor object of shape (n_t(i))
-    whose p'th specifies the p'th time value we want to find the latent states when the initial 
-    condition uses the i'th combination of parameter values.
-
-    figsize: a two element array specifying the width and height of the figure.
-
+    t_grid : numpy.ndarray, shape = (n_t)
+        We assume the user has evaluated the FOM solution on a spatio-temporal grid. t_grid[i] 
+        specifies the position of the i'th gridline along the t-axis.
+    
+    x_grid : numpy.ndarray, shape = (n_x)
+        We assume the user has evaluated the FOM solution on a spatio-temporal grid. x_grid[i] 
+        specifies the position of the i'th gridline along the x-axis.
+    
+    figsize : tuple[int], len = 2
+        specifies the width and height of the figure.
     
 
     -----------------------------------------------------------------------------------------------
@@ -245,6 +249,8 @@ def Plot_Prediction(model           : torch.nn.Module,
     assert(model.n_IC                       == n_IC);
     assert(physics.n_IC                     == n_IC);
     assert(len(physics.X_Positions.shape)   == 1);
+    assert(isinstance(figsize, tuple));
+    assert(len(figsize) == 2);
     n_x : int = physics.X_Positions.shape[0];
 
     assert(isinstance(t_Grid, list));
@@ -413,11 +419,11 @@ def Plot_GP2d(  p1_mesh         : numpy.ndarray,
                 gp_mean         : numpy.ndarray, 
                 gp_std          : numpy.ndarray, 
                 param_train     : numpy.ndarray, 
-                param_names     : list[str]     = ['p1', 'p2'], 
-                n_cols          : int           = 5, 
-                figsize         : tuple[int]    = (15, 13), 
-                color_levels    : int           = 100, 
-                cm                              = plt.cm.jet) -> None:
+                param_names     : list[str]             = ['p1', 'p2'], 
+                n_cols          : int                   = 5, 
+                figsize         : tuple[int]            = (15, 13), 
+                color_levels    : int                   = 100, 
+                cm              : mpl.colors.Colormap   = plt.cm.jet) -> None:
     """
     This function plots the mean and standard deviation of the posterior distributions of each 
     latent dynamics coefficient as a function the (2) parameters. We assume there are just two 
@@ -428,35 +434,43 @@ def Plot_GP2d(  p1_mesh         : numpy.ndarray,
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    p1_mesh: A 2d ndarray object of shape (N(1), N(2)) where N(1), N(2) denote the number of 
-    distinct values for the first and second parameters in the training set, respectively. The i,j 
-    element of this array holds the i'th value of the first parameter.
+    p1_mesh : numpy.ndarray, shape = (N(1), N(2)
+        i,j element holds the i'th value of the first parameter. Here, N(1), N(2) denote the number 
+        of distinct values for the first and second parameters in the training set, respectively. 
 
-    p2_mesh: A 2d ndarray object of shape (N(1), N(2)) whose i,j element holds the j'th value of 
-    the second parameter.
+    p2_mesh : numpy.ndarray, shape = (N(1), N(2)) 
+        i,j element holds the j'th value of the second parameter. Here, N(1), N(2) denote the 
+        number of distinct values for the first and second parameters in the training set, 
+        respectively. 
 
-    gp_mean: A 3d numpy array of shape (N(1), N(2), n_coef), where n_coef denotes the number of 
-    coefficients in the latent model. The i, j, k element of this model holds the mean of the 
-    posterior distribution for the k'th parameter when the parameters consist of the  i'th value
-    of the first parameter and the j'th of the second.
+    gp_mean : numpy.ndarray, shape = (N(1), N(2), n_coef)
+        i, j, k element of this model holds the mean of the posterior distribution for the k'th
+        coefficient when the parameters consist of the i'th value of the first parameter and the 
+        j'th of the second. Here, n_coef denotes the number of coefficients in the latent model.
 
-    gp_std: A 3d numpy array of shape (N(1), N(2), n_coef), where n_coef denotes the number of 
-    coefficients in the latent model. The i, j, k element of this model holds the std of the 
-    posterior distribution for the k'th parameter when the parameters consist of the  i'th value
-    of the first parameter and the j'th of the second.
+    gp_std : numpy.ndarray, shape = (N(1), N(2), n_coef)
+        i, j, k element of this model holds the std of the posterior distribution for the k'th 
+        coefficient when the parameters consist of the i'th value of the first parameter and
+        the j'th of the second.
 
-    param_train: A 2d array of shape (n_train, 2) whose i, j element holds the value of the 
-    j'th parameter when we use the i'th combination of testing parameters.
+    param_train : numpy.ndarray, shape = (n_train, 2)
+        i, j element holds the value of the j'th parameter when we use the i'th combination of 
+        testing parameters.
 
-    param_names: A two element list housing the names for the two parameters. 
+    param_names : list[str]
+        A two element list housing the names for the two parameters. 
 
-    n_cols: The number of columns in our subplots.
+    n_cols : int
+        The number of columns in our subplots.
 
-    figsize: A two element tuple specifying the size of the overall figure size. 
+    figsize : tuple[int], len = 2
+        A two element tuple specifying the size of the overall figure size. 
     
-    color_levels: The number of color levels to put in our plot.
+    color_levels : int
+        The number of color levels to put in our plot.
 
-    cm: The color map we use for the plots.
+    cm : matplotlib.colors.Colormap
+        The color map we use for the plots.
 
 
     
@@ -475,6 +489,9 @@ def Plot_GP2d(  p1_mesh         : numpy.ndarray,
     assert(isinstance(param_train, numpy.ndarray));
     assert(isinstance(param_names, list));
     
+    assert(isinstance(figsize, tuple));
+    assert(len(figsize) == 2);
+
     assert(p1_mesh.ndim         == 2);
     assert(p2_mesh.ndim         == 2);
     assert(p1_mesh.shape        == p2_mesh.shape);
@@ -612,7 +629,7 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
                     n_init_train    : int,
                     figsize         : tuple[int]    = (10, 10), 
                     param_names     : list[str]     = ['p1', 'p2'], 
-                    title           : str           = ''):
+                    title           : str           = '') -> None:
     """
     This plot makes a "heatmap". Specifically, we assume that values represents the samples of 
     a function which depends on two paramaters, p1 and p2. The i,j entry of values represents 
@@ -626,27 +643,33 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    values: A 2d numpy ndarray object of shape (n1, n2), where n1 and n2 are the length of p1_grid
-    and p2_grid, respectively (the number of p1, p2 values).
+    values : numpy.ndarray, shape = (n1, n2)
+        i,j element holds the value of some function (that depneds on two parameters, p1 and p2) 
+        when p1 = p1_grid[i] and p2_grid[j]. 
 
-    p1_grid: This is a numpy.ndarray of shape (n1) that holds the set of possible values for p1.
-    Specifically, the i'th element should hold the i'th value for the p1 parameter. 
+    p1_grid : numpy.ndarray, shape = (n1)
+        i'th element holds the i'th value for the p1 parameter. 
 
-    p2_grid: This is a numpy.ndarray of shape (n2) that holds the set of possible values for p2.
-    Specifically, the i'th element should hold the i'th value for the p2 parameter. 
+    p2_grid : numpy.ndarray, shape = (n2) 
+        i'th element holds the i'th value for the p2 parameter. 
 
-    param_train: A 2d array of shape (n_train, 2) whose i, j element holds the value of the 
-    j'th parameter when we use the i'th combination of testing parameters. We assume the first 
-    n_init_train rows in this array hold the combinations that were originally in the training 
-    set and the rest were added in successive rounds of training.
+    param_train : numpy.ndarray, shapre = (n_train, 2)
+        i, j element holds the value of the j'th parameter when we use the i'th combination of 
+        testing parameters. We assume the first n_init_train rows in this array hold the 
+        combinations that were originally in the training set and the rest were added in successive 
+        rounds of training.
 
-    n_init_train: The initial number of combinations of parameters in the training set.
+    n_init_train : int
+        The initial number of combinations of parameters in the training set.
 
-    figsize: A two element tuple specifying the size of the overall figure size. 
+    figsize : tuple[int], len = 2
+        A two element tuple specifying the size of the overall figure size. 
 
-    param_names: A two element list housing the names for the two parameters. 
+    param_names : list[str], len = 2
+        A two element list housing the names for the two parameters. 
 
-    title: The plot title.
+    title : str
+        The plot title.
     
 
 
@@ -667,6 +690,8 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     assert(values.ndim      == 2);
     assert(param_train.ndim == 2);
 
+    assert(isinstance(figsize, tuple));
+    assert(isinstance(param_names, list));
     assert(len(figsize)     == 2);
     assert(len(param_names) == 2);
 
