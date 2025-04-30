@@ -81,7 +81,7 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
 
         # Fit it to the data (train), then add it to the list of trained GPs
         gp.fit(X, targets_i);
-        gp_list += [gp];
+        gp_list.append(gp);
 
     # All done!
     return gp_list;

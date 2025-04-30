@@ -196,8 +196,8 @@ class DampedSpring(LatentDynamics):
 
                 # Package the results from this combination of parameter values.
                 coefs[i, :] = result[0];
-                loss_sindy += result[1];
-                loss_coef  += result[2];
+                loss_sindy  = loss_sindy + result[1];
+                loss_coef   = loss_coef + result[2];
             
             # Package everything to return!
             return coefs, loss_sindy, loss_coef;

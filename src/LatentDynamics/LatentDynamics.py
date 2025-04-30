@@ -201,6 +201,7 @@ class LatentDynamics:
         param_dict = {'n_z'             : self.n_z, 
                       'n_coefs'         : self.n_coefs, 
                       'n_IC'            : self.n_IC,
+                      'coef_norm_order' : self.coef_norm_order,
                       'Uniform_t_Grid'  : self.Uniform_t_Grid};
         return param_dict;
 
