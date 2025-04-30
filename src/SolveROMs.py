@@ -75,7 +75,7 @@ def average_rom(model           : torch.nn.Module,
     An n_param element list whose i'th element is a 2d numpy ndarray object of shape (n_t_i, n_z) 
     whose j, k element holds the k'th component of the latent solution at the j'th time step when 
     we the means of the posterior distribution for the i'th combination of parameter values to 
-    define the coefficients in the latent dynamics.
+    define the latent dynamics.
     """
 
     # Checks. 
@@ -147,12 +147,13 @@ def sample_roms(model           : torch.nn.Module,
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    model: A model (i.e., autoencoder). We use this to map the FOM IC's (stored in Physics) to the 
-    latent space using the model's encoder. We assume that physics, latent_dynamics, and model all 
-    have the same number of initial conditions.
+    model: A model (i.e., autoencoder). We use this to map the FOM IC's (which we can get from 
+    physics) to the latent space using the model's encoder. We assume that physics, 
+    latent_dynamics, and model all have the same number of initial conditions.
 
-    physics: A "Physics" object that stores the ICs for each parameter combination. We assume that 
-    physics, latent_dynamics, and model all have the same number of initial conditions.
+    physics: A "Physics" object that allows us to find the IC for a particular combination of 
+    parameter values. We assume that physics, latent_dynamics, and model all have the same number 
+    of initial conditions.
     
     latent_dynamics: A LatentDynamics object which describes how we specify the dynamics in the
     model's latent space. We use this to simulate the latent dynamics forward in time. We assume

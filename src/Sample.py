@@ -42,8 +42,8 @@ def Update_Train_Space(trainer : BayesianGLaSDI, config : dict) -> tuple[NextSte
     -----------------------------------------------------------------------------------------------
 
     A tuple: (NextStep.RunSample, Result.Success). The first returned value, NextStep.RunSample, 
-    indicates that we have a new sample and need to generate the fom solution using the 
-    corresponding parameter values for the IC. The second returned value, Result.Success, indicates 
+    indicates that we have a new sample and need to generate the FOM solution using the 
+    corresponding parameter values for the IC/physics. The second returned value, Result.Success, indicates 
     that we were able to pick a new sample without running into any problems. 
     """
 
@@ -96,9 +96,9 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     -----------------------------------------------------------------------------------------------
 
     A tuple: (NextStep.Train, Result.Success). The first returned value, NextStep.Train, 
-    indicates that we have generated the fom solution for the new training point and need to 
+    indicates that we have generated the FOM solution for the new training point and need to 
     resume training. The second return value, Result.Success, indicates that we were able to 
-    generate the fom solution without running into any problems. 
+    generate the FOM solution without running into any problems. 
     """
     
 
@@ -143,7 +143,7 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     # ---------------------------------------------------------------------------------------------
     # Generate new testing, training solutions.
     
-    # Generate the fom solutions for the new training points. After we have generated them, we
+    # Generate the FOM solutions for the new training points. After we have generated them, we
     # append them to trainer's X_Train variable.
     new_X_Train, new_t_Train    = trainer.physics.generate_solutions(new_train_params);
     
@@ -174,6 +174,6 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     # ---------------------------------------------------------------------------------------------
     # Wrap up
 
-    # We are now done. Since we now have the new fom solutions, the next step is training.
+    # We are now done. Since we now have the new FOM solutions, the next step is training.
     next_step, result = NextStep.Train, Result.Success;
     return result, next_step;
