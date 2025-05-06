@@ -2,16 +2,6 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-# Add the main directory to the search path.
-import  os;
-import  sys;
-src_Path        : str   = os.path.dirname(os.path.dirname(__file__));
-LD_Path         : str   = os.path.join(src_Path, "LatentDynamics");
-util_Path       : str   = os.path.join(src_Path, "Utilities");
-sys.path.append(src_Path);
-sys.path.append(LD_Path);
-sys.path.append(util_Path);
-
 import  numpy;
 import  torch;
 
@@ -62,9 +52,7 @@ class Explicit(Physics):
                          param_names    = param_names, 
                          Uniform_t_Grid = config['Explicit']['uniform_t_grid']);
         
-        # The functions we deal with are scalar valued. Likewise, since there is only one spatial 
-        # dimension, dim is also 1. 
-        self.qdim           : int   = 1;
+        # Since there is only one spatial dimension, dim is also 1. 
         self.spatial_dim    : int   = 1;
 
         # Make sure the config dictionary is actually for the Explicit physics model.
@@ -93,7 +81,7 @@ class Explicit(Physics):
 
     def initial_condition(self, param : numpy.ndarray) -> list[numpy.ndarray]:
         """
-        Evaluates the initial condition along the spatial grid. In this case,
+        Evaluates the initial condition at the points in self.X_Positions. In this case,
         
             u(t, x) = [sin(2x-t) + 0.1 sin(w t) cos( 40x + 2t)] exp(-a x^2)
         
@@ -112,7 +100,7 @@ class Explicit(Physics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        param : numpy.ndarray, shape = (2)
+        param : numpy.ndarray, shape = (self.n_p)
             The two elements corresponding to the values of the w and a parameters. self.a_idx and 
             self.w_idx tell us which index corresponds to which variable.
         
@@ -121,13 +109,14 @@ class Explicit(Physics):
         Returns 
         -------------------------------------------------------------------------------------------
 
-        X0 : list[numpy.ndarray], len = self.n_x
+        X0 : list[numpy.ndarray], len = self.n_IC
             i'th element has shape self.n_x (the number of grid points along the spatial axis) and
             holds the i'th derivative of the initial state when we use param to define the FOM.
         """
 
         # Checks.
         assert(isinstance(param, numpy.ndarray));
+        assert(self.X_Positions is not None);
         assert(len(param.shape) == 1);
         assert(param.shape[0]   == self.n_p);
 
@@ -175,6 +164,7 @@ class Explicit(Physics):
         """
        
         assert(isinstance(param, numpy.ndarray));
+        assert(self.X_Positions is not None);
         assert(len(param.shape) == 1);
         assert(param.shape[0]   == self.n_p);
 

@@ -6,10 +6,7 @@
 import  os;
 import  sys;
 src_Path        : str   = os.path.dirname(os.path.dirname(__file__));
-LD_Path         : str   = os.path.join(src_Path, "LatentDynamics");
 util_Path       : str   = os.path.join(src_Path, "Utilities");
-sys.path.append(src_Path);
-sys.path.append(LD_Path);
 sys.path.append(util_Path);
 
 import  numpy;
@@ -72,9 +69,7 @@ class Burgers(Physics):
                          param_names    = param_names, 
                          Uniform_t_Grid = True);
 
-        # The solution to Burgers' equation is scalar valued, so the qdim is 1. Likewise, since 
-        # there is only one spatial dimension in the 1D burgers example, dim is also 1.
-        self.qdim           : int   = 1;
+        # Since there is only one spatial dimension in the 1D burgers example, dim is also 1.
         self.spatial_dim    : int   = 1;
         
         # Make sure the config dictionary is actually for Burgers' equation.
@@ -108,8 +103,7 @@ class Burgers(Physics):
 
     def initial_condition(self, param : numpy.ndarray) -> list[numpy.ndarray]:
         """
-        Evaluates the initial condition along the spatial grid. For this class, we use the 
-        following initial condition:
+        Evaluates the initial condition at the points in self.X_Positions. In this case,
 
             u(0, x) = a*exp(-x^2 / (2*w^2))
             v(0, x) = (d/dt)u(t, x)|_{t = 0}
@@ -122,7 +116,7 @@ class Burgers(Physics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        param: numpy.ndarray, shape (2)
+        param: numpy.ndarray, shape = (self.n_p)
             The two elements correspond to the values of the w and a parameters. self.a_idx and 
             self.w_idx tell us which index corresponds to which variable.
         
@@ -139,6 +133,7 @@ class Burgers(Physics):
 
         # Checks.
         assert(isinstance(param, numpy.ndarray));
+        assert(self.X_Positions is not None);
         assert(len(param.shape) == 1);
         assert(param.shape[0]   == self.n_p);
         
@@ -175,7 +170,7 @@ class Burgers(Physics):
 
     def solve(self, param : numpy.ndarray) -> tuple[list[torch.Tensor], torch.Tensor]:
         """
-        Solves the 1d burgers equation when the IC uses the parameters in the param array.
+        Solves the 1d burgers equation when the FOM is defined using the parameters in param.
 
 
         -------------------------------------------------------------------------------------------
@@ -224,16 +219,16 @@ class Burgers(Physics):
 
 
         # Solve the PDE!
-        X       : torch.Tensor  = torch.Tensor(solver(u0 = u0, t_Grid = t_Grid, Dx = self.dx, maxk = self.maxk, convergence_threshold = self.convergence_threshold));
+        D       : torch.Tensor  = torch.Tensor(solver(u0 = u0, t_Grid = t_Grid, Dx = self.dx, maxk = self.maxk, convergence_threshold = self.convergence_threshold));
         if(self.Uniform_t_Grid  == True):
-            V   : torch.Tensor  = Derivative1_Order4(X, h = dt);
+            V   : torch.Tensor  = Derivative1_Order4(D, h = dt);
         else:
-            V   : torch.Tensor  = Derivative1_Order2_NonUniform(X, t_Grid = t_Grid);
+            V   : torch.Tensor  = Derivative1_Order2_NonUniform(D, t_Grid = t_Grid);
 
-        X       : torch.Tensor  = X.reshape(n_t, self.n_x);
+        D       : torch.Tensor  = D.reshape(n_t, self.n_x);
         V       : torch.Tensor  = V.reshape(n_t, self.n_x);
 
-        new_X   : list[torch.Tensor]    = [X, V];
+        new_X   : list[torch.Tensor]    = [D, V];
 
         # All done!
         return new_X, t_Grid;

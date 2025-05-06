@@ -20,28 +20,30 @@ class Physics:
     # spatial dimension of the problem domain.
     spatial_dim :    int            = -1;
     
-    # The FOM solution can be vector valued. If it is, then qdim specifies the dimensionality of 
-    # the FOM solution at each point. If the solution is scalar valued, then qdim = -1. 
-    qdim            : int           = -1;
-
     # The shape of each frame of a FOM solution to this equation. This is the shape of the objects
     # we will put into our autoencoder. If there is no structure to the spatial positions of the 
     # nodes in each solution frame, then this may be a single element list specifying the number
     # of nodes. On the other hand, if the nodes are organized into a grid with k axes, then this 
-    # could be a k-element list whose i'th element specifies the size of the i'th axis. If qdim 
-    # != -1 (the solution is vector-valued), qdim should be the leading element of Frame_Shape.
-    Frame_Shape     : list[int]     = [];
+    # could be a k-element list whose i'th element specifies the size of the i'th axis. If the 
+    # solution is vector-valued, the dimensionality of the solution vectors should be the leading 
+    # element of Frame_Shape.
+    Frame_Shape     : list[int]     = None;
 
-    # If qdim = -1 (the solution is scalar valued), then this should be an array of shape 
-    # (Frame_Shape[0], ... , Frame_Shape[-1], spatial_dim) whose i(1), ... , i(-1), k element holds 
-    # the k'th component of the position of the i(1), ... , i(-1) node. 
-    X_Positions     : numpy.ndarray = numpy.array([]);
+    # At each frame, we evaluate the solution at a fixed number of positions in the spatial portion
+    # of the problem domain. This array should hold the coordinates of those positions. It may be 
+    # organized as a grid of coordinates, list of coordinates, or something else. Different 
+    # sub-classes will format this differently. We only use this for plotting purposes, so the 
+    # exact shape doesn't really matter. 
+    X_Positions     : numpy.ndarray = None;
 
     # A dictionary housing the configuration parameters for the Physics object.
-    config          : dict          = {};
+    config          : dict          = None;
     
     # list of parameter names to parse parameters.
     param_names     : list[str]     = None;
+
+    # The number of parameters. i.e., the length of param_names.
+    n_p             : int           = -1;
 
     # If true, then we can assume that for each parameter value, the t_Grid for that parameter 
     # value has uniformly sized time steps (t_Grid[i + 1] - t_Grid[i] = dt is the same for each i).
