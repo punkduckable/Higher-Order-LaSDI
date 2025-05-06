@@ -247,10 +247,8 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     where H is a hyperelastic model and S is a viscosity operator of Laplacian type. We also impose 
     with the following initial conditions:
         
-        x(X, 0)         = X
-        v(X, 0)         =   { -s*X[0]^2                     if X = X[0]
-                            { s*X[0]^2 (8.0 - X[0])         if X = X[-1]
-                            { 0                             otherwise
+        x((x, y), 0)         =  (x, y)
+        v((x, y), 0)         =  (-s*x^2, s*x^2 (8.0 - x))
     
     where X[0] and X[-1] are the positions of the first and lash nodes, respectively. Here, s is 
     a parameter that the user can change. 
@@ -265,58 +263,76 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    meshfile_name: A string specifying the mesh file to use. This should specify a file in the 
-    Physics/PyMFEM/data subdirectory.
+    meshfile_name : str
+        specifies the mesh file to use. This should specify a file in the Physics/PyMFEM/data 
+        subdirectory.
 
-    ref_levels: An integer specifying the number of times to refine the mesh uniformly.
+    ref_levels : int   
+        specifies the number of times to refine the mesh uniformly.
 
-    order: An integer specifying the finite element order (polynomial degree of the basis functions).
+    order : int 
+        specifies the finite element order (polynomial degree of the basis functions).
 
-    ode_solver_type: An integer specifying which ODE solver we should use
-        1   - Backward Euler
-        2   - SDIRK2
-        3   - SDIRK3
-        11  - Forward Euler
-        12  - RK2
-        13  - RK3 SSP
-        14  - RK4
-        22  - ImplicitMidpointSolver
-        23  - SDIRK23Solver
-        24  - SDIRK34Solver
-
+    ode_solver_type : int 
+        specifies which ODE solver we should use
+            1   - Backward Euler
+            2   - SDIRK2
+            3   - SDIRK3
+            11  - Forward Euler
+            12  - RK2
+            13  - RK3 SSP
+            14  - RK4
+            22  - ImplicitMidpointSolver
+            23  - SDIRK23Solver
+            24  - SDIRK34Solver
     
-    t_final: A float specifying the final time. We simulate the dynamics from the start time to the
-    final time. The start time is 0.
+    t_final : float
+        specifies the final time. We simulate the dynamics from the start time to the final time. 
+        The start time is 0.
 
-    time_step_size: A float specifying the time step size.
+    time_step_size : float 
+        specifies the time step size.
 
-    viscosity: A float specifying the viscosity coefficient.
+    viscosity : float
+        specifies the viscosity coefficient.
 
-    shear_modulus: a float specifying the shear modulus in the Neo-Hookean hyperelastic model.
+    shear_modulus : float
+        specifies the shear modulus in the Neo-Hookean hyperelastic model.
 
-    bulk_modulus: A float specifying the bulk modulus in the Neo-Hookean hyperelastic model.
+    bulk_modulus : float
+        specifies the bulk modulus in the Neo-Hookean hyperelastic model.
 
-    theta: A float specifying the constant "s" in the initial velocity.
+    theta : float
+        specifies dthe constant "s" in the initial velocity.
 
-    serialize_steps: Serialize (save) the solution this often.
+    serialize_steps : int
+        Specifies how frequently we serialize (save) the solution.
 
-    VisIt: A boolean which, if True, will prompt the code to save the displacement and velocity 
-    GridFunctions every time we serialize them. It will save the GridFunctions in a format that
-    VisIt (visit.llnl.gov) can understand/work with.
+    VisIt : bool
+        If True, will prompt the code to save the displacement and velocity GridFunctions every 
+        time we serialize them. It will save the GridFunctions in a format that VisIt 
+        (visit.llnl.gov) can understand/work with.
     
         
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
 
-    A Four element tuple: D, V, X, and T. 
+    D, V, X, T. 
     
-    D and V are two element numpy.ndarrays of shape (Nt, Nx)
-    whose i, j element holds displacement and velocity at the j'th position at the i'th time step, 
-    respectively.
+    D : numpy.ndarray, shape = (Nt, 2, N_Nodes)
+        i, j, k element holds the j'th component of the displacement at the k'th position (i.e., 
+        X[i, :]) at the i'th time step (i.e., T[i]).
+    
+    V : numpy.ndarray, shape = (Nt, 2, N_Nodes)
+        i, j, k element holds the j'th component of the velocity at the k'th position (i.e., X[i]) 
+        at the i'th time step (i.e., T[i]).
 
-    X and T are one dimensional arrays whose i'th element holds the i'th position and time value,
-    respectively.
+    X : numpy.ndarray, shape = (N_Nodes, 2)
+        i'th row holds the position of the i'th node at which we evaluate the solution.
+    
+    T : numpy.ndarray, shape = (Nt)
+        i'th element holds the j'th time at which we evaluate the solution.
     """
     
 
@@ -333,6 +349,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     K       : float = bulk_modulus;
     global s;
     s = theta;
+    LOGGER.info("Simulating with theta = %f" % theta);
 
     # Setup the mesh.
     LOGGER.debug("Lading the mesh and its properties");
@@ -393,9 +410,9 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     fe_offset           = intArray([0, fe_size, 2*fe_size]);
 
     # Setup the grid functions for displacement and velocity.
-    VD  = mfem.BlockVector(fe_offset);
-    D_gf   = mfem.GridFunction();
-    V_gf   = mfem.GridFunction();
+    VD      = mfem.BlockVector(fe_offset);
+    D_gf    = mfem.GridFunction();
+    V_gf    = mfem.GridFunction();
     V_gf.MakeRef(fespace, VD.GetBlock(0), 0);
     D_gf.MakeRef(fespace, VD.GetBlock(1), 0);
     
@@ -499,6 +516,11 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     displacements_list  : list[numpy.ndarray]   = [];
     velocities_list     : list[numpy.ndarray]   = [];
 
+    # Append the ICs.
+    times_list.append(0);
+    displacements_list.append(  numpy.reshape(D_gf.GetDataArray().copy(), (dim, Num_Nodes)));
+    velocities_list.append(     numpy.reshape(V_gf.GetDataArray().copy(), (dim, Num_Nodes)));
+
     # Time step!!!!!
     t           : float = 0.0;
     ti          : int   = 1;        # counter to keep track of when we should serialize solution.
@@ -520,13 +542,13 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
                             str(ee) + ", KE = " + str(ke) +
                             ", dTE = " + str((ee + ke) - (ee0 + ke0)));
             LOGGER.info(text);
-        
+
 
             # Serialize the current displacement, velocity, and time.
             times_list.append(t);
-            displacements_list.append(D_gf.GetDataArray());
-            velocities_list.append(V_gf.GetDataArray());
-        
+            displacements_list.append(  numpy.reshape(D_gf.GetDataArray().copy(),  (dim, Num_Nodes)));
+            velocities_list.append(     numpy.reshape(V_gf.GetDataArray().copy(),  (dim, Num_Nodes)));
+
 
             # If visualizing, Save the GridFunctions to the VisIt object.
             if(VisIt):
