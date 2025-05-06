@@ -567,7 +567,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     # Turn times, displacements, velocities lists into arrays.
     Times           = numpy.array(times_list, dtype = numpy.float32);
     Displacements   = numpy.array(displacements_list, dtype = numpy.float32);
-    Velocities      = numpy.array(displacements_list, dtype = numpy.float32);
+    Velocities      = numpy.array(velocities_list, dtype = numpy.float32);
 
 
     return Displacements, Velocities, Positions, Times;

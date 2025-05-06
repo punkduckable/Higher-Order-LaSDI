@@ -176,14 +176,11 @@ class NonlinearElasticity(Physics):
         
 
         # Solve the PDE!
-        D, V, _, T  = Simulate(theta = param[0], t_final = 12);
-
-        print(D[:, :, 100]);
-        print(V[:, :, 100]);
+        D, V, _, T  = Simulate(theta = param[0]);
 
         # All done!
         X       : list[torch.Tensor]    = [torch.Tensor(D), torch.Tensor(V)];
         t_Grid  : torch.Tensor          = torch.Tensor(T);
-        
+
         return X, t_Grid;
     
