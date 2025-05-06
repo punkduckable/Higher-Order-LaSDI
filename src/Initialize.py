@@ -25,6 +25,7 @@ from    GPLaSDI             import  BayesianGLaSDI;
 from    Model               import  Autoencoder, load_Autoencoder, Autoencoder_Pair, load_Autoencoder_Pair;
 from    Physics             import  Physics;
 from    Explicit            import  Explicit;
+from    NonlinearElasticity import  NonlinearElasticity
 
 # Set up logger.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
@@ -40,7 +41,8 @@ ld_dict         =  {'sindy'                 : SINDy,
                     'spring'                : DampedSpring};
 physics_dict    =  {'Burgers'               : Burgers.Burgers,
                     'BurgersSecondOrder'    : BurgersSecondOrder.Burgers,
-                    'Explicit'              : Explicit};
+                    'Explicit'              : Explicit,
+                    'NonlinearElasticity'   : NonlinearElasticity};
 
 
 
