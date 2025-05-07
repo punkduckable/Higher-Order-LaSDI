@@ -230,9 +230,10 @@ class Physics:
 
         # Cycle through the parameters.
         X       : list[list[torch.Tensor]]  = [];
-        t_Grid  : list[torch.Tensor]       = [];
+        t_Grid  : list[torch.Tensor]        = [];
         for j in range(n_params):
             param   = params[j, :];
+            LOGGER.info("Generating solution for parameter %d, %s" % (j, str(param)));
 
             # Solve the underlying equation using the current set of parameter values.
             new_X, new_t_Grid = self.solve(param);
