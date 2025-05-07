@@ -241,17 +241,17 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     """
     This examples solves a time dependent nonlinear elasticity problem of the form 
 
-        (dv/dt)(X, t)   = H(x(X, t)) + S v(X, t), 
-        (dx/dt)(X, t)   = v(X, t),
+        (d/dt)v(X, t)   = H(d(X, t)) + S v(X, t), 
+        (d/dt)d(X, t)   = v(X, t),
     
     where H is a hyperelastic model and S is a viscosity operator of Laplacian type. We also impose 
     with the following initial conditions:
         
-        x((x, y), 0)         =  (x, y)
-        v((x, y), 0)         =  (-s*x^2, s*x^2 (8.0 - x))
+        d((x, y), 0)         =  (x, y)
+        v((x, y), 0)         =  (-theta*x^2, theta*x^2 (8.0 - x))
     
-    where X[0] and X[-1] are the positions of the first and lash nodes, respectively. Here, s is 
-    a parameter that the user can change. 
+    where X[0] and X[-1] are the positions of the first and lash nodes, respectively. Here, theta 
+    is a parameter that the user can change. 
     
     See the c++ version of example 10 in the MFEM library for more detail.
 
@@ -303,7 +303,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
         specifies the bulk modulus in the Neo-Hookean hyperelastic model.
 
     theta : float
-        specifies dthe constant "s" in the initial velocity.
+        specifies the constant "theta" in the initial velocity.
 
     serialize_steps : int
         Specifies how frequently we serialize (save) the solution.
@@ -492,8 +492,8 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     if (VisIt):
         LOGGER.info("Setting up VisIt visualization.");
 
-        dc_path : str = os.path.join(os.path.join(os.path.curdir, "VisIt"), "nlelast-fom");
-        dc = mfem.VisItDataCollection(dc_path, mesh);
+        dc_path : str   = os.path.join(os.path.join(os.path.curdir, "VisIt"), "nlelast-fom");
+        dc              = mfem.VisItDataCollection(dc_path, mesh);
         dc.SetPrecision(8);
         # // To save the mesh using MFEM's parallel mesh format:
         # // dc->SetFormat(DataCollection::PARALLEL_FORMAT);
@@ -552,9 +552,16 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
 
             # If visualizing, Save the GridFunctions to the VisIt object.
             if(VisIt):
+                # Set the mesh to the current displacement
+                mesh.SwapNodes(D_gf, 0);
+
+                # Save the mesh, displacement, and velocity
                 dc.SetCycle(ti);
                 dc.SetTime(t);
                 dc.Save();
+        
+                # Now swap the deformed mesh back to reset everything.
+                mesh.SwapNodes(D_gf, 0);
 
         ti = ti + 1;
         
