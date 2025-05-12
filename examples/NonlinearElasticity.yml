@@ -28,10 +28,16 @@ workflow:
 parameter_space:
   parameters:
     - name:                 s
-      min:                  0.001
+      min:                  0.0008
       max:                  0.0016
       test_space_type:      uniform
-      sample_size:          7
+      sample_size:          5
+      log_scale:            false
+    - name:                 K
+      min:                  4.0
+      max:                  6.0
+      test_space_type:      uniform
+      sample_size:          5
       log_scale:            false
   test_space:
     type:                   grid
