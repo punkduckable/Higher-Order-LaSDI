@@ -53,8 +53,9 @@ class NonlinearElasticity(Physics):
         """
 
         # Checks.
-        assert(len(param_names) == 1);
+        assert(len(param_names) == 2);
         assert('s' in param_names);
+        assert('K' in param_names);
 
         # Call the super class initializer.
         super().__init__(config         = config, 
@@ -62,21 +63,25 @@ class NonlinearElasticity(Physics):
                          Uniform_t_Grid = False);
 
         # Since there are 2 spatial dimensions, dim is 2. 
-        self.spatial_dim    : int   = 2;
-        self.n_IC           : int   = 2; 
+        self.spatial_dim    : int           = 2;
+        self.n_IC           : int           = 2; 
 
         # Next, we need to setup X_Positions and Frame_Shape. Doing this is a bit tricky, because 
         # the solver actually picks both quantities. Specifically, in this case, Frame_Shape is 
         # [2, N_Nodes, 2] and X_Positions has shape [N_Nodes, 2]. The issue is that we have to run 
         # a simulation to get N_Nodes. We run a simulation with a final time of zero; this prompts
         # the code to generate the mesh and nodes, but not to solve for anything
-        D, V, X, T          = Simulate(t_final = 0);        # D, V have shape (Nt, 2, N_Nodes)
-        self.Frame_Shape    = list(D.shape[1:]);
-        self.X_Positions    = X;
+        D, V, X, T                          = Simulate(t_final = 0);        # D, V have shape (Nt, 2, N_Nodes)
+        self.Frame_Shape    : list[int]     = list(D.shape[1:]);
+        self.X_Positions    : numpy.ndarray = X;
 
         # Make sure the config dictionary is actually for the explicit physics model.
         assert('NonlinearElasticity' in config);
-        
+
+        # Determine which index corresponds to s and which to K (simulate accepts a two element
+        # array holding s and K. We need to know which element corresponds to K and which to s).
+        self.s_idx  : int   = self.param_names.index('s');
+        self.K_idx  : int   = self.param_names.index('K');
         return;
     
 
@@ -150,7 +155,7 @@ class NonlinearElasticity(Physics):
         -------------------------------------------------------------------------------------------
 
         param: numpy.ndarray, shape = (2)
-            Holds the values of the w and a parameters. self.a_idx and self.w_idx tell us which 
+            Holds the values of the s and . self.a_idx and self.w_idx tell us which 
             index corresponds to which variable.
 
 
@@ -176,7 +181,7 @@ class NonlinearElasticity(Physics):
         
 
         # Solve the PDE!
-        D, V, _, T  = Simulate(theta = param[0]);
+        D, V, _, T  = Simulate(theta = param[self.s_idx], bulk_modulus = param[self.K_idx]);
 
         # All done!
         X       : list[torch.Tensor]    = [torch.Tensor(D), torch.Tensor(V)];
