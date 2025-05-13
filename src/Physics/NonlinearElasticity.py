@@ -5,7 +5,7 @@
 # Add the main directory to the search path.
 import  os;
 import  sys;
-PyMFEM_Path     : str   = os.path.abspath(os.path.join(os.path.join(os.path.curdir, "Physics"), "PyMFEM"));
+PyMFEM_Path     : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "PyMFEM"));
 sys.path.append(PyMFEM_Path);
 
 import  numpy;
