@@ -21,6 +21,7 @@ from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
 from    Model                       import  Autoencoder, Autoencoder_Pair;
 from    SolveROMs                   import  sample_roms;
+from    ParameterSpace              import  ParameterSpace;
 
 
 # Set up the logger
@@ -623,19 +624,18 @@ def Plot_GP2d(  p1_mesh         : numpy.ndarray,
 
 
 def Plot_Heatmap2d( values          : numpy.ndarray, 
-                    p1_grid         : numpy.ndarray, 
-                    p2_grid         : numpy.ndarray, 
-                    param_train     : numpy.ndarray,
-                    n_init_train    : int,
+                    param_space     : ParameterSpace,
                     figsize         : tuple[int]    = (10, 10), 
-                    param_names     : list[str]     = ['p1', 'p2'], 
                     title           : str           = '') -> None:
     """
     This plot makes a "heatmap". Specifically, we assume that values represents the samples of 
-    a function which depends on two paramaters, p1 and p2. The i,j entry of values represents 
-    the value of some function when p1 = p1_grid[i] and p2 = p2_grid[j]. We make an image whose 
-    i, j has a color based on values[i, j]. We also add boxes around each pixel that is part of 
-    the training set (with special red boxes for elements of the initial training set).
+    a function which depends on two paramaters, p1 and p2 (the two variables in the 
+    ParameterSpace object). The i,j entry of values represents the value of some function when 
+    p1 takes on it's i'th value and p2 takes on it's j'th. 
+    
+    We make an image whose i, j has a color based on values[i, j]. We also add boxes around 
+    each pixel that is part of the training set (with special red boxes for elements of the 
+    initial training set).
 
     
 
@@ -644,29 +644,17 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     -----------------------------------------------------------------------------------------------
 
     values : numpy.ndarray, shape = (n1, n2)
-        i,j element holds the value of some function (that depneds on two parameters, p1 and p2) 
-        when p1 = p1_grid[i] and p2_grid[j]. 
+        i,j element holds the value of some function (that depends on two parameters, p1 and p2) 
+        when p1 = param_space.test_meshgrid[0][i, 0] and p2 = param_space.test_meshgrid[1][0, j]. 
+        Here, n1 and n2 represent the number of distinct values for the p1 and p2 parameters, 
+        respectively.
 
-    p1_grid : numpy.ndarray, shape = (n1)
-        i'th element holds the i'th value for the p1 parameter. 
-
-    p2_grid : numpy.ndarray, shape = (n2) 
-        i'th element holds the i'th value for the p2 parameter. 
-
-    param_train : numpy.ndarray, shapre = (n_train, 2)
-        i, j element holds the value of the j'th parameter when we use the i'th combination of 
-        testing parameters. We assume the first n_init_train rows in this array hold the 
-        combinations that were originally in the training set and the rest were added in successive 
-        rounds of training.
-
-    n_init_train : int
-        The initial number of combinations of parameters in the training set.
+    param_space : ParameterSpace
+        A ParameterSpace object which holds the combinations of parameters in the testing and 
+        training sets. We assume that this object has two parameters (it's n_p attribute is two).
 
     figsize : tuple[int], len = 2
         A two element tuple specifying the size of the overall figure size. 
-
-    param_names : list[str], len = 2
-        A two element list housing the names for the two parameters. 
 
     title : str
         The plot title.
@@ -680,30 +668,27 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     Nothing!
     """
 
-    # Checks.
+    # Checks
     assert(isinstance(values, numpy.ndarray));
-    assert(isinstance(p1_grid, numpy.ndarray));
-    assert(isinstance(p2_grid, numpy.ndarray));
-
-    assert(p1_grid.ndim     == 1);
-    assert(p2_grid.ndim     == 1);
+    assert(isinstance(param_space, ParameterSpace));
+    assert(param_space.n_p  == 2);
     assert(values.ndim      == 2);
-    assert(param_train.ndim == 2);
+
+    p1_grid : numpy.ndarray     = param_space.test_meshgrid[0][:, 0];
+    p2_grid : numpy.ndarray     = param_space.test_meshgrid[1][0, :];
+    n1      : int               = p1_grid.shape[0];
+    n2      : int               = p2_grid.shape[0];
+    assert(values.shape[0]  == n1);
+    assert(values.shape[1]  == n2);
 
     assert(isinstance(figsize, tuple));
-    assert(isinstance(param_names, list));
     assert(len(figsize)     == 2);
-    assert(len(param_names) == 2);
-
-    n_p1    : int = len(p1_grid);
-    n_p2    : int = len(p2_grid);
-    assert(values.shape[0] == n_p1);
-    assert(values.shape[1] == n_p2);
-    assert(param_train.shape[1]     == 2);
-
+    
     # Setup.
-    n_train : int   = param_train.shape[0];
-    n_test  : int   = len(p1_grid)*len(p2_grid);
+    n_train         : int           = param_space.n_train();
+    n_test          : int           = param_space.n_test();
+    param_names     : list[str]     = param_space.param_names;
+    n_init_train    : int           = param_space.n_init_train;
     LOGGER.info("Making heatmap. Parameters = %s. There are %d training points (%d initial) and %d testing points." % (str(param_names), n_train, n_init_train, n_test));
 
 
@@ -722,13 +707,13 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     # the i'th value of p1 and j'th value of p2.
     im = ax.imshow(values, cmap = cmap);
     fig.colorbar(im, ax = ax, fraction = 0.04);
-    ax.set_xticks(numpy.arange(0, n_p1, 2), labels = numpy.round(p1_grid[::2], 2));
-    ax.set_yticks(numpy.arange(0, n_p2, 2), labels = numpy.round(p2_grid[::2], 2));
+    ax.set_xticks(numpy.arange(0, n1, 2), labels = numpy.round(p1_grid[::2], 2));
+    ax.set_yticks(numpy.arange(0, n2, 2), labels = numpy.round(p2_grid[::2], 2));
 
     # Add the value itself (as text) to the center of each "pixel".
     LOGGER.debug("Adding values to the center of each pixel");
-    for i in range(n_p1):
-        for j in range(n_p2):
+    for i in range(n1):
+        for j in range(n2):
             ax.text(j, i, round(values[i, j], 1), ha = 'center', va = 'center', color = 'k');
 
 
@@ -736,14 +721,14 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     # Add boxes around each "pixel" corresponding to a training point. 
 
     # Stuff to help us plot the boxes.
-    grid_square_x   : numpy.ndarray = numpy.arange(-0.5, n_p1, 1);
-    grid_square_y   : numpy.ndarray = numpy.arange(-0.5, n_p2, 1);
+    grid_square_x   : numpy.ndarray = numpy.arange(-0.5, n1, 1);
+    grid_square_y   : numpy.ndarray = numpy.arange(-0.5, n2, 1);
 
     # Add boxes around parameter combinations in the training set.
     LOGGER.debug("Adding boxes around parameters in the training set");
     for i in range(n_train):
-        p1_index : float = numpy.sum(p1_grid < param_train[i, 0]);
-        p2_index : float = numpy.sum(p2_grid < param_train[i, 1]);
+        p1_index : float = numpy.sum(p1_grid < param_space.train_space[i, 0]);
+        p2_index : float = numpy.sum(p2_grid < param_space.train_space[i, 1]);
 
         # Add red boxes around the initial points and black ones around points we added to the 
         # training set in later rounds.
