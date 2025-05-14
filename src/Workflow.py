@@ -28,6 +28,7 @@ from    GPLaSDI             import  BayesianGLaSDI;
 from    Initialize          import  Initialize_Trainer;
 from    Sample              import  Run_Samples, Update_Train_Space;
 from    Logging             import  Initialize_Logger, Log_Dictionary;
+from    Plot                import  Plot_Heatmap2d;
 
 # Set up the logger.
 Initialize_Logger(level = logging.INFO);
@@ -96,13 +97,13 @@ def main():
         result          = restart_dict['result'];
     else:
         restart_dict    = None;
-        next_step       = NextStep.PickSample;
+        next_step       = NextStep.RunSample;
         result          = Result.Unexecuted;
     
     # Initialize the trainer.
     trainer, param_space, physics, model, latent_dynamics = Initialize_Trainer(config, restart_dict);
 
-    # Run the next step.
+    # Start running steps.
     result, next_step = step(trainer, next_step, config, use_restart);
 
     # Report the result
@@ -214,24 +215,16 @@ def step(trainer        : BayesianGLaSDI,
             next_step = NextStep.Train;
 
 
-
     elif (next_step is NextStep.PickSample):
+        # Use greedy sampling to pick that sample. Note that if the training set is empty, this 
+        # function does nothing.
         result, next_step = Update_Train_Space(trainer, config);
 
 
-
     elif (next_step is NextStep.RunSample):
+        # Generate the trajectories for all new testing and training parameters. Append these new
+        # trajectories to trainer's X_Train and X_Test attributes.
         result, next_step = Run_Samples(trainer, config);
-
-
-
-    elif (next_step is NextStep.CollectSample):
-        # Note: We should only reach here if we are using the offline stuff... since I disabled 
-        # that, we should never reach this step.
-        raise RuntimeError("Encountered CollectSample, which is disabled");
-        LOGGER.info("NextStep = Collect_Samples. Has something gone wrong? We should only be here if running offline (which should be disabled).");
-        result, next_step = Collect_Samples(trainer, config);
-
 
 
     else:
