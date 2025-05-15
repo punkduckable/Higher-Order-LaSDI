@@ -8,8 +8,9 @@ import      logging;
 from        os.path                 import  expanduser, join, dirname;
 
 from        mfem.common.arg_parser  import  ArgParser;
-import      mfem.ser                as      mfem;
-from        mfem.ser                import  intArray, add_vector, Add;
+import      mfem.par                as      mfem;
+from        mfem.par                import  intArray, add_vector, Add;
+from        mpi4py                  import  MPI 
 import      numpy;
 from        numpy                   import  sqrt, pi, cos, sin, hypot, arctan2;
 from        scipy.special           import  erfc;
@@ -35,16 +36,17 @@ class InitialVelocity(mfem.VectorPyCoefficient):
 
         global s;
 
-        v = numpy.zeros(len(x))
-        v[-1] = s*x[0]**2*(8.0-x[0])
-        v[0] = -s*x[0]**2
+        v       = numpy.zeros(len(x))
+        v[-1]   = -(s/80.0)* sin(s * x[0])
         return v
 
 
 
 class InitialDeformation(mfem.VectorPyCoefficient):
     def EvalValue(self, x):
-        return x.copy()
+        from copy import deepcopy
+        y = deepcopy(x)
+        return y
 
 
 
@@ -65,58 +67,25 @@ class ElasticEnergyCoefficient(mfem.PyCoefficient):
 
 
 
-class ReducedSystemOperator(mfem.PyOperator):
-    def __init__(self, M, S, H):
-        mfem.PyOperator.__init__(self, M.Height())
-        self.M = M
-        self.S = S
-        self.H = H
-        self.Jacobian = None
-        h = M.Height()
-        self.w = mfem.Vector(h)
-        self.z = mfem.Vector(h)
-        self.dt = 0.0
-        self.v = None
-        self.x = None
-
-    def SetParameters(self, dt, v, x):
-        self.dt = dt
-        self.v = v
-        self.x = x
-
-    def Mult(self, k, y):
-        add_vector(self.v, self.dt, k, self.w)
-        add_vector(self.x, self.dt, self.w, self.z)
-        self.H.Mult(self.z, y)
-        self.M.AddMult(k, y)
-        self.S.AddMult(self.w, y)
-
-    def GetGradient(self, k):
-        Jacobian = Add(1.0, self.M.SpMat(), self.dt, self.S.SpMat())
-        self.Jacobian = Jacobian
-        add_vector(self.v, self.dt, k, self.w)
-        add_vector(self.x, self.dt, self.w, self.z)
-        grad_H = self.H.GetGradientMatrix(self.z)
-
-        Jacobian.Add(self.dt**2, grad_H)
-        return Jacobian
-
-
-
 class HyperelasticOperator(mfem.PyTimeDependentOperator):
-    def __init__(self, fespace, ess_bdr, visc, mu, K):
-        mfem.PyTimeDependentOperator.__init__(self, 2*fespace.GetVSize(), 0.0)
+    def __init__(self, fespace, ess_tdof_list_, visc, mu, K):
+        mfem.PyTimeDependentOperator.__init__(self, 2*fespace.TrueVSize(), 0.0)
 
         rel_tol = 1e-8
         skip_zero_entries = 0
         ref_density = 1.0
-        self.z = mfem.Vector(self.Height()//2)
+
+        self.ess_tdof_list = ess_tdof_list_
+        self.z = mfem.Vector(self.Height() // 2)
+        self.z2 = mfem.Vector(self.Height() // 2)
+        self.H_sp = mfem.Vector(self.Height() // 2)
+        self.dvxdt_sp = mfem.Vector(self.Height() // 2)
         self.fespace = fespace
         self.viscosity = visc
 
-        M = mfem.BilinearForm(fespace)
-        S = mfem.BilinearForm(fespace)
-        H = mfem.NonlinearForm(fespace)
+        M = mfem.ParBilinearForm(fespace)
+        S = mfem.ParBilinearForm(fespace)
+        H = mfem.ParNonlinearForm(fespace)
         self.M = M
         self.H = H
         self.S = S
@@ -124,100 +93,68 @@ class HyperelasticOperator(mfem.PyTimeDependentOperator):
         rho = mfem.ConstantCoefficient(ref_density)
         M.AddDomainIntegrator(mfem.VectorMassIntegrator(rho))
         M.Assemble(skip_zero_entries)
-        M.EliminateEssentialBC(ess_bdr)
         M.Finalize(skip_zero_entries)
+        self.Mmat = M.ParallelAssemble()
+        self.Mmat.EliminateRowsCols(self.ess_tdof_list)
 
-        M_solver = mfem.CGSolver()
-        M_prec = mfem.DSmoother()
+        M_solver = mfem.CGSolver(fespace.GetComm())
+        M_prec = mfem.HypreSmoother()
         M_solver.iterative_mode = False
         M_solver.SetRelTol(rel_tol)
         M_solver.SetAbsTol(0.0)
         M_solver.SetMaxIter(30)
         M_solver.SetPrintLevel(0)
+        M_prec.SetType(mfem.HypreSmoother.Jacobi)
         M_solver.SetPreconditioner(M_prec)
-        M_solver.SetOperator(M.SpMat())
+        M_solver.SetOperator(self.Mmat)
 
         self.M_solver = M_solver
         self.M_prec = M_prec
 
         model = mfem.NeoHookeanModel(mu, K)
         H.AddDomainIntegrator(mfem.HyperelasticNLFIntegrator(model))
-        H.SetEssentialBC(ess_bdr)
+        H.SetEssentialTrueDofs(self.ess_tdof_list)
         self.model = model
 
         visc_coeff = mfem.ConstantCoefficient(visc)
         S.AddDomainIntegrator(mfem.VectorDiffusionIntegrator(visc_coeff))
         S.Assemble(skip_zero_entries)
-        S.EliminateEssentialBC(ess_bdr)
         S.Finalize(skip_zero_entries)
-
-        self.reduced_oper = ReducedSystemOperator(M, S, H)
-
-        J_prec = mfem.DSmoother(1)
-        J_minres = mfem.MINRESSolver()
-        J_minres.SetRelTol(rel_tol)
-        J_minres.SetAbsTol(0.0)
-        J_minres.SetMaxIter(300)
-        J_minres.SetPrintLevel(-1)
-        J_minres.SetPreconditioner(J_prec)
-
-        self.J_solver = J_minres
-        self.J_prec = J_prec
-
-        newton_solver = mfem.NewtonSolver()
-        newton_solver.iterative_mode = False
-        newton_solver.SetSolver(self.J_solver)
-        newton_solver.SetOperator(self.reduced_oper)
-        newton_solver.SetPrintLevel(1)  # print Newton iterations
-        newton_solver.SetRelTol(rel_tol)
-        newton_solver.SetAbsTol(0.0)
-        newton_solver.SetMaxIter(10)
-        self.newton_solver = newton_solver
+        self.Smat = mfem.HypreParMatrix()
+        S.FormSystemMatrix(self.ess_tdof_list, self.Smat)
 
     def Mult(self, vx, dvx_dt):
-        sc = self.Height()//2
+        sc = self.Height() // 2
         v = mfem.Vector(vx, 0,  sc)
         x = mfem.Vector(vx, sc,  sc)
-        z = self.z;
         dv_dt = mfem.Vector(dvx_dt, 0, sc)
         dx_dt = mfem.Vector(dvx_dt, sc,  sc)
-        self.H.Mult(x, z)
+
+        self.H.Mult(x, self.z)
+        self.H_sp.Assign(self.z)
+
         if (self.viscosity != 0.0):
-            self.S.AddMult(v, z)
-        z.Neg()
-        self.M_solver.Mult(z, dv_dt)
-        dx_dt = v
-#        Print(vx.Size())
+            self.Smat.Mult(v, self.z2)
+            self.z += self.z2
+        
+        self.z.Neg()
+        self.M_solver.Mult(self.z, dv_dt)
 
-    def ImplicitSolve(self, dt, vx, dvx_dt):
-        sc = self.Height()//2
-        v = mfem.Vector(vx, 0,  sc)
-        x = mfem.Vector(vx, sc,  sc)
-        dv_dt = mfem.Vector(dvx_dt, 0, sc)
-        dx_dt = mfem.Vector(dvx_dt, sc,  sc)
-
-        # By eliminating kx from the coupled system:
-        # kv = -M^{-1}*[H(x + dt*kx) + S*(v + dt*kv)]
-        # kx = v + dt*kv
-        # we reduce it to a nonlinear equation for kv, represented by the
-        # backward_euler_oper. This equation is solved with the newton_solver
-        # object (using J_solver and J_prec internally).
-        self.reduced_oper.SetParameters(dt, v, x)
-        zero = mfem.Vector()  # empty vector is interpreted as
-        # zero r.h.s. by NewtonSolver
-        self.newton_solver.Mult(zero, dv_dt)
-        add_vector(v, dt, dv_dt, dx_dt)
+        dx_dt.Assign(v) # this changes dvx_dt
+        self.dvxdt_sp.Assign(dvx_dt)
 
     def ElasticEnergy(self, x):
         return self.H.GetEnergy(x)
 
     def KineticEnergy(self, v):
-        return 0.5*self.M.InnerProduct(v, v)
+        from mpi4py import MPI
+        local_energy = 0.5*self.M.InnerProduct(v, v)
+        energy = MPI.COMM_WORLD.allreduce(local_energy, op=MPI.SUM)
+        return energy
 
     def GetElasticEnergyDensity(self, x, w):
         w_coeff = ElasticEnergyCoefficient(self.model, x)
         w.ProjectCoefficient(w_coeff)
-
 
 
 
@@ -227,16 +164,17 @@ class HyperelasticOperator(mfem.PyTimeDependentOperator):
 # -------------------------------------------------------------------------------------------------
 
 def Simulate(   meshfile_name   : str           = "beam-quad.mesh", 
-                ref_levels      : int           = 2,
-                order           : int           = 3,
-                ode_solver_type : int           = 3,
-                t_final         : float         = 300.0,
-                time_step_size  : float         = 3.0,
+                ser_ref_levels  : int           = 2,
+                par_ref_levels  : int           = 0,
+                order           : int           = 2,
+                ode_solver_type : int           = 14,
+                t_final         : float         = 150.0,
+                time_step_size  : float         = 0.03,
                 viscosity       : float         = 1e-2,
                 shear_modulus   : float         = 0.25, 
                 bulk_modulus    : float         = 5.0,
-                theta           : float         = 0.1/64.,
-                serialize_steps : int           = 1, 
+                theta           : float         = 1.0,
+                serialize_steps : int           = 10, 
                 VisIt           : bool          = True) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """
     This examples solves a time dependent nonlinear elasticity problem of the form 
@@ -267,8 +205,11 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
         specifies the mesh file to use. This should specify a file in the Physics/PyMFEM/data 
         subdirectory.
 
-    ref_levels : int   
-        specifies the number of times to refine the mesh uniformly.
+    ser_ref_levels : int   
+        specifies the number of times to refine the serial mesh uniformly.
+
+    par_ref_levels : int 
+        specifies the number of times to refine each parallel mesh.
 
     order : int 
         specifies the finite element order (polynomial degree of the basis functions).
@@ -342,22 +283,27 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
 
     LOGGER.info("Setting up non-linear elasticity simulation with MFEM.");
 
+    # Fetch thread information.
+    comm                = MPI.COMM_WORLD
+    myid        : int   = comm.Get_rank()
+    num_procs   : int   = comm.Get_size()
+
     # Set variable aliases.
-    dt      : float = time_step_size;
-    visc    : float = viscosity;
-    mu      : float = shear_modulus;
-    K       : float = bulk_modulus;
+    dt          : float = time_step_size;
+    visc        : float = viscosity;
+    mu          : float = shear_modulus;
+    K           : float = bulk_modulus;
     global s;
     s = theta;
-    LOGGER.info("Simulating with theta = %f" % theta);
+    if(myid == 0): LOGGER.info("Simulating with theta = %f" % theta);
 
     # Setup the mesh.
-    LOGGER.debug("Lading the mesh and its properties");
+    if(myid == 0): LOGGER.debug("Lading the mesh and its properties");
     meshfile_path   : str   = expanduser(join(dirname(__file__), 'data', meshfile_name));
     mesh                    = mfem.Mesh(meshfile_path, 1, 1);
     dim             : int   = mesh.Dimension();
-    LOGGER.debug("meshfile_path = %s" % meshfile_path);
-    LOGGER.debug("dim = %d" % dim);
+    if(myid == 0): LOGGER.debug("meshfile_path = %s" % meshfile_path);
+    if(myid == 0): LOGGER.debug("dim = %d" % dim);
 
     # Select the ODE solver.
     LOGGER.debug("Selecting the ODE solver");
@@ -386,10 +332,19 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
         exit;
 
     # Refine the mesh 
-    LOGGER.debug("Refining mesh");
-    for lev in range(ref_levels):
+    if(myid == 0): LOGGER.debug("Refining mesh");
+    for lev in range(ser_ref_levels):
         mesh.UniformRefinement();
     
+    # Now define a parallel mesh by a partitioning of the serial mesh. Refine this mesh further in 
+    # parallel to increase the resolution. Once the parallel mesh is defined, the serial mesh can 
+    # be deleted.
+    pmesh = mfem.ParMesh(MPI.COMM_WORLD, mesh)
+    del mesh
+    for x in range(par_ref_levels):
+        pmesh.UniformRefinement()
+
+
 
     # ---------------------------------------------------------------------------------------------
     # 2. Define the vector finite element spaces representing the mesh
@@ -399,31 +354,30 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     #    we group them together in block vector vx, with offsets given by the
     #    fe_offset array.
 
-    LOGGER.info("Setting up the FEM space.");
-    fec                 = mfem.H1_FECollection(order, dim);         # Basis functions
-    fespace             = mfem.FiniteElementSpace(mesh, fec, dim);  # FEM space (span of basis functions).
+    if(myid == 0): LOGGER.info("Setting up the FEM space.");
+    fe_coll             = mfem.H1_FECollection(order, dim);                 # Basis functions
+    fespace             = mfem.ParFiniteElementSpace(pmesh, fe_coll, dim);  # FEM space (span of basis functions).
+    glob_size   : int   = fespace.GlobalTrueVSize();
+    if(myid == 0): LOGGER.info('Number of velocity/deformation unknowns: ' + str(glob_size));
 
-    
-    fe_size     : int   = fespace.GetVSize();
-    LOGGER.info("Number of velocity/deformation unknowns: " + str(fe_size));
-   
-    fe_offset           = intArray([0, fe_size, 2*fe_size]);
+    true_size   : int   = fespace.TrueVSize()
+    true_offset         = intArray([0, true_size, 2*true_size]);
 
     # Setup the grid functions for displacement and velocity.
-    VD      = mfem.BlockVector(fe_offset);
-    D_gf    = mfem.GridFunction();
-    V_gf    = mfem.GridFunction();
-    V_gf.MakeRef(fespace, VD.GetBlock(0), 0);
-    D_gf.MakeRef(fespace, VD.GetBlock(1), 0);
+    VD      = mfem.BlockVector(true_offset);
+    V_gf    = mfem.ParGridFunction(fespace);
+    D_gf    = mfem.ParGridFunction(fespace);
+    V_gf.MakeTRef(fespace, VD, true_offset[0])
+    D_gf.MakeTRef(fespace, VD, true_offset[1])
     
     # ???
-    D_ref = mfem.GridFunction(fespace);
-    mesh.GetNodes(D_ref);
+    D_ref = mfem.ParGridFunction(fespace);
+    pmesh.GetNodes(D_ref);
     
     # Elastic energy density.
     w_fec       = mfem.L2_FECollection(order + 1, dim);
-    w_fespace   = mfem.FiniteElementSpace(mesh, w_fec);
-    w           = mfem.GridFunction(w_fespace);
+    w_fespace   = mfem.ParFiniteElementSpace(pmesh, w_fec);
+    w_gf          = mfem.ParGridFunction(w_fespace);
 
 
 
@@ -431,35 +385,49 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     # 3. Set the initial conditions for v and x, and the boundary conditions on
     #    a beam-like mesh (see description above).
 
-    LOGGER.info("Settng initial and boundary conditions");
+    if(myid == 0): LOGGER.info("Settng initial and boundary conditions");
 
     # Set up objects to hold the ICs
-    LOGGER.debug("Setting up objects to hold the initial conditions;");
+    if(myid == 0): LOGGER.debug("Setting up objects to hold the initial conditions;");
     velo        = InitialVelocity(dim);
     deform      = InitialDeformation(dim);
+    
+    # ???
     V_gf.ProjectCoefficient(velo);
+    V_gf.SetTrueVector();
+
     D_gf.ProjectCoefficient(deform);
+    D_gf.SetTrueVector();
+
+    V_gf.SetFromTrueVector()
+    D_gf.SetFromTrueVector()
+
+    V_gf.GetTrueDofs(VD.GetBlock(0))
+    D_gf.GetTrueDofs(VD.GetBlock(1))
 
     # Impose boundary conditions.
-    LOGGER.debug("Imposing Boundary Conditions");
+    if(myid == 0): LOGGER.debug("Imposing Boundary Conditions");
     ess_bdr = intArray(fespace.GetMesh().bdr_attributes.Max());
     ess_bdr.Assign(0);
     ess_bdr[0] = 1;
+
+    ess_tdof_list = mfem.intArray()
+    fespace.GetEssentialTrueDofs(ess_bdr, ess_tdof_list)
 
 
 
     # ---------------------------------------------------------------------------------------------
     # 4. Define HyperelasticOperator and initialize it the initial energies.
     
-    LOGGER.info("Setting up Hyperelastic operator.");
+    if(myid == 0): LOGGER.info("Setting up Hyperelastic operator.");
 
     oper = HyperelasticOperator(fespace, ess_bdr, visc, mu, K);
     ee0 = oper.ElasticEnergy(D_gf);
     ke0 = oper.KineticEnergy(V_gf);
 
-    LOGGER.info("initial elastic energy (EE) = " + str(ee0));
-    LOGGER.info("initial kinetic energy (KE) = " + str(ke0));
-    LOGGER.info("initial   total energy (TE) = " + str(ee0 + ke0));
+    if(myid == 0): LOGGER.info("initial elastic energy (EE) = " + str(ee0));
+    if(myid == 0): LOGGER.info("initial kinetic energy (KE) = " + str(ke0));
+    if(myid == 0): LOGGER.info("initial   total energy (TE) = " + str(ee0 + ke0));
 
 
 
@@ -469,10 +437,10 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     LOGGER.info("Extracting node positions");
 
     # Fetch the nodes + number of them
-    Nodes_GridFun   : mfem.GridFunction = mfem.GridFunction(fespace);
-    mesh.GetNodes(Nodes_GridFun);                                               # Get GridFunction that holds the nodes
+    Nodes_GridFun                       = mfem.ParGridFunction(fespace);
+    pmesh.GetNodes(Nodes_GridFun);                                              # Get GridFunction that holds the nodes
     Num_Nodes       : int               = Nodes_GridFun.FESpace().GetNDofs();   # Get the number of nodes
-    LOGGER.debug("There are %d nodes" % Num_Nodes);
+    if(myid == 0): LOGGER.debug("There are %d nodes" % Num_Nodes);
 
     # Now extra the data stored at the nodes. This will look like the a list holding the first
     # coordinate of each node concatenated with a list holding the second coordinate of every node
@@ -481,7 +449,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     
     # Reshape to be an array whose i'th row holds the position of the i'th node
     Positions       : numpy.ndarray     = numpy.reshape(nodes_data, (dim, Num_Nodes)).T; 
-    LOGGER.debug("Positions has shape %s (Num_Nodes = %d, dim = %d)" % (str(Positions.shape), Num_Nodes, dim));
+    if(myid == 0): LOGGER.debug("Positions has shape %s (Num_Nodes = %d, dim = %d)" % (str(Positions.shape), Num_Nodes, dim));
 
 
 
@@ -493,7 +461,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
         LOGGER.info("Setting up VisIt visualization.");
 
         dc_path : str   = os.path.join(os.path.join(os.path.curdir, "VisIt"), "nlelast-fom");
-        dc              = mfem.VisItDataCollection(dc_path, mesh);
+        dc              = mfem.VisItDataCollection(dc_path, pmesh);
         dc.SetPrecision(8);
         # // To save the mesh using MFEM's parallel mesh format:
         # // dc->SetFormat(DataCollection::PARALLEL_FORMAT);
@@ -508,7 +476,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     # ---------------------------------------------------------------------------------------------
     # 6. Perform time-integration (looping over the time iterations, ti, with a time-step dt).
     
-    LOGGER.info("Running time stepping from t = 0 to t = %f with dt = %d" % (t_final, dt));
+    LOGGER.info("Running time stepping from t = 0 to t = %f with dt %f" % (t_final, dt));
 
     # Setup for time stepping.
     ode_solver.Init(oper);
@@ -538,11 +506,11 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
             ee = oper.ElasticEnergy(D_gf);
             ke = oper.KineticEnergy(V_gf);
 
-            text : str  = ( "step " + str(ti) + ", t = " + str(t) + ", EE = " +
-                            str(ee) + ", KE = " + str(ke) +
-                            ", dTE = " + str((ee + ke) - (ee0 + ke0)));
-            LOGGER.info(text);
-
+            if(myid == 0):
+                text : str  = ( "step " + str(ti) + ", t = " + str(t) + ", EE = " +
+                                str(ee) + ", KE = " + str(ke) +
+                                ", dTE = " + str((ee + ke) - (ee0 + ke0)));
+                LOGGER.info(text);
 
             # Serialize the current displacement, velocity, and time.
             times_list.append(t);
@@ -553,7 +521,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
             # If visualizing, Save the GridFunctions to the VisIt object.
             if(VisIt):
                 # Set the mesh to the current displacement
-                mesh.SwapNodes(D_gf, 0);
+                pmesh.SwapNodes(D_gf, 0);
 
                 # Save the mesh, displacement, and velocity
                 dc.SetCycle(ti);
@@ -561,7 +529,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
                 dc.Save();
         
                 # Now swap the deformed mesh back to reset everything.
-                mesh.SwapNodes(D_gf, 0);
+                pmesh.SwapNodes(D_gf, 0);
 
         ti = ti + 1;
         
@@ -572,21 +540,13 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     # 7. Package everything up for returning.
 
     # Turn times, displacements, velocities lists into arrays.
-    Times           = numpy.array(times_list, dtype = numpy.float32);
-    Displacements   = numpy.array(displacements_list, dtype = numpy.float32);
-    Velocities      = numpy.array(velocities_list, dtype = numpy.float32);
+    Times           = numpy.array(times_list,           dtype = numpy.float32);
+    Displacements   = numpy.array(displacements_list,   dtype = numpy.float32);
+    Velocities      = numpy.array(velocities_list,      dtype = numpy.float32);
 
 
     return Displacements, Velocities, Positions, Times;
 
-    nodes = x
-    owns_nodes = 0
-    nodes, owns_nodes = mesh.SwapNodes(nodes, owns_nodes)
-    mesh.Print('deformed.mesh', 8)
-    mesh.SwapNodes(nodes, owns_nodes)
-    v.Save('velocity.sol', 8)
-    oper.GetElasticEnergyDensity(x, w)
-    w.Save('elastic_energy.sol',  8)
 
 
 
