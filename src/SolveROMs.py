@@ -19,6 +19,10 @@ from    GaussianProcess             import  eval_gp, sample_coefs;
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
 from    Model                       import  Autoencoder, Autoencoder_Pair;
+from    ParameterSpace              import  ParameterSpace;
+
+import  logging;
+LOGGER : logging.Logger = logging.getLogger(__name__);
 
 
 
@@ -100,12 +104,14 @@ def average_rom(model           : torch.nn.Module,
 
     # For each parameter in param_grid, fetch the corresponding initial condition and then encode
     # it. This gives us a list whose i'th element holds the encoding of the i'th initial condition.
+    LOGGER.debug("Fetching latent space initial conditions for %d combinations of parameters." % n_param);
     Z0      : list[list[numpy.ndarray]] = model.latent_initial_conditions(param_grid, physics);
 
     # Evaluate each GP at each combination of parameter values. This returns two arrays, the 
     # first of which is a 2d array of shape (n_param, n_coef) whose i,j element specifies the mean 
     # of the posterior distribution for the j'th coefficient at the i'th combination of parameter 
     # values.
+    LOGGER.debug("Finding the mean of each GP's posterior distribution");
     post_mean, _ = eval_gp(gp_list, param_grid);
 
     # Make each element of t_Grid into a numpy.ndarray of shape (1, n_t(i)). This is what 
@@ -120,6 +126,7 @@ def average_rom(model           : torch.nn.Module,
 
     # Simulate the laten dynamics! For each testing parameter, use the mean value of each posterior 
     # distribution to define the coefficients. 
+    LOGGER.info("simulating initial conditions for %d combinations of parameters forward in time" % n_param);
     Zis : list[list[numpy.ndarray]] = latent_dynamics.simulate( coefs   = post_mean, 
                                                                 IC      = Z0, 
                                                                 t_Grid  = t_Grid);
@@ -217,8 +224,9 @@ def sample_roms(model           : torch.nn.Module,
     assert(model.n_IC               == n_IC);
 
 
-    # Make each element of t_Grid into a numpy.ndarray of shape (1, n_t(i)). This is what 
+    # Reshape t_Grid so that the i'th element is a numpy.ndarray of shape (1, n_t(i)). This is what 
     # simulate expects.
+    LOGGER.debug("reshaping t_Grid so that the i'th element has shape (1, n_t(i)).");
     t_Grid_np : list[numpy.ndarray] = [];
     for i in range(n_param):
         if(isinstance(t_Grid[i], torch.Tensor)):
@@ -232,6 +240,7 @@ def sample_roms(model           : torch.nn.Module,
     # condition and then encode it. This gives us a list whose i'th element is an n_IC element
     # list whose j'th element is an array of shape (1, n_z) holding the IC for the j'th derivative
     # of the latent state when we use the i'th combination of parameter values. 
+    LOGGER.debug("Fetching latent space initial conditions for %d combinations of parameters." % n_param);
     Z0      : list[list[numpy.ndarray]] = model.latent_initial_conditions(param_grid, physics);
 
 
@@ -240,6 +249,7 @@ def sample_roms(model           : torch.nn.Module,
     # in an n_param element list whose k'th element is a (n_sample, n_coef) array whose i, j 
     # element stores the i'th sample from the posterior distribution for the j'th coefficient at 
     # the k'th combination of parameter values.
+    LOGGER.debug("Sampling coefficients from the GP posterior distributions");
     coefs_by_parameter  : list[numpy.ndarray]       = [sample_coefs(gp_list = gp_list, Input = param_grid[i, :], n_samples = n_samples) for i in range(n_param)];
 
     # Reorganize the coef samples into an n_samples element list whose i'th element is an 
@@ -273,6 +283,7 @@ def sample_roms(model           : torch.nn.Module,
     # Simulate each set of dynamics forward in time. We generate this one sample at a time. For 
     # each sample, we use the k'th set of coefficients. There is one set of coefficients per 
     # sample. For each sample, we use the same ICs and the same t_Grid.
+    LOGGER.info("Generating latent trajectories for %d samples of the coefficients." % n_samples);
     for k in range(n_samples):
         # This yields an n_param element list whose i'th element is an n_IC element list whose
         # j'th element is an numpy.ndarray of shape (n_t_i, 1, n_z). We store this in the 
@@ -461,3 +472,214 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
     
     else:
         raise ValueError("Invalid model type!");
+
+
+
+
+def Compute_Error_and_STD(  model           : torch.nn.Module,
+                            physics         : Physics,
+                            param_space     : ParameterSpace,
+                            latent_dynamics : LatentDynamics,
+                            gp_list         : list[GaussianProcessRegressor],
+                            t_Test          : list[torch.Tensor],
+                            X_Test          : list[list[torch.Tensor]],
+                            n_samples       : int) -> tuple[list[numpy.ndarray], list[numpy.ndarray]]:
+    """
+    This function draws n_samples samples of the coefficients for each combination of the 
+    parameter values, then solves the corresponding latent dynamics and computes the std 
+    and maximum relative error between the FOM frames and their reconstruction.
+
+
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+
+    model : torch.nn.Module
+        For each combinations of parameters, we find the model's latent dynamics for that 
+        combination and solve them forward in time. 
+
+    physics : Physics
+        A Physics object that we use to fetch the initial condition for each combination of 
+        parameter values.
+
+    param_space : ParameterSpace
+        A ParameterSpace object which holds the testing parameters.
+    
+    latent_dynamics : LatentDynamics
+        The LatentDynamics object we use to generate the latent space data. For each combination 
+        of parameter values, we fetch the corresponding coefficients to define the latent dynamics.
+    
+    gp_list : list, len = c_coefs
+        A set of trained gaussian project objects. The i'th one represents a gaussian process that
+        maps a combination of parameter values to a sample for the i'th coefficient in the latent
+        dynamics. For each combination of parameter values, we sample the posterior distribution of
+        each GP; we use these samples to build samples of the latent dynamics, which we can use 
+        to sample the predicted dynamics produced by that combination of parameter values.
+
+    t_Test : list[torch.Tensor], len = n_test
+        i'th element is a 1d numpy.ndarray object of length n_t(i) whose j'th element holds the 
+        value of the j'th time value at which we solve the latent dynamics for the i'th combination
+        of parameter values.
+
+    X_Test : list[list[torch.Tensor]], len = n_test
+        i'th element is an n_IC element list whose j'th element is a torch.Tensor of shape 
+        (n_t(i), ...) whose k, ... slice holds the k'th frame of the j'th time derivative of the
+        FOM model when we use the i'th combination of parameter values to define the FOM model.
+
+    n_samples : int
+        The number of samples we draw from each GP's posterior distribution. Each sample gives us 
+        a set of coefficients which we can use to define the latent dynamics that we then solve 
+        forward in time. 
+
+    
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    max_rel_error, max_std
+
+    max_rel_error : list[numpy.ndarray], len = n_IC
+        i'th element is a 1d numpy.ndarray of shape (n_test) whose j'th element holds the maximum
+        relative error between a frame of the FOM solution's i'th derivative and its reconstruction
+        when the FOM uses the j'th combination of parameter values. 
+    
+    max_std : list[numpy.ndarray], len = n_IC
+        i'th element is a 1d numpy.ndarray of shape (n_test) whose j'th element holds the std
+    """ 
+
+    # Run checks
+    assert(isinstance(gp_list,          list));
+    assert(isinstance(t_Test,           list));
+    assert(isinstance(X_Test,           list));
+
+    param_test  : numpy.ndarray         = param_space.test_space;
+    assert(isinstance(param_test,       numpy.ndarray));
+    assert(len(param_test.shape)        == 2);
+    assert(isinstance(n_samples,        int));
+    assert(len(gp_list)                 == latent_dynamics.n_coefs);
+
+    n_test  : int   = len(X_Test);   
+    assert(len(X_Test)                  == n_test);
+    assert(param_test.shape[0]          == n_test);
+
+    assert(isinstance(X_Test[0],        list));
+    n_IC    : int                       = len(X_Test[0]);
+    for i in range(n_test):
+        assert(isinstance(X_Test[i],    list));
+        assert(len(X_Test[i])           == n_IC);
+    
+        for j in range(n_IC):
+            assert(isinstance(t_Test[j],    torch.Tensor));
+            assert(len(t_Test[j].shape)     == 1);
+            n_t_j   : int = t_Test[j].shape[0];
+
+            assert(isinstance(X_Test[i][j], torch.Tensor));
+            assert(X_Test[i][j].shape[0]    == n_t_j);
+    
+
+
+    # For each combination of parameter values in the testing set, sample the latent coefficients 
+    # and solve the latent dynamics forward in time. 
+    LOGGER.info("Generating latent dynamics trajectories for %d samples of the coefficients for %d combinations of testing parameter" % (n_samples, n_test));
+    Zis_samples     : list[list[numpy.ndarray]] = sample_roms(model, physics, latent_dynamics, gp_list, param_test, t_Test, n_samples);    # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_samples, n_z)
+
+    LOGGER.info("Generating latent dynamics trajectories using posterior distribution means for %d combinations of testing parameter" % (n_test));
+    Zis_mean        : list[list[numpy.ndarray]] = average_rom(model, physics, latent_dynamics, gp_list, param_test, t_Test);               # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_z)
+        
+    # Set up arrays to hold the average error between X_pred_mean and X_test, as well as the std of 
+    # the predictions.
+    max_rel_error   : list[numpy.ndarray]   = [];
+    max_std          : list[numpy.ndarray]   = [];
+    for d in range(n_IC):
+        max_rel_error.append(  numpy.zeros(n_test, dtype = numpy.float32));
+        max_std.append(         numpy.zeros(n_test, dtype = numpy.float32));
+
+
+
+    # Pass the samples through the decoder. The way this works depends on what kind of model we are using. 
+    if(isinstance(model, Autoencoder)):
+        # Decode the mean predictions.
+        X_pred_mean     : list[list[numpy.ndarray]]     = [];   # len = n_test. i'th element has len n_IC whose j'th element has shape (n_t_i, n_x).
+        for i in range(n_test):
+            X_pred_mean.append([model.Decode(torch.Tensor(Zis_mean[i][0])).detach().numpy()]);
+
+        # Decode the Zis for each parameter and compute the corresponding STDs. 
+        for i in range(n_test):
+            # Decode the latent trajectories for each sample of the i'th combination of parameter values.
+            n_t_i           : int                   = len(t_Test[i]);
+            FOM_Frame_Shape : tuple[int]            = physics.X_Positions.shape;
+
+            ith_X_Pred   : numpy.ndarray            = numpy.empty((n_t_i, n_samples,) + FOM_Frame_Shape, dtype = numpy.float32);
+
+            for j in range(n_samples):
+                X_Pred_ij                           = model.Decode(torch.Tensor(Zis_samples[i][0][:, j, :]));
+                ith_X_Pred[:, j, :]                 = X_Pred_ij.detach().numpy();
+
+            # For each component of each frame of the reconstruction using the i'th combination of
+            # parameter values, we can compute the std (across the samples) of that component. We 
+            # find the frame which has the component that gives the largest STD. This becomes the
+            # i'th element of max_std[0].
+            max_std[0][i]                           = ith_X_Pred.std(axis = 1).max();
+        
+        
+
+    elif(isinstance(model, Autoencoder_Pair)):
+        # Decode the mean predictions.
+        X_pred_mean     : list[list[numpy.ndarray]]     = [];   # len = n_test. i'th element has len n_IC whose j'th element has shape (n_t_i, n_x).
+        for i in range(n_test):
+            Disp_Pred_mean_i, Vel_Pred_mean_i   = model.Decode(torch.Tensor(Zis_mean[i][0]), torch.Tensor(Zis_mean[i][1]));
+            X_pred_mean.append([Disp_Pred_mean_i.detach().numpy(), Vel_Pred_mean_i.detach().numpy()]);
+
+        # Decode the Zis for each parameter and compute the corresponding STDs. 
+        for i in range(n_test):
+            # Decode the latent trajectories for each sample of the i'th combination of parameter values.
+            n_t_i           : int                   = len(t_Test[i]);
+            FOM_Frame_Shape : tuple[int]            = physics.X_Positions.shape;
+
+            ith_Disp_Pred   : numpy.ndarray         = numpy.empty((n_t_i, n_samples,) + FOM_Frame_Shape, dtype = numpy.float32);
+            ith_Vel_Pred    : numpy.ndarray         = numpy.empty((n_t_i, n_samples,) + FOM_Frame_Shape, dtype = numpy.float32);
+
+            for j in range(n_samples):
+                Disp_Pred_ij, Vel_Pred_ij           = model.Decode(torch.Tensor(Zis_samples[i][0][:, j, :]), torch.Tensor(Zis_samples[i][1][:, j, :]));
+                ith_Disp_Pred[:, j, :]              = Disp_Pred_ij.detach().numpy();
+                ith_Vel_Pred[:, j, :]               = Vel_Pred_ij.detach().numpy();
+
+            # For each component of each frame of the reconstruction using the i'th combination of
+            # parameter values, we can compute the std (across the samples) of that component. We 
+            # find the frame which has the component that gives the largest STD. This becomes the
+            # i'th element of max_std[0] and max_std[1].
+            max_std[0][i]                           = ith_Disp_Pred.std(axis = 1).max();
+            max_std[1][i]                           = ith_Vel_Pred.std(axis = 1).max();
+
+    else: 
+        raise TypeError("This function only works if mode is an Autoencoder or Autoencoder_Pair object. Got %s" % str(type(model)));
+
+
+    # For each d \in {0, 1, ... , n_{IC} - 1} and k \in {1, 2, ... , n_test - 1}, find the mean 
+    # error between X_Pred_mean[d][k, ...] and X_test[d][k, ...].
+    for d in range(n_IC):
+        for k in range(n_test):        
+            # Extract the prediction, true values for the d'th component of the FOM solution when we use 
+            # the k'th parameter value. These have shape (n_t, n_x).
+            kth_X_Pred_d            : numpy.ndarray = X_pred_mean[k][d];
+            kth_X_Test_d            : numpy.ndarray = X_Test[k][d].numpy();
+            
+            # For each compute the relative error between the predicted and true values of the d'th 
+            # derivative of the FOM solution at each time step when we use the k'th combination of 
+            # parameter values.
+            kth_Relative_Errors_d   : numpy.ndarray = numpy.linalg.norm(kth_X_Pred_d - kth_X_Test_d, axis = 1) / numpy.linalg.norm(kth_X_Test_d, axis = 1);
+            max_rel_error[d][k]                     = kth_Relative_Errors_d.max();
+
+
+    # Reshape each element of max_rel_error and max_std has shape (N(1), ... , N(n_p)), where N(k) 
+    # is the number of distinct values of the k'th parameter in the training set. The i(1), ... , i(n_p) 
+    # element of the d'th element of these lists will hold the mean error and std of the prediction of 
+    # the d'th derivative of the FOM solution when we use the i(k)'th value of the k'th parameter, 
+    # respectively.
+    for d in range(n_IC):
+        max_rel_error[d]   = max_rel_error[d].reshape(param_space.test_grid_sizes);
+        max_std[d]          = max_std[d].reshape(param_space.test_grid_sizes);
+
+
+    # All done!
+    return max_rel_error, max_std;
