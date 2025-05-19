@@ -9,7 +9,8 @@ Dependencies (version number)
 - matplotlib    (3.9.2)
 - seaborn       (0.13.2)
 
-Further, if you want to use the Nonlinear-Elasticity example, you will also need to install PyMFEM.
+Further, if you want to use the Nonlinear-Elasticity example, you will also need to install PyMFEM 
+with the parallel version enabled.
 
 What things to I need to modify if I want to use my own [object]?
 - [LatentDynamics]
