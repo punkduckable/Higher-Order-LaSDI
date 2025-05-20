@@ -179,7 +179,6 @@ class NonlinearElasticity(Physics):
         assert(len(param.shape) == 1);
         assert(param.shape[0]   == self.n_p);
         
-
         # Solve the PDE!
         D, V, _, T  = Simulate(theta = param[self.s_idx], bulk_modulus = param[self.K_idx]);
 

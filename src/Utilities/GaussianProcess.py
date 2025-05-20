@@ -138,8 +138,7 @@ def eval_gp(gp_list : list[GaussianProcessRegressor], Inputs : numpy.ndarray) ->
     # Find the means and SDs of the posterior distribution for each GP evaluated at the 
     # various inputs.
     for i in range(n_GPs):
-        GP_i : GaussianProcessRegressor = gp_list[i];
-        pred_mean[:, i], pred_std[:, i] = GP_i.predict(Inputs, return_std = True);
+        pred_mean[:, i], pred_std[:, i] = gp_list[i].predict(Inputs, return_std = True);
 
     # All done!
     return pred_mean, pred_std;
