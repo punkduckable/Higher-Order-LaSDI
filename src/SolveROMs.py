@@ -591,7 +591,7 @@ def Compute_Error_and_STD(  model           : torch.nn.Module,
     max_rel_error   : list[numpy.ndarray]   = [];
     max_std          : list[numpy.ndarray]   = [];
     for d in range(n_IC):
-        max_rel_error.append(  numpy.zeros(n_test, dtype = numpy.float32));
+        max_rel_error.append(   numpy.zeros(n_test, dtype = numpy.float32));
         max_std.append(         numpy.zeros(n_test, dtype = numpy.float32));
 
     # Pass the samples through the decoder. The way this works depends on what kind of model we are using. 
