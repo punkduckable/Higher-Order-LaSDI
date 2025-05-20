@@ -54,8 +54,8 @@ class NonlinearElasticity(Physics):
 
         # Checks.
         assert(len(param_names) == 2);
-        assert('s' in param_names);
-        assert('K' in param_names);
+        assert('s'  in param_names);
+        assert('mu' in param_names);
 
         # Call the super class initializer.
         super().__init__(config         = config, 
@@ -78,10 +78,10 @@ class NonlinearElasticity(Physics):
         # Make sure the config dictionary is actually for the explicit physics model.
         assert('NonlinearElasticity' in config);
 
-        # Determine which index corresponds to s and which to K (simulate accepts a two element
-        # array holding s and K. We need to know which element corresponds to K and which to s).
+        # Determine which index corresponds to s and which to mu (simulate accepts a two element
+        # array holding s and mu. We need to know which element corresponds to mu and which to s).
         self.s_idx  : int   = self.param_names.index('s');
-        self.K_idx  : int   = self.param_names.index('K');
+        self.mu_idx : int   = self.param_names.index('mu');
         return;
     
 
@@ -180,7 +180,7 @@ class NonlinearElasticity(Physics):
         assert(param.shape[0]   == self.n_p);
         
         # Solve the PDE!
-        D, V, _, T  = Simulate(theta = param[self.s_idx], bulk_modulus = param[self.K_idx]);
+        D, V, _, T  = Simulate(theta = param[self.s_idx], shear_modulus = param[self.mu_idx]);
 
         # All done!
         X       : list[torch.Tensor]    = [torch.Tensor(D), torch.Tensor(V)];
