@@ -565,6 +565,7 @@ class ParameterSpace:
         self.test_space         : numpy.ndarray         = dict_['test_space'];      #
         self.test_grid_sizes    : list[int]             = dict_['test_grid_sizes']; #
         self.test_meshgrid      : tuple[numpy.ndarray]  = dict_['test_meshgrid'];   #
+        self.n_init_train       : int                   = dict_['n_init_train'];
 
         # Run checks
         assert(self.n_init_train            == dict_['n_init_train']);
