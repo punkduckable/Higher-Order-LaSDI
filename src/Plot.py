@@ -705,12 +705,6 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
 
     # Plot the figure as an image (the i,j pixel is just value[i, j], the value associated with 
     # the i'th value of p1 and j'th value of p2.
-    print("p1)")
-    print(p1_grid);
-    print("p2")
-    print(p2_grid);
-    print("values");
-    print(values.T);
     im = ax.imshow(values.T, cmap = cmap);
     fig.colorbar(im, ax = ax, fraction = 0.04);
     ax.set_xticks(numpy.arange(0, n1, 2), labels = numpy.round(p1_grid[::2], 2));
