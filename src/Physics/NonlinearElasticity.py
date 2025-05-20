@@ -73,7 +73,7 @@ class NonlinearElasticity(Physics):
         # the code to generate the mesh and nodes, but not to solve for anything
         D, V, X, T                          = Simulate(t_final = 0);        # D, V have shape (Nt, 2, N_Nodes)
         self.Frame_Shape    : list[int]     = list(D.shape[1:]);
-        self.X_Positions    : numpy.ndarray = X;
+        self.X_Positions    : numpy.ndarray = numpy.copy(X);
 
         # Make sure the config dictionary is actually for the explicit physics model.
         assert('NonlinearElasticity' in config);
@@ -126,7 +126,7 @@ class NonlinearElasticity(Physics):
         s   : float             = param[0];
 
         # Compute the initial condition and return!
-        X   : numpy.ndarray     = self.X_Positions.T;       # Shape = (2, N_Nodes)
+        X   : numpy.ndarray     = numpy.copy(self.X_Positions);         # Shape = (2, N_Nodes)
         u0  : numpy.ndarray     = X;
         v0  : numpy.ndarray     = numpy.empty_like(u0);
         v0[0, :]    = -s*numpy.multiply(X[0, :], X[0, :]);
