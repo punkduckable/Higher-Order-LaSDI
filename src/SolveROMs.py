@@ -15,7 +15,7 @@ import  torch;
 import  numpy;
 from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 
-from    GaussianProcess             import  eval_gp, sample_coefs;
+from    GaussianProcess             import  eval_gp, sample_coefs, fit_gps;
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
 from    Model                       import  Autoencoder, Autoencoder_Pair;
@@ -594,8 +594,6 @@ def Compute_Error_and_STD(  model           : torch.nn.Module,
         max_rel_error.append(  numpy.zeros(n_test, dtype = numpy.float32));
         max_std.append(         numpy.zeros(n_test, dtype = numpy.float32));
 
-
-
     # Pass the samples through the decoder. The way this works depends on what kind of model we are using. 
     if(isinstance(model, Autoencoder)):
         # Decode the mean predictions.
@@ -607,13 +605,13 @@ def Compute_Error_and_STD(  model           : torch.nn.Module,
         for i in range(n_test):
             # Decode the latent trajectories for each sample of the i'th combination of parameter values.
             n_t_i           : int                   = len(t_Test[i]);
-            FOM_Frame_Shape : tuple[int]            = physics.X_Positions.shape;
+            FOM_Frame_Shape : list[int]            = physics.Frame_Shape;
 
-            ith_X_Pred   : numpy.ndarray            = numpy.empty((n_t_i, n_samples,) + FOM_Frame_Shape, dtype = numpy.float32);
+            ith_X_Pred   : numpy.ndarray            = numpy.empty([n_t_i, n_samples] + FOM_Frame_Shape, dtype = numpy.float32);
 
             for j in range(n_samples):
                 X_Pred_ij                           = model.Decode(torch.Tensor(Zis_samples[i][0][:, j, :]));
-                ith_X_Pred[:, j, :]                 = X_Pred_ij.detach().numpy();
+                ith_X_Pred[:, j, ...]               = X_Pred_ij.detach().numpy();
 
             # For each component of each frame of the reconstruction using the i'th combination of
             # parameter values, we can compute the std (across the samples) of that component. We 
@@ -634,15 +632,15 @@ def Compute_Error_and_STD(  model           : torch.nn.Module,
         for i in range(n_test):
             # Decode the latent trajectories for each sample of the i'th combination of parameter values.
             n_t_i           : int                   = len(t_Test[i]);
-            FOM_Frame_Shape : tuple[int]            = physics.X_Positions.shape;
+            FOM_Frame_Shape : list[int]             = physics.Frame_Shape;
 
-            ith_Disp_Pred   : numpy.ndarray         = numpy.empty((n_t_i, n_samples,) + FOM_Frame_Shape, dtype = numpy.float32);
-            ith_Vel_Pred    : numpy.ndarray         = numpy.empty((n_t_i, n_samples,) + FOM_Frame_Shape, dtype = numpy.float32);
-
+            ith_Disp_Pred   : numpy.ndarray         = numpy.empty([n_t_i, n_samples] + FOM_Frame_Shape, dtype = numpy.float32);
+            ith_Vel_Pred    : numpy.ndarray         = numpy.empty([n_t_i, n_samples] + FOM_Frame_Shape, dtype = numpy.float32);
             for j in range(n_samples):
-                Disp_Pred_ij, Vel_Pred_ij           = model.Decode(torch.Tensor(Zis_samples[i][0][:, j, :]), torch.Tensor(Zis_samples[i][1][:, j, :]));
-                ith_Disp_Pred[:, j, :]              = Disp_Pred_ij.detach().numpy();
-                ith_Vel_Pred[:, j, :]               = Vel_Pred_ij.detach().numpy();
+                Disp_Pred_ij, Vel_Pred_ij           = model.Decode(Latent_Displacement  = torch.Tensor(Zis_samples[i][0][:, j, :]), 
+                                                                   Latent_Velocity      = torch.Tensor(Zis_samples[i][1][:, j, :]));
+                ith_Disp_Pred[:, j, ...]            = Disp_Pred_ij.detach().numpy();
+                ith_Vel_Pred[:, j, ...]             = Vel_Pred_ij.detach().numpy();
 
             # For each component of each frame of the reconstruction using the i'th combination of
             # parameter values, we can compute the std (across the samples) of that component. We 
@@ -653,17 +651,21 @@ def Compute_Error_and_STD(  model           : torch.nn.Module,
 
     else: 
         raise TypeError("This function only works if mode is an Autoencoder or Autoencoder_Pair object. Got %s" % str(type(model)));
-
-
+    
     # For each d \in {0, 1, ... , n_{IC} - 1} and k \in {1, 2, ... , n_test - 1}, find the mean 
     # error between X_Pred_mean[d][k, ...] and X_test[d][k, ...].
     for d in range(n_IC):
         for k in range(n_test):        
             # Extract the prediction, true values for the d'th component of the FOM solution when we use 
-            # the k'th parameter value. These have shape (n_t, n_x).
-            kth_X_Pred_d            : numpy.ndarray = X_pred_mean[k][d];
-            kth_X_Test_d            : numpy.ndarray = X_Test[k][d].numpy();
-            
+            # the k'th parameter value. These have shape (n_t(k),) + physics.Frame_Shape.
+            kth_X_Pred_d            : numpy.ndarray = X_pred_mean[k][d];        # shape (n_t(k),) + physics.Frame_Shape
+            kth_X_Test_d            : numpy.ndarray = X_Test[k][d].numpy();     # shape (n_t(k),) + physics.Frame_Shape
+
+            # Reshape them to have shape  (n_t(k), -1) so that we can easily compute norms across the time axis.
+            n_t_k   : int   = kth_X_Pred_d.shape[0];
+            kth_X_Pred_d = kth_X_Pred_d.reshape(n_t_k, -1);
+            kth_X_Test_d = kth_X_Test_d.reshape(n_t_k, -1);
+
             # For each compute the relative error between the predicted and true values of the d'th 
             # derivative of the FOM solution at each time step when we use the k'th combination of 
             # parameter values.
@@ -677,9 +679,8 @@ def Compute_Error_and_STD(  model           : torch.nn.Module,
     # the d'th derivative of the FOM solution when we use the i(k)'th value of the k'th parameter, 
     # respectively.
     for d in range(n_IC):
-        max_rel_error[d]   = max_rel_error[d].reshape(param_space.test_grid_sizes);
+        max_rel_error[d]    = max_rel_error[d].reshape(param_space.test_grid_sizes);
         max_std[d]          = max_std[d].reshape(param_space.test_grid_sizes);
-
 
     # All done!
     return max_rel_error, max_std;

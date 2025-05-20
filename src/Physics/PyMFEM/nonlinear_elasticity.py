@@ -269,7 +269,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
         i, j, k element holds the j'th component of the velocity at the k'th position (i.e., X[i]) 
         at the i'th time step (i.e., T[i]).
 
-    X : numpy.ndarray, shape = (N_Nodes, 2)
+    X : numpy.ndarray, shape = (2, N_Nodes)
         i'th row holds the position of the i'th node at which we evaluate the solution.
     
     T : numpy.ndarray, shape = (Nt)
@@ -447,9 +447,9 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     # and so on. For example, if dim = 2, this is the array (x1, ... , xN, y1, ... , yN).
     nodes_data      : numpy.ndarray     = Nodes_GridFun.GetDataArray();         
     
-    # Reshape to be an array whose i'th row holds the position of the i'th node
-    Positions       : numpy.ndarray     = numpy.reshape(nodes_data, (dim, Num_Nodes)).T; 
-    if(myid == 0): LOGGER.debug("Positions has shape %s (Num_Nodes = %d, dim = %d)" % (str(Positions.shape), Num_Nodes, dim));
+    # Reshape to be an array whose i'th row holds the position of the i'th node.
+    Positions       : numpy.ndarray     = numpy.reshape(nodes_data, (dim, Num_Nodes)); 
+    if(myid == 0): LOGGER.debug("Positions has shape %s (dim = %d, Num_Nodes = %d)" % (str(Positions.shape), dim, Num_Nodes));
 
 
 

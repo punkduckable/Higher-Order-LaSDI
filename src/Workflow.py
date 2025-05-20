@@ -19,16 +19,20 @@ import  time;
 
 import  numpy;
 import  torch;
+import  matplotlib.pyplot           as      plt;
+from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 
-from    Enums               import  NextStep, Result;
-from    ParameterSpace      import  ParameterSpace;
-from    Physics             import  Physics;
-from    LatentDynamics      import  LatentDynamics;
-from    GPLaSDI             import  BayesianGLaSDI;
-from    Initialize          import  Initialize_Trainer;
-from    Sample              import  Run_Samples, Update_Train_Space;
-from    Logging             import  Initialize_Logger, Log_Dictionary;
-from    Plot                import  Plot_Heatmap2d;
+import  SolveROMs;
+from    Enums                       import  NextStep, Result;
+from    ParameterSpace              import  ParameterSpace;
+from    Physics                     import  Physics;
+from    LatentDynamics              import  LatentDynamics;
+from    GPLaSDI                     import  BayesianGLaSDI;
+from    GaussianProcess             import  fit_gps, eval_gp;
+from    Initialize                  import  Initialize_Trainer;
+from    Sample                      import  Run_Samples, Update_Train_Space;
+from    Logging                     import  Initialize_Logger, Log_Dictionary;
+from    Plot                        import  Plot_Heatmap2d, Plot_GP2d;
 
 # Set up the logger.
 Initialize_Logger(level = logging.INFO);
@@ -114,6 +118,76 @@ def main():
         result = Result.Unexecuted;
     elif (result is Result.Complete):
         LOGGER.info("Workflow is finished.");
+
+
+
+    # ---------------------------------------------------------------------------------------------
+    # Plot!
+    # ---------------------------------------------------------------------------------------------
+
+    # Set up gaussian processes. 
+    model.cpu();
+
+    # Get a GP for each coefficient in the latent dynamics.
+    gp_list         : list[GaussianProcessRegressor]    = fit_gps(param_space.train_space, trainer.best_coefs);
+
+    gp_pred_mean, gp_pred_std = eval_gp(gp_list, param_space.test_space);
+    gp_pred_mean    = gp_pred_mean.reshape(param_space.test_grid_sizes + [-1]);
+    gp_pred_std     = gp_pred_std.reshape(param_space.test_grid_sizes + [-1]);
+
+    Max_Rel_Error, Max_STD  = SolveROMs.Compute_Error_and_STD(
+                                                model           = model, 
+                                                physics         = physics,
+                                                param_space     = param_space,
+                                                latent_dynamics = latent_dynamics,
+                                                gp_list         = gp_list,
+                                                t_Test          = trainer.t_Test,
+                                                X_Test          = trainer.X_Test,
+                                                n_samples       = trainer.n_samples);
+
+    if(param_space.n_p == 2):
+        n_IC : int = latent_dynamics.n_IC;
+        
+        # Plot the mean and STD of the posterior distribution for each coefficient evaluated at
+        # each combination of parameter values.
+        Plot_GP2d(  p1_mesh     = param_space.test_meshgrid[0], 
+                    p2_mesh     = param_space.test_meshgrid[1], 
+                    gp_mean     = gp_pred_mean, 
+                    gp_std      = gp_pred_std, 
+                    param_train = param_space.train_space, 
+                    param_names = param_space.param_names, 
+                    n_cols      = 5);
+        
+        # Plot maximum (across the frames) relative reconstruction error between each frame of each 
+        # derivative of the FOM solution for each combination of parameter values and their 
+        # corresponding reconstructions.
+        for d in range(n_IC):
+            if(d == 0):
+                title   : str   = r'$max_{t} \frac{\left\| u_\bar{\xi}(t, x) - u(t, x) \right\|_x} {\| u(t, x)\|_x}$';
+            elif(d == 1):
+                title   : str   = r'$max_{t} \frac{\left\| \frac{d}{dt}u_{\bar{\xi}}(t, x) - \frac{d}{dt}u(t, x) \right\|_x}{\left\| \frac{d}{dt}u(t, x) \right\|_x}$';
+            else:
+                title   : str   = r'$max_{t} \frac{\left\| \frac{d^{%d}}{dt^{%d}}u_{\bar{\xi}}(t, x) - \frac{d^{%d}}{dt^{%d}}u(t, x) \right\|_x}{\left\| \frac{d^{%d}}{dt^{%d}}u(t, x) \right\|_x}$' % (d, d, d, d, d, d);
+
+            Plot_Heatmap2d(     values          = Max_Rel_Error[d] * 100, 
+                                param_space     = param_space,
+                                title           = title);
+
+        # Plot the std of the component of the frame with the largest std (across the samples) in 
+        # the reconstruction of that component of that frame. Do this for each combination of 
+        # parameter values and derivative of the FOM solution.
+        for d in range(n_IC):
+            if(d == 0):
+                title   : str   = r'$max_{(t, x)} \sigma_{i \in \{1, \ldots, %d\}} \left[ u_{\xi^i} \right]$' % trainer.n_samples;
+            elif(d == 1):
+                title   : str   = r'$max_{(t, x)} \sigma_{i \in \{ 1, \ldots, %d\}} \left[\frac{d}{dt}u_{\xi^i} \right]$' % (trainer.n_samples);
+            else:
+                title   : str   = r'$max_{(t, x)} \sigma_{i \in \{ 1, \ldots, %d\}} \left[\frac{d^{%d}}{dt^{%d}}u_{\xi^i} \right]$' % (trainer.n_samples, d, d);
+
+            Plot_Heatmap2d( values          = Max_STD[d] * 100,
+                            param_space     = param_space, 
+                            title           = title);
+
 
 
     # ---------------------------------------------------------------------------------------------
