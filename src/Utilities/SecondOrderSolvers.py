@@ -2,6 +2,8 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
+from    typing      import  Callable;
+
 import  numpy; 
 import  torch;
 
@@ -90,7 +92,7 @@ transform it into a method for solving 2nd order ODEs.
 # Runge-Kutta Solvers
 # -------------------------------------------------------------------------------------------------
 
-def RK1(f       : callable, 
+def RK1(f       : Callable, 
         y0      : numpy.ndarray | torch.Tensor, 
         Dy0     : numpy.ndarray | torch.Tensor, 
         t_Grid  : numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray] | tuple[torch.Tensor, torch.Tensor]:
@@ -122,7 +124,7 @@ def RK1(f       : callable,
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    f : callable
+    f : Callable
         The right-hand side of the ODE (see the top of this doc string). This is a function whose 
         domain and co-domain are \mathbb{R} x V x V and V, respectively. Thus, we assume that 
         f(t, y(t), y'(t)) = y''(t).
@@ -201,7 +203,7 @@ def RK1(f       : callable,
 
 
 
-def RK2(f       : callable, 
+def RK2(f       : Callable, 
         y0      : numpy.ndarray | torch.Tensor, 
         Dy0     : numpy.ndarray | torch.Tensor, 
         t_Grid  : numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray] | tuple[torch.Tensor, torch.Tensor]:
@@ -242,7 +244,7 @@ def RK2(f       : callable,
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    f : callable
+    f : Callable
         The right-hand side of the ODE (see the top of this doc string). This is a function whose 
         domain and co-domain are \mathbb{R} x V x V and V, respectively. Thus, we assume that 
         f(t, y(t), y'(t)) = y''(t).
@@ -322,7 +324,7 @@ def RK2(f       : callable,
 
 
 
-def RK4(f       : callable, 
+def RK4(f       : Callable, 
         y0      : numpy.ndarray | torch.Tensor, 
         Dy0     : numpy.ndarray | torch.Tensor, 
         t_Grid  : numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray] | tuple[torch.Tensor, torch.Tensor]:
@@ -377,7 +379,7 @@ def RK4(f       : callable,
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    f : callable
+    f : Callable
         The right-hand side of the ODE (see the top of this doc string). This is a function whose 
         domain and co-domain are \mathbb{R} x V x V and V, respectively. Thus, we assume that 
         f(t, y(t), y'(t)) = y''(t).

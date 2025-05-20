@@ -705,7 +705,13 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
 
     # Plot the figure as an image (the i,j pixel is just value[i, j], the value associated with 
     # the i'th value of p1 and j'th value of p2.
-    im = ax.imshow(values, cmap = cmap);
+    print("p1)")
+    print(p1_grid);
+    print("p2")
+    print(p2_grid);
+    print("values");
+    print(values.T);
+    im = ax.imshow(values.T, cmap = cmap);
     fig.colorbar(im, ax = ax, fraction = 0.04);
     ax.set_xticks(numpy.arange(0, n1, 2), labels = numpy.round(p1_grid[::2], 2));
     ax.set_yticks(numpy.arange(0, n2, 2), labels = numpy.round(p2_grid[::2], 2));
@@ -714,7 +720,7 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     LOGGER.debug("Adding values to the center of each pixel");
     for i in range(n1):
         for j in range(n2):
-            ax.text(j, i, round(values[i, j], 1), ha = 'center', va = 'center', color = 'k');
+            ax.text(i, j, round(values[i, j], 1), ha = 'center', va = 'center', color = 'k');
 
 
     # ---------------------------------------------------------------------------------------------
