@@ -168,8 +168,8 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
                 par_ref_levels  : int           = 0,
                 order           : int           = 2,
                 ode_solver_type : int           = 14,
-                t_final         : float         = 150.0,
-                time_step_size  : float         = 0.03,
+                t_final         : float         = 100.0,
+                time_step_size  : float         = 0.02,
                 viscosity       : float         = 1e-2,
                 shear_modulus   : float         = 0.25, 
                 bulk_modulus    : float         = 5.0,
@@ -457,10 +457,10 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     # 7. VisIt
 
     # Setup VisIt visualization (if we are doing that)
-    if (VisIt):
+    if (VisIt == True):
         LOGGER.info("Setting up VisIt visualization.");
 
-        dc_path : str   = os.path.join(os.path.join(os.path.curdir, "VisIt"), "nlelast-fom");
+        dc_path : str   = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "nlelast-fom");
         dc              = mfem.VisItDataCollection(dc_path, pmesh);
         dc.SetPrecision(8);
         # // To save the mesh using MFEM's parallel mesh format:

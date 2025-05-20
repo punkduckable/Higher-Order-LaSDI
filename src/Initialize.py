@@ -206,7 +206,7 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
         model_config        : dict              = config['model'][model_type];
         hidden_widths       : list[int]         = model_config['hidden_widths'];
         n_z                 : int               = model_config['latent_dimension'];
-        activation          : str               = model_config['activation']  if 'activation' in config else 'tanh';
+        activation          : str               = model_config['activation']  if 'activation' in model_config else 'tanh';
 
         # Now build the widths attribute + fetch Frame_Shape from physics.
         Frame_Shape         : list[int]         = physics.Frame_Shape;
