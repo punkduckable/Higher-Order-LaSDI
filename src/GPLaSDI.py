@@ -926,8 +926,8 @@ class BayesianGLaSDI:
 
     def get_new_sample_point(self) -> numpy.ndarray:
         """
-        This function finds the element of the testing set whose corresponding latent dynamics 
-        gives the highest variance FOM time series. 
+        This function finds the element of the testing set (excluding the training set) whose 
+        corresponding latent dynamics gives the highest variance FOM time series. 
 
         How does this work? The latent space coefficients change with parameter values. For each 
         coefficient, we fit a gaussian process whose input is the parameter values. Thus, for each 
@@ -980,26 +980,54 @@ class BayesianGLaSDI:
         # Remember that coefs should specify the coefficients from that iteration. 
         model       : torch.nn.Module   = self.model.cpu();
         n_test      : int               = self.param_space.n_test();
+        n_train     : int               = self.param_space.n_train();
         n_IC        : int               = self.latent_dynamics.n_IC;
         model.load_state_dict(torch.load(self.path_checkpoint + '/' + 'checkpoint.pt'));
 
+        # First, find the candidate parameters. This is the elements of the testing set that 
+        # are not already in the training set.
+        candidate_parameters    : list[numpy.ndarray]   = [];
+        t_Candidates            : list[torch.Tensor]    = [];
+        for i in range(n_test):
+            ith_Test_param = self.param_space.test_space[i, :];
+            
+            # Check if the i'th testing parameter is in the training set
+            in_train : bool = False;
+            for j in range(n_train):
+                if(numpy.any(numpy.all(self.param_space.train_space[j, :] == ith_Test_param))):
+                    in_train = True;
+                    break;
+            
+            # If not, add it to the set of candidates
+            if(in_train == False):
+                candidate_parameters.append(ith_Test_param);
+                t_Candidates.append(self.t_Test[i]);
+        
+        # Concatenate the candidates to form an array of shape (n_candidates, n_coefs).
+        n_candidates : int = len(candidate_parameters);
+        LOGGER.info("There are %d candidate testing parameters (%d in the testing space, %d in the training set)" % (n_candidates, n_test, n_train));
+        assert(n_candidates >= 1);
+        candidate_parameters    = numpy.array(candidate_parameters);
+
+
         # Map the initial conditions for the FOM to initial conditions in the latent space.
-        # Yields an n_test element list whose i'th element is an n_IC element list whose j'th
+        # Yields an n_candidates element list whose i'th element is an n_IC element list whose j'th
         # element is an numpy.ndarray of shape (1, n_z) whose k'th element holds the k'th component
         # of the encoding of the initial condition for the j'th derivative of the latent dynamics 
-        # corresponding to the i'th combination of parameter values.
-        Z0 : list[list[numpy.ndarray]]  = model.latent_initial_conditions(self.param_space.test_space, self.physics);
+        # corresponding to the i'th candidate combination of parameter values.
+        Z0 : list[list[numpy.ndarray]]  = model.latent_initial_conditions(  param_grid  = candidate_parameters, 
+                                                                            physics     = self.physics);
 
         # Train the GPs on the training data, get one GP per latent space coefficient.
         gp_list : list[GaussianProcessRegressor] = fit_gps(self.param_space.train_space, coefs);
 
-        # For each combination of parameter values in the testing set, for each coefficient, 
+        # For each combination of parameter values in the candidate set, for each coefficient, 
         # draw a set of samples from the posterior distribution for that coefficient evaluated at
-        # the testing parameters. We store the samples for a particular combination of parameter 
+        # the candidate parameters. We store the samples for a particular combination of parameter 
         # values in a 2d numpy.ndarray of shape (n_sample, n_coef), whose i, j element holds the 
         # i'th sample of the j'th coefficient. We store the arrays for different parameter values 
         # in a list of length n_test. 
-        coef_samples : list[numpy.ndarray] = [sample_coefs(gp_list, self.param_space.test_space[i, :], self.n_samples) for i in range(n_test)];
+        coef_samples : list[numpy.ndarray] = [sample_coefs(gp_list, candidate_parameters[i, :], self.n_samples) for i in range(n_candidates)];
 
         # Now, solve the latent dynamics forward in time for each set of coefficients in 
         # coef_samples. There are n_test combinations of parameter values, and we have n_samples 
@@ -1014,15 +1042,15 @@ class BayesianGLaSDI:
         # distribution for the i'th combination of testing parameter values.
         LatentStates    : list[list[numpy.ndarray]]     = [];
         n_z             : int                           = self.latent_dynamics.n_z;
-        for i in range(n_test):
+        for i in range(n_candidates):
             LatentStates_i  : list[numpy.ndarray]    = [];
             for j in range(n_IC):
                 LatentStates_i.append(numpy.ndarray([self.n_samples, len(self.t_Test[j]), n_z]));
             LatentStates.append(LatentStates_i);
         
-        for i in range(n_test):
+        for i in range(n_candidates):
             # Fetch the t_Grid for the i'th combination of parameter values.
-            t_Grid  : numpy.ndarray = self.t_Test[i].reshape(1, -1).detach().numpy();
+            t_Grid  : numpy.ndarray = t_Candidates[i].reshape(1, -1).detach().numpy();
             n_t_j   : int           = len(t_Grid);
 
             # Simulate one sample at a time; store the resulting frames.           
@@ -1038,7 +1066,7 @@ class BayesianGLaSDI:
 
         # We have found the testing parameter we want to add to the training set. Fetch it, then
         # stop the timer and return the parameter. 
-        new_sample : numpy.ndarray = self.param_space.test_space[m_index, :].reshape(1, -1);
+        new_sample : numpy.ndarray = candidate_parameters[m_index, :].reshape(1, -1);
         LOGGER.info('New param: ' + str(numpy.round(new_sample, 4)) + '\n');
         self.timer.end("new_sample");
 
