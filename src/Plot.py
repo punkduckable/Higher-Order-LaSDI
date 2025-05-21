@@ -155,20 +155,20 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
         im0 = ax[0].contourf(t_grid, x_grid, X_True_np[d].T, levels = numpy.linspace(X_min[d], X_max[d], 200));  # Note: contourf(X, Y, Z) requires Z.shape = (Y.shape, X.shape) with Z[i, j] corresponding to Y[i] and X[j]
         ax[0].set_title("True");
         ax[0].set_xlabel("t");
-        ax[0].set_ylabel("x");
+        ax[0].set_ylabel("x", rotation = 0);
 
         fig.colorbar(im0, cax = ax[1], format = "%0.2f", location = "left");
 
         ax[2].contourf(t_grid, x_grid, X_Pred_np[d].T, levels = numpy.linspace(X_min[d], X_max[d], 200));            
         ax[2].set_title("Prediction");
         ax[2].set_xlabel("t");
-        ax[2].set_ylabel("x");
+        ax[2].set_ylabel("x", rotation = 0);
 
 
         im3 = ax[3].contourf(t_grid, x_grid, Diff_X[d].T, levels = numpy.linspace(Diff_X_min[d], Diff_X_max[d], 200));
         ax[3].set_title("Difference");
         ax[3].set_xlabel("t");
-        ax[3].set_ylabel("x");
+        ax[3].set_ylabel("x", rotation = 0);
 
         fig.colorbar(im3, cax = ax[4], format = "%0.2f", location = "left");
 
@@ -379,7 +379,7 @@ def Plot_Prediction(model           : torch.nn.Module,
             plt.contourf(t_grid_i_np, x_grid, X_pred_i_mean_np[j].T, 100, cmap = plt.cm.jet);   # Note: contourf(X, Y, Z) requires Z.shape = (Y.shape, X.shape) with Z[i, j] corresponding to Y[i] and X[j].
             plt.colorbar();
             plt.xlabel("t");
-            plt.ylabel("x");
+            plt.ylabel("x", rotation = 0);
             plt.title('Decoder Mean Prediction');
             
             # Plot the std of the d'th derivative of the FOM solution.
@@ -387,7 +387,7 @@ def Plot_Prediction(model           : torch.nn.Module,
             plt.contourf(t_grid_i_np, x_grid, X_pred_i_std_np[j].T, 100, cmap = plt.cm.jet);
             plt.colorbar();
             plt.xlabel("t");
-            plt.ylabel("x");
+            plt.ylabel("x", rotation = 0);
             plt.title('Decoder Standard Deviation');
 
             # Plot the d'th derivative of the true FOM solution.
@@ -395,7 +395,7 @@ def Plot_Prediction(model           : torch.nn.Module,
             plt.contourf(t_grid_i_np, x_grid, X_True_i_np[j].T, 100, cmap = plt.cm.jet);
             plt.colorbar();
             plt.xlabel("t");
-            plt.ylabel("x");
+            plt.ylabel("x", rotation = 0);
             plt.title('Ground Truth');
 
             # Plot the error between the mean predicted d'th derivative and the true d'th derivative of
@@ -405,7 +405,7 @@ def Plot_Prediction(model           : torch.nn.Module,
             plt.contourf(t_grid_i_np, x_grid, error.T, 100, cmap = plt.cm.jet);
             plt.colorbar();
             plt.xlabel("t");
-            plt.ylabel("x");
+            plt.ylabel("x", rotation = 0);
             plt.title('Absolute Error');
 
             plt.tight_layout();
@@ -554,9 +554,9 @@ def Plot_GP2d(  p1_mesh         : numpy.ndarray,
                 axs_mean[i, j].set_frame_on(False);
 
                 if (j == 0):
-                    axs_std[i, j].set_ylabel(param_names[1]);
+                    axs_std[i, j].set_ylabel(param_names[1], rotation = 0);
                     axs_std[i, j].get_yaxis().set_visible(True);
-                    axs_mean[i, j].set_ylabel(param_names[1]);
+                    axs_mean[i, j].set_ylabel(param_names[1], rotation = 0);
                     axs_mean[i, j].get_yaxis().set_visible(True);
                 if (i == subplot_shape[0] - 1):
                     axs_std[i, j].set_xlabel(param_names[0]);
@@ -603,9 +603,9 @@ def Plot_GP2d(  p1_mesh         : numpy.ndarray,
             # Add plot labels (but only if the current subplot is in the first column or final 
             # row).
             if (j == 0):
-                axs_std[i, j].set_ylabel(param_names[1]);
+                axs_std[i, j].set_ylabel(param_names[1], rotation = 0);
                 axs_std[i, j].get_yaxis().set_visible(True);
-                axs_mean[i, j].set_ylabel(param_names[1]);
+                axs_mean[i, j].set_ylabel(param_names[1], rotation = 0);
                 axs_mean[i, j].get_yaxis().set_visible(True);
             if (i == subplot_shape[0] - 1):
                 axs_std[i, j].set_xlabel(param_names[0]);
@@ -704,7 +704,7 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     cmap = LinearSegmentedColormap.from_list('rg', ['C0', 'w', 'C3'], N = 256);
 
     # Plot the figure as an image (the i,j pixel is just value[i, j], the value associated with 
-    # the i'th value of p1 and j'th value of p2.
+    # the i'th value of p1 and j'th value of p2
     im = ax.imshow(values.T, cmap = cmap);
     fig.colorbar(im, ax = ax, fraction = 0.04);
     ax.set_xticks(numpy.arange(0, n1, 2), labels = numpy.round(p1_grid[::2], 2));
@@ -714,7 +714,7 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     LOGGER.debug("Adding values to the center of each pixel");
     for i in range(n1):
         for j in range(n2):
-            ax.text(i, j, round(values[i, j], 1), ha = 'center', va = 'center', color = 'k');
+            ax.text(i, j, round(values[i, j], 2), ha = 'center', va = 'center', color = 'k');
 
 
     # ---------------------------------------------------------------------------------------------
@@ -749,7 +749,7 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
 
     # Set plot lables and plot!
     ax.set_xlabel(param_names[0], fontsize = 15);
-    ax.set_ylabel(param_names[1], fontsize = 15);
+    ax.set_ylabel(param_names[1], fontsize = 15, rotation = 0);
     ax.set_title(title, fontsize = 25);
     plt.show();
 
