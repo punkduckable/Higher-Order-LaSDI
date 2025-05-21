@@ -33,11 +33,11 @@ parameter_space:
       test_space_type:      uniform
       sample_size:          5
       log_scale:            false
-    - name:                 K
-      min:                  4.0
-      max:                  6.0
+    - name:                 mu
+      min:                  .2
+      max:                  .6
       test_space_type:      uniform
-      sample_size:          5
+      sample_size:          3
       log_scale:            false
   test_space:
     type:                   grid
