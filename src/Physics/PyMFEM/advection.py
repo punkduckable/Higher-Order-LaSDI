@@ -166,7 +166,7 @@ class FE_Evolution(mfem.PyTimeDependentOperator):
 # -------------------------------------------------------------------------------------------------
 
 
-def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh", 
+def Simulate(   meshfile_name       : str       = "periodic-square.mesh", 
                 ser_ref_levels      : int       = 2,
                 par_ref_levels      : int       = 0,
                 order               : int       = 3,
@@ -188,7 +188,7 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
         d((x, y), 0)         =  (x, y)
         v((x, y), 0)         =  (-theta*x^2, theta*x^2 (8.0 - x))
     
-    where X[0] and X[-1] are the positions of the first and lash nodes, respectively. Here, theta 
+    where X[0] and X[-1] are the positions of the first and last nodes, respectively. Here, theta 
     is a parameter that the user can change. 
     
     See the c++ version of example 10 in the MFEM library for more detail.
@@ -247,12 +247,12 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
 
     Sol, X, T. 
     
-    Sol : numpy.ndarray, shape = (Nt, 1, N_Nodes)
+    Sol : numpy.ndarray, shape = (Nt, 1, num_positions)
         i, j, k element holds the j'th component of the solution at the k'th position (i.e., 
         X[i, :]) at the i'th time step (i.e., T[i]).
 
-    X : numpy.ndarray, shape = (2, N_Nodes)
-        i'th row holds the position of the i'th node at which we evaluate the solution.
+    X : numpy.ndarray, shape = (2, num_positions)
+        i'th row holds the position of the i'th position at which we evaluate the solution.
     
     T : numpy.ndarray, shape = (Nt)
         i'th element holds the j'th time at which we evaluate the solution.
@@ -269,8 +269,9 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
     num_procs           : int   = comm.Get_size();
     verbose             : bool  = (myid == 0);
 
-    # Set default parameters.
+    # Set variables.
     problem             : int   = 0;
+    dt                  : float = time_step_size;
 
     # Set the device.
     device : mfem.Device = mfem.Device('cpu');
@@ -391,9 +392,9 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
     # 6. Setup the a grid function to hold the solution.
 
     if(myid == 0): LOGGER.debug("Setting up the grid function to hold the initial condition.");
-    u_gf   : mfem.ParGridFunction               = mfem.ParGridFunction(fes);
+    u_gf    : mfem.ParGridFunction                  = mfem.ParGridFunction(fes);
     u_gf.ProjectCoefficient(u0);
-    U       : mfem._par.hypre.HypreParVector    = u_gf.GetTrueDofs();
+    U       : mfem._par.hypre.HypreParVector        = u_gf.GetTrueDofs();
 
     # Save the initial solution.
     if(myid == 0): LOGGER.debug("Saving the initial solution.");
@@ -419,11 +420,11 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
     if(myid == 0): LOGGER.debug("x_min = %f, x_max = %f, y_min = %f, y_max = %f" % (x_min, x_max, y_min, y_max));
 
     # Now, sample num_positions points evenly spaced between x_min and x_max, and y_min and y_max.
-    x_positions = numpy.random.uniform(x_min, x_max, num_positions);
-    y_positions = numpy.random.uniform(y_min, y_max, num_positions);
-    Positions   : numpy.ndarray = numpy.column_stack((x_positions, y_positions));
+    x_positions     : numpy.ndarray = numpy.random.uniform(x_min, x_max, num_positions);
+    y_positions     : numpy.ndarray = numpy.random.uniform(y_min, y_max, num_positions);
+    Positions       : numpy.ndarray = numpy.row_stack((x_positions, y_positions));
+    Num_Positions   : int           = Positions.shape[1];
     if(myid == 0): LOGGER.debug("Positions has shape %s (dim = %d, num_positions = %d)" % (str(Positions.shape), dim, num_positions));
-
 
 
     # ---------------------------------------------------------------------------------------------
@@ -454,9 +455,22 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
     times_list          : list[float]           = [];    
     u_list              : list[numpy.ndarray]   = [];
 
-    # Append the ICs.
+    # Append the initial time
     times_list.append(0);
-    u_list.append(  numpy.reshape(u_gf.GetDataArray().copy(), (dim, Num_Vertices)));
+
+    # Evaluate the initial solution at the positions.
+    element_nums        = pmesh.FindPoints(Positions.T);
+    u_Positions_0       = numpy.zeros((1, Num_Positions));
+
+    for i in range(Num_Positions):
+        # Get the element number of the i'th point
+        element_num : int   = element_nums[1][i];
+        point               = mfem.IntegrationPoint();
+        x,y                 = numpy.float64(Positions[:, i].tolist());
+        point.Set2(x, y);
+        u_Positions_0[0, i]= u_gf.GetValue(element_num, point, dim);
+
+    u_list.append( u_Positions_0);
 
     # Initialize the ODE solver.
     ode_solver.Init(adv);
@@ -469,39 +483,40 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
         if t > t_final - dt/2:
             break;
         
+        # Step the ODE solver.
         t, dt = ode_solver.Step(U, t, dt);
-        
+        u_gf.Assign(U);
+
         # Should we serialize?
         if ti % serialization_steps == 0:
             if(myid == 0): LOGGER.info("time step: " + str(ti) + ", time: " + str(numpy.round(t, 3)));
 
             # Serialize the current displacement, velocity, and time.
             times_list.append(t);
-            u_list.append(  numpy.reshape(u_gf.GetDataArray().copy(),  (dim, Num_Vertices)));
 
-            """
-            # JENNIFER'S CODE
-            input_data = # CHOOSE INPOINT POINTS
-            element_nums = mesh.FindPoints(input_points);
-            values_at_points = numpy.zeros((batch_size, 1));
-            for i in range(batch_size):
+            # Evaluate the solution at the positions.
+            element_nums        = mesh.FindPoints(Positions.T);
+            u_Positions_t       = numpy.zeros((1, Num_Positions));
+
+            for i in range(Num_Positions):
                 # Get the element number of the i'th point
-                element_num = element_nums[1][i];
-                point = mfem.IntegrationPoint()
-                x,y = np.float64(input_data[i,:].tolist())
+                element_num : int   = element_nums[1][i];
+                point               = mfem.IntegrationPoint();
+                x,y                 = numpy.float64(Positions[:, i].tolist());
                 point.Set2(x, y)
-                values_at_points[i] = gf.GetValue(element_num, point, dim)
-            """
+                u_Positions_t[0, i] = u_gf.GetValue(element_num, point, dim)
 
+            # Append the current solution to the list.
+            u_list.append(u_Positions_t);
 
-
-            # If visualizing, Save the GridFunctions to the VisIt object.
+            # If visualizing, Save the solution to the VisIt object.
             if(VisIt):
-                # Save the mesh, displacement, and velocity
+                # Save the mesh, solution, and time.
                 dc.SetCycle(ti);
                 dc.SetTime(t);
                 dc.Save();
-        
+            
+        # Increment the time step counter.
         ti = ti + 1;
 
 
@@ -523,4 +538,4 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
 
 if __name__ == "__main__":
     Logging.Initialize_Logger(level = logging.DEBUG);
-    D, V, X, T = Simulate();
+    Sol, X, T = Simulate();
