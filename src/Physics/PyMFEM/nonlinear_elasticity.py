@@ -25,7 +25,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 
 
 # -------------------------------------------------------------------------------------------------
-# Classes
+# Nonlinear Elasticity Classes
 # -------------------------------------------------------------------------------------------------
 
 
@@ -247,7 +247,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
         specifies the constant "theta" in the initial velocity.
 
     serialize_steps : int
-        Specifies how frequently we serialize (save) the solution.
+        Specifies how frequently we serialize (save) and visualize the solution.
 
     VisIt : bool
         If True, will prompt the code to save the displacement and velocity GridFunctions every 
@@ -377,7 +377,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     # Elastic energy density.
     w_fec       = mfem.L2_FECollection(order + 1, dim);
     w_fespace   = mfem.ParFiniteElementSpace(pmesh, w_fec);
-    w_gf          = mfem.ParGridFunction(w_fespace);
+    w_gf        = mfem.ParGridFunction(w_fespace);
 
 
 
@@ -434,7 +434,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     # ---------------------------------------------------------------------------------------------
     # 5. Extract the positions of the nodes.
 
-    LOGGER.info("Extracting node positions");
+    if(myid == 0): LOGGER.info("Extracting node positions");
 
     # Fetch the nodes + number of them
     Nodes_GridFun                       = mfem.ParGridFunction(fespace);
@@ -454,11 +454,11 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 7. VisIt
+    # 6. VisIt
 
     # Setup VisIt visualization (if we are doing that)
     if (VisIt == True):
-        LOGGER.info("Setting up VisIt visualization.");
+        if(myid == 0): LOGGER.info("Setting up VisIt visualization.");
 
         dc_path : str   = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "nlelast-fom");
         dc              = mfem.VisItDataCollection(dc_path, pmesh);
@@ -474,9 +474,9 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 6. Perform time-integration (looping over the time iterations, ti, with a time-step dt).
+    # 7. Perform time-integration (looping over the time iterations, ti, with a time-step dt).
     
-    LOGGER.info("Running time stepping from t = 0 to t = %f with dt %f" % (t_final, dt));
+    if(myid == 0): LOGGER.info("Running time stepping from t = 0 to t = %f with dt %f" % (t_final, dt));
 
     # Setup for time stepping.
     ode_solver.Init(oper);
