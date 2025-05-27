@@ -188,7 +188,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
         d((x, y), 0)         =  (x, y)
         v((x, y), 0)         =  (-theta*x^2, theta*x^2 (8.0 - x))
     
-    where X[0] and X[-1] are the positions of the first and lash nodes, respectively. Here, theta 
+    where X[0] and X[-1] are the positions of the first and last nodes, respectively. Here, theta 
     is a parameter that the user can change. 
     
     See the c++ version of example 10 in the MFEM library for more detail.
@@ -375,9 +375,9 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     pmesh.GetNodes(D_ref);
     
     # Elastic energy density.
-    w_fec       = mfem.L2_FECollection(order + 1, dim);
-    w_fespace   = mfem.ParFiniteElementSpace(pmesh, w_fec);
-    w_gf        = mfem.ParGridFunction(w_fespace);
+    w_fec       : mfem.FiniteElementCollection  = mfem.L2_FECollection(order + 1, dim);
+    w_fespace   : mfem.ParFiniteElementSpace    = mfem.ParFiniteElementSpace(pmesh, w_fec);
+    w_gf        : mfem.ParGridFunction          = mfem.ParGridFunction(w_fespace);
 
 
 
