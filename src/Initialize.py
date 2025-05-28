@@ -26,6 +26,7 @@ from    Model               import  Autoencoder, load_Autoencoder, Autoencoder_P
 from    Physics             import  Physics;
 from    Explicit            import  Explicit;
 from    NonlinearElasticity import  NonlinearElasticity
+from    Advection           import  Advection;
 
 # Set up logger.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
@@ -34,14 +35,19 @@ LOGGER  : logging.Logger    = logging.getLogger(__name__);
 # depending on the settings.
 trainer_dict    =  {'gplasdi'               : BayesianGLaSDI};
 model_dict      =  {'ae'                    : Autoencoder,
-                    'pair'                  : Autoencoder_Pair};
+                    'autoencoder'           : Autoencoder,
+                    'pair'                  : Autoencoder_Pair,
+                    'autoencoder_pair'      : Autoencoder_Pair};
 model_load_dict =  {'ae'                    : load_Autoencoder,
-                    'pair'                  : load_Autoencoder_Pair};
+                    'autoencoder'           : load_Autoencoder,
+                    'pair'                  : load_Autoencoder_Pair,
+                    'autoencoder_pair'      : load_Autoencoder_Pair};
 ld_dict         =  {'sindy'                 : SINDy, 
                     'spring'                : DampedSpring};
 physics_dict    =  {'Burgers'               : Burgers.Burgers,
                     'BurgersSecondOrder'    : BurgersSecondOrder.Burgers,
                     'Explicit'              : Explicit,
+                    'Advection'             : Advection,
                     'NonlinearElasticity'   : NonlinearElasticity};
 
 
@@ -200,7 +206,7 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
     LOGGER.info("Initializing Model (%s)" % model_type);
 
     # Autoencoder, autoencoder pair case.
-    if(model_type == "ae" or model_type == "pair"):
+    if(model_type == "ae" or model_type == "pair" or model_type == "autoencoder" or model_type == "autoencoder_pair"):
 
         # Next, fetch the hidden widths, latent dimension (n_z), and activation for the model. 
         model_config        : dict              = config['model'][model_type];
@@ -214,13 +220,16 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
         widths              : list[int]         = [space_dim] + hidden_widths + [n_z];
 
         # Now build the model!
-        model           : torch.nn.Module   = model_dict[model_type](
+        model           : torch.nn.Module       = model_dict[model_type](
                                                         widths          = widths, 
                                                         activation      = activation, 
                                                         reshape_shape   = Frame_Shape);
 
         # All done!
         return model;
+
+    else:
+        raise ValueError("Model type %s not supported." % model_type);
 
 
 

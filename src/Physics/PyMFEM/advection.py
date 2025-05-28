@@ -29,95 +29,81 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class velocity_coeff(mfem.VectorPyCoefficient):
-    def __init__(self, dim : int, bb_min : float, bb_max : float, problem : int):
+    def __init__(self, dim : int, bb_min : float, bb_max : float):
         # Run the super class initializer
         mfem.VectorPyCoefficient.__init__(self, dim);
 
         # Now set problem specific attributes.
         self.bb_min     : float = bb_min;
         self.bb_max     : float = bb_max;
-        self.problem    : int   = problem;
 
 
-    def EvalValue(self, x):
-        dim = len(x)
+    def EvalValue(self, x : list[float]) -> list[float]:
+        dim : int = len(x);
 
-        center = (self.bb_min + self.bb_max)/2.0
+        center : float = (self.bb_min + self.bb_max)/2.0;
+
         # map to the reference [-1,1] domain
-        X = 2 * (x - center) / (self.bb_max - self.bb_min)
-        if self.problem == 0:
-            if dim == 1:
-                v = [1.0, ]
-            elif dim == 2:
-                v = [sqrt(2./3.), sqrt(1./3)]
-            elif dim == 3:
-                v = [sqrt(3./6.), sqrt(2./6), sqrt(1./6.)]
-        elif (self.problem == 1 or self.problem == 2):
-            # Clockwise rotation in 2D around the origin
-            w = pi/2
-            if dim == 1:
-                v = [1.0, ]
-            elif dim == 2:
-                v = [w*X[1],  - w*X[0]]
-            elif dim == 3:
-                v = [w*X[1],  - w*X[0],  0]
-        elif (self.problem == 3):
-            # Clockwise twisting rotation in 2D around the origin
-            w = pi/2
-            d = max((X[0]+1.)*(1.-X[0]), 0.) * max((X[1]+1.)*(1.-X[1]), 0.)
-            d = d ** 2
-            if dim == 1:
-                v = [1.0, ]
-            elif dim == 2:
-                v = [d*w*X[1],  - d*w*X[0]]
-            elif dim == 3:
-                v = [d*w*X[1],  - d*w*X[0],  0]
+        X : list[float] = 2 * (x - center) / (self.bb_max - self.bb_min);
+        
+        # Clockwise twisting rotation in 2D around the origin
+        global gamma;
+        d : float = max((X[0] + 1.)*(1. - X[0]), 0.) * max((X[1] + 1.)*(1. - X[1]), 0.);
+        d : float = d ** 2;
+        if dim == 1:
+            v : list[float] = [1.0, ]
+        elif dim == 2:
+            v : list[float] = [d*gamma*X[1],  - d*gamma*X[0]]
+        elif dim == 3:
+            v : list[float] = [d*gamma*X[1],  - d*gamma*X[0],  0]
+
         return v
 
 
 
 class u0_coeff(mfem.PyCoefficient):
-    def __init__(self, bb_min : float, bb_max : float, problem : int):
+    def __init__(self, bb_min : float, bb_max : float):
         # Run the super class initializer
         mfem.PyCoefficient.__init__(self);
 
         # Now set problem specific attributes.
         self.bb_min : float = bb_min;
         self.bb_max : float = bb_max;
-        self.problem : int   = problem;
 
+    def EvalValue(self, x : numpy.ndarray) -> float:
+        """
+        This function returns the initial condition for the advection problem.
 
-    def EvalValue(self, x):
-        dim = len(x)
+        The initial condition is a sine wave in the x-direction and a sine wave in the y-direction.
 
-        center = (self.bb_min + self.bb_max)/2.0
-        # map to the reference [-1,1] domain
-        X = 2 * (x - center) / (self.bb_max - self.bb_min)
-        if (self.problem == 0 or self.problem == 1):
-            if dim == 1:
-                return numpy.exp(-40. * (X[0]-0.5)**2)
-            elif (dim == 2 or dim == 3):
-                rx  : float = 0.45
-                ry  : float = 0.25
-                cx  : float = 0.
-                cy  : float = -0.2
-                w   : float = 10.
-                if dim == 3:
-                    s = (1. + 0.25*cos(2 * pi * x[2]))
-                    rx = rx * s
-                    ry = ry * s
-                return (erfc(w * (X[0]-cx-rx)) * erfc(-w*(X[0]-cx+rx)) *
-                        erfc(w * (X[1]-cy-ry)) * erfc(-w*(X[1]-cy+ry)))/16
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+        x : numpy.ndarray, shape = (2,)
+            The position at which to evaluate the initial condition. The first element is the 
+            x-coordinate, and the second element is the y-coordinate.
 
-        elif self.problem == 2:
-            rho = hypot(x[0], x[1])
-            phi = arctan2(x[1], x[0])
-            return (sin(pi * rho) ** 2) * sin(3*phi)
-        elif self.problem == 3:
-            return sin(pi * X[0]) * sin(pi * X[1])
+            
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+        
+        float
+            The value of the initial condition at the given position.
+        """
 
-        return 0.0
+        assert(isinstance(x, numpy.ndarray));
+        assert(x.shape == (2,));
 
+        # Get the center of the bounding box.
+        center : float = (self.bb_min + self.bb_max)/2.0;
+
+        # Map to the reference [-1,1] domain.
+        X : numpy.ndarray = 2 * (x - center) / (self.bb_max - self.bb_min);
+        
+        # Return the initial condition.
+        global omega;
+        return sin(pi * omega * X[0]) * sin(pi * omega * X[1])
 
 
 # Inflow boundary condition (zero for the problems considered in this example)
@@ -131,15 +117,15 @@ class FE_Evolution(mfem.PyTimeDependentOperator):
     def __init__(self, M, K, b):
         mfem.PyTimeDependentOperator.__init__(self, M.Height())
 
-        self.M_prec = mfem.HypreSmoother()
-        self.M_solver = mfem.CGSolver(M.GetComm())
-        self.z = mfem.Vector(M.Height())
+        self.M_prec     : mfem.HypreSmoother    = mfem.HypreSmoother();
+        self.M_solver   : mfem.CGSolver         = mfem.CGSolver(M.GetComm());
+        self.z          : mfem.Vector           = mfem.Vector(M.Height());
 
-        self.K = K
-        self.M = M
-        self.b = b
-        self.M_prec.SetType(mfem.HypreSmoother.Jacobi)
-        self.M_solver.SetPreconditioner(self.M_prec)
+        self.K          : mfem.HypreParMatrix   = K;
+        self.M          : mfem.HypreParMatrix   = M;
+        self.b          : mfem.HypreParVector   = b;
+        self.M_prec.SetType(mfem.HypreSmoother.Jacobi);
+        self.M_solver.SetPreconditioner(self.M_prec);
         self.M_solver.SetOperator(M)
         self.M_solver.iterative_mode = False
         self.M_solver.SetRelTol(1e-9)
@@ -168,30 +154,27 @@ class FE_Evolution(mfem.PyTimeDependentOperator):
 
 def Simulate(   meshfile_name       : str       = "periodic-square.mesh", 
                 ser_ref_levels      : int       = 2,
-                par_ref_levels      : int       = 0,
+                par_ref_levels      : int       = 1,
                 order               : int       = 3,
                 ode_solver_type     : int       = 4,
-                t_final             : float     = 10.0,
-                time_step_size      : float     = 0.01,
-                serialization_steps : int       = 10, 
-                num_positions       : int       = 100,
+                t_final             : float     = 5.0,
+                time_step_size      : float     = 0.005,
+                w                   : float     = pi/2,
+                k                   : float     = 2.0,
+                serialization_steps : int       = 10,
+                num_positions       : int       = 1000,
                 VisIt               : bool      = True) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """
     This examples solves a time dependent nonlinear elasticity problem of the form 
 
-        (d/dt)v(X, t)   = H(d(X, t)) + S v(X, t), 
-        (d/dt)d(X, t)   = v(X, t),
+        (d/dt)u(X, t)   = -v(X) * grad(u(X, t)),
     
     where H is a hyperelastic model and S is a viscosity operator of Laplacian type. We also impose 
     with the following initial conditions:
         
-        d((x, y), 0)         =  (x, y)
-        v((x, y), 0)         =  (-theta*x^2, theta*x^2 (8.0 - x))
-    
-    where X[0] and X[-1] are the positions of the first and last nodes, respectively. Here, theta 
-    is a parameter that the user can change. 
-    
-    See the c++ version of example 10 in the MFEM library for more detail.
+        u((x, y), 0)         =  sin(pi * x) * sin(pi * y)
+
+    See the c++ version of example 9 in the MFEM library for more detail.
 
     We solve this PDE, then return the solution at each time step. 
 
@@ -229,6 +212,13 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
     time_step_size : float 
         specifies the time step size.
 
+    w : float 
+        specifies the rotation speed of the velocity field (this becomes the gamma variable in 
+        the EvalValue method in the velocity_coeff class).
+
+    k : float
+        specifies the frequency of the initial condition (this becomes the omega variable in 
+        the EvalValue method in the u0_coeff class).
 
     serialization_steps : int
         Specifies how frequently we serialize (save) and visualize the solution.
@@ -270,13 +260,10 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
     verbose             : bool  = (myid == 0);
 
     # Set variables.
-    problem             : int   = 0;
     dt                  : float = time_step_size;
-
-    # Set the device.
-    device : mfem.Device = mfem.Device('cpu');
-    if myid == 0:
-        device.Print();
+    global gamma; global omega;
+    gamma = w;
+    omega = k;
 
     # Define the ODE solver used for time integration. Several explicit Runge-Kutta methods are 
     # available.
@@ -344,9 +331,9 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
     # 4. Define the coefficient objects.
     
     if(myid == 0): LOGGER.info("Setting up the coefficient objects.");
-    velocity    = velocity_coeff(dim, bb_min, bb_max, problem);
+    velocity    = velocity_coeff(dim, bb_min, bb_max);
     inflow      = inflow_coeff();
-    u0          = u0_coeff(bb_min, bb_max, problem); 
+    u0          = u0_coeff(bb_min, bb_max); 
 
 
 
@@ -538,4 +525,5 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
 
 if __name__ == "__main__":
     Logging.Initialize_Logger(level = logging.DEBUG);
-    Sol, X, T = Simulate();
+    Sol, X, T = Simulate(t_final = 1.0);
+    Sol, X, T = Simulate(k = 3.0, w = 2.0, t_final = 1.0);
