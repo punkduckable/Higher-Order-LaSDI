@@ -525,5 +525,4 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
 
 if __name__ == "__main__":
     Logging.Initialize_Logger(level = logging.DEBUG);
-    Sol, X, T = Simulate(t_final = 1.0);
-    Sol, X, T = Simulate(k = 3.0, w = 2.0, t_final = 1.0);
+    Sol, X, T = Simulate();
