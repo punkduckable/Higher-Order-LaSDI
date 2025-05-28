@@ -9,6 +9,7 @@ Physics_Path    : str  = os.path.abspath(os.path.join(os.path.dirname(__file__),
 sys.path.append(Physics_Path);
 
 import  logging;
+from    typing      import  Callable;
 
 import  torch;
 import  numpy;
@@ -136,7 +137,7 @@ class MultiLayerPerceptron(torch.nn.Module):
 
         # Set up the activation function. 
         self.activation     : str       = activation;
-        self.activation_fn  : callable  = act_dict[self.activation]();
+        self.activation_fn  : Callable  = act_dict[self.activation]();
         LOGGER.info("Initializing a MultiLayerPerceptron with widths %s, activation %s, reshape_shape = %s (index %d)" \
                     % (str(self.widths), self.activation, str(self.reshape_shape), self.reshape_index));
 

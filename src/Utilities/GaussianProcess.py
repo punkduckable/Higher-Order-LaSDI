@@ -102,7 +102,7 @@ def eval_gp(gp_list : list[GaussianProcessRegressor], Inputs : numpy.ndarray) ->
        a list of trained GP regressor objects. The i'th element of this list is a GP regressor 
        object whose domain includes the rows of Inputs.
     
-    Inputs: torch.Tensor, shape = (n_inputs, input_dim)
+    Inputs: numpy.ndarray, shape = (n_inputs, input_dim)
         We evaluate each Gaussian Process in gp_list at each row of Inputs. Thus, the i'th row
         represents the i'th input to the Gaussian Processes. Here, input_dim is the dimensionality 
         of the input space for the GPs) and n_inputs is the number of inputs at which we want to 

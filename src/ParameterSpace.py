@@ -8,6 +8,7 @@ Util_Path       : str   = os.path.abspath(os.path.join(os.path.dirname(__file__)
 sys.path.append(Util_Path);
 
 import  logging;
+from    typing      import  Callable;
 
 import  numpy;
 
@@ -125,7 +126,7 @@ def create_uniform_1dspace(param_dict : dict) -> tuple[int, numpy.ndarray]:
 
 
 # A macro that allows us to switch function we use to generate generate a parameter's range. 
-getParam1DSpace : dict[str, callable]    = {'list'       : get_1dspace_from_list,
+getParam1DSpace : dict[str, Callable]    = {'list'       : get_1dspace_from_list,
                                             'uniform'    : create_uniform_1dspace};
 
 
