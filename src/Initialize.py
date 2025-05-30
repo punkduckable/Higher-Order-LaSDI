@@ -20,6 +20,7 @@ import  BurgersSecondOrder;
 from    LatentDynamics      import  LatentDynamics;
 from    SINDy               import  SINDy;
 from    DampedSpring        import  DampedSpring;
+from    DampedSpring_weak   import  DampedSpring_weak;
 from    ParameterSpace      import  ParameterSpace;
 from    GPLaSDI             import  BayesianGLaSDI;
 from    Model               import  Autoencoder, load_Autoencoder, Autoencoder_Pair, load_Autoencoder_Pair;
@@ -37,7 +38,8 @@ model_dict      =  {'ae'                    : Autoencoder,
 model_load_dict =  {'ae'                    : load_Autoencoder,
                     'pair'                  : load_Autoencoder_Pair};
 ld_dict         =  {'sindy'                 : SINDy, 
-                    'spring'                : DampedSpring};
+                    'spring'                : DampedSpring,
+                    'spring_w'              : DampedSpring_weak};
 physics_dict    =  {'Burgers'               : Burgers.Burgers,
                     'BurgersSecondOrder'    : BurgersSecondOrder.Burgers,
                     'Explicit'              : Explicit};
@@ -139,14 +141,29 @@ def Initialize_Trainer(config : dict, restart_dict : dict = None) -> tuple[Bayes
     assert(ld_type in config['latent_dynamics']);
     assert(ld_type in ld_dict);
     latent_dynamics         = ld_dict[ld_type]( n_z             = model.n_z, 
-                                                coef_norm_order = config['latent_dynamics']['coef_norm_order'],
-                                                Uniform_t_Grid  = physics.Uniform_t_Grid);
+                                            coef_norm_order = config['latent_dynamics']['coef_norm_order'],
+                                            Uniform_t_Grid  = physics.Uniform_t_Grid);
+    # if ld_type == 'spring_w':
+    #     latent_dynamics         = ld_dict[ld_type]( n_z             = model.n_z, 
+    #                                             coef_norm_order = config['latent_dynamics']['coef_norm_order'],
+    #                                             Uniform_t_Grid  = physics.Uniform_t_Grid,
+    #                                             config = config);
+    # else:
+    #     latent_dynamics         = ld_dict[ld_type]( n_z             = model.n_z, 
+    #                                             coef_norm_order = config['latent_dynamics']['coef_norm_order'],
+    #                                             Uniform_t_Grid  = physics.Uniform_t_Grid);
     if (restart_dict is not None):
         latent_dynamics.load(restart_dict['latent_dynamics']);
 
     # Initialize the trainer object. If we are using a restart file, then load the 
     # trainer from that file.
-    trainer                 = trainer_dict[trainer_type](physics, model, latent_dynamics, param_space, config['lasdi'][trainer_type]);
+    if ld_type == 'spring_w':
+            trainer         = trainer_dict[trainer_type](physics, model, latent_dynamics, param_space, config['lasdi'][trainer_type],config['latent_dynamics']['spring_w']);
+    else:
+            trainer         = trainer_dict[trainer_type](physics, model, latent_dynamics, param_space, config['lasdi'][trainer_type]);
+
+    # trainer                 = trainer_dict[trainer_type](physics, model, latent_dynamics, param_space, config['lasdi'][trainer_type]);
+    
     if (restart_dict is not None):
         trainer.load(restart_dict['trainer']);
 
@@ -204,7 +221,7 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
         model_config        : dict              = config['model'][model_type];
         hidden_widths       : list[int]         = model_config['hidden_widths'];
         n_z                 : int               = model_config['latent_dimension'];
-        activation          : str               = model_config['activation']  if 'activation' in config else 'tanh';
+        activation          : str               = model_config['activation']  if 'activation' in model_config else 'tanh';
 
         # Now build the widths attribute + fetch Frame_Shape from physics.
         Frame_Shape         : list[int]         = physics.Frame_Shape;

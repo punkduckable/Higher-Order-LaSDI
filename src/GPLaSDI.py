@@ -102,7 +102,8 @@ class BayesianGLaSDI:
                  model              : torch.nn.Module, 
                  latent_dynamics    : LatentDynamics, 
                  param_space        : ParameterSpace, 
-                 config             : dict):
+                 config             : dict,
+                 config_w           : dict = None):
         """
         This class runs a full GPLaSDI training. As input, it takes the model defined as a 
         torch.nn.Module object, a Physics object to recover FOM ICs + information on the time 
@@ -200,13 +201,27 @@ class BayesianGLaSDI:
         # Set up variables to aide checkpointing.
         self.best_coefs     : numpy.ndarray = None;             # The best coefficients from the iteration with lowest testing loss
         self.restart_iter   : int           = 0;                # Iteration number at the end of the last training period
+
+        if config_w is not None:
+            self.test_func    = config_w['test_func'];
+            self.test_func_width    = config_w['test_func_width'];
+            self.overlap    = config_w['overlap'];
+            self.pq    = config_w['pq'];
+            self.LS_loss_type    = config_w['LS_loss_type'];
+                
+            LOGGER.info("Weak form enabled with test_func=%s, LS_loss_type=%s" % (self.test_func, self.LS_loss_type));
+
         
         # All done!
         return;
 
 
 
-    def train(self) -> None:
+    def train(self,
+              weak:   bool = False) -> None:
+        
+        print('HERE')
+        print(weak)
         """
         Runs a round of training on the model.
 
@@ -266,6 +281,35 @@ class BayesianGLaSDI:
                                                                         p_rollout    = p_rollout);
 
         self.timer.end("Rollout Setup");
+
+        # -----------------------------------------------------------------------------------------
+        # Test Functions
+
+        if weak:
+
+            self.Phis  = []
+            self.dPhis = []
+            self.d2Phis = []
+
+            for i in range(len(t_Train_device)):
+                # T = t_Train_device[i][-1] * numpy.mean(numpy.diff(t_Train_device[i]))
+                T = t_Train_device[i][-1] 
+
+                print(f'T = {T}')
+                print(f'n_t[i] = {len(t_Train_device[i])}')
+
+                # Phi_i, dPhi_i, d2Phi_i = self.get_test_functions(T, len(t_Train_device[i]), self.test_func_width,self.overlap, self.pq, test_func = self.test_func)
+                Phi_i, dPhi_i, d2Phi_i = self.get_test_functions(T, len(t_Train_device[i]),t_Train_device[i], self.test_func_width,self.overlap, self.pq, test_func = self.test_func)
+
+
+                self.Phis.append(Phi_i)
+                self.dPhis.append(dPhi_i)
+                self.d2Phis.append(d2Phi_i)
+
+
+
+            LOGGER.info("Got test functions");
+
 
 
         # -----------------------------------------------------------------------------------------
@@ -595,7 +639,11 @@ class BayesianGLaSDI:
                 # called "coefs" of shape (n_train, n_coefs), where n_train = number of training 
                 # parameter parameters and n_coefs denotes the number of coefficients in the latent
                 # dynamics model. 
-                coefs, loss_LD, loss_coef       = LD.calibrate(Latent_States = Latent_States, t_Grid    = t_Train_device);
+                if weak:
+                    coefs, loss_LD, loss_coef       = LD.calibrate(Phis = self.Phis,dPhis = self.dPhis,d2Phis = self.d2Phis, Latent_States = Latent_States, t_Grid    = t_Train_device);
+                else:
+                    coefs, loss_LD, loss_coef       = LD.calibrate(Latent_States = Latent_States, t_Grid    = t_Train_device);
+
 
                 self.timer.end("Calibration");
 
@@ -1060,20 +1108,39 @@ class BayesianGLaSDI:
             self.
         """
 
-        dict_ = {'X_Train'          : self.X_Train, 
-                 'X_Test'           : self.X_Test, 
-                 't_Train'          : self.t_Train,
-                 't_Test'           : self.t_Test,
-                 'lr'               : self.lr, 
-                 'n_iter'           : self.n_iter,
-                 'n_samples'        : self.n_samples, 
-                 'best_coefs'       : self.best_coefs, 
-                 'max_iter'         : self.max_iter,
-                 'max_iter'         : self.max_iter, 
-                 'weights'          : self.loss_weights, 
-                 'restart_iter'     : self.restart_iter, 
-                 'timer'            : self.timer.export(), 
-                 'optimizer'        : self.optimizer.state_dict()};
+        if self.Phis:
+            dict_ = {'X_Train'          : self.X_Train, 
+                    'X_Test'           : self.X_Test, 
+                    't_Train'          : self.t_Train,
+                    't_Test'           : self.t_Test,
+                    'lr'               : self.lr, 
+                    'n_iter'           : self.n_iter,
+                    'n_samples'        : self.n_samples, 
+                    'best_coefs'       : self.best_coefs, 
+                    'max_iter'         : self.max_iter,
+                    'max_iter'         : self.max_iter, 
+                    'weights'          : self.loss_weights, 
+                    'restart_iter'     : self.restart_iter, 
+                    'timer'            : self.timer.export(), 
+                    'optimizer'        : self.optimizer.state_dict()};
+        else:
+            dict_ = {'X_Train'          : self.X_Train, 
+                    'X_Test'           : self.X_Test, 
+                    't_Train'          : self.t_Train,
+                    't_Test'           : self.t_Test,
+                    'lr'               : self.lr, 
+                    'n_iter'           : self.n_iter,
+                    'n_samples'        : self.n_samples, 
+                    'best_coefs'       : self.best_coefs, 
+                    'max_iter'         : self.max_iter,
+                    'max_iter'         : self.max_iter, 
+                    'weights'          : self.loss_weights, 
+                    'restart_iter'     : self.restart_iter, 
+                    'timer'            : self.timer.export(), 
+                    'optimizer'        : self.optimizer.state_dict(),
+                    'Phis'             : self.Phis,
+                    'dPhis'            : self.dPhis,
+                    'd2Phis'           : self.d2Phis};
         return dict_;
 
 
@@ -1120,3 +1187,127 @@ class BayesianGLaSDI:
         # All done!
         return;
     
+    def getUniformGrid(self,T, L, s, p):
+
+        '''
+        generates uniform grid for test functions
+        s is overlap
+        L is test function width
+        '''
+        
+
+        overlap = s # int(np.floor(L*(1 - np.sqrt(1 - s**(1/p)))))
+        #print("support and overlap", L, overlap)
+        # create grid
+        grid = []
+        a = 0
+        b = L
+        grid.append([a, b])
+        while b - overlap + L <= T:
+            a = b - overlap
+            b = a + L
+            grid.append([a, b])
+
+        grid = numpy.asarray(grid)
+        
+        a_s = grid[:,0]
+        b_s = grid[:,1]
+
+        return a_s, b_s
+
+    def get_test_functions(self, T,n_t,timesteps, test_func_width, overlap,pq, test_func = 'PC-poly',H = 30): 
+        '''
+        H: number of test functions compactly supported on time 
+        interval [0,T], assumes equally spaces
+        n_t: number of time points, assumes equally spaced
+
+        returns: Phis: dim (H, n_t), each of H test functions evaluated at n_t time points
+                dPhis: dim (H, n_t), each of H test function time derivatives evaluated at n_t time points
+        '''
+        
+        # t = torch.linspace(0,T,n_t)
+
+        if test_func == 'bump':
+            L = test_func_width #T/50 # length of test function support
+            s = test_func_width*overlap # overlap
+            a_s, b_s = self.getUniformGrid(T, L, s, 1)
+
+            # t = torch.linspace(0,T,n_t)
+            t = timesteps
+            H = len(a_s)
+            print("Number of Bump test functions:", H)
+            
+            Phis = torch.zeros((H,n_t))
+            dPhis = torch.zeros((H,n_t))
+            d2Phis = torch.zeros((H,n_t))
+            # eta = 1
+            eta = 5
+            # a = T/(H+1)
+            a = L/2
+            const = eta #bumps are of form e^( -eta/(1 - (x/a)^2 ) + const)
+            # Make function integrate to 1
+            # Numerical integration 
+            nugget = 1e-7
+            a_space = numpy.linspace(-a+nugget,a-nugget,1000)
+            # bump = numpy.exp(-eta/(1-(a_space/a)**2) + eta)
+            # bump = numpy.exp(-eta/(1-(a_space/a)**2) + eta)
+            # C = 1/numpy.trapz(bump,a_space)
+            bump = numpy.exp(-eta/(1-(a_space/a)**2))
+            C = 1/numpy.trapz(bump,a_space)/numpy.exp(const)
+            # C = numpy.exp(5)
+            
+            h = torch.linspace(a,T-a,H)
+            # n_T = H + 2
+            
+                        
+            for j, ji in enumerate(h):
+                for i, ti in enumerate(t):
+                    x = (ti-ji)/a
+                    denom = 1 - x**2
+                    f = -eta/denom + const
+                    fp = -eta/(denom**2)*2*x/a
+                    fpp = ( -eta/(denom**2)*2/a/a ) + ( -eta/(denom**3)*2*x/a * -2*x/a*-2 )
+                    if denom > 0:
+                        Phis[j,i] = C*torch.exp(f)
+                        dPhis[j,i] = C*torch.exp(f)*fp
+                        d2Phis[j,i] = C*( torch.exp(f)*(fp**2) + torch.exp(f)*fpp )
+                    else:
+                        Phis[j,i] = 0
+                        dPhis[j,i] = 0
+                        d2Phis[j,i] = 0
+
+        if test_func == 'PC-poly':
+            L = test_func_width #T/50 # length of test function support
+            s = test_func_width*overlap # overlap
+            a_s, b_s = self.getUniformGrid(T, L, s, 1)
+
+            # a_s = a_s[:-1]
+            # b_s = b_s[:-1]
+
+            # t = torch.linspace(0,T,n_t)
+            t = timesteps
+            H = len(a_s)
+            print('t = ', t)
+            print('a_s = ',a_s)
+            print('b_s = ',b_s)
+            print('s = ',s)
+            print('L = ',L)
+            print("Number of test functions:", H)
+            Phis = torch.zeros((H,n_t))
+            dPhis = torch.zeros((H,n_t))
+            d2Phis = torch.zeros((H,n_t))
+            
+
+            # parallize the time computations
+            p, q = pq, pq 
+            for h in range(H):
+                a = a_s[h]
+                b = b_s[h]
+                C = 1/(p**p*q**q)*((p+q)/(b-a))**(p+q)
+                Phis[h,:] = C* (t-a)**p*(b-t)**q*(t>=a)*(t<=b)
+                dPhis[h,:] = C* (p*(t-a)**(p-1)*(b-t)**q - q*(t-a)**p*(b-t)**(q-1))*(t>=a)*(t<=b)
+                d2Phis[h,:] = C* (p*(p-1)*(t-a)**(p-2)*(b-t)**q  - q*p*(t-a)**(p-1)*(b-t)**(q-1) - 
+                                q*p*(t-a)**(p-1)*(b-t)**(q-1) + q*(q-1)*(t-a)**p*(b-t)**(q-2) )*(t>=a)*(t<=b)
+                
+
+        return Phis, dPhis, d2Phis
