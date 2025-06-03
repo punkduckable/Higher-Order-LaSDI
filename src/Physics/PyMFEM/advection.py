@@ -148,9 +148,8 @@ class FE_Evolution(mfem.PyTimeDependentOperator):
 
 
 # -------------------------------------------------------------------------------------------------
-# Main function
+# Simulate function
 # -------------------------------------------------------------------------------------------------
-
 
 def Simulate(   meshfile_name       : str       = "periodic-square.mesh", 
                 ser_ref_levels      : int       = 2,
@@ -257,7 +256,6 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
     comm                        = MPI.COMM_WORLD;
     myid                : int   = comm.Get_rank();
     num_procs           : int   = comm.Get_size();
-    verbose             : bool  = (myid == 0);
 
     # Set variables.
     dt                  : float = time_step_size;
@@ -466,7 +464,7 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
     t   : float = 0.0;
     ti  : int   = 0;
     while True:
-        # Check if we should stop time stepping (if this time step is within dt/2 of t_final.
+        # Check if we should stop time stepping (if this time step is within dt/2 of t_final).
         if t > t_final - dt/2:
             break;
         
