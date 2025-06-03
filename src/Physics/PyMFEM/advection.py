@@ -381,14 +381,6 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
     u_gf.ProjectCoefficient(u0);
     U       : mfem._par.hypre.HypreParVector        = u_gf.GetTrueDofs();
 
-    # Save the initial solution.
-    if(myid == 0): LOGGER.debug("Saving the initial solution.");
-    smyid       : str = '{:0>6d}'.format(myid);
-    mesh_name   : str = "ex9-mesh." + smyid;
-    sol_name    : str = "ex9-init." + smyid;
-    pmesh.Print(mesh_name, 8);
-    u_gf.Save(sol_name, 8);
-
 
 
     # ---------------------------------------------------------------------------------------------
@@ -507,11 +499,6 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
 
     # ---------------------------------------------------------------------------------------------
     # 7. Package everything up for returning.
-
-    # Save the final solution.
-    u_gf.Assign(U);
-    sol_name = "ex9-final." + smyid;
-    u_gf.Save(sol_name, 8);
 
     # Turn times, displacements, velocities lists into arrays.
     Times       : numpy.ndarray = numpy.array(times_list,           dtype = numpy.float32);
