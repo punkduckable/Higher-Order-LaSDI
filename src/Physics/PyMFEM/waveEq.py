@@ -186,222 +186,6 @@ class cInitialRate(mfem.PyCoefficient):
 # Simulate function
 # -------------------------------------------------------------------------------------------------
 
-def run(mesh_file="",
-        ref_levels=2,
-        order=2,
-        ode_solver_type=10,
-        t_final=0.5,
-        dt=1e-2,
-        speed=1.0,
-        dirichlet=True,
-        visit=True,
-        visualization=True,
-        vis_steps=5):
-
-
-    mesh = mfem.Mesh(mesh_file, 1, 1)
-    dim = mesh.Dimension()
-
-    # 3. Define the ODE solver used for time integration. Several second order
-    #    time integrators are available.
-    if ode_solver_type <= 10:
-        ode_solver = mfem.GeneralizedAlpha2Solver(ode_solver_type/10)
-    elif ode_solver_type == 11:
-        ode_solver = mfem.AverageAccelerationSolver()
-    elif ode_solver_type == 12:
-        ode_solver = mfem.LinearAccelerationSolver()
-    elif ode_solver_type == 13:
-        ode_solver = mfem.CentralDifferenceSolver()
-    elif ode_solver_type == 14:
-        ode_solver = mfem.FoxGoodwinSolver()
-    else:
-        print("Unknown ODE solver type: " + str(ode_solver_type))
-
-    # 4. Refine the mesh to increase the resolution. In this example we do
-    #    'ref_levels' of uniform refinement, where 'ref_levels' is a
-    #    command-line parameter.
-    for lev in range(ref_levels):
-        mesh.UniformRefinement()
-
-    # 5. Define the vector finite element space representing the current and the
-    #    initial temperature, u_ref.
-    fe_coll = mfem.H1_FECollection(order, dim)
-    fespace = mfem.FiniteElementSpace(mesh, fe_coll)
-
-    fe_size = fespace.GetTrueVSize()
-    print("Number of temperature unknowns: " + str(fe_size))
-
-    u_gf = mfem.GridFunction(fespace)
-    dudt_gf = mfem.GridFunction(fespace)
-
-    # 6. Set the initial conditions for u. All boundaries are considered
-    #    natural.
-    class cInitialSolution(mfem.PyCoefficient):
-        def EvalValue(self, x : numpy.ndarray) -> float:
-            norm2 : float = numpy.sum(x**2);
-            return numpy.exp(-norm2*30);
-
-    class cInitialRate(mfem.PyCoefficient):
-        def EvalValue(self, x : numpy.ndarray) -> float:
-            return 0;
-
-    u_0 = cInitialSolution()
-    dudt_0 = cInitialRate()
-
-    u_gf.ProjectCoefficient(u_0)
-    u = mfem.Vector()
-    u_gf.GetTrueDofs(u)
-
-    dudt_gf.ProjectCoefficient(dudt_0)
-    dudt = mfem.Vector()
-    dudt_gf.GetTrueDofs(dudt)
-
-    # 7. Initialize the conduction operator and the visualization.
-    ess_bdr = mfem.intArray()
-    if mesh.bdr_attributes.Size():
-        ess_bdr.SetSize(mesh.bdr_attributes.Max())
-        if (dirichlet):
-            ess_bdr.Assign(1)
-        else:
-            ess_bdr.Assign(0)
-
-    oper = WaveOperator(fespace, ess_bdr, speed)
-
-    u_gf.SetFromTrueDofs(u)
-
-    mesh.Print("ex23.mesh", 8)
-    output = io.StringIO()
-    output.precision = 8
-    u_gf.Save(output)
-    dudt_gf.Save(output)
-    fid = open("ex23-init.gf", 'w')
-    fid.write(output.getvalue())
-    fid.close()
-
-    if visit:
-        visit_dc = mfem.VisItDataCollection("Example23", mesh)
-        visit_dc.RegisterField("solution", u_gf)
-        visit_dc.RegisterField("rate", dudt_gf)
-        visit_dc.SetCycle(0)
-        visit_dc.SetTime(0.0)
-        visit_dc.Save()
-
-    if visualization:
-        sout = mfem.socketstream("localhost", 19916)
-        if not sout.good():
-            print("Unable to connect to GLVis server at localhost:19916")
-            visualization = False
-            print("GLVis visualization disabled.")
-        else:
-            sout.precision(output.precision)
-            sout << "solution\n" << mesh << u_gf
-            sout << "pause\n"
-            sout.flush()
-            print(
-                "GLVis visualization paused. Press space (in the GLVis window) to resume it.")
-
-    # 8. Perform time-integration (looping over the time iterations, ti, with a
-    #    time-step dt).
-    ode_solver.Init(oper)
-    t = 0.0
-
-    last_step = False
-    ti = 0
-    while not last_step:
-        ti += 1
-        if t + dt >= t_final - dt/2:
-            last_step = True
-
-        t, dt = ode_solver.Step(u, dudt, t, dt)
-
-        if last_step or (ti % vis_steps == 0):
-            print("step " + str(ti) + ", t = " + "{:g}".format(t))
-
-            u_gf.SetFromTrueDofs(u)
-            dudt_gf.SetFromTrueDofs(dudt)
-            if visualization:
-                sout << "solution\n" << mesh << u_gf
-                sout.flush()
-
-            if visit:
-                visit_dc.SetCycle(ti)
-                visit_dc.SetTime(t)
-                visit_dc.Save()
-
-        oper.SetParameters(u)
-
-    # 9. Save the final solution. This output can be viewed later using GLVis:
-    #    "glvis -m ex23.mesh -g ex23-final.gf".
-    output = io.StringIO()
-    output.precision = 8
-    u_gf.Save(output)
-    dudt_gf.Save(output)
-    fid = open("ex23-final.gf", "w")
-    fid.write(output.getvalue())
-    fid.close()
-
-"""
-if __name__ == "__main__":
-    from mfem.common.arg_parser import ArgParser
-    parser = ArgParser(description="Ex23 (Wave problem)")
-    parser.add_argument('-m', '--mesh',
-                        default='star.mesh',
-                        action='store', type=str,
-                        help='Mesh file to use.')
-    parser.add_argument('-r', '--refine',
-                        action='store', default=2, type=int,
-                        help="Number of times to refine the mesh uniformly before parallel")
-    parser.add_argument('-o', '--order',
-                        action='store', default=2, type=int,
-                        help="Finite element order (polynomial degree)")
-    help_ode = '\n'.join(["ODE solver: [0--10] \t- GeneralizedAlpha(0.1 * s),",
-                          "11 \t - Average Acceleration,",
-                          "12 \t - Linear Acceleration",
-                          "13 \t- CentralDifference",
-                          "14 \t- FoxGoodwin"])
-    parser.add_argument('-s', '--ode-solver',
-                        action='store', default=10, type=int,
-                        help=help_ode)
-    parser.add_argument('-tf', '--t-final',
-                        action='store', default=0.5, type=float,
-                        help="Final time; start time is 0.")
-    parser.add_argument('-dt', '--time-step',
-                        action='store', default=1e-2, type=float,
-                        help="Time step")
-    parser.add_argument("-c", "--speed",
-                        action='store', default=1.0, type=float,
-                        help="Wave speed.")
-    parser.add_argument("-neu",  "--neumann",
-                        action='store_true', default=False,
-                        help="BC switch.")
-    parser.add_argument('-vis', '--visualization',
-                        action='store_true', default=True,
-                        help='Enable GLVis visualization')
-    parser.add_argument('-visit', '--visit-datafiles',
-                        action='store_true', default=True,
-                        help="Save data files for VisIt (visit.llnl.gov) visualization.")
-    parser.add_argument("-vs", "--visualization-steps",
-                        action='store', default=5,  type=int,
-                        help="Visualize every n-th timestep.")
-
-    args = parser.parse_args()
-    parser.print_options(args)
-    mesh_file = expanduser(
-        join(os.path.dirname(__file__), '..', 'data', args.mesh))
-
-    run(mesh_file=mesh_file,
-        ref_levels=args.refine,
-        order=args.order,
-        ode_solver_type=args.ode_solver,
-        t_final=args.t_final,
-        dt=args.time_step,
-        speed=args.speed,
-        dirichlet=(not args.neumann),
-        visit=args.visit_datafiles,
-        vis_steps=args.visualization_steps,
-        visualization=args.visualization)
-"""
-
 def Simulate(mesh_file          : str   = "star.mesh",
              ref_levels         : int   = 0,
              order              : int   = 2,
@@ -497,15 +281,6 @@ def Simulate(mesh_file          : str   = "star.mesh",
     global c;
     c = c_;
 
-    # Load the mesh.
-    LOGGER.debug("Loading the mesh and its properties");
-    meshfile_path   : str   = expanduser(join(dirname(__file__), 'data', mesh_file));
-    mesh                    = mfem.Mesh(meshfile_path, 1, 1);
-
-    # Get the dimension (i.e., number of spatial dimensions) of the mesh.
-    dim : int = mesh.Dimension();
-    LOGGER.debug("mesh dimension = %d" % dim);
-
     # Define the ODE solver used for time integration.
     LOGGER.debug("Defining the ODE solver.");
     if   ode_solver_type <= 10:
@@ -521,7 +296,21 @@ def Simulate(mesh_file          : str   = "star.mesh",
     else:
         print("Unknown ODE solver type: " + str(ode_solver_type));
 
-    # Refine the mesh to increase the resolution. 
+
+
+    # ---------------------------------------------------------------------------------------------
+    # 2. Setup the mesh.
+
+    # Load the mesh.
+    LOGGER.debug("Loading the mesh and its properties");
+    meshfile_path   : str   = expanduser(join(dirname(__file__), 'data', mesh_file));
+    mesh                    = mfem.Mesh(meshfile_path, 1, 1);
+
+    # Get the dimension (i.e., number of spatial dimensions) of the mesh.
+    dim : int = mesh.Dimension();
+    LOGGER.debug("mesh dimension = %d" % dim);
+
+    # Serially refine the mesh to increase the resolution. 
     LOGGER.debug("Refining the mesh to increase the resolution.");
     for lev in range(ref_levels):
         mesh.UniformRefinement();
@@ -529,7 +318,7 @@ def Simulate(mesh_file          : str   = "star.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 2. Define the finite element space and grid functions to hold the solution and the time 
+    # 3. Define the finite element space and grid functions to hold the solution and the time 
     # derivative of the solution.
 
     LOGGER.info("Defining the finite element space and grid functions to hold U and (d/dt)U.");
@@ -549,7 +338,7 @@ def Simulate(mesh_file          : str   = "star.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 3. Set the initial conditions for U and (d/dt)U.
+    # 4. Set the initial conditions for U and (d/dt)U.
 
     LOGGER.info("Setting the initial conditions for U and (d/dt)U.");
 
@@ -572,7 +361,7 @@ def Simulate(mesh_file          : str   = "star.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 4. Initialize the wave operator.
+    # 5. Initialize the wave operator.
 
     LOGGER.info("Initializing the wave operator.");
 
@@ -647,7 +436,7 @@ def Simulate(mesh_file          : str   = "star.mesh",
 
     
     # ---------------------------------------------------------------------------------------------
-    # 6. Set up the VisIt visualization (if we are doing that)
+    # 6. VisIt
 
     # Store the initial solution to u_gf and dudt_gf.
     u_gf.SetFromTrueDofs(u);
@@ -672,7 +461,7 @@ def Simulate(mesh_file          : str   = "star.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 7. Setup lists to store the solution at each time step.
+    # 7. Setup lists to store the solution + evaluate the initial solution at the positions.
 
     LOGGER.info("Setting up lists to store the time, U, and DtU at each time step.");
 
@@ -685,7 +474,6 @@ def Simulate(mesh_file          : str   = "star.mesh",
     _, element_nums, _  = mesh.FindPoints(Positions.T, warn = False, inv_trans = None);
     u_Positions_0       = numpy.zeros((1, num_positions));
     dudt_Positions_0    = numpy.zeros((1, num_positions));
-
 
     for i in range(num_positions):
         # Get the element number of the i'th point.
@@ -738,8 +526,8 @@ def Simulate(mesh_file          : str   = "star.mesh",
 
             # Evaluate the solution at the positions.
             _, element_nums, _  = mesh.FindPoints(Positions.T, warn = False, inv_trans = None);
-            u_Positions_0       = numpy.zeros((1, num_positions));
-            dudt_Positions_0    = numpy.zeros((1, num_positions));
+            u_Positions_t       = numpy.zeros((1, num_positions));
+            dudt_Positions_t    = numpy.zeros((1, num_positions));
 
             for i in range(num_positions):
                 # Get the element number of the i'th point
@@ -754,13 +542,13 @@ def Simulate(mesh_file          : str   = "star.mesh",
                 point.Set2(x, y);
 
                 # Evaluate the solution at the i'th position.
-                u_Positions_0[0, i]     = u_gf.GetValue(element_num, point, dim);
-                dudt_Positions_0[0, i]  = dudt_gf.GetValue(element_num, point, dim);
+                u_Positions_t[0, i]     = u_gf.GetValue(element_num, point, dim);
+                dudt_Positions_t[0, i]  = dudt_gf.GetValue(element_num, point, dim);
 
             # Append the current U, DtU, and time to their corresponding lists.
             times_list.append(t);
-            displacements_list.append(  u_Positions_0);
-            velocities_list.append(     dudt_Positions_0);
+            displacements_list.append(  u_Positions_t);
+            velocities_list.append(     dudt_Positions_t);
     
             # If visualizing, Save the solution to the VisIt object.
             if VisIt:

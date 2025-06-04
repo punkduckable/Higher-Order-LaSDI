@@ -151,7 +151,7 @@ class FE_Evolution(mfem.PyTimeDependentOperator):
 # Simulate function
 # -------------------------------------------------------------------------------------------------
 
-def Simulate(   meshfile_name       : str       = "periodic-square.mesh", 
+def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh", 
                 ser_ref_levels      : int       = 2,
                 par_ref_levels      : int       = 1,
                 order               : int       = 3,
@@ -324,14 +324,23 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
     global_vSize : int = fes.GlobalTrueVSize();
     if(myid == 0): LOGGER.info("Number of unknowns: " + str(global_vSize));
 
+    # Setup the grid function to hold the initial condition.
+    if(myid == 0): LOGGER.debug("Setting up the grid function to hold the initial condition.");
+    u_gf    : mfem.ParGridFunction                  = mfem.ParGridFunction(fes);
+
+
 
     # ---------------------------------------------------------------------------------------------
-    # 4. Define the coefficient objects.
+    # 4. Define the initial condition objects.
     
     if(myid == 0): LOGGER.info("Setting up the coefficient objects.");
     velocity    = velocity_coeff(dim, bb_min, bb_max);
     inflow      = inflow_coeff();
     u0          = u0_coeff(bb_min, bb_max); 
+
+    # Project the initial condition onto the finite element space.
+    u_gf.ProjectCoefficient(u0);
+    U       : mfem._par.hypre.HypreParVector        = u_gf.GetTrueDofs();
 
 
 
@@ -374,19 +383,9 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 6. Setup the a grid function to hold the solution.
+    # 6. Set up positions at which we will evaluate the solution.
 
-    if(myid == 0): LOGGER.debug("Setting up the grid function to hold the initial condition.");
-    u_gf    : mfem.ParGridFunction                  = mfem.ParGridFunction(fes);
-    u_gf.ProjectCoefficient(u0);
-    U       : mfem._par.hypre.HypreParVector        = u_gf.GetTrueDofs();
-
-
-
-    # ---------------------------------------------------------------------------------------------
-    # 7. Set up positions at which we will evaluate the solution.
-
-    if(myid == 0): LOGGER.info("Setting up Positions");
+    if(myid == 0): LOGGER.info("Sampling %d positions in the mesh" % num_positions);
 
     # Figure out the maximum/minimum x and y coordinates of the mesh.
     bb_min, bb_max = pmesh.GetBoundingBox();
@@ -397,15 +396,47 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
     if(myid == 0): LOGGER.debug("x_min = %f, x_max = %f, y_min = %f, y_max = %f" % (x_min, x_max, y_min, y_max));
 
     # Now, sample num_positions points evenly spaced between x_min and x_max, and y_min and y_max.
-    x_positions     : numpy.ndarray = numpy.random.uniform(x_min, x_max, num_positions);
-    y_positions     : numpy.ndarray = numpy.random.uniform(y_min, y_max, num_positions);
-    Positions       : numpy.ndarray = numpy.row_stack((x_positions, y_positions));
-    Num_Positions   : int           = Positions.shape[1];
-    if(myid == 0): LOGGER.debug("Positions has shape %s (dim = %d, num_positions = %d)" % (str(Positions.shape), dim, num_positions));
+    # If the mesh has an unusal shape, some of these points may lie outside the mesh. We sample 
+    # too many positions to account for this. Any points that lie outside the mesh will be ignored.
+    # We will sample new points if the number of points that lie inside the mesh is less than 
+    # num_positions.
+    Valid_Positions_List : list[numpy.ndarray] = [];
+    num_valid_positions  : int = 0;
+    
+    while(num_valid_positions < num_positions):
+        if(myid == 0): LOGGER.debug("Sampling %d positions" % num_positions);
+
+        # Sample random x,y coordinates
+        x_positions : numpy.ndarray = numpy.random.uniform(x_min, x_max, num_positions);
+        y_positions : numpy.ndarray = numpy.random.uniform(y_min, y_max, num_positions);
+
+        # Create array of points in format expected by FindPoints
+        points : numpy.ndarray = numpy.column_stack((x_positions, y_positions));
+
+        # Find which points are in the mesh.
+        count, elem_list, _ = pmesh.FindPoints(points, warn = False, inv_trans = None);
+
+        # Check which points are inside elements
+        for i in range(num_positions):
+            if elem_list[i] >= 0:  # -1 indicates point not found in any element
+                Valid_Positions_List.append(points[i]);
+                num_valid_positions += 1;
+                
+                if num_valid_positions >= num_positions:
+                    break;
+
+        # If we have not enough valid positions, sample again.
+        if(num_valid_positions < num_positions):
+            if(myid == 0): LOGGER.debug("Not enough valid positions (current = %d, needed = %d), sampling again" % (num_valid_positions, num_positions));
+
+    # Convert the list of valid positions to a numpy array.
+    Positions : numpy.ndarray = numpy.array(Valid_Positions_List).T;
+    if(myid == 0): LOGGER.debug("Positions has shape %s (dim = %d, num_positions = %d)" % (str(Positions.shape), dim, Positions.shape[1]));
+
 
 
     # ---------------------------------------------------------------------------------------------
-    # 8. VisIt
+    # 7. VisIt
 
     # Setup VisIt visualization (if we are doing that)
     if (VisIt == True):
@@ -422,69 +453,93 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
         dc.Save();
 
 
-    # --------------------------------------------------------------------------------------------- 
-    # 9.  Perform time-integration 
 
-    # Setup the ODE solver.
-    adv : FE_Evolution = FE_Evolution(M, K, B);
+    # ---------------------------------------------------------------------------------------------
+    # 8. Setup lists to store the solution + evaluate the initial solution at the positions.
 
-    # Setup the lists to hold the solution at each time step.
+    if(myid == 0): LOGGER.info("Setting up lists to store the time, solution at each time step.");
+
+    # Setup for time stepping.
     times_list          : list[float]           = [];    
     u_list              : list[numpy.ndarray]   = [];
 
-    # Append the initial time
-    times_list.append(0);
-
     # Evaluate the initial solution at the positions.
-    element_nums        = pmesh.FindPoints(Positions.T);
-    u_Positions_0       = numpy.zeros((1, Num_Positions));
+    _, element_nums, _  = pmesh.FindPoints(Positions.T, warn = False, inv_trans = None);
+    u_Positions_0       = numpy.zeros((1, num_positions));
 
-    for i in range(Num_Positions):
-        # Get the element number of the i'th point
-        element_num : int   = element_nums[1][i];
+    for i in range(num_positions):
+        # Get the element number of the i'th point.
+        element_num : int   = element_nums[i];
+        if(element_num == -1):
+            LOGGER.error("Element number is -1 for point %d, position = %s" % (i, str(Positions[:, i])));
+            raise ValueError("Element number is -1 for point %d, position = %s" % (i, str(Positions[:, i])));
+    
+        # Make the current position to a mfem.IntegrationPoint object.
         point               = mfem.IntegrationPoint();
         x,y                 = numpy.float64(Positions[:, i].tolist());
         point.Set2(x, y);
-        u_Positions_0[0, i]= u_gf.GetValue(element_num, point, dim);
 
-    u_list.append( u_Positions_0);
+        # Evaluate the solution at the i'th position.
+        u_Positions_0[0, i]     = u_gf.GetValue(element_num, point, dim);
+
+    # Append the initial solution and time to their corresponding lists.
+    times_list.append(0);
+    u_list.append(  u_Positions_0);
+
+
+
+    # --------------------------------------------------------------------------------------------- 
+    # 9.  Perform time-integration.
+
+    # Setup the ODE solver.
+    adv : FE_Evolution = FE_Evolution(M, K, B);
 
     # Initialize the ODE solver.
     ode_solver.Init(adv);
 
     # Run the time stepping loop.
-    t   : float = 0.0;
-    ti  : int   = 0;
-    while True:
+    t           : float = 0.0;
+    ti          : int   = 0;
+    last_step   : bool  = False;
+    
+    while not last_step:
         # Check if we should stop time stepping (if this time step is within dt/2 of t_final).
-        if t > t_final - dt/2:
-            break;
+        if t + dt >= t_final - dt/2:
+            last_step = True;
         
         # Step the ODE solver.
         t, dt = ode_solver.Step(U, t, dt);
         u_gf.Assign(U);
 
         # Should we serialize?
-        if ti % serialization_steps == 0:
+        if last_step or (ti % serialization_steps == 0):
             if(myid == 0): LOGGER.info("time step: " + str(ti) + ", time: " + str(numpy.round(t, 3)));
 
-            # Serialize the current displacement, velocity, and time.
-            times_list.append(t);
+            # Update the solution to the grid functions
+            u_gf.Assign(U);
 
             # Evaluate the solution at the positions.
-            element_nums        = mesh.FindPoints(Positions.T);
-            u_Positions_t       = numpy.zeros((1, Num_Positions));
+            _, element_nums, _  = pmesh.FindPoints(Positions.T, warn = False, inv_trans = None);
+            u_Positions_t       = numpy.zeros((1, num_positions));
 
-            for i in range(Num_Positions):
+            for i in range(num_positions):
                 # Get the element number of the i'th point
-                element_num : int   = element_nums[1][i];
+                element_num : int   = element_nums[i];
+                if(element_num == -1):
+                    LOGGER.error("Element number is -1 for point %d, position = %s"     % (i, str(Positions[:, i])));
+                    raise ValueError("Element number is -1 for point %d, position = %s" % (i, str(Positions[:, i])));
+
+                # Make the current position to a mfem.IntegrationPoint object.
                 point               = mfem.IntegrationPoint();
                 x,y                 = numpy.float64(Positions[:, i].tolist());
-                point.Set2(x, y)
-                u_Positions_t[0, i] = u_gf.GetValue(element_num, point, dim)
+                point.Set2(x, y);
 
-            # Append the current solution to the list.
-            u_list.append(u_Positions_t);
+                # Evaluate the solution at the i'th position.
+                u_Positions_t[0, i]     = u_gf.GetValue(element_num, point, dim);
+
+            # Append the current solution and time to their corresponding lists.
+            times_list.append(t);
+            u_list.append(  u_Positions_t);
 
             # If visualizing, Save the solution to the VisIt object.
             if(VisIt):
@@ -495,6 +550,7 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
             
         # Increment the time step counter.
         ti = ti + 1;
+
 
 
     # ---------------------------------------------------------------------------------------------
