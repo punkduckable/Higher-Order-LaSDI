@@ -29,32 +29,80 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class velocity_coeff(mfem.VectorPyCoefficient):
-    def __init__(self, dim : int, bb_min : float, bb_max : float):
+    def __init__(self, dim : int, bb_min : numpy.ndarray, bb_max : numpy.ndarray) -> None:
+        """
+        Initialize a velocity_coeff object. This class is used to define the velocity field for the 
+        advection problem. If dim = 2, the velocity field is defined by
+
+            v(x, y) = d(x, y)* gamma * (y, -x)
+
+        where d(x, y) = max((x + 1)*(1 - x), 0.) * max((y + 1)*(1 - y), 0.) takes on non-zero 
+        values in [-1, 1] x [-1, 1] and is zero outside of this domain. Further, gamma is a 
+        global.
+        """
+
+        # Run checks
+        assert(isinstance(bb_min, numpy.ndarray));
+        assert(isinstance(bb_max, numpy.ndarray));
+        assert(len(bb_min) == dim);
+        assert(len(bb_max) == dim);
+        for i in range(dim):
+            assert(bb_min[i] < bb_max[i]);
+
         # Run the super class initializer
         mfem.VectorPyCoefficient.__init__(self, dim);
 
         # Now set problem specific attributes.
-        self.bb_min     : float = bb_min;
-        self.bb_max     : float = bb_max;
+        self.dim        : int           = dim;
+        self.bb_min     : numpy.ndarray = bb_min;
+        self.bb_max     : numpy.ndarray = bb_max;
 
 
-    def EvalValue(self, x : list[float]) -> list[float]:
-        dim : int = len(x);
 
-        center : float = (self.bb_min + self.bb_max)/2.0;
+    def EvalValue(self, x : numpy.ndarray) -> numpy.ndarray:
+        """
+        Evaluate the velocity field at the given position.
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+        
+        x : numpy.ndarray, shape = (dim,)
+            A 1D array holding the position at which to evaluate the velocity field.   
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+        
+        numpy.ndarray, shape = (dim,)
+            A 1D array holding the velocity field at the given position.
+        """
+
+        # Run checks
+        assert(isinstance(x, numpy.ndarray));
+        assert(len(x.shape) == 1);
+        assert(len(x) == self.dim);
+
+        # Get the bounding box.
+        bb_min : numpy.ndarray = self.bb_min;
+        bb_max : numpy.ndarray = self.bb_max;
+
+        # Get the center of the bounding box.
+        center : float = (bb_min + bb_max)/2.0;
 
         # map to the reference [-1,1] domain
-        X : list[float] = 2 * (x - center) / (self.bb_max - self.bb_min);
+        X : numpy.ndarray = 2 * (x - center) / (bb_max - bb_min);
         
         # Clockwise twisting rotation in 2D around the origin
         global gamma;
         d : float = max((X[0] + 1.)*(1. - X[0]), 0.) * max((X[1] + 1.)*(1. - X[1]), 0.);
         d : float = d ** 2;
-        if dim == 1:
+        if self.dim == 1:
             v : list[float] = [1.0, ]
-        elif dim == 2:
+        elif self.dim == 2:
             v : list[float] = [d*gamma*X[1],  - d*gamma*X[0]]
-        elif dim == 3:
+        elif self.dim == 3:
             v : list[float] = [d*gamma*X[1],  - d*gamma*X[0],  0]
 
         return v
@@ -62,20 +110,50 @@ class velocity_coeff(mfem.VectorPyCoefficient):
 
 
 class u0_coeff(mfem.PyCoefficient):
-    def __init__(self, bb_min : float, bb_max : float):
+    def __init__(self, bb_min : numpy.ndarray, bb_max : numpy.ndarray):
+        """
+        Initialize a u0_coeff object. This class is used to define the initial condition for the 
+        advection problem. The initial condition is defined by
+
+            u_0(x, t) = sin(pi * omega * x~) * sin(pi * omega * y~)
+
+        where x~ and y~ are the non-dimensionalized coordinates. Specifically, 
+
+            x~ = 2 * (x - center) / (bb_max - bb_min)
+            y~ = 2 * (y - center) / (bb_max - bb_min)
+
+        where center = (bb_min + bb_max) / 2.0.
+        """
+
+        # Run checks
+        assert(isinstance(bb_min, numpy.ndarray));
+        assert(isinstance(bb_max, numpy.ndarray));
+        assert(len(bb_min) == 2);
+        assert(len(bb_max) == 2);
+
         # Run the super class initializer
         mfem.PyCoefficient.__init__(self);
 
         # Now set problem specific attributes.
-        self.bb_min : float = bb_min;
-        self.bb_max : float = bb_max;
+        self.bb_min : numpy.ndarray = bb_min;
+        self.bb_max : numpy.ndarray = bb_max;
+
+
 
     def EvalValue(self, x : numpy.ndarray) -> float:
         """
-        This function returns the initial condition for the advection problem.
+        This function returns the initial condition for the advection problem:
 
-        The initial condition is a sine wave in the x-direction and a sine wave in the y-direction.
+            u_0(x, t) = sin(pi * omega * x~) * sin(pi * omega * y~)
 
+        where x~ and y~ are the non-dimensionalized coordinates. Specifically, 
+
+            x~ = 2 * (x - center) / (bb_max - bb_min)
+            y~ = 2 * (y - center) / (bb_max - bb_min)
+
+        where center = (bb_min + bb_max) / 2.0.
+
+        
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
@@ -104,6 +182,7 @@ class u0_coeff(mfem.PyCoefficient):
         # Return the initial condition.
         global omega;
         return sin(pi * omega * X[0]) * sin(pi * omega * X[1])
+
 
 
 # Inflow boundary condition (zero for the problems considered in this example)
@@ -162,7 +241,7 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
                 k                   : float     = 2.0,
                 serialization_steps : int       = 10,
                 num_positions       : int       = 1000,
-                VisIt               : bool      = True) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]:
+                VisIt               : bool      = True) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """
     This examples solves a time dependent nonlinear elasticity problem of the form 
 
@@ -216,8 +295,8 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
         the EvalValue method in the velocity_coeff class).
 
     k : float
-        specifies the frequency of the initial condition (this becomes the omega variable in 
-        the EvalValue method in the u0_coeff class).
+        specifies the frequency of peaks in the initial condition (this becomes the omega variable 
+        in the EvalValue method in the u0_coeff class).
 
     serialization_steps : int
         Specifies how frequently we serialize (save) and visualize the solution.
@@ -234,7 +313,7 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
     Returns
     -----------------------------------------------------------------------------------------------
 
-    Sol, X, T. 
+    Sol, X, T, bb_min, bb_max
     
     Sol : numpy.ndarray, shape = (Nt, 1, num_positions)
         i, j, k element holds the j'th component of the solution at the k'th position (i.e., 
@@ -245,6 +324,12 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
     
     T : numpy.ndarray, shape = (Nt)
         i'th element holds the j'th time at which we evaluate the solution.
+
+    bb_min : numpy.ndarray, shape = (2,)
+        The minimum coordinates of the bounding box.
+
+    bb_max : numpy.ndarray, shape = (2,)
+        The maximum coordinates of the bounding box.
     """
 
     # ---------------------------------------------------------------------------------------------
@@ -304,6 +389,7 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
         if mesh.NURBSext:
             mesh.SetCurvature(max(order, 1));
         bb_min, bb_max = mesh.GetBoundingBox(max(order, 1));
+    
 
     # Setup the parallel mesh and refine it.
     if(myid == 0): LOGGER.debug("Setting up the parallel mesh");
@@ -538,16 +624,9 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
     Trajectory  : numpy.ndarray = numpy.array(u_list,               dtype = numpy.float32);
 
 
-    return Trajectory, Positions, Times;
+    return Trajectory, Positions, Times, bb_min, bb_max;
 
 
 if __name__ == "__main__":
     Logging.Initialize_Logger(level = logging.DEBUG);
-    Sol, X, T = Simulate();
-    print("Sol.shape = " + str(Sol.shape));
-    print("X.shape = " + str(X.shape));
-    print("T.shape = " + str(T.shape));
-    print("Sol[:, 0, 0] = " + str(Sol[:, 0, 0]));
-    print("X[:, 0] = " + str(X[:, 0]));
-    print("T[0] = " + str(T[0]));
-    exit();
+    Sol, X, T, bb_min, bb_max = Simulate();
