@@ -79,8 +79,8 @@ class Burgers(Physics):
         # Set up X_Positions. For the Burgers class, X_Positions is 1D and has shape (n_x).
         self.X_Positions : numpy.ndarray = numpy.linspace(self.x_min, self.x_max, self.n_x, dtype = numpy.float32);
 
-        # ???
-        self.maxk                   : int   = config['Burgers']['maxk'];                  # TODO: ??? What is this ???
+        # Set up the maximum number of corrections and the convergence threshold.
+        self.maxk                   : int   = config['Burgers']['maxk'];
         self.convergence_threshold  : float = config['Burgers']['convergence_threshold'];
 
         # Determine which index corresponds to 'a' and 'w' (we pass an array of parameter values, 

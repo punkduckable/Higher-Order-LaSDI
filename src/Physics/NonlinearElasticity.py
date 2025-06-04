@@ -5,6 +5,7 @@
 # Add the main directory to the search path.
 import  os;
 import  sys;
+import logging;
 PyMFEM_Path     : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "PyMFEM"));
 sys.path.append(PyMFEM_Path);
 
@@ -13,6 +14,9 @@ import  torch;
 
 from    Physics                         import  Physics;
 from    nonlinear_elasticity            import  Simulate;
+
+LOGGER : logging.Logger = logging.getLogger(__name__);
+
 
 
 
@@ -53,9 +57,11 @@ class NonlinearElasticity(Physics):
         """
 
         # Checks.
+        assert(isinstance(param_names, list));
         assert(len(param_names) == 2);
         assert('s'  in param_names);
         assert('mu' in param_names);
+        assert('NonlinearElasticity' in config);
 
         # Call the super class initializer.
         super().__init__(config         = config, 
@@ -74,9 +80,7 @@ class NonlinearElasticity(Physics):
         D, V, X, T                          = Simulate(t_final = 0);        # D, V have shape (Nt, 2, N_Nodes)
         self.Frame_Shape    : list[int]     = list(D.shape[1:]);
         self.X_Positions    : numpy.ndarray = numpy.copy(X);
-
-        # Make sure the config dictionary is actually for the explicit physics model.
-        assert('NonlinearElasticity' in config);
+        LOGGER.debug("Frame shape: %s" % str(self.Frame_Shape));
 
         # Determine which index corresponds to s and which to mu (simulate accepts a two element
         # array holding s and mu. We need to know which element corresponds to mu and which to s).

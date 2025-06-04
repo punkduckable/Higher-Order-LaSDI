@@ -15,46 +15,44 @@ lasdi:
 
     loss_weights:
       recon:                1.0
-      chain_rule:           1.0
       LD:                   0.5
       rollout:              0.5
       coef:                 0.0001
-      consistency:          1.0
 
 workflow:
   use_restart:              false
-  restart_file:          
+  restart_file:            
 
 parameter_space:
   parameters:
-    - name:                 s
-      min:                  0.5
-      max:                  1.5
+    - name:                 k
+      min:                  2.0
+      max:                  3.0
       test_space_type:      uniform
       sample_size:          5
       log_scale:            false
-    - name:                 mu
-      min:                  .2
-      max:                  .6
+    - name:                 w
+      min:                  1.0
+      max:                  2.0
       test_space_type:      uniform
-      sample_size:          3
+      sample_size:          5
       log_scale:            false
   test_space:
     type:                   grid
 
 model:
-  type:                     pair
-  pair:
+  type:                     autoencoder
+  autoencoder:
     hidden_widths:          [250, 100, 100, 100]
     latent_dimension:       5  
 
 latent_dynamics:
-  type:                     spring
+  type:                     sindy
   coef_norm_order:          fro
-  spring:
+  sindy:
 
 physics:
-  type:                     NonlinearElasticity
-  NonlinearElasticity:
+  type:                     Advection
+  Advection:
 
 

@@ -25,80 +25,192 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 
 
 # -------------------------------------------------------------------------------------------------
-# Classes
+# Nonlinear Elasticity Classes
 # -------------------------------------------------------------------------------------------------
 
 
-
 class InitialVelocity(mfem.VectorPyCoefficient):
-    def EvalValue(self, x):
-        dim = len(x)
+    """
+    Defines the initial velocity field for the nonlinear elasticity problem. The velocity is zero 
+    in all dimensions except the last, where it follows a sinusoidal pattern.
+    """
+    def EvalValue(self, x: numpy.ndarray) -> numpy.ndarray:
+        """
+        Evaluates the initial velocity at position x.
 
-        global s;
+        
 
-        v       = numpy.zeros(len(x))
-        v[-1]   = -(s/80.0)* sin(s * x[0])
+        -----------------------------------------------------------------------------------------------
+        Arguments
+        -----------------------------------------------------------------------------------------------
+        x : numpy.ndarray
+            Position vector at which to evaluate the velocity.
+
+            
+            
+        -----------------------------------------------------------------------------------------------
+        Returns
+        -----------------------------------------------------------------------------------------------
+        v : numpy.ndarray
+            Initial velocity vector at position x. Has same dimension as x. Only the last component 
+            is non-zero, given by: -(s/80.0)*sin(s*x[0]) where s is a global parameter controlling 
+            the oscillation frequency.
+        """
+        dim : int = len(x)
+        
+        # Access global parameter s that controls oscillation frequency
+        global s
+
+        # Initialize velocity vector to zeros
+        v : numpy.ndarray = numpy.zeros(len(x))
+        
+        # Set only the last component to be non-zero
+        v[-1] = -(s/80.0) * sin(s * x[0])
         return v
 
 
-
 class InitialDeformation(mfem.VectorPyCoefficient):
-    def EvalValue(self, x):
+    """
+    Defines the initial deformation field for the nonlinear elasticity problem. The initial 
+    deformation is simply the identity map (no deformation).
+    """
+    def EvalValue(self, x: numpy.ndarray) -> numpy.ndarray:
+        """
+        Evaluates the initial deformation at position x.
+
+        
+
+        -----------------------------------------------------------------------------------------------
+        Arguments
+        -----------------------------------------------------------------------------------------------
+        x : numpy.ndarray
+            Position vector at which to evaluate the deformation.
+
+            
+        
+        -----------------------------------------------------------------------------------------------
+        Returns
+        -----------------------------------------------------------------------------------------------
+        y : numpy.ndarray
+            Initial deformation vector at position x. Returns a copy of x, representing no initial 
+            deformation.
+        """
         from copy import deepcopy
-        y = deepcopy(x)
+        y : numpy.ndarray = deepcopy(x)
         return y
 
 
-
 class ElasticEnergyCoefficient(mfem.PyCoefficient):
-    def __init__(self, model, x):
-        self.x = x
-        self.model = model
-        self.J = mfem.DenseMatrix()
-        mfem.PyCoefficient.__init__(self)
+    """
+    Defines the elastic energy density coefficient for the nonlinear elasticity problem. This 
+    coefficient is used to compute the elastic energy at each point in the domain based on the 
+    deformation gradient and a constitutive model.
 
-    def Eval(self, T, ip):
-        self.model.SetTransformation(T)
-        self.x.GetVectorGradient(T, self.J)
-        # T.Jacobian().Print()
-        # print self.x.GetDataArray()
-        # self.J.Print()
-        return self.model.EvalW(self.J)/(self.J.Det())
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+    model : mfem.PyNonlinearFormIntegrator
+        The constitutive model that defines the strain energy density function.
+    
+    x : mfem.GridFunction
+        The deformation field whose energy we want to compute.
+    """
+    def __init__(self, model: mfem.PyNonlinearFormIntegrator, x: mfem.GridFunction):
+        self.x       : mfem.GridFunction                 = x;
+        self.model   : mfem.PyNonlinearFormIntegrator    = model;
+        self.J       : mfem.DenseMatrix                  = mfem.DenseMatrix();
+        mfem.PyCoefficient.__init__(self);
+
+
+
+    def Eval(self, T: mfem.ElementTransformation, ip: mfem.IntegrationPoint) -> float:
+        """
+        Evaluates the elastic energy density at a given point.
+
+        
+
+        -----------------------------------------------------------------------------------------------
+        Arguments
+        -----------------------------------------------------------------------------------------------
+        T : mfem.ElementTransformation
+            The transformation from reference to physical coordinates.
+        
+        ip : mfem.IntegrationPoint
+            The integration point at which to evaluate the energy.
+
+            
+
+        -----------------------------------------------------------------------------------------------
+        Returns
+        -----------------------------------------------------------------------------------------------
+        float
+            The elastic energy density divided by the Jacobian determinant.
+        """
+        # Set the current transformation
+        self.model.SetTransformation(T);
+        
+        # Get the deformation gradient
+        self.x.GetVectorGradient(T, self.J);
+        
+        # Return elastic energy density divided by Jacobian determinant
+        return self.model.EvalW(self.J)/(self.J.Det());
 
 
 
 class HyperelasticOperator(mfem.PyTimeDependentOperator):
-    def __init__(self, fespace, ess_tdof_list_, visc, mu, K):
+    def __init__(self, fespace: mfem.ParFiniteElementSpace, ess_tdof_list_: list[int], visc: float, mu: float, K: float) -> None:
+        """
+        Initialize the hyperelastic operator.
+
+        Parameters
+        ----------
+        fespace : mfem.ParFiniteElementSpace
+            The finite element space
+        ess_tdof_list_ : list[int] 
+            List of essential true degrees of freedom
+        visc : float
+            Viscosity coefficient
+        mu : float
+            Shear modulus
+        K : float
+            Bulk modulus
+        """
+        # Initialize parent class with size = 2*fespace.TrueVSize() and t=0.0
         mfem.PyTimeDependentOperator.__init__(self, 2*fespace.TrueVSize(), 0.0)
 
-        rel_tol = 1e-8
-        skip_zero_entries = 0
-        ref_density = 1.0
+        # Set solver parameters
+        rel_tol             : float = 1e-8;
+        skip_zero_entries   : int   = 0;
+        ref_density         : float = 1.0;
 
-        self.ess_tdof_list = ess_tdof_list_
-        self.z = mfem.Vector(self.Height() // 2)
-        self.z2 = mfem.Vector(self.Height() // 2)
-        self.H_sp = mfem.Vector(self.Height() // 2)
-        self.dvxdt_sp = mfem.Vector(self.Height() // 2)
-        self.fespace = fespace
-        self.viscosity = visc
+        # Store input parameters
+        self.ess_tdof_list  : list[int] = ess_tdof_list_;
+        self.z              : mfem.Vector = mfem.Vector(self.Height() // 2);
+        self.z2             : mfem.Vector = mfem.Vector(self.Height() // 2);
+        self.H_sp           : mfem.Vector = mfem.Vector(self.Height() // 2);
+        self.dvxdt_sp       : mfem.Vector = mfem.Vector(self.Height() // 2);
+        self.fespace        : mfem.ParFiniteElementSpace = fespace;
+        self.viscosity      : float = visc;
 
-        M = mfem.ParBilinearForm(fespace)
-        S = mfem.ParBilinearForm(fespace)
-        H = mfem.ParNonlinearForm(fespace)
-        self.M = M
-        self.H = H
-        self.S = S
+        # Initialize bilinear and nonlinear forms
+        M : mfem.ParBilinearForm    = mfem.ParBilinearForm(fespace);
+        S : mfem.ParBilinearForm    = mfem.ParBilinearForm(fespace);
+        H : mfem.ParNonlinearForm   = mfem.ParNonlinearForm(fespace);
+        self.M : mfem.ParBilinearForm    = M;
+        self.H : mfem.ParNonlinearForm    = H;
+        self.S : mfem.ParBilinearForm     = S;
 
-        rho = mfem.ConstantCoefficient(ref_density)
+        # Setup mass matrix M
+        rho: mfem.ConstantCoefficient = mfem.ConstantCoefficient(ref_density)
         M.AddDomainIntegrator(mfem.VectorMassIntegrator(rho))
         M.Assemble(skip_zero_entries)
         M.Finalize(skip_zero_entries)
-        self.Mmat = M.ParallelAssemble()
+        self.Mmat: mfem.HypreParMatrix = M.ParallelAssemble()
         self.Mmat.EliminateRowsCols(self.ess_tdof_list)
 
-        M_solver = mfem.CGSolver(fespace.GetComm())
-        M_prec = mfem.HypreSmoother()
+        # Setup mass matrix solver
+        M_solver: mfem.CGSolver = mfem.CGSolver(fespace.GetComm())
+        M_prec: mfem.HypreSmoother = mfem.HypreSmoother()
         M_solver.iterative_mode = False
         M_solver.SetRelTol(rel_tol)
         M_solver.SetAbsTol(0.0)
@@ -188,7 +300,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
         d((x, y), 0)         =  (x, y)
         v((x, y), 0)         =  (-theta*x^2, theta*x^2 (8.0 - x))
     
-    where X[0] and X[-1] are the positions of the first and lash nodes, respectively. Here, theta 
+    where X[0] and X[-1] are the positions of the first and last nodes, respectively. Here, theta 
     is a parameter that the user can change. 
     
     See the c++ version of example 10 in the MFEM library for more detail.
@@ -247,7 +359,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
         specifies the constant "theta" in the initial velocity.
 
     serialize_steps : int
-        Specifies how frequently we serialize (save) the solution.
+        Specifies how frequently we serialize (save) and visualize the solution.
 
     VisIt : bool
         If True, will prompt the code to save the displacement and velocity GridFunctions every 
@@ -375,9 +487,9 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     pmesh.GetNodes(D_ref);
     
     # Elastic energy density.
-    w_fec       = mfem.L2_FECollection(order + 1, dim);
-    w_fespace   = mfem.ParFiniteElementSpace(pmesh, w_fec);
-    w_gf          = mfem.ParGridFunction(w_fespace);
+    w_fec       : mfem.FiniteElementCollection  = mfem.L2_FECollection(order + 1, dim);
+    w_fespace   : mfem.ParFiniteElementSpace    = mfem.ParFiniteElementSpace(pmesh, w_fec);
+    w_gf        : mfem.ParGridFunction          = mfem.ParGridFunction(w_fespace);
 
 
 
@@ -434,7 +546,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     # ---------------------------------------------------------------------------------------------
     # 5. Extract the positions of the nodes.
 
-    LOGGER.info("Extracting node positions");
+    if(myid == 0): LOGGER.info("Extracting node positions");
 
     # Fetch the nodes + number of them
     Nodes_GridFun                       = mfem.ParGridFunction(fespace);
@@ -454,11 +566,11 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 7. VisIt
+    # 6. VisIt
 
     # Setup VisIt visualization (if we are doing that)
     if (VisIt == True):
-        LOGGER.info("Setting up VisIt visualization.");
+        if(myid == 0): LOGGER.info("Setting up VisIt visualization.");
 
         dc_path : str   = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "nlelast-fom");
         dc              = mfem.VisItDataCollection(dc_path, pmesh);
@@ -474,9 +586,9 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 6. Perform time-integration (looping over the time iterations, ti, with a time-step dt).
+    # 7. Perform time-integration (looping over the time iterations, ti, with a time-step dt).
     
-    LOGGER.info("Running time stepping from t = 0 to t = %f with dt %f" % (t_final, dt));
+    if(myid == 0): LOGGER.info("Running time stepping from t = 0 to t = %f with dt %f" % (t_final, dt));
 
     # Setup for time stepping.
     ode_solver.Init(oper);
