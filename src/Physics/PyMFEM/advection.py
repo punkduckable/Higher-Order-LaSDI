@@ -396,11 +396,13 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
     if(myid == 0): LOGGER.debug("x_min = %f, x_max = %f, y_min = %f, y_max = %f" % (x_min, x_max, y_min, y_max));
 
     # Now, sample num_positions points evenly spaced between x_min and x_max, and y_min and y_max.
-    # If the mesh has an unusal shape, some of these points may lie outside the mesh. We sample 
+    # If the mesh has an unusual shape, some of these points may lie outside the mesh. We sample 
     # too many positions to account for this. Any points that lie outside the mesh will be ignored.
     # We will sample new points if the number of points that lie inside the mesh is less than 
     # num_positions.
     Valid_Positions_List : list[numpy.ndarray] = [];
+    Elements_List        : list[int]           = [];
+    RefCoords_List       : list[numpy.ndarray] = [];
     num_valid_positions  : int = 0;
     
     while(num_valid_positions < num_positions):
@@ -414,14 +416,17 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
         points : numpy.ndarray = numpy.column_stack((x_positions, y_positions));
 
         # Find which points are in the mesh.
-        count, elem_list, _ = pmesh.FindPoints(points, warn = False, inv_trans = None);
+        count, elem_list, ref_coords = pmesh.FindPoints(points, warn = False, inv_trans = None);
 
         # Check which points are inside elements
         for i in range(num_positions):
             if elem_list[i] >= 0:  # -1 indicates point not found in any element
                 Valid_Positions_List.append(points[i]);
+                Elements_List.append(elem_list[i]);
+                RefCoords_List.append(ref_coords[i]);
                 num_valid_positions += 1;
-                
+
+                # If we have enough valid positions, break.
                 if num_valid_positions >= num_positions:
                     break;
 
@@ -429,8 +434,10 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
         if(num_valid_positions < num_positions):
             if(myid == 0): LOGGER.debug("Not enough valid positions (current = %d, needed = %d), sampling again" % (num_valid_positions, num_positions));
 
-    # Convert the list of valid positions to a numpy array.
+    # Convert the lists to numpy arrays.
     Positions : numpy.ndarray = numpy.array(Valid_Positions_List).T;
+    Elements  : numpy.ndarray = numpy.array(Elements_List);
+    RefCoords : numpy.ndarray = numpy.array(RefCoords_List);
     if(myid == 0): LOGGER.debug("Positions has shape %s (dim = %d, num_positions = %d)" % (str(Positions.shape), dim, Positions.shape[1]));
 
 
@@ -464,23 +471,9 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
     u_list              : list[numpy.ndarray]   = [];
 
     # Evaluate the initial solution at the positions.
-    _, element_nums, _  = pmesh.FindPoints(Positions.T, warn = False, inv_trans = None);
     u_Positions_0       = numpy.zeros((1, num_positions));
-
     for i in range(num_positions):
-        # Get the element number of the i'th point.
-        element_num : int   = element_nums[i];
-        if(element_num == -1):
-            LOGGER.error("Element number is -1 for point %d, position = %s" % (i, str(Positions[:, i])));
-            raise ValueError("Element number is -1 for point %d, position = %s" % (i, str(Positions[:, i])));
-    
-        # Make the current position to a mfem.IntegrationPoint object.
-        point               = mfem.IntegrationPoint();
-        x,y                 = numpy.float64(Positions[:, i].tolist());
-        point.Set2(x, y);
-
-        # Evaluate the solution at the i'th position.
-        u_Positions_0[0, i]     = u_gf.GetValue(element_num, point, dim);
+        u_Positions_0[0, i]     = u_gf.GetValue(Elements[i], RefCoords[i], dim);
 
     # Append the initial solution and time to their corresponding lists.
     times_list.append(0);
@@ -510,6 +503,7 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
         # Step the ODE solver.
         t, dt = ode_solver.Step(U, t, dt);
         u_gf.Assign(U);
+        ti += 1;
 
         # Should we serialize?
         if last_step or (ti % serialization_steps == 0):
@@ -519,23 +513,9 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
             u_gf.Assign(U);
 
             # Evaluate the solution at the positions.
-            _, element_nums, _  = pmesh.FindPoints(Positions.T, warn = False, inv_trans = None);
             u_Positions_t       = numpy.zeros((1, num_positions));
-
             for i in range(num_positions):
-                # Get the element number of the i'th point
-                element_num : int   = element_nums[i];
-                if(element_num == -1):
-                    LOGGER.error("Element number is -1 for point %d, position = %s"     % (i, str(Positions[:, i])));
-                    raise ValueError("Element number is -1 for point %d, position = %s" % (i, str(Positions[:, i])));
-
-                # Make the current position to a mfem.IntegrationPoint object.
-                point               = mfem.IntegrationPoint();
-                x,y                 = numpy.float64(Positions[:, i].tolist());
-                point.Set2(x, y);
-
-                # Evaluate the solution at the i'th position.
-                u_Positions_t[0, i]     = u_gf.GetValue(element_num, point, dim);
+                u_Positions_t[0, i]     = u_gf.GetValue(Elements[i], RefCoords[i], dim);
 
             # Append the current solution and time to their corresponding lists.
             times_list.append(t);
@@ -547,9 +527,6 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
                 dc.SetCycle(ti);
                 dc.SetTime(t);
                 dc.Save();
-            
-        # Increment the time step counter.
-        ti = ti + 1;
 
 
 
@@ -567,3 +544,10 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
 if __name__ == "__main__":
     Logging.Initialize_Logger(level = logging.DEBUG);
     Sol, X, T = Simulate();
+    print("Sol.shape = " + str(Sol.shape));
+    print("X.shape = " + str(X.shape));
+    print("T.shape = " + str(T.shape));
+    print("Sol[:, 0, 0] = " + str(Sol[:, 0, 0]));
+    print("X[:, 0] = " + str(X[:, 0]));
+    print("T[0] = " + str(T[0]));
+    exit();

@@ -650,9 +650,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     # Evaluate the initial solution at the positions.
     D_Positions_0               = numpy.zeros((2, num_positions));
     V_Positions_0               = numpy.zeros((2, num_positions));
-
     for i in range(num_positions):
-        # Evaluate the solution at the i'th position.
         D_Positions_0[:, i]     = D_gf.GetValue(Elements[i], RefCoords[i], dim);
         V_Positions_0[:, i]     = V_gf.GetValue(Elements[i], RefCoords[i], dim);
 
@@ -680,6 +678,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
             last_step = True;
 
         t, dt = ode_solver.Step(VD, t, dt)
+        ti = ti + 1;
 
         # Should we serialize?
         if (last_step or (ti % serialize_steps) == 0):
@@ -701,9 +700,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
             # Evaluate the solution at the positions.
             D_Positions_t       = numpy.zeros((2, num_positions));
             V_Positions_t       = numpy.zeros((2, num_positions));
-
             for i in range(num_positions):
-                # Evaluate the solution at the i'th position.
                 D_Positions_t[:, i]     = D_gf.GetValue(Elements[i], RefCoords[i], dim);
                 V_Positions_t[:, i]     = V_gf.GetValue(Elements[i], RefCoords[i], dim);
 
@@ -722,10 +719,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
                 dc.Save();  
                 
                 # Now swap the deformed mesh back to reset everything.
-                pmesh.SwapNodes(D_gf, 0);
-
-        ti = ti + 1;
-        
+                pmesh.SwapNodes(D_gf, 0);        
 
 
 
