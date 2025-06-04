@@ -170,9 +170,9 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
 
 class cInitialSolution(mfem.PyCoefficient):
     def EvalValue(self, x : numpy.ndarray) -> float:    
-        global c;
+        global decay;
         norm2 : float = numpy.sum(x**2);
-        return numpy.exp(-norm2*c);
+        return numpy.exp(-norm2*decay);
 
 
 
@@ -192,8 +192,8 @@ def Simulate(mesh_file          : str   = "star.mesh",
              ode_solver_type    : int   = 10,
              t_final            : float = 1.0,
              dt                 : float = 1e-2,
-             speed              : float = 1.0,
-             c_                 : float = 30.0,
+             c                  : float = 0.5,
+             k                  : float = 20.0,
              dirichlet          : bool  = True,
              serialization_steps: int   = 1,
              num_positions      : int   = 1000,
@@ -228,11 +228,11 @@ def Simulate(mesh_file          : str   = "star.mesh",
     dt : float
         The time step. We solve the wave equation using a time-stepping scheme with time step dt.
 
-    speed : float
+    c : float
         The speed of the wave.  
 
-    c_ : float
-        A coefficient used to define the initial solution: u(0, x) = exp(-c*|x|^2).
+    k : float
+        A coefficient used to define the initial solution: u(0, x) = exp(-k*|x|^2).
 
     dirichlet : bool
         Whether to use Dirichlet boundary conditions. If True, we fix the position of the nodes on the 
@@ -278,8 +278,8 @@ def Simulate(mesh_file          : str   = "star.mesh",
     LOGGER.info("Setting up wave equation simulation with MFEM.");
     
     # Set the global variable c.
-    global c;
-    c = c_;
+    global decay;
+    decay = k;
 
     # Define the ODE solver used for time integration.
     LOGGER.debug("Defining the ODE solver.");
@@ -378,7 +378,7 @@ def Simulate(mesh_file          : str   = "star.mesh",
             ess_bdr.Assign(0);
 
     # Initialize the wave operator.
-    oper : WaveOperator = WaveOperator(fespace, ess_bdr, speed);
+    oper : WaveOperator = WaveOperator(fespace = fespace, ess_bdr = ess_bdr, speed = c);
 
 
 
@@ -559,12 +559,3 @@ def Simulate(mesh_file          : str   = "star.mesh",
 if __name__ == "__main__":
     Logging.Initialize_Logger(level = logging.DEBUG);
     U, DtU, X, T = Simulate();
-
-    print("U.shape = " + str(U.shape));
-    print("DtU.shape = " + str(DtU.shape));
-    print("X.shape = " + str(X.shape));
-    print("T.shape = " + str(T.shape));
-    print("U[:, 0, 0] = " + str(U[:, 0, 0]));
-    print("DtU[:, 0, 0] = " + str(DtU[:, 0, 0]));
-    print("X[:, 0] = " + str(X[:, 0]));
-    exit();
