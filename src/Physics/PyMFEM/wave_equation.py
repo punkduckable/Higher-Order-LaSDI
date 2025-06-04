@@ -4,11 +4,9 @@
 
 import      os;
 import      sys;
-import      io;
 import      logging;
 
 import      mfem.ser    as      mfem;
-from        mfem.ser    import  intArray;
 from        os.path     import  expanduser, join, dirname;
 import      numpy;
 

@@ -27,6 +27,7 @@ from    Physics             import  Physics;
 from    Explicit            import  Explicit;
 from    NonlinearElasticity import  NonlinearElasticity
 from    Advection           import  Advection;
+from    WaveEquation        import  WaveEquation;
 
 # Set up logger.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
@@ -48,7 +49,8 @@ physics_dict    =  {'Burgers'               : Burgers.Burgers,
                     'BurgersSecondOrder'    : BurgersSecondOrder.Burgers,
                     'Explicit'              : Explicit,
                     'Advection'             : Advection,
-                    'NonlinearElasticity'   : NonlinearElasticity};
+                    'NonlinearElasticity'   : NonlinearElasticity,
+                    'WaveEquation'          : WaveEquation};
 
 
 

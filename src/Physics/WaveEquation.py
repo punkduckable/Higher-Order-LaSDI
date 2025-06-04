@@ -4,14 +4,13 @@
 
 
 # Add the main directory to the search path.
-import logging;
+import  logging;
 import  os;
 import  sys;
 PyMFEM_Path     : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "PyMFEM"));
 sys.path.append(PyMFEM_Path);
 
 import  numpy;
-from    scipy.special                   import  erfc;
 import  torch;
 
 from    Physics                         import  Physics;
