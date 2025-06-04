@@ -7,8 +7,6 @@ import      mfem.par                as      mfem;
 from        mfem.par                import  intArray;
 from        mpi4py                  import  MPI;
 import      numpy;
-from        numpy                   import  sqrt, pi, cos, sin, hypot, arctan2;
-from        scipy.special           import  erfc;
 
 import      os;
 import      sys;
@@ -181,7 +179,7 @@ class u0_coeff(mfem.PyCoefficient):
         
         # Return the initial condition.
         global omega;
-        return sin(pi * omega * X[0]) * sin(pi * omega * X[1])
+        return numpy.sin(numpy.pi * omega * X[0]) * numpy.sin(numpy.pi * omega * X[1])
 
 
 
@@ -237,7 +235,7 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
                 ode_solver_type     : int       = 4,
                 t_final             : float     = 5.0,
                 time_step_size      : float     = 0.005,
-                w                   : float     = pi/2,
+                w                   : float     = numpy.pi/2,
                 k                   : float     = 2.0,
                 serialization_steps : int       = 10,
                 num_positions       : int       = 1000,
@@ -474,7 +472,7 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
     if(myid == 0): LOGGER.info("Sampling %d positions in the mesh" % num_positions);
 
     # Figure out the maximum/minimum x and y coordinates of the mesh.
-    bb_min, bb_max = pmesh.GetBoundingBox();
+    if(myid == 0): LOGGER.debug("The bounding box for the mesh is given by bb_min = %s, bb_max = %s" % (str(bb_min), str(bb_max)));
     x_min   : float = bb_min[0];
     x_max   : float = bb_max[0];
     y_min   : float = bb_min[1];

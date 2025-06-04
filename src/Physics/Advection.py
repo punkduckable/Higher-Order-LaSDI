@@ -43,8 +43,9 @@ class Advection(Physics):
             ``physics`` sub-dictionary of the configuration file.
         
         param_names : list[str], optional
-            Names of parameters appearing in the initial condition. The advection example has no 
-            parameters so this should be an empty list.
+            Names of parameters appearing in the initial condition. The advection model has two 
+            parameters w (which specifies the rotation speed of the velocity field) and k (which 
+            specifies the frequency of peaks in the initial condition).
 
         
         
@@ -68,9 +69,11 @@ class Advection(Physics):
                          Uniform_t_Grid = False);
 
         # Run a short simulation to determine the frame shape and positions.
-        Sol, X, T                           = Simulate(t_final = 0);
+        Sol, X, T, bb_min, bb_max           = Simulate(t_final = 0);
         self.Frame_Shape    : list[int]     = list(Sol.shape[1:]);
-        self.X_Positions    : numpy.ndarray = numpy.copy(X);
+        self.X_Positions    : numpy.ndarray = numpy.copy(X);            # shape = (2, N)
+        self.bb_min         : numpy.ndarray = numpy.copy(bb_min);
+        self.bb_max         : numpy.ndarray = numpy.copy(bb_max);
         LOGGER.debug("Frame shape: %s" % str(self.Frame_Shape));
 
         # Since there are two spatial dimensions, set spatial_dim accordingly.
@@ -123,23 +126,11 @@ class Advection(Physics):
         assert(self.X_Positions is not None);
 
         # Bounding box used to non-dimensionalize the coordinates.
-        bb_min = numpy.array([-1.0, -1.0]);
-        bb_max = numpy.array([ 1.0,  1.0]);
-        center = (bb_min + bb_max) / 2.0;
+        center : numpy.ndarray = (self.bb_min + self.bb_max) / 2.0;
+        X      : numpy.ndarray = 2.0 * (self.X_Positions - center.reshape(-1, 1)) / (self.bb_max - self.bb_min).reshape(-1, 1);
 
-        X = 2.0 * (self.X_Positions - center[:, None]) / (bb_max - bb_min)[:, None];
-
-        rx  : float = 0.45;
-        ry  : float = 0.25;
-        cx  : float = 0.0;
-        cy  : float = -0.2;
-        w   : float = 10.0;
-
-        u0  : numpy.ndarray = (erfc(w * (X[0] - cx - rx)) *
-                               erfc(-w * (X[0] - cx + rx)) *
-                               erfc(w * (X[1] - cy - ry)) *
-                               erfc(-w * (X[1] - cy + ry))) / 16.0;
-
+        # Evaluate the initial condition.
+        u0     : numpy.ndarray = numpy.sin(numpy.pi * param[self.k_idx] * X[0]) * numpy.sin(numpy.pi * param[self.k_idx] * X[1]);
         return [u0.reshape(1, -1)];
 
 
@@ -177,7 +168,7 @@ class Advection(Physics):
         assert(param.shape[0]   == self.n_p);
 
         # Solve the PDE using the external MFEM script.
-        Sol, _, Times = Simulate(k = param[self.k_idx], w = param[self.w_idx], t_final = 1.0);
+        Sol, _, Times, _, _ = Simulate(k = param[self.k_idx], w = param[self.w_idx], VisIt = False);
 
         X       : list[torch.Tensor] = [torch.Tensor(Sol)];
         t_Grid  : torch.Tensor       = torch.Tensor(Times);
