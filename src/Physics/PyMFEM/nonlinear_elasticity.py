@@ -285,6 +285,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
                 viscosity       : float         = 1e-2,
                 shear_modulus   : float         = 0.25, 
                 bulk_modulus    : float         = 5.0,
+                num_positions   : int           = 1000,
                 theta           : float         = 1.0,
                 serialize_steps : int           = 10, 
                 VisIt           : bool          = True) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]:
@@ -355,6 +356,9 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     bulk_modulus : float
         specifies the bulk modulus in the Neo-Hookean hyperelastic model.
 
+    num_positions : int
+        specifies the number of positions at which we will evaluate the solution.
+
     theta : float
         specifies the constant "theta" in the initial velocity.
 
@@ -373,15 +377,15 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
 
     D, V, X, T. 
     
-    D : numpy.ndarray, shape = (Nt, 2, N_Nodes)
+    D : numpy.ndarray, shape = (Nt, 2, num_positions)
         i, j, k element holds the j'th component of the displacement at the k'th position (i.e., 
         X[i, :]) at the i'th time step (i.e., T[i]).
     
-    V : numpy.ndarray, shape = (Nt, 2, N_Nodes)
+    V : numpy.ndarray, shape = (Nt, 2, num_positions)
         i, j, k element holds the j'th component of the velocity at the k'th position (i.e., X[i]) 
         at the i'th time step (i.e., T[i]).
 
-    X : numpy.ndarray, shape = (2, N_Nodes)
+    X : numpy.ndarray, shape = (2, num_positions)
         i'th row holds the position of the i'th node at which we evaluate the solution.
     
     T : numpy.ndarray, shape = (Nt)
@@ -409,14 +413,6 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     s = theta;
     if(myid == 0): LOGGER.info("Simulating with theta = %f" % theta);
 
-    # Setup the mesh.
-    if(myid == 0): LOGGER.debug("Lading the mesh and its properties");
-    meshfile_path   : str   = expanduser(join(dirname(__file__), 'data', meshfile_name));
-    mesh                    = mfem.Mesh(meshfile_path, 1, 1);
-    dim             : int   = mesh.Dimension();
-    if(myid == 0): LOGGER.debug("meshfile_path = %s" % meshfile_path);
-    if(myid == 0): LOGGER.debug("dim = %d" % dim);
-
     # Select the ODE solver.
     LOGGER.debug("Selecting the ODE solver");
     if ode_solver_type == 1:
@@ -442,6 +438,18 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     else:
         print("Unknown ODE solver type: " + str(ode_solver_type));
         exit;
+    
+
+    # ---------------------------------------------------------------------------------------------
+    # 2. Set up the mesh. 
+
+    # Setup the mesh.
+    if(myid == 0): LOGGER.debug("Lading the mesh and its properties");
+    meshfile_path   : str   = expanduser(join(dirname(__file__), 'data', meshfile_name));
+    mesh                    = mfem.Mesh(meshfile_path, 1, 1);
+    dim             : int   = mesh.Dimension();
+    if(myid == 0): LOGGER.debug("meshfile_path = %s" % meshfile_path);
+    if(myid == 0): LOGGER.debug("dim = %d" % dim);
 
     # Refine the mesh 
     if(myid == 0): LOGGER.debug("Refining mesh");
@@ -454,12 +462,12 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     pmesh = mfem.ParMesh(MPI.COMM_WORLD, mesh)
     del mesh
     for x in range(par_ref_levels):
-        pmesh.UniformRefinement()
+        pmesh.UniformRefinement();
 
 
 
     # ---------------------------------------------------------------------------------------------
-    # 2. Define the vector finite element spaces representing the mesh
+    # 3. Define the vector finite element spaces representing the mesh
     #    deformation x, the velocity v, and the initial configuration, x_ref.
     #    Define also the elastic energy density, w, which is in a discontinuous
     #    higher-order space. Since x and v are integrated in time as a system,
@@ -475,14 +483,15 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     true_size   : int   = fespace.TrueVSize()
     true_offset         = intArray([0, true_size, 2*true_size]);
 
-    # Setup the grid functions for displacement and velocity.
+    # Setup the grid functions for displacement and velocity. Note that we use a BlockVector to 
+    # hold the velocity and displacement because the ODE solvers expect a single vector.
     VD      = mfem.BlockVector(true_offset);
     V_gf    = mfem.ParGridFunction(fespace);
     D_gf    = mfem.ParGridFunction(fespace);
-    V_gf.MakeTRef(fespace, VD, true_offset[0])
-    D_gf.MakeTRef(fespace, VD, true_offset[1])
+    V_gf.MakeTRef(fespace, VD, true_offset[0]);
+    D_gf.MakeTRef(fespace, VD, true_offset[1]);
     
-    # ???
+    # Get the nodes of the mesh.
     D_ref = mfem.ParGridFunction(fespace);
     pmesh.GetNodes(D_ref);
     
@@ -504,18 +513,23 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     velo        = InitialVelocity(dim);
     deform      = InitialDeformation(dim);
     
-    # ???
+    # Project the initial velocity and deformation onto the FEM space.
     V_gf.ProjectCoefficient(velo);
     V_gf.SetTrueVector();
 
+    # Project the initial deformation onto the FEM space.
     D_gf.ProjectCoefficient(deform);
     D_gf.SetTrueVector();
 
-    V_gf.SetFromTrueVector()
-    D_gf.SetFromTrueVector()
+    # Set the grid functions to the true vectors (i.e., the vectors that hold the values of the 
+    # velocity and deformation at the nodes of the mesh).
+    V_gf.SetFromTrueVector();
+    D_gf.SetFromTrueVector();
 
-    V_gf.GetTrueDofs(VD.GetBlock(0))
-    D_gf.GetTrueDofs(VD.GetBlock(1))
+    # Get the true vectors (i.e., the vectors that hold the values of the velocity and deformation 
+    # at the nodes of the mesh).
+    V_gf.GetTrueDofs(VD.GetBlock(0));
+    D_gf.GetTrueDofs(VD.GetBlock(1));
 
     # Impose boundary conditions.
     if(myid == 0): LOGGER.debug("Imposing Boundary Conditions");
@@ -523,6 +537,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     ess_bdr.Assign(0);
     ess_bdr[0] = 1;
 
+    # Get the essential true dofs.
     ess_tdof_list = mfem.intArray()
     fespace.GetEssentialTrueDofs(ess_bdr, ess_tdof_list)
 
@@ -546,22 +561,60 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     # ---------------------------------------------------------------------------------------------
     # 5. Extract the positions of the nodes.
 
-    if(myid == 0): LOGGER.info("Extracting node positions");
+    if(myid == 0): LOGGER.info("Sampling %d positions in the mesh" % num_positions);
 
-    # Fetch the nodes + number of them
-    Nodes_GridFun                       = mfem.ParGridFunction(fespace);
-    pmesh.GetNodes(Nodes_GridFun);                                              # Get GridFunction that holds the nodes
-    Num_Nodes       : int               = Nodes_GridFun.FESpace().GetNDofs();   # Get the number of nodes
-    if(myid == 0): LOGGER.debug("There are %d nodes" % Num_Nodes);
+    # Figure out the maximum/minimum x and y coordinates of the mesh.
+    bb_min, bb_max = pmesh.GetBoundingBox();
+    x_min   : float = bb_min[0];
+    x_max   : float = bb_max[0];
+    y_min   : float = bb_min[1];
+    y_max   : float = bb_max[1];
+    if(myid == 0): LOGGER.debug("x_min = %f, x_max = %f, y_min = %f, y_max = %f" % (x_min, x_max, y_min, y_max));
 
-    # Now extra the data stored at the nodes. This will look like the a list holding the first
-    # coordinate of each node concatenated with a list holding the second coordinate of every node
-    # and so on. For example, if dim = 2, this is the array (x1, ... , xN, y1, ... , yN).
-    nodes_data      : numpy.ndarray     = Nodes_GridFun.GetDataArray();         
+    # Now, sample num_positions points evenly spaced between x_min and x_max, and y_min and y_max.
+    # If the mesh has an unusal shape, some of these points may lie outside the mesh. We sample 
+    # too many positions to account for this. Any points that lie outside the mesh will be ignored.
+    # We will sample new points if the number of points that lie inside the mesh is less than 
+    # num_positions.
+    Valid_Positions_List : list[numpy.ndarray] = [];
+    elements_list        : list[int]           = [];
+    ref_coords_list      : list[numpy.ndarray] = [];
+    num_valid_positions  : int = 0;
     
-    # Reshape to be an array whose i'th row holds the position of the i'th node.
-    Positions       : numpy.ndarray     = numpy.reshape(nodes_data, (dim, Num_Nodes)); 
-    if(myid == 0): LOGGER.debug("Positions has shape %s (dim = %d, Num_Nodes = %d)" % (str(Positions.shape), dim, Num_Nodes));
+    while(num_valid_positions < num_positions):
+        if(myid == 0): LOGGER.debug("Sampling %d positions" % num_positions);
+
+        # Sample random x,y coordinates
+        x_positions : numpy.ndarray = numpy.random.uniform(x_min, x_max, num_positions);
+        y_positions : numpy.ndarray = numpy.random.uniform(y_min, y_max, num_positions);
+
+        # Create array of points in format expected by FindPoints
+        points : numpy.ndarray = numpy.column_stack((x_positions, y_positions));
+
+        # Find which points are in the mesh.
+        count, elem_list, ref_coords = pmesh.FindPoints(points, warn = False, inv_trans = None);
+
+        # Check which points are inside elements
+        for i in range(num_positions):
+            if elem_list[i] >= 0:  # -1 indicates point not found in any element
+                Valid_Positions_List.append(points[i]);
+                elements_list.append(elem_list[i]);
+                ref_coords_list.append(ref_coords[i]);
+                num_valid_positions += 1;
+
+                # If we have enough valid positions, break.
+                if num_valid_positions >= num_positions:
+                    break;
+
+        # If we have not enough valid positions, sample again.
+        if(num_valid_positions < num_positions):
+            if(myid == 0): LOGGER.debug("Not enough valid positions (current = %d, needed = %d), sampling again" % (num_valid_positions, num_positions));
+
+    # Convert the list of valid positions to a numpy array.
+    Positions : numpy.ndarray = numpy.array(Valid_Positions_List).T;
+    Elements  : numpy.ndarray = numpy.array(elements_list);
+    RefCoords : numpy.ndarray = numpy.array(ref_coords_list);
+    if(myid == 0): LOGGER.debug("Positions has shape %s (dim = %d, num_positions = %d)" % (str(Positions.shape), dim, Positions.shape[1]));
 
 
 
@@ -584,27 +637,43 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
         dc.Save();
 
 
+    # ---------------------------------------------------------------------------------------------
+    # 7. Setup lists to store the solution + evaluate the initial solution at the positions.
+
+    LOGGER.info("Setting up lists to store the time, U, and DtU at each time step.");
+
+    # Setup for time stepping.
+    times_list          : list[float]           = [];    
+    displacements_list  : list[numpy.ndarray]   = [];
+    velocities_list     : list[numpy.ndarray]   = [];
+
+    # Evaluate the initial solution at the positions.
+    D_Positions_0               = numpy.zeros((2, num_positions));
+    V_Positions_0               = numpy.zeros((2, num_positions));
+
+    for i in range(num_positions):
+        # Evaluate the solution at the i'th position.
+        D_Positions_0[:, i]     = D_gf.GetValue(Elements[i], RefCoords[i], dim);
+        V_Positions_0[:, i]     = V_gf.GetValue(Elements[i], RefCoords[i], dim);
+
+    # Append the initial U, DtU, and time to their corresponding lists.
+    times_list.append(0);
+    displacements_list.append(  D_Positions_0);
+    velocities_list.append(     V_Positions_0);
+
+
 
     # ---------------------------------------------------------------------------------------------
     # 7. Perform time-integration (looping over the time iterations, ti, with a time-step dt).
     
     if(myid == 0): LOGGER.info("Running time stepping from t = 0 to t = %f with dt %f" % (t_final, dt));
 
-    # Setup for time stepping.
-    ode_solver.Init(oper);
-    times_list          : list[float]           = [];    
-    displacements_list  : list[numpy.ndarray]   = [];
-    velocities_list     : list[numpy.ndarray]   = [];
-
-    # Append the ICs.
-    times_list.append(0);
-    displacements_list.append(  numpy.reshape(D_gf.GetDataArray().copy(), (dim, Num_Nodes)));
-    velocities_list.append(     numpy.reshape(V_gf.GetDataArray().copy(), (dim, Num_Nodes)));
-
     # Time step!!!!!
+    ode_solver.Init(oper);
     t           : float = 0.0;
     ti          : int   = 1;        # counter to keep track of when we should serialize solution.
     last_step   : bool  = False;
+
     while not last_step:
         # Check if we should stop time stepping (if this time step is within dt/2 of t_final.
         if (t + dt >= t_final - dt/2):
@@ -618,28 +687,40 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
             ee = oper.ElasticEnergy(D_gf);
             ke = oper.KineticEnergy(V_gf);
 
+            # Print the energy.
             if(myid == 0):
                 text : str  = ( "step " + str(ti) + ", t = " + str(t) + ", EE = " +
                                 str(ee) + ", KE = " + str(ke) +
                                 ", dTE = " + str((ee + ke) - (ee0 + ke0)));
                 LOGGER.info(text);
 
-            # Serialize the current displacement, velocity, and time.
+            # Update the solution to the grid functions
+            V_gf.Assign(VD.GetBlock(0));
+            D_gf.Assign(VD.GetBlock(1));
+
+            # Evaluate the solution at the positions.
+            D_Positions_t       = numpy.zeros((2, num_positions));
+            V_Positions_t       = numpy.zeros((2, num_positions));
+
+            for i in range(num_positions):
+                # Evaluate the solution at the i'th position.
+                D_Positions_t[:, i]     = D_gf.GetValue(Elements[i], RefCoords[i], dim);
+                V_Positions_t[:, i]     = V_gf.GetValue(Elements[i], RefCoords[i], dim);
+
+            # Append the current U, DtU, and time to their corresponding lists.
             times_list.append(t);
-            displacements_list.append(  numpy.reshape(D_gf.GetDataArray().copy(),  (dim, Num_Nodes)));
-            velocities_list.append(     numpy.reshape(V_gf.GetDataArray().copy(),  (dim, Num_Nodes)));
-
-
-            # If visualizing, Save the GridFunctions to the VisIt object.
-            if(VisIt):
+            displacements_list.append(  D_Positions_t);
+            velocities_list.append(     V_Positions_t);
+    
+            # If visualizing, Save the solution to the VisIt object.
+            if VisIt:
                 # Set the mesh to the current displacement
                 pmesh.SwapNodes(D_gf, 0);
 
-                # Save the mesh, displacement, and velocity
                 dc.SetCycle(ti);
                 dc.SetTime(t);
-                dc.Save();
-        
+                dc.Save();  
+                
                 # Now swap the deformed mesh back to reset everything.
                 pmesh.SwapNodes(D_gf, 0);
 
@@ -665,3 +746,12 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
 if __name__ == "__main__":
     Logging.Initialize_Logger(level = logging.INFO);
     D, V, X, T = Simulate();
+
+    print("D.shape = " + str(D.shape));
+    print("V.shape = " + str(V.shape));
+    print("X.shape = " + str(X.shape));
+    print("T.shape = " + str(T.shape));
+    print("D[:, 0, 0] = " + str(D[:, 0, 0]));
+    print("V[:, 0, 0] = " + str(V[:, 0, 0]));
+    print("X[:, 0] = " + str(X[:, 0]));
+    exit();
