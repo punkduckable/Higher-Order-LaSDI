@@ -64,24 +64,25 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
         K.AddDomainIntegrator(mfem.DiffusionIntegrator(c2));
         K.Assemble();
 
-        # Initialize the stiffness and mass matrices
-        self.Kmat : mfem.SparseMatrix = mfem.SparseMatrix();
-        self.Mmat : mfem.SparseMatrix = mfem.SparseMatrix();
+        # Initialize the stiffness matrix.
+        self.Kmat0 = mfem.SparseMatrix();
+        self.Kmat = mfem.SparseMatrix();
+        dummy = mfem.intArray();
+        K.FormSystemMatrix(dummy, self.Kmat0);              # Build the stiffness matrix.
+        K.FormSystemMatrix(self.ess_tdof_list, self.Kmat);  # Build the stiffness matrix.
 
         # Define the mass matrix
-        M   : mfem.BilinearForm = mfem.BilinearForm(fespace);
+        self.Mmat = mfem.SparseMatrix();
+        M = mfem.BilinearForm(fespace);
         M.AddDomainIntegrator(mfem.MassIntegrator());
-        M.Assemble();
+        M.Assemble(); 
+        M.FormSystemMatrix(self.ess_tdof_list, self.Mmat);  # Build the mass matrix.
 
         # Build K and M from the 
         if mfem_version < 471:
             dummy       : mfem.intArray     = mfem.intArray();
             self.Kmat0  : mfem.SparseMatrix = mfem.SparseMatrix();
             K.FormSystemMatrix(dummy, self.Kmat0);
-        
-        # TODO: What does this function do?  
-        K.FormSystemMatrix(self.ess_tdof_list, self.Kmat);
-        M.FormSystemMatrix(self.ess_tdof_list, self.Mmat);
 
         # Store the stiffness and mass matrices
         self.K : mfem.BilinearForm = K;
@@ -91,8 +92,8 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
         rel_tol : float = 1e-8;
 
         # Initialize the solver and preconditioner for M
-        M_solver     : mfem.CGSolver    = mfem.CGSolver();
-        M_prec       : mfem.DSmoother = mfem.DSmoother();
+        M_solver     : mfem.CGSolver        = mfem.CGSolver();
+        M_prec       : mfem.DSmoother       = mfem.DSmoother();
         M_solver.iterative_mode = False;
         M_solver.SetRelTol(rel_tol);
         M_solver.SetAbsTol(0.0);
@@ -100,12 +101,12 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
         M_solver.SetPrintLevel(0);
         M_solver.SetPreconditioner(M_prec);
         M_solver.SetOperator(self.Mmat);
-        self.M_prec       : mfem.DSmoother  = M_prec;
-        self.M_solver     : mfem.CGSolver   = M_solver;
+        self.M_prec     : mfem.DSmoother    = M_prec;
+        self.M_solver   : mfem.CGSolver     = M_solver;
 
         # Initialize the solver and preconditioner for T
-        T_solver     : mfem.CGSolver    = mfem.CGSolver();
-        T_prec       : mfem.DSmoother   = mfem.DSmoother();
+        T_solver        : mfem.CGSolver     = mfem.CGSolver();
+        T_prec          : mfem.DSmoother    = mfem.DSmoother();
         T_solver.iterative_mode = False;
         T_solver.SetRelTol(rel_tol);
         T_solver.SetAbsTol(0.0);
@@ -116,9 +117,6 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
         self.T_solver   : mfem.CGSolver     = T_solver;
         self.T          : mfem.SparseMatrix = None;
 
-        # Initialize the vector
-        self.z : mfem.Vector = mfem.Vector(self.Height());
-
 
         
     def Mult(self, u : mfem.Vector, du_dt : mfem.Vector, d2udt2 : mfem.Vector) -> None:
@@ -126,20 +124,15 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
         #    d2udt2 = M^{-1}*-K(u)
         # for d2udt2
 
-        # Compute the stiffness matrix
-        z : mfem.Vector = self.z;
-        self.K.FullMult(u, z);
+        # Compute the stiffness matrix, store in z.
+        z = mfem.Vector(u.Size());
+        self.Kmat.Mult(u, z);
+
+        # Negate the stiffness matrix.
         z.Neg();
 
-        # Set the essential boundary conditions to zero
-        z.SetSubVector(self.ess_tdof_list, 0.0);
-
-        # Solve for d2udt2
+        # Solve for d2udt2.
         self.M_solver.Mult(z, d2udt2);
-
-        # Set the essential boundary conditions to zero
-        d2udt2.SetSubVector(self.ess_tdof_list, 0.0);
-
 
 
     def ImplicitSolve(self, fac0 : float, fac1 : float, u : mfem.Vector, dudt : mfem.Vector, d2udt2 : mfem.Vector) -> None:
@@ -150,15 +143,20 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
             self.T : mfem.SparseMatrix = mfem.Add(1.0, self.Mmat, fac0, self.Kmat);
             self.T_solver.SetOperator(self.T)
 
-        z : mfem.Vector = self.z;
-        self.K.FullMult(u, z);
+
+        # Compute the stiffness matrix, store in z.
+        z = mfem.Vector(u.Size());
+        self.Kmat0.Mult(u, z);
+
+        # Negate the stiffness matrix.
         z.Neg();
-        z.SetSubVector(self.ess_tdof_list, 0.0);
 
+        # Set the essential boundary conditions to zero.
+        for j in self.ess_tdof_list:
+            z[j] = 0.0
+
+        # Solve for d2udt2.
         self.T_solver.Mult(z, d2udt2)
-
-        if mfem_version >= 471:
-            d2udt2.SetSubVector(self.ess_tdof_list, 0.0)
 
 
 
@@ -185,15 +183,15 @@ class cInitialRate(mfem.PyCoefficient):
 # -------------------------------------------------------------------------------------------------
 
 def Simulate(mesh_file          : str   = "star.mesh",
-             ref_levels         : int   = 0,
+             ref_levels         : int   = 2,
              order              : int   = 2,
              ode_solver_type    : int   = 10,
-             t_final            : float = 1.0,
+             t_final            : float = 5.0,
              dt                 : float = 1e-2,
              c                  : float = 0.5,
              k                  : float = 20.0,
              dirichlet          : bool  = True,
-             serialization_steps: int   = 1,
+             serialization_steps: int   = 5,
              num_positions      : int   = 1000,
              VisIt              : bool  = True) -> tuple[numpy.ndarray,numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """
