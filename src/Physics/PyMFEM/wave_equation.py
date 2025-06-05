@@ -32,8 +32,36 @@ mfem_version : int = (mfem.MFEM_VERSION_MAJOR*100 + mfem.MFEM_VERSION_MINOR*10+
 class WaveOperator(mfem.SecondOrderTimeDependentOperator):
     def __init__(self, fespace : mfem.FiniteElementSpace, ess_bdr : mfem.intArray, speed : float) -> None:
         """
-        Initialize the WaveOperator.
+        Initialize the WaveOperator. The strong form of the wave equation is:
 
+            d2udt2 = c^2*laplacian(u)
+        
+        where c is the speed of the wave. Therefore, given basis functions { \phi_i }_{i = 1}^{N}, 
+        the weak form of the wave equation is:
+        
+            (\phi_i, u) + c^2*(grad(\phi_i), grad(u)) = 0
+        
+        If we assume that the solution is of the form u(x, t) = \sum_{j = 1}^{N} \phi_j(x) U_j(t),
+        then the weak form of the wave equation becomes:
+
+            (\phi_i, \sum_{j = 1}^{N} \phi_j(x) U_j(t)) + c^2*(grad(\phi_i), grad(\sum_{j = 1}^{N} \phi_j(x) U_j(t))) = 0
+
+        This engenders the following system of equations:
+
+            M* (d^2/dt^2)U(t) + K*U(t) = 0
+
+        where M is the mass matrix, K is the stiffness matrix, and U(t) is the vector whose j'th 
+        entry is U_j(t). The entries of the mass and stiffness matrices are given by:   
+
+            M_{ij} = (\phi_i, \phi_j)
+            K_{ij} = c^2*(\nabla \phi_i, \nabla \phi_j)
+        
+        Thus, to solve the wave equation with MFEM, we need two bilinear forms: one for the mass 
+        matrix and one for the stiffness matrix. The former needs to be a mass type bilinear form, 
+        and the latter needs to be a diffusion type bilinear form (See documentation for more 
+        details). 
+
+        
         ---------------------------------------------------------------------------------------------
         Arguments
         ---------------------------------------------------------------------------------------------
@@ -51,111 +79,136 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
             The speed of the wave in the direction of the wave's propagation.
         """ 
 
-        # Run the super class initializer
-        mfem.SecondOrderTimeDependentOperator.__init__(self, fespace.GetTrueVSize(), 0.0)
+        # ---------------------------------------------------------------------------------------------
+        # 1. Initialize the bilinear forms and matrices.
 
-        # Get the essential boundary conditions
+        # Run the super class initializer. Note that fespace.GetTrueVSize() returns the number of 
+        # "true" unknown DOFs after removing those that are constrained by Dirichlet BCs.
+        mfem.SecondOrderTimeDependentOperator.__init__(self, fespace.GetTrueVSize(), 0.0); 
+
+        # Get the essential boundary conditions. This ess_bdr is an array of length equal to the 
+        # number of boundary attributes. For each boundary attribute a, if ess_bdr[a] == 1 then 
+        # that face has u = 0 (Dirichlet) boundary condition. We store the indices of the DOFs 
+        # that are constrained by Dirichlet BCs in self.ess_tdof_list.
         self.ess_tdof_list : mfem.intArray = mfem.intArray();
         fespace.GetEssentialTrueDofs(ess_bdr, self.ess_tdof_list);
 
-        # Define the diffusion coefficient
-        c2  : mfem.ConstantCoefficient  = mfem.ConstantCoefficient(speed*speed);
-        K   : mfem.BilinearForm         = mfem.BilinearForm(fespace);
-        K.AddDomainIntegrator(mfem.DiffusionIntegrator(c2));
-        K.Assemble();
+        # Define the bilinear form corresponding to the term K in the weak form of the wave
+        # equation (see the docstring above).
+        c2  : mfem.ConstantCoefficient  = mfem.ConstantCoefficient(speed*speed);        # c^2
+        K   : mfem.BilinearForm         = mfem.BilinearForm(fespace);                   # Initialize the bilinear form.
+        K.AddDomainIntegrator(mfem.DiffusionIntegrator(c2));                            # Sets K to the bilinear form B(u, v) = c^2*(\nabla u, \nabla v)
+        K.Assemble();                                                                   # Computes B(\phi_i, \phi_j) = c^2*(\nabla \phi_i, \nabla \phi_j) for all i, j using the basis functions in fespace.
 
-        # Initialize the stiffness matrix.
-        self.Kmat0 = mfem.SparseMatrix();
-        self.Kmat = mfem.SparseMatrix();
-        dummy = mfem.intArray();
-        K.FormSystemMatrix(dummy, self.Kmat0);              # Build the stiffness matrix.
-        K.FormSystemMatrix(self.ess_tdof_list, self.Kmat);  # Build the stiffness matrix.
+        # Build a matrix to hold K.
+        self.Kmat0 = mfem.SparseMatrix();                                               # Initialize a matrix to hold K. This one is used to build K without setting the essential boundary conditions.
+        self.Kmat  = mfem.SparseMatrix();                                               # Initialize a matrix to hold K. This one is used to build K with the essential boundary conditions set.
+        dummy      = mfem.intArray();
+        K.FormSystemMatrix(dummy, self.Kmat0);                                          # This populates Kmat0 such that the i,j'th entry is B(\phi_i, \phi_j) = c^2*(\nabla \phi_i, \nabla \phi_j).
+        K.FormSystemMatrix(self.ess_tdof_list, self.Kmat);                              # Does the same thing, but with all of the rows/columns corresponding to essential boundary conditions removed.
 
-        # Define the mass matrix
-        self.Mmat = mfem.SparseMatrix();
-        M = mfem.BilinearForm(fespace);
-        M.AddDomainIntegrator(mfem.MassIntegrator());
-        M.Assemble(); 
-        M.FormSystemMatrix(self.ess_tdof_list, self.Mmat);  # Build the mass matrix.
+        # Definite the bilinear form corresponding to the term M in the weak form of the wave
+        # equation (see the docstring above).
+        M = mfem.BilinearForm(fespace);                                                 # Initialize the bilinear form.
+        M.AddDomainIntegrator(mfem.MassIntegrator());                                   # Sets M to the bilinear form B(u, v) = (u, v)
+        M.Assemble();                                                                   # Computes B(\phi_i, \phi_j) = (\phi_i, \phi_j) for all i, j using the basis functions in fespace.
+        
+        # Build a matrix to hold M.        
+        self.Mmat = mfem.SparseMatrix();                                                # Initialize a matrix to hold M.
+        M.FormSystemMatrix(self.ess_tdof_list, self.Mmat);                              # Build M, stores it in self.Mmat.
 
-        # Build K and M from the 
+        # In older MFEM (< 4.7.1), FormSystemMatrix(dummy, Kmat0) might not have worked earlier. 
+        # This block simply ensures that self.Kmat0 always exists, even in older releases.
         if mfem_version < 471:
             dummy       : mfem.intArray     = mfem.intArray();
             self.Kmat0  : mfem.SparseMatrix = mfem.SparseMatrix();
             K.FormSystemMatrix(dummy, self.Kmat0);
 
-        # Store the stiffness and mass matrices
-        self.K : mfem.BilinearForm = K;
-        self.M : mfem.BilinearForm = M;
+        # Store the stiffness and mass matrices. 
+        self.K : mfem.BilinearForm = K;                                                 # i,j entry is c^2*(\nabla \phi_i, \nabla \phi_j)
+        self.M : mfem.BilinearForm = M;                                                 # i,j entry is (\phi_i, \phi_j) 
 
         # Define the relative tolerance (for the solver)
         rel_tol : float = 1e-8;
 
-        # Initialize the solver and preconditioner for M
+
+
+        # ---------------------------------------------------------------------------------------------
+        # 2. Initialize the solvers and preconditioners.
+
+        # The wave solver needs to invert the mass matrix M many times (e.g., if you do a Newmark 
+        # or implicit‐time‐stepping scheme), and it also needs some solver/preconditioner for 
+        # whatever "T" operator you will define later. (In many implementations, "T" is something 
+        # like M + a*K or some combination used in the time‐update step.) In this code, we 
+        # initialize two separate CG (Conjugate Gradient) solvers, each with a diagonal smoother 
+        # (DSmoother) as a preconditioner.
+
+        # Initialize the solver and preconditioner for M. See Mult below.
         M_solver     : mfem.CGSolver        = mfem.CGSolver();
         M_prec       : mfem.DSmoother       = mfem.DSmoother();
         M_solver.iterative_mode = False;
-        M_solver.SetRelTol(rel_tol);
-        M_solver.SetAbsTol(0.0);
-        M_solver.SetMaxIter(30);
-        M_solver.SetPrintLevel(0);
-        M_solver.SetPreconditioner(M_prec);
-        M_solver.SetOperator(self.Mmat);
-        self.M_prec     : mfem.DSmoother    = M_prec;
-        self.M_solver   : mfem.CGSolver     = M_solver;
+        M_solver.SetRelTol(rel_tol);                        # Says "stop when the relative residual is < rel_tol"
+        M_solver.SetAbsTol(0.0);                            # says "no absolute‐residual stopping condition.""
+        M_solver.SetMaxIter(30);                            # Sets the maximum number of iterations.
+        M_solver.SetPrintLevel(0);                          # Silences all CG output.
+        M_solver.SetPreconditioner(M_prec);                 # Attaches a diagonal smoother as a pre-conditioner to speed up the solver.
+        M_solver.SetOperator(self.Mmat);                    # Tells the CG solver "the linear system I want to solve is Mx = b where M = self.Mmat.
+        self.M_prec     : mfem.DSmoother    = M_prec;       # Stash M_solver and M_prec so that whenever the time‐integrator needs to compute M^{-1}b, it can just call M_solver.Mult(b, x).
+        self.M_solver   : mfem.CGSolver     = M_solver;   
 
-        # Initialize the solver and preconditioner for T
+        # Initialize the solver and preconditioner for T = M + fac0*K (see ImplicitSolve below).
         T_solver        : mfem.CGSolver     = mfem.CGSolver();
         T_prec          : mfem.DSmoother    = mfem.DSmoother();
-        T_solver.iterative_mode = False;
-        T_solver.SetRelTol(rel_tol);
-        T_solver.SetAbsTol(0.0);
-        T_solver.SetMaxIter(100);
-        T_solver.SetPrintLevel(0);
-        T_solver.SetPreconditioner(T_prec);
-        self.T_prec     : mfem.DSmoother    = T_prec;
-        self.T_solver   : mfem.CGSolver     = T_solver;
-        self.T          : mfem.SparseMatrix = None;
+        T_solver.iterative_mode = False;                    # Tells the CG solver "I want to solve a linear system Tx = b where T = M + fac0*K."
+        T_solver.SetRelTol(rel_tol);                        # Says "stop when the relative residual is < rel_tol"
+        T_solver.SetAbsTol(0.0);                            # says "no absolute‐residual stopping condition.""
+        T_solver.SetMaxIter(100);                           # Sets the maximum number of iterations.
+        T_solver.SetPrintLevel(0);                          # Silences all CG output.     
+        T_solver.SetPreconditioner(T_prec);                 # Attaches a diagonal smoother as a pr-conditioner to speed up the solver.
+        self.T_prec     : mfem.DSmoother    = T_prec;       # Stash T_solver and T_prec so that whenever the time‐integrator needs to compute T^{-1}b, it can just call T_solver.Mult(b, x).
+        self.T_solver   : mfem.CGSolver     = T_solver;  
+        self.T          : mfem.SparseMatrix = None;         # Initialize T to None. This will force us to build T = M + fac0*K in ImplicitSolve.
 
 
         
     def Mult(self, u : mfem.Vector, du_dt : mfem.Vector, d2udt2 : mfem.Vector) -> None:
-        # Compute:
-        #    d2udt2 = M^{-1}*-K(u)
-        # for d2udt2
+        # Solve the following equation for (d^2/dt^2) U(t):
+        #    M * [(d^2/dt^2) U(t)] = -K(U(t))
 
         # Compute the stiffness matrix, store in z.
-        z = mfem.Vector(u.Size());
-        self.Kmat.Mult(u, z);
+        z = mfem.Vector(u.Size());      # Initialize a vector to hold K(U(t)).
+        self.Kmat.Mult(u, z);           # Computes K(U(t)) and stores it in z.
 
-        # Negate the stiffness matrix.
-        z.Neg();
+        # Multiplies z by -1.
+        z.Neg();                    
 
-        # Solve for d2udt2.
+        # Solves M* [(d^2/dt^2) U(t)] = -K(U(t)) for [(d^2/dt^2) U(t)].
         self.M_solver.Mult(z, d2udt2);
 
 
     def ImplicitSolve(self, fac0 : float, fac1 : float, u : mfem.Vector, dudt : mfem.Vector, d2udt2 : mfem.Vector) -> None:
-        # Solve the equation:
-        #    d2udt2 = M^{-1}*[-K(u + fac0*d2udt2)]
-        # for d2udt2
+        # Solve the following equation for (d^2/dt^2) U(t):
+        #    (M + fac0*K) * [(d^2/dt^2) U(t)] = -K*U(t)
+
         if self.T is None:
+            # Build the matrix T = M + fac0*K.
             self.T : mfem.SparseMatrix = mfem.Add(1.0, self.Mmat, fac0, self.Kmat);
             self.T_solver.SetOperator(self.T)
 
 
-        # Compute the stiffness matrix, store in z.
+        # Compute K(U(t)).
         z = mfem.Vector(u.Size());
-        self.Kmat0.Mult(u, z);
+        self.Kmat0.Mult(u, z);              # Computes K(U(t)) and stores it in z.
 
-        # Negate the stiffness matrix.
+        # Multiplies z by -1.
         z.Neg();
 
-        # Set the essential boundary conditions to zero.
+        # Set the essential boundary conditions to zero. This is necessary because the stiffness 
+        # matrix is not symmetric.
         for j in self.ess_tdof_list:
             z[j] = 0.0
 
-        # Solve for d2udt2.
+        # Solves (M + fac0*K) * [(d^2/dt^2) U(t)] = -K*U(t) for [(d^2/dt^2) U(t)].
         self.T_solver.Mult(z, d2udt2)
 
 
