@@ -2,19 +2,19 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
+
 # Add the main directory to the search path.
-import logging;
+import  logging;
 import  os;
 import  sys;
 PyMFEM_Path     : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "PyMFEM"));
 sys.path.append(PyMFEM_Path);
 
 import  numpy;
-from    scipy.special                   import  erfc;
 import  torch;
 
 from    Physics                         import  Physics;
-from    advection                       import  Simulate;
+from    wave_equation                   import  Simulate;
 
 
 LOGGER : logging.Logger = logging.getLogger(__name__);
@@ -23,15 +23,15 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 
 
 # -------------------------------------------------------------------------------------------------
-# Advection class
+# WaveEquation class
 # -------------------------------------------------------------------------------------------------
 
-class Advection(Physics):
+class WaveEquation(Physics):
     def __init__(self, config : dict, param_names : list[str] = None) -> None:
         """
-        Initialize an Advection object. This class acts as a wrapper around the MFEM-based solver 
-        implemented in ``advection.py`` within the ``PyMFEM`` sub-directory. The solver models 
-        the transport of a scalar quantity on a two dimensional domain.
+        Initialize a WaveEquation object. This class acts as a wrapper around the MFEM-based solver 
+        implemented in ``wave_equation.py`` within the ``PyMFEM`` sub-directory. The solver models 
+        the propagation of a wave in a two dimensional domain.
 
         
         -------------------------------------------------------------------------------------------
@@ -39,13 +39,12 @@ class Advection(Physics):
         -------------------------------------------------------------------------------------------
 
         config : dict
-            Dictionary housing the settings for the Advection object. This should be the 
+            Dictionary housing the settings for the WaveEquation object. This should be the 
             ``physics`` sub-dictionary of the configuration file.
         
         param_names : list[str], optional
-            Names of parameters appearing in the initial condition. The advection model has two 
-            parameters w (which specifies the rotation speed of the velocity field) and k (which 
-            specifies the frequency of peaks in the initial condition).
+            Names of parameters appearing in the initial condition. The wave equation example has 
+            no parameters so this should be an empty list.
 
         
         
@@ -59,9 +58,9 @@ class Advection(Physics):
         # Run checks
         assert(isinstance(param_names, list));
         assert(len(param_names) == 2);
+        assert('c' in param_names);
         assert('k' in param_names);
-        assert('w' in param_names);
-        assert('Advection' in config);
+        assert('WaveEquation' in config);
 
         # Call the super class initializer.
         super().__init__(config         = config,
@@ -69,20 +68,18 @@ class Advection(Physics):
                          Uniform_t_Grid = False);
 
         # Run a short simulation to determine the frame shape and positions.
-        Sol, X, T, bb_min, bb_max           = Simulate(t_final = 0);
-        self.Frame_Shape    : list[int]     = list(Sol.shape[1:]);
-        self.X_Positions    : numpy.ndarray = numpy.copy(X);            # shape = (2, N)
-        self.bb_min         : numpy.ndarray = numpy.copy(bb_min);
-        self.bb_max         : numpy.ndarray = numpy.copy(bb_max);
+        U, DtU, X, T                        = Simulate(t_final = 0);
+        self.Frame_Shape    : list[int]     = list(U.shape[1:]);
+        self.X_Positions    : numpy.ndarray = numpy.copy(X);            # shape = (2, N)    
         LOGGER.debug("Frame shape: %s" % str(self.Frame_Shape));
 
         # Since there are two spatial dimensions, set spatial_dim accordingly.
         self.spatial_dim    : int           = 2;
-        self.n_IC           : int           = 1;
+        self.n_IC           : int           = 2;
 
-        # Make sure the config dictionary is actually for the advection model.
-        self.k_idx  : int   = self.param_names.index('k');
-        self.w_idx  : int   = self.param_names.index('w');        
+        # Determine which index corresponds to c (wave speed) and which to k (decay rate in the IC).
+        self.c_idx  : int   = self.param_names.index('c');
+        self.k_idx  : int   = self.param_names.index('k');        
         return;
 
 
@@ -93,12 +90,15 @@ class Advection(Physics):
         ``self.X_Positions``. For the default problem considered in the MFEM example, the initial 
         state is defined by
              
-            u_0(x, t) = sin(pi * k * x) * sin(pi * k * y)
+            u_0(x, t) = exp(-k * |x|^2)
 
-        Here, k = param[0] and w = param[1] (w defines the governing equation but is unused in the 
-        initial condition).
-
-        Note: The initial condition is defined on the unit square.
+        Here, k = param[0] and c = param[1]. 
+        
+        Note 1: c is unused in the IC but defines the wave speed in wave equation, 
+        
+                d^2u/dt^2 = c^2 * d^2u/dx^2,
+       
+        Note 2: The initial condition is defined on a star-shaped domain.
         
 
         -------------------------------------------------------------------------------------------
@@ -106,7 +106,7 @@ class Advection(Physics):
         -------------------------------------------------------------------------------------------
 
         param : numpy.ndarray, shape = (self.n_p)
-            A two element array holding the values of the k and w parameters.
+            A two element array holding the values of the k and c parameters.
 
 
                 
@@ -114,9 +114,10 @@ class Advection(Physics):
         Returns
         -------------------------------------------------------------------------------------------
 
-        u0 : list[numpy.ndarray], len = 1
-            A single element list whose element has shape (1, N) holding the value of the initial 
-            condition at each of the N spatial locations.
+        u0 : list[numpy.ndarray], len = 2   
+            A two element list whose i'th element is a numpy.ndarray of shape (1, N) holding the 
+            value of the i'th time derivative of the initial condition at each of the N spatial 
+            locations. 
         """
 
         # Checks
@@ -125,13 +126,12 @@ class Advection(Physics):
         assert(param.shape[0]   == self.n_p);
         assert(self.X_Positions is not None);
 
-        # Bounding box used to non-dimensionalize the coordinates.
-        center : numpy.ndarray = (self.bb_min + self.bb_max) / 2.0;
-        X      : numpy.ndarray = 2.0 * (self.X_Positions - center.reshape(-1, 1)) / (self.bb_max - self.bb_min).reshape(-1, 1);
-
         # Evaluate the initial condition.
-        u0     : numpy.ndarray = numpy.sin(numpy.pi * param[self.k_idx] * X[0]) * numpy.sin(numpy.pi * param[self.k_idx] * X[1]);
-        return [u0.reshape(1, -1)];
+        norm2 : float           = numpy.sum(numpy.square(self.X_Positions), axis = 0);
+        u0    : numpy.ndarray   = numpy.exp(-norm2*param[self.k_idx]).reshape(1, -1);
+        v0    : numpy.ndarray   = numpy.zeros_like(u0);
+        
+        return [u0, v0];
 
 
 
@@ -155,11 +155,12 @@ class Advection(Physics):
 
         X, t_grid 
 
-        X : list[torch.Tensor], len = 1
-            A one element list containing a tensor of shape (n_t, *self.Frame_Shape) with the 
-            solution trajectory.
+        X : list[torch.Tensor], len = 2 
+            A two element list containing a tensor of shape (n_t, *self.Frame_Shape) with the 
+            solution trajectory. The first element is the solution u(x, t) and the second element 
+            is the solution du/dt(x, t).
 
-        t_grid : torch.Tensor
+        t_grid : torch.Tensor, shape = (n_t)
             A one dimensional tensor of the corresponding times.
         """
 
@@ -168,8 +169,8 @@ class Advection(Physics):
         assert(param.shape[0]   == self.n_p);
 
         # Solve the PDE using the external MFEM script.
-        Sol, _, Times, _, _ = Simulate(k = param[self.k_idx], w = param[self.w_idx], VisIt = False);
+        U, DtU, _, Times = Simulate(k = param[self.k_idx], c = param[self.c_idx], VisIt = False);
 
-        X       : list[torch.Tensor] = [torch.Tensor(Sol)];
+        X       : list[torch.Tensor] = [torch.Tensor(U), torch.Tensor(DtU)];
         t_Grid  : torch.Tensor       = torch.Tensor(Times);
         return X, t_Grid;

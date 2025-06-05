@@ -7,8 +7,6 @@ import      mfem.par                as      mfem;
 from        mfem.par                import  intArray;
 from        mpi4py                  import  MPI;
 import      numpy;
-from        numpy                   import  sqrt, pi, cos, sin, hypot, arctan2;
-from        scipy.special           import  erfc;
 
 import      os;
 import      sys;
@@ -29,32 +27,80 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class velocity_coeff(mfem.VectorPyCoefficient):
-    def __init__(self, dim : int, bb_min : float, bb_max : float):
+    def __init__(self, dim : int, bb_min : numpy.ndarray, bb_max : numpy.ndarray) -> None:
+        """
+        Initialize a velocity_coeff object. This class is used to define the velocity field for the 
+        advection problem. If dim = 2, the velocity field is defined by
+
+            v(x, y) = d(x, y)* gamma * (y, -x)
+
+        where d(x, y) = max((x + 1)*(1 - x), 0.) * max((y + 1)*(1 - y), 0.) takes on non-zero 
+        values in [-1, 1] x [-1, 1] and is zero outside of this domain. Further, gamma is a 
+        global.
+        """
+
+        # Run checks
+        assert(isinstance(bb_min, numpy.ndarray));
+        assert(isinstance(bb_max, numpy.ndarray));
+        assert(len(bb_min) == dim);
+        assert(len(bb_max) == dim);
+        for i in range(dim):
+            assert(bb_min[i] < bb_max[i]);
+
         # Run the super class initializer
         mfem.VectorPyCoefficient.__init__(self, dim);
 
         # Now set problem specific attributes.
-        self.bb_min     : float = bb_min;
-        self.bb_max     : float = bb_max;
+        self.dim        : int           = dim;
+        self.bb_min     : numpy.ndarray = bb_min;
+        self.bb_max     : numpy.ndarray = bb_max;
 
 
-    def EvalValue(self, x : list[float]) -> list[float]:
-        dim : int = len(x);
 
-        center : float = (self.bb_min + self.bb_max)/2.0;
+    def EvalValue(self, x : numpy.ndarray) -> numpy.ndarray:
+        """
+        Evaluate the velocity field at the given position.
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+        
+        x : numpy.ndarray, shape = (dim,)
+            A 1D array holding the position at which to evaluate the velocity field.   
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+        
+        numpy.ndarray, shape = (dim,)
+            A 1D array holding the velocity field at the given position.
+        """
+
+        # Run checks
+        assert(isinstance(x, numpy.ndarray));
+        assert(len(x.shape) == 1);
+        assert(len(x) == self.dim);
+
+        # Get the bounding box.
+        bb_min : numpy.ndarray = self.bb_min;
+        bb_max : numpy.ndarray = self.bb_max;
+
+        # Get the center of the bounding box.
+        center : float = (bb_min + bb_max)/2.0;
 
         # map to the reference [-1,1] domain
-        X : list[float] = 2 * (x - center) / (self.bb_max - self.bb_min);
+        X : numpy.ndarray = 2 * (x - center) / (bb_max - bb_min);
         
         # Clockwise twisting rotation in 2D around the origin
         global gamma;
         d : float = max((X[0] + 1.)*(1. - X[0]), 0.) * max((X[1] + 1.)*(1. - X[1]), 0.);
         d : float = d ** 2;
-        if dim == 1:
+        if self.dim == 1:
             v : list[float] = [1.0, ]
-        elif dim == 2:
+        elif self.dim == 2:
             v : list[float] = [d*gamma*X[1],  - d*gamma*X[0]]
-        elif dim == 3:
+        elif self.dim == 3:
             v : list[float] = [d*gamma*X[1],  - d*gamma*X[0],  0]
 
         return v
@@ -62,20 +108,50 @@ class velocity_coeff(mfem.VectorPyCoefficient):
 
 
 class u0_coeff(mfem.PyCoefficient):
-    def __init__(self, bb_min : float, bb_max : float):
+    def __init__(self, bb_min : numpy.ndarray, bb_max : numpy.ndarray):
+        """
+        Initialize a u0_coeff object. This class is used to define the initial condition for the 
+        advection problem. The initial condition is defined by
+
+            u_0(x, t) = sin(pi * omega * x~) * sin(pi * omega * y~)
+
+        where x~ and y~ are the non-dimensionalized coordinates. Specifically, 
+
+            x~ = 2 * (x - center) / (bb_max - bb_min)
+            y~ = 2 * (y - center) / (bb_max - bb_min)
+
+        where center = (bb_min + bb_max) / 2.0.
+        """
+
+        # Run checks
+        assert(isinstance(bb_min, numpy.ndarray));
+        assert(isinstance(bb_max, numpy.ndarray));
+        assert(len(bb_min) == 2);
+        assert(len(bb_max) == 2);
+
         # Run the super class initializer
         mfem.PyCoefficient.__init__(self);
 
         # Now set problem specific attributes.
-        self.bb_min : float = bb_min;
-        self.bb_max : float = bb_max;
+        self.bb_min : numpy.ndarray = bb_min;
+        self.bb_max : numpy.ndarray = bb_max;
+
+
 
     def EvalValue(self, x : numpy.ndarray) -> float:
         """
-        This function returns the initial condition for the advection problem.
+        This function returns the initial condition for the advection problem:
 
-        The initial condition is a sine wave in the x-direction and a sine wave in the y-direction.
+            u_0(x, t) = sin(pi * omega * x~) * sin(pi * omega * y~)
 
+        where x~ and y~ are the non-dimensionalized coordinates. Specifically, 
+
+            x~ = 2 * (x - center) / (bb_max - bb_min)
+            y~ = 2 * (y - center) / (bb_max - bb_min)
+
+        where center = (bb_min + bb_max) / 2.0.
+
+        
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
@@ -103,7 +179,8 @@ class u0_coeff(mfem.PyCoefficient):
         
         # Return the initial condition.
         global omega;
-        return sin(pi * omega * X[0]) * sin(pi * omega * X[1])
+        return numpy.sin(numpy.pi * omega * X[0]) * numpy.sin(numpy.pi * omega * X[1])
+
 
 
 # Inflow boundary condition (zero for the problems considered in this example)
@@ -148,22 +225,21 @@ class FE_Evolution(mfem.PyTimeDependentOperator):
 
 
 # -------------------------------------------------------------------------------------------------
-# Main function
+# Simulate function
 # -------------------------------------------------------------------------------------------------
 
-
-def Simulate(   meshfile_name       : str       = "periodic-square.mesh", 
+def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh", 
                 ser_ref_levels      : int       = 2,
                 par_ref_levels      : int       = 1,
                 order               : int       = 3,
                 ode_solver_type     : int       = 4,
                 t_final             : float     = 5.0,
                 time_step_size      : float     = 0.005,
-                w                   : float     = pi/2,
+                w                   : float     = numpy.pi/2,
                 k                   : float     = 2.0,
                 serialization_steps : int       = 10,
                 num_positions       : int       = 1000,
-                VisIt               : bool      = True) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]:
+                VisIt               : bool      = True) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """
     This examples solves a time dependent nonlinear elasticity problem of the form 
 
@@ -217,8 +293,8 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
         the EvalValue method in the velocity_coeff class).
 
     k : float
-        specifies the frequency of the initial condition (this becomes the omega variable in 
-        the EvalValue method in the u0_coeff class).
+        specifies the frequency of peaks in the initial condition (this becomes the omega variable 
+        in the EvalValue method in the u0_coeff class).
 
     serialization_steps : int
         Specifies how frequently we serialize (save) and visualize the solution.
@@ -235,7 +311,7 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
     Returns
     -----------------------------------------------------------------------------------------------
 
-    Sol, X, T. 
+    Sol, X, T, bb_min, bb_max
     
     Sol : numpy.ndarray, shape = (Nt, 1, num_positions)
         i, j, k element holds the j'th component of the solution at the k'th position (i.e., 
@@ -246,6 +322,12 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
     
     T : numpy.ndarray, shape = (Nt)
         i'th element holds the j'th time at which we evaluate the solution.
+
+    bb_min : numpy.ndarray, shape = (2,)
+        The minimum coordinates of the bounding box.
+
+    bb_max : numpy.ndarray, shape = (2,)
+        The maximum coordinates of the bounding box.
     """
 
     # ---------------------------------------------------------------------------------------------
@@ -257,7 +339,6 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
     comm                        = MPI.COMM_WORLD;
     myid                : int   = comm.Get_rank();
     num_procs           : int   = comm.Get_size();
-    verbose             : bool  = (myid == 0);
 
     # Set variables.
     dt                  : float = time_step_size;
@@ -306,6 +387,7 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
         if mesh.NURBSext:
             mesh.SetCurvature(max(order, 1));
         bb_min, bb_max = mesh.GetBoundingBox(max(order, 1));
+    
 
     # Setup the parallel mesh and refine it.
     if(myid == 0): LOGGER.debug("Setting up the parallel mesh");
@@ -326,14 +408,23 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
     global_vSize : int = fes.GlobalTrueVSize();
     if(myid == 0): LOGGER.info("Number of unknowns: " + str(global_vSize));
 
+    # Setup the grid function to hold the initial condition.
+    if(myid == 0): LOGGER.debug("Setting up the grid function to hold the initial condition.");
+    u_gf    : mfem.ParGridFunction                  = mfem.ParGridFunction(fes);
+
+
 
     # ---------------------------------------------------------------------------------------------
-    # 4. Define the coefficient objects.
+    # 4. Define the initial condition objects.
     
     if(myid == 0): LOGGER.info("Setting up the coefficient objects.");
     velocity    = velocity_coeff(dim, bb_min, bb_max);
     inflow      = inflow_coeff();
     u0          = u0_coeff(bb_min, bb_max); 
+
+    # Project the initial condition onto the finite element space.
+    u_gf.ProjectCoefficient(u0);
+    U       : mfem._par.hypre.HypreParVector        = u_gf.GetTrueDofs();
 
 
 
@@ -376,30 +467,12 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 6. Setup the a grid function to hold the solution.
+    # 6. Set up positions at which we will evaluate the solution.
 
-    if(myid == 0): LOGGER.debug("Setting up the grid function to hold the initial condition.");
-    u_gf    : mfem.ParGridFunction                  = mfem.ParGridFunction(fes);
-    u_gf.ProjectCoefficient(u0);
-    U       : mfem._par.hypre.HypreParVector        = u_gf.GetTrueDofs();
-
-    # Save the initial solution.
-    if(myid == 0): LOGGER.debug("Saving the initial solution.");
-    smyid       : str = '{:0>6d}'.format(myid);
-    mesh_name   : str = "ex9-mesh." + smyid;
-    sol_name    : str = "ex9-init." + smyid;
-    pmesh.Print(mesh_name, 8);
-    u_gf.Save(sol_name, 8);
-
-
-
-    # ---------------------------------------------------------------------------------------------
-    # 7. Set up positions at which we will evaluate the solution.
-
-    if(myid == 0): LOGGER.info("Setting up Positions");
+    if(myid == 0): LOGGER.info("Sampling %d positions in the mesh" % num_positions);
 
     # Figure out the maximum/minimum x and y coordinates of the mesh.
-    bb_min, bb_max = pmesh.GetBoundingBox();
+    if(myid == 0): LOGGER.debug("The bounding box for the mesh is given by bb_min = %s, bb_max = %s" % (str(bb_min), str(bb_max)));
     x_min   : float = bb_min[0];
     x_max   : float = bb_max[0];
     y_min   : float = bb_min[1];
@@ -407,15 +480,54 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
     if(myid == 0): LOGGER.debug("x_min = %f, x_max = %f, y_min = %f, y_max = %f" % (x_min, x_max, y_min, y_max));
 
     # Now, sample num_positions points evenly spaced between x_min and x_max, and y_min and y_max.
-    x_positions     : numpy.ndarray = numpy.random.uniform(x_min, x_max, num_positions);
-    y_positions     : numpy.ndarray = numpy.random.uniform(y_min, y_max, num_positions);
-    Positions       : numpy.ndarray = numpy.row_stack((x_positions, y_positions));
-    Num_Positions   : int           = Positions.shape[1];
-    if(myid == 0): LOGGER.debug("Positions has shape %s (dim = %d, num_positions = %d)" % (str(Positions.shape), dim, num_positions));
+    # If the mesh has an unusual shape, some of these points may lie outside the mesh. We sample 
+    # too many positions to account for this. Any points that lie outside the mesh will be ignored.
+    # We will sample new points if the number of points that lie inside the mesh is less than 
+    # num_positions.
+    Valid_Positions_List : list[numpy.ndarray] = [];
+    Elements_List        : list[int]           = [];
+    RefCoords_List       : list[numpy.ndarray] = [];
+    num_valid_positions  : int = 0;
+    
+    while(num_valid_positions < num_positions):
+        if(myid == 0): LOGGER.debug("Sampling %d positions" % num_positions);
+
+        # Sample random x,y coordinates
+        x_positions : numpy.ndarray = numpy.random.uniform(x_min, x_max, num_positions);
+        y_positions : numpy.ndarray = numpy.random.uniform(y_min, y_max, num_positions);
+
+        # Create array of points in format expected by FindPoints
+        points : numpy.ndarray = numpy.column_stack((x_positions, y_positions));
+
+        # Find which points are in the mesh.
+        count, elem_list, ref_coords = pmesh.FindPoints(points, warn = False, inv_trans = None);
+
+        # Check which points are inside elements
+        for i in range(num_positions):
+            if elem_list[i] >= 0:  # -1 indicates point not found in any element
+                Valid_Positions_List.append(points[i]);
+                Elements_List.append(elem_list[i]);
+                RefCoords_List.append(ref_coords[i]);
+                num_valid_positions += 1;
+
+                # If we have enough valid positions, break.
+                if num_valid_positions >= num_positions:
+                    break;
+
+        # If we have not enough valid positions, sample again.
+        if(num_valid_positions < num_positions):
+            if(myid == 0): LOGGER.debug("Not enough valid positions (current = %d, needed = %d), sampling again" % (num_valid_positions, num_positions));
+
+    # Convert the lists to numpy arrays.
+    Positions : numpy.ndarray = numpy.array(Valid_Positions_List).T;
+    Elements  : numpy.ndarray = numpy.array(Elements_List);
+    RefCoords : numpy.ndarray = numpy.array(RefCoords_List);
+    if(myid == 0): LOGGER.debug("Positions has shape %s (dim = %d, num_positions = %d)" % (str(Positions.shape), dim, Positions.shape[1]));
+
 
 
     # ---------------------------------------------------------------------------------------------
-    # 8. VisIt
+    # 7. VisIt
 
     # Setup VisIt visualization (if we are doing that)
     if (VisIt == True):
@@ -432,69 +544,66 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
         dc.Save();
 
 
-    # --------------------------------------------------------------------------------------------- 
-    # 9.  Perform time-integration 
 
-    # Setup the ODE solver.
-    adv : FE_Evolution = FE_Evolution(M, K, B);
+    # ---------------------------------------------------------------------------------------------
+    # 8. Setup lists to store the solution + evaluate the initial solution at the positions.
 
-    # Setup the lists to hold the solution at each time step.
+    if(myid == 0): LOGGER.info("Setting up lists to store the time, solution at each time step.");
+
+    # Setup for time stepping.
     times_list          : list[float]           = [];    
     u_list              : list[numpy.ndarray]   = [];
 
-    # Append the initial time
-    times_list.append(0);
-
     # Evaluate the initial solution at the positions.
-    element_nums        = pmesh.FindPoints(Positions.T);
-    u_Positions_0       = numpy.zeros((1, Num_Positions));
+    u_Positions_0       = numpy.zeros((1, num_positions));
+    for i in range(num_positions):
+        u_Positions_0[0, i]     = u_gf.GetValue(Elements[i], RefCoords[i], dim);
 
-    for i in range(Num_Positions):
-        # Get the element number of the i'th point
-        element_num : int   = element_nums[1][i];
-        point               = mfem.IntegrationPoint();
-        x,y                 = numpy.float64(Positions[:, i].tolist());
-        point.Set2(x, y);
-        u_Positions_0[0, i]= u_gf.GetValue(element_num, point, dim);
+    # Append the initial solution and time to their corresponding lists.
+    times_list.append(0);
+    u_list.append(  u_Positions_0);
 
-    u_list.append( u_Positions_0);
+
+
+    # --------------------------------------------------------------------------------------------- 
+    # 9.  Perform time-integration.
+
+    # Setup the ODE solver.
+    adv : FE_Evolution = FE_Evolution(M, K, B);
 
     # Initialize the ODE solver.
     ode_solver.Init(adv);
 
     # Run the time stepping loop.
-    t   : float = 0.0;
-    ti  : int   = 0;
-    while True:
-        # Check if we should stop time stepping (if this time step is within dt/2 of t_final.
-        if t > t_final - dt/2:
-            break;
+    t           : float = 0.0;
+    ti          : int   = 0;
+    last_step   : bool  = False;
+    
+    while not last_step:
+        # Check if we should stop time stepping (if this time step is within dt/2 of t_final).
+        if t + dt >= t_final - dt/2:
+            last_step = True;
         
         # Step the ODE solver.
         t, dt = ode_solver.Step(U, t, dt);
         u_gf.Assign(U);
+        ti += 1;
 
         # Should we serialize?
-        if ti % serialization_steps == 0:
+        if last_step or (ti % serialization_steps == 0):
             if(myid == 0): LOGGER.info("time step: " + str(ti) + ", time: " + str(numpy.round(t, 3)));
 
-            # Serialize the current displacement, velocity, and time.
-            times_list.append(t);
+            # Update the solution to the grid functions
+            u_gf.Assign(U);
 
             # Evaluate the solution at the positions.
-            element_nums        = mesh.FindPoints(Positions.T);
-            u_Positions_t       = numpy.zeros((1, Num_Positions));
+            u_Positions_t       = numpy.zeros((1, num_positions));
+            for i in range(num_positions):
+                u_Positions_t[0, i]     = u_gf.GetValue(Elements[i], RefCoords[i], dim);
 
-            for i in range(Num_Positions):
-                # Get the element number of the i'th point
-                element_num : int   = element_nums[1][i];
-                point               = mfem.IntegrationPoint();
-                x,y                 = numpy.float64(Positions[:, i].tolist());
-                point.Set2(x, y)
-                u_Positions_t[0, i] = u_gf.GetValue(element_num, point, dim)
-
-            # Append the current solution to the list.
-            u_list.append(u_Positions_t);
+            # Append the current solution and time to their corresponding lists.
+            times_list.append(t);
+            u_list.append(  u_Positions_t);
 
             # If visualizing, Save the solution to the VisIt object.
             if(VisIt):
@@ -502,27 +611,20 @@ def Simulate(   meshfile_name       : str       = "periodic-square.mesh",
                 dc.SetCycle(ti);
                 dc.SetTime(t);
                 dc.Save();
-            
-        # Increment the time step counter.
-        ti = ti + 1;
+
 
 
     # ---------------------------------------------------------------------------------------------
     # 7. Package everything up for returning.
-
-    # Save the final solution.
-    u_gf.Assign(U);
-    sol_name = "ex9-final." + smyid;
-    u_gf.Save(sol_name, 8);
 
     # Turn times, displacements, velocities lists into arrays.
     Times       : numpy.ndarray = numpy.array(times_list,           dtype = numpy.float32);
     Trajectory  : numpy.ndarray = numpy.array(u_list,               dtype = numpy.float32);
 
 
-    return Trajectory, Positions, Times;
+    return Trajectory, Positions, Times, bb_min, bb_max;
 
 
 if __name__ == "__main__":
     Logging.Initialize_Logger(level = logging.DEBUG);
-    Sol, X, T = Simulate();
+    Sol, X, T, bb_min, bb_max = Simulate();
