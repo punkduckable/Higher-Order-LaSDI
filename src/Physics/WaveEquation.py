@@ -128,9 +128,10 @@ class WaveEquation(Physics):
 
         # Evaluate the initial condition.
         norm2 : float           = numpy.sum(numpy.square(self.X_Positions), axis = 0);
-        u0    : numpy.ndarray   = numpy.exp(-norm2*param[self.k_idx]);
+        u0    : numpy.ndarray   = numpy.exp(-norm2*param[self.k_idx]).reshape(1, -1);
+        v0    : numpy.ndarray   = numpy.zeros_like(u0);
         
-        return [u0];
+        return [u0, v0];
 
 
 

@@ -6,7 +6,7 @@ import      os;
 import      sys;
 import      logging;
 
-import      mfem.ser    as      mfem;
+import      mfem.par    as      mfem;
 from        os.path     import  expanduser, join, dirname;
 import      numpy;
 
