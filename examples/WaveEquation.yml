@@ -9,9 +9,9 @@ lasdi:
     rollout_update_freq:    100
     dp_per_update:          0.002
 
-    max_iter:               5000
-    n_iter:                 1000
-    max_greedy_iter:        5000
+    max_iter:               6000
+    n_iter:                 2000
+    max_greedy_iter:        6000
 
     loss_weights:
       recon:                1.0
