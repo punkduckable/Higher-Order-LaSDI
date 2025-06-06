@@ -39,22 +39,22 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
         where c is the speed of the wave. Therefore, given basis functions { \phi_i }_{i = 1}^{N}, 
         the weak form of the wave equation is:
         
-            (\phi_i, u) + c^2*(grad(\phi_i), grad(u)) = 0
+            (\phi_i, (d^2/dt^2) u) + c^2*(grad(\phi_i), grad(u)) = 0
         
         If we assume that the solution is of the form u(x, t) = \sum_{j = 1}^{N} \phi_j(x) U_j(t),
         then the weak form of the wave equation becomes:
 
-            (\phi_i, \sum_{j = 1}^{N} \phi_j(x) U_j(t)) + c^2*(grad(\phi_i), grad(\sum_{j = 1}^{N} \phi_j(x) U_j(t))) = 0
+            (\phi_i, \sum_{j = 1}^{N} \phi_j(x) U_j''(t)) + c^2 * (\nabla \phi_i, \nabla \sum_{j = 1}^{N} \phi_j(x) U_j(t)) = 0
 
         This engenders the following system of equations:
 
-            M* (d^2/dt^2)U(t) + K*U(t) = 0
+            M * U''(t) + K*U(t) = 0
 
         where M is the mass matrix, K is the stiffness matrix, and U(t) is the vector whose j'th 
         entry is U_j(t). The entries of the mass and stiffness matrices are given by:   
 
             M_{ij} = (\phi_i, \phi_j)
-            K_{ij} = c^2*(\nabla \phi_i, \nabla \phi_j)
+            K_{ij} = c^2 * (\nabla \phi_i, \nabla \phi_j)
         
         Thus, to solve the wave equation with MFEM, we need two bilinear forms: one for the mass 
         matrix and one for the stiffness matrix. The former needs to be a mass type bilinear form, 
@@ -172,35 +172,35 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
 
         
     def Mult(self, u : mfem.Vector, du_dt : mfem.Vector, d2udt2 : mfem.Vector) -> None:
-        # Solve the following equation for (d^2/dt^2) U(t):
-        #    M * [(d^2/dt^2) U(t)] = -K(U(t))
+        # Solve the following equation for U''(t):
+        #    M * U''(t) = -K(U(t))
 
         # Compute the stiffness matrix, store in z.
         z = mfem.Vector(u.Size());      # Initialize a vector to hold K(U(t)).
         self.Kmat.Mult(u, z);           # Computes K(U(t)) and stores it in z.
 
-        # Multiplies z by -1.
+        # Multiplies z by -1. z now holds -K*U(t).
         z.Neg();                    
 
-        # Solves M* [(d^2/dt^2) U(t)] = -K(U(t)) for [(d^2/dt^2) U(t)].
+        # Solves M* U''(t) = -K(U(t)) for U''(t).
         self.M_solver.Mult(z, d2udt2);
 
 
     def ImplicitSolve(self, fac0 : float, fac1 : float, u : mfem.Vector, dudt : mfem.Vector, d2udt2 : mfem.Vector) -> None:
-        # Solve the following equation for (d^2/dt^2) U(t):
-        #    (M + fac0*K) * [(d^2/dt^2) U(t)] = -K*U(t)
+        # Solve the following equation for U''(t):
+        #    (M + fac0*K) * U''(t) = -K*U(t)
 
         if self.T is None:
             # Build the matrix T = M + fac0*K.
             self.T : mfem.SparseMatrix = mfem.Add(1.0, self.Mmat, fac0, self.Kmat);
-            self.T_solver.SetOperator(self.T)
+            self.T_solver.SetOperator(self.T);
 
 
-        # Compute K(U(t)).
+        # Compute K(U(t)), store it in z.
         z = mfem.Vector(u.Size());
         self.Kmat0.Mult(u, z);              # Computes K(U(t)) and stores it in z.
 
-        # Multiplies z by -1.
+        # Multiplies z by -1. z now holds -K*U(t).
         z.Neg();
 
         # Set the essential boundary conditions to zero. This is necessary because the stiffness 
@@ -208,13 +208,14 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
         for j in self.ess_tdof_list:
             z[j] = 0.0
 
-        # Solves (M + fac0*K) * [(d^2/dt^2) U(t)] = -K*U(t) for [(d^2/dt^2) U(t)].
-        self.T_solver.Mult(z, d2udt2)
+        # Solves (M + fac0*K) * U''(t) = -K*U(t) for U''(t).
+        self.T_solver.Mult(z, d2udt2);
 
 
 
     def SetParameters(self, u):
         self.T = None
+
 
 
 class cInitialSolution(mfem.PyCoefficient):
