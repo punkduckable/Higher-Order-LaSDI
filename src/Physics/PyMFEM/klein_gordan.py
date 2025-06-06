@@ -111,7 +111,7 @@ class KleinGordonOperator(mfem.SecondOrderTimeDependentOperator):
         K.FormSystemMatrix(dummy, self.Kmat0);                                          # This populates Kmat0 such that the i,j'th entry is B(\phi_i, \phi_j) = c^2*(\nabla \phi_i, \nabla \phi_j).
         K.FormSystemMatrix(self.ess_tdof_list, self.Kmat);                              # Does the same thing, but with all of the rows/columns corresponding to essential boundary conditions removed.
 
-        # Definite the bilinear form corresponding to the term M in the weak form of the 
+        # Define the bilinear form corresponding to the term M in the weak form of the 
         # Klein-Gordon equation (see the docstring above).
         M = mfem.BilinearForm(fespace);                                                 # Initialize the bilinear form.
         M.AddDomainIntegrator(mfem.MassIntegrator());                                   # Sets M to the bilinear form B(u, v) = (u, v)
@@ -140,8 +140,8 @@ class KleinGordonOperator(mfem.SecondOrderTimeDependentOperator):
             K.FormSystemMatrix(dummy, self.Kmat0);
 
         # Store the K, M, and M2 matrices. 
-        self.K : mfem.BilinearForm = K;                                                 # i,j entry is c^2*(\nabla \phi_i, \nabla \phi_j)
-        self.M : mfem.BilinearForm = M;                                                 # i,j entry is (\phi_i, \phi_j) 
+        self.K  : mfem.BilinearForm = K;                                                # i,j entry is c^2*(\nabla \phi_i, \nabla \phi_j)
+        self.M  : mfem.BilinearForm = M;                                                # i,j entry is (\phi_i, \phi_j) 
         self.M2 : mfem.BilinearForm = M2;                                               # i,j entry is m^2*(\phi_i, \phi_j)
 
         # Define the relative tolerance (for the solver)
@@ -211,6 +211,7 @@ class KleinGordonOperator(mfem.SecondOrderTimeDependentOperator):
 
         # Solves M* U''(t) = -K(U(t)) - M2 * U(t) for U''(t).
         self.M_solver.Mult(z, d2udt2);
+
 
 
     def ImplicitSolve(self, fac0 : float, fac1 : float, u : mfem.Vector, dudt : mfem.Vector, d2udt2 : mfem.Vector) -> None:
@@ -284,7 +285,7 @@ def Simulate(mesh_file          : str   = "star.mesh",
              t_final            : float = 5.0,
              dt                 : float = 1e-2,
              c                  : float = 0.5,
-             m                  : float = 1.0,
+             m                  : float = 2.0,
              k                  : float = 20.0,
              dirichlet          : bool  = True,
              serialization_steps: int   = 5,
