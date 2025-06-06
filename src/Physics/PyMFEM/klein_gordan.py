@@ -26,13 +26,41 @@ mfem_version : int = (mfem.MFEM_VERSION_MAJOR*100 + mfem.MFEM_VERSION_MINOR*10+
 
 
 # -------------------------------------------------------------------------------------------------
-# Wave Equation class
+# Klein-Gordon Operator class
 # -------------------------------------------------------------------------------------------------
 
-class WaveOperator(mfem.SecondOrderTimeDependentOperator):
-    def __init__(self, fespace : mfem.FiniteElementSpace, ess_bdr : mfem.intArray, speed : float) -> None:
+class KleinGordonOperator(mfem.SecondOrderTimeDependentOperator):
+    def __init__(self, fespace : mfem.FiniteElementSpace, ess_bdr : mfem.intArray, c : float, m : float) -> None:
         """
-        Initialize the WaveOperator.
+        This class implements the Klein-Gordon operator. The Klein-Gordon operator is given by:
+            
+              (d^2/dt^2) u - c^2*laplacian(u) + m^2*u = 0
+            
+        where u is the scalar field, c is the speed of light, and m is the mass of the field. Let 
+        { \phi_i } be the basis functions in the finite element space fespace. Then the weak form 
+        of the Klein-Gordon operator is given by:
+
+            (\phi_i, (d^2/dt^2) u) + c^2*(\nabla \phi_i, \nabla u) + m^2*(\phi_i, u) = 0
+        
+        If we assume the solution is of the form u(x, t) = \sum_{j = 1}^{N} \phi_j(x) U_j(t), then 
+        the weak form of the Klein-Gordon operator becomes:
+        
+            (\phi_i, \sum_{j = 1}^{N} \phi_j(x) U_j''(t)) + c^2*(\nabla \phi_i, \nabla \sum_{j = 1}^{N} \phi_j(x) U_j(t)) + m^2*(\phi_i, \sum_{j = 1}^{N} \phi_j(x) U_j(t)) = 0
+
+        This engenders the following system of equations:
+
+            M*U''(t) + K*U(t) + M2*U(t) = 0
+
+        where M is the mass matrix, K is the stiffness matrix, M2 is the mass matrix for the 
+        mass term, and U(t) is the vector whose j'th entry is U_j(t). The entries of the mass and 
+        stiffness matrices are given by:   
+
+            M_{ij}  = (\phi_i, \phi_j)
+            K_{ij}  = c^2*(\nabla \phi_i, \nabla \phi_j)
+            M2_{ij} = m^2*(\phi_i, \phi_j)
+
+        where \Omega is the domain.
+        
 
         ---------------------------------------------------------------------------------------------
         Arguments
@@ -47,117 +75,179 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
             is essential (i.e., fixed). If the integer is 0, then the boundary condition is natural 
             (i.e., free).
 
-        speed : float   
-            The speed of the wave in the direction of the wave's propagation.
+        c : float   
+            The speed of the wave in the direction of the wave's propagation. See the Klein-Gordon 
+            equation above.
+
+        m : float
+            The mass of the field. See the Klein-Gordon equation above.
         """ 
 
-        # Run the super class initializer
-        mfem.SecondOrderTimeDependentOperator.__init__(self, fespace.GetTrueVSize(), 0.0)
+        # ---------------------------------------------------------------------------------------------
+        # 1. Initialize the bilinear forms and matrices.
 
-        # Get the essential boundary conditions
+        # Run the super class initializer. Note that fespace.GetTrueVSize() returns the number of 
+        # "true" unknown DOFs after removing those that are constrained by Dirichlet BCs.
+        mfem.SecondOrderTimeDependentOperator.__init__(self, fespace.GetTrueVSize(), 0.0); 
+
+        # Get the essential boundary conditions. This ess_bdr is an array of length equal to the 
+        # number of boundary attributes. For each boundary attribute a, if ess_bdr[a] == 1 then 
+        # that face has u = 0 (Dirichlet) boundary condition. We store the indices of the DOFs 
+        # that are constrained by Dirichlet BCs in self.ess_tdof_list.
         self.ess_tdof_list : mfem.intArray = mfem.intArray();
         fespace.GetEssentialTrueDofs(ess_bdr, self.ess_tdof_list);
 
-        # Define the diffusion coefficient
-        c2  : mfem.ConstantCoefficient  = mfem.ConstantCoefficient(speed*speed);
-        K   : mfem.BilinearForm         = mfem.BilinearForm(fespace);
-        K.AddDomainIntegrator(mfem.DiffusionIntegrator(c2));
-        K.Assemble();
+        # Define the bilinear form corresponding to the term K in the weak form of the 
+        # Klein-Gordon equation (see the docstring above).
+        c2  : mfem.ConstantCoefficient  = mfem.ConstantCoefficient(c*c);                # c^2
+        K   : mfem.BilinearForm         = mfem.BilinearForm(fespace);                   # Initialize the bilinear form.
+        K.AddDomainIntegrator(mfem.DiffusionIntegrator(c2));                            # Sets K to the bilinear form B(u, v) = c^2*(\nabla u, \nabla v)
+        K.Assemble();                                                                   # Computes B(\phi_i, \phi_j) = c^2*(\nabla \phi_i, \nabla \phi_j) for all i, j using the basis functions in fespace.
 
-        # Initialize the stiffness matrix.
-        self.Kmat0 = mfem.SparseMatrix();
-        self.Kmat = mfem.SparseMatrix();
-        dummy = mfem.intArray();
-        K.FormSystemMatrix(dummy, self.Kmat0);              # Build the stiffness matrix.
-        K.FormSystemMatrix(self.ess_tdof_list, self.Kmat);  # Build the stiffness matrix.
+        # Build a matrix to hold K.
+        self.Kmat0 = mfem.SparseMatrix();                                               # Initialize a matrix to hold K. This one is used to build K without setting the essential boundary conditions.
+        self.Kmat  = mfem.SparseMatrix();                                               # Initialize a matrix to hold K. This one is used to build K with the essential boundary conditions set.
+        dummy      = mfem.intArray();
+        K.FormSystemMatrix(dummy, self.Kmat0);                                          # This populates Kmat0 such that the i,j'th entry is B(\phi_i, \phi_j) = c^2*(\nabla \phi_i, \nabla \phi_j).
+        K.FormSystemMatrix(self.ess_tdof_list, self.Kmat);                              # Does the same thing, but with all of the rows/columns corresponding to essential boundary conditions removed.
 
-        # Define the mass matrix
-        self.Mmat = mfem.SparseMatrix();
-        M = mfem.BilinearForm(fespace);
-        M.AddDomainIntegrator(mfem.MassIntegrator());
-        M.Assemble(); 
-        M.FormSystemMatrix(self.ess_tdof_list, self.Mmat);  # Build the mass matrix.
+        # Definite the bilinear form corresponding to the term M in the weak form of the 
+        # Klein-Gordon equation (see the docstring above).
+        M = mfem.BilinearForm(fespace);                                                 # Initialize the bilinear form.
+        M.AddDomainIntegrator(mfem.MassIntegrator());                                   # Sets M to the bilinear form B(u, v) = (u, v)
+        M.Assemble();                                                                   # Computes B(\phi_i, \phi_j) = (\phi_i, \phi_j) for all i, j using the basis functions in fespace.
+        
+        # Build a matrix to hold M.        
+        self.Mmat = mfem.SparseMatrix();                                                # Initialize a matrix to hold M.
+        M.FormSystemMatrix(self.ess_tdof_list, self.Mmat);                              # Build M, stores it in self.Mmat.
 
-        # Build K and M from the 
+        # Define the bilinear form corresponding to the term M2 in the weak form of the 
+        # Klein-Gordon equation (see the docstring above).
+        m2  : mfem.ConstantCoefficient  = mfem.ConstantCoefficient(m*m);                # m^2
+        M2  : mfem.BilinearForm         = mfem.BilinearForm(fespace);                   # Initialize the bilinear form.
+        M2.AddDomainIntegrator(mfem.MassIntegrator(m2));                                # Sets M2 to the bilinear form B(u, v) = m^2*(u, v)
+        M2.Assemble();                                                                  # Computes B(\phi_i, \phi_j) = m^2*(\phi_i, \phi_j) for all i, j using the basis functions in fespace.
+        
+        # Build a matrix to hold M2.
+        self.M2mat = mfem.SparseMatrix();                                               # Initialize a matrix to hold M2.
+        M2.FormSystemMatrix(self.ess_tdof_list, self.M2mat);                            # Build M2, stores it in self.M2mat.
+
+        # In older MFEM (< 4.7.1), FormSystemMatrix(dummy, Kmat0) might not have worked earlier. 
+        # This block simply ensures that self.Kmat0 always exists, even in older releases.
         if mfem_version < 471:
             dummy       : mfem.intArray     = mfem.intArray();
             self.Kmat0  : mfem.SparseMatrix = mfem.SparseMatrix();
             K.FormSystemMatrix(dummy, self.Kmat0);
 
-        # Store the stiffness and mass matrices
-        self.K : mfem.BilinearForm = K;
-        self.M : mfem.BilinearForm = M;
+        # Store the K, M, and M2 matrices. 
+        self.K : mfem.BilinearForm = K;                                                 # i,j entry is c^2*(\nabla \phi_i, \nabla \phi_j)
+        self.M : mfem.BilinearForm = M;                                                 # i,j entry is (\phi_i, \phi_j) 
+        self.M2 : mfem.BilinearForm = M2;                                               # i,j entry is m^2*(\phi_i, \phi_j)
 
         # Define the relative tolerance (for the solver)
         rel_tol : float = 1e-8;
 
-        # Initialize the solver and preconditioner for M
+
+
+        # ---------------------------------------------------------------------------------------------
+        # 2. Initialize the solvers and preconditioners.
+
+        # The Klein-Gordon solver needs to invert the mass matrix M many times (e.g., if you do a 
+        # Newmark or implicit‐time‐stepping scheme), and it also needs some solver/preconditioner for 
+        # whatever "T" operator you will define later. (In many implementations, "T" is something 
+        # like M + a*K or some combination used in the time‐update step.) In this code, we 
+        # initialize two separate CG (Conjugate Gradient) solvers, each with a diagonal smoother 
+        # (DSmoother) as a preconditioner.
+
+        # Initialize the solver and preconditioner for M. See Mult below.
         M_solver     : mfem.CGSolver        = mfem.CGSolver();
         M_prec       : mfem.DSmoother       = mfem.DSmoother();
         M_solver.iterative_mode = False;
-        M_solver.SetRelTol(rel_tol);
-        M_solver.SetAbsTol(0.0);
-        M_solver.SetMaxIter(30);
-        M_solver.SetPrintLevel(0);
-        M_solver.SetPreconditioner(M_prec);
-        M_solver.SetOperator(self.Mmat);
-        self.M_prec     : mfem.DSmoother    = M_prec;
-        self.M_solver   : mfem.CGSolver     = M_solver;
+        M_solver.SetRelTol(rel_tol);                        # Says "stop when the relative residual is < rel_tol"
+        M_solver.SetAbsTol(0.0);                            # says "no absolute‐residual stopping condition.""
+        M_solver.SetMaxIter(30);                            # Sets the maximum number of iterations.
+        M_solver.SetPrintLevel(0);                          # Silences all CG output.
+        M_solver.SetPreconditioner(M_prec);                 # Attaches a diagonal smoother as a pre-conditioner to speed up the solver.
+        M_solver.SetOperator(self.Mmat);                    # Tells the CG solver "the linear system I want to solve is Mx = b where M = self.Mmat.
+        self.M_prec     : mfem.DSmoother    = M_prec;       # Stash M_solver and M_prec so that whenever the time‐integrator needs to compute M^{-1}b, it can just call M_solver.Mult(b, x).
+        self.M_solver   : mfem.CGSolver     = M_solver;   
 
-        # Initialize the solver and preconditioner for T
+        # Initialize the solver and preconditioner for T = M + fac0*K (see ImplicitSolve below).
         T_solver        : mfem.CGSolver     = mfem.CGSolver();
         T_prec          : mfem.DSmoother    = mfem.DSmoother();
-        T_solver.iterative_mode = False;
-        T_solver.SetRelTol(rel_tol);
-        T_solver.SetAbsTol(0.0);
-        T_solver.SetMaxIter(100);
-        T_solver.SetPrintLevel(0);
-        T_solver.SetPreconditioner(T_prec);
-        self.T_prec     : mfem.DSmoother    = T_prec;
-        self.T_solver   : mfem.CGSolver     = T_solver;
-        self.T          : mfem.SparseMatrix = None;
+        T_solver.iterative_mode = False;                    # Tells the CG solver "I want to solve a linear system Tx = b where T = M + fac0*K."
+        T_solver.SetRelTol(rel_tol);                        # Says "stop when the relative residual is < rel_tol"
+        T_solver.SetAbsTol(0.0);                            # says "no absolute‐residual stopping condition.""
+        T_solver.SetMaxIter(100);                           # Sets the maximum number of iterations.
+        T_solver.SetPrintLevel(0);                          # Silences all CG output.     
+        T_solver.SetPreconditioner(T_prec);                 # Attaches a diagonal smoother as a pr-conditioner to speed up the solver.
+        self.T_prec     : mfem.DSmoother    = T_prec;       # Stash T_solver and T_prec so that whenever the time‐integrator needs to compute T^{-1}b, it can just call T_solver.Mult(b, x).
+        self.T_solver   : mfem.CGSolver     = T_solver;  
+        self.T          : mfem.SparseMatrix = None;         # Initialize T to None. This will force us to build T = M + fac0*K in ImplicitSolve.
 
 
         
     def Mult(self, u : mfem.Vector, du_dt : mfem.Vector, d2udt2 : mfem.Vector) -> None:
-        # Compute:
-        #    d2udt2 = M^{-1}*-K(u)
-        # for d2udt2
+        # Solve the following equation for U''(t):
+        #    M * U''(t) = -K(U(t)) - M2 * U(t)
 
-        # Compute the stiffness matrix, store in z.
-        z = mfem.Vector(u.Size());
-        self.Kmat.Mult(u, z);
+        # Compute the stiffness matrix, store in x.
+        x : mfem.Vector = mfem.Vector(u.Size());        # Initialize a vector to hold K(U(t)).
+        self.Kmat.Mult(u, x);                           # Computes K(U(t)) and stores it in x.
 
-        # Negate the stiffness matrix.
-        z.Neg();
+        # Multiplies x by -1, it now holds -K*U(t).
+        x.Neg();                    
 
-        # Solve for d2udt2.
+        # Compute M2*U(t), store in y.
+        y : mfem.Vector = mfem.Vector(u.Size());        # Initialize a vector to hold M2(U(t)).
+        self.M2mat.Mult(u, y);                          # Computes M2(U(t)) and stores it in y.
+
+        # Multiplies y by -1, it now holds -M2 * U(t).
+        y.Neg();
+
+        # Compute x + y = -K*U(t) - M2 * U(t), store in z.
+        z : mfem.Vector = mfem.Vector(u.Size());
+        mfem.add_vector(x, 1.0, y, z);                  # z = x + 1.0*y.
+
+        # Solves M* U''(t) = -K(U(t)) - M2 * U(t) for U''(t).
         self.M_solver.Mult(z, d2udt2);
 
 
     def ImplicitSolve(self, fac0 : float, fac1 : float, u : mfem.Vector, dudt : mfem.Vector, d2udt2 : mfem.Vector) -> None:
-        # Solve the equation:
-        #    d2udt2 = M^{-1}*[-K(u + fac0*d2udt2)]
-        # for d2udt2
+        # Solve the following equation for U''(t):
+        #    (M + fac0*K) * U''(t) = -K*U(t) - M2 * U(t)
+
         if self.T is None:
+            # Build the matrix T = M + fac0*K.
             self.T : mfem.SparseMatrix = mfem.Add(1.0, self.Mmat, fac0, self.Kmat);
-            self.T_solver.SetOperator(self.T)
+            self.T_solver.SetOperator(self.T);
 
+        # Compute K(U(t)), store it in x.
+        x : mfem.Vector = mfem.Vector(u.Size());        # Initialize a vector to hold K(U(t)).
+        self.Kmat0.Mult(u, x);                          # Computes K(U(t)) and stores it in x.
 
-        # Compute the stiffness matrix, store in z.
-        z = mfem.Vector(u.Size());
-        self.Kmat0.Mult(u, z);
+        # Multiplies x by -1, it now holds -K*U(t).
+        x.Neg();
 
-        # Negate the stiffness matrix.
-        z.Neg();
+        # Compute M2*U(t), store it in y.
+        y : mfem.Vector = mfem.Vector(u.Size());        # Initialize a vector to hold M2(U(t)).
+        self.M2mat.Mult(u, y);                          # Computes M2(U(t)) and stores it in y.
 
-        # Set the essential boundary conditions to zero.
+        # Multiplies y by -1, it now holds -M2 * U(t).
+        y.Neg();
+
+        # Compute x + y = -K*U(t) - M2 * U(t), store in z.
+        z : mfem.Vector = mfem.Vector(u.Size());
+        mfem.add_vector(x, 1.0, y, z);                  # z = x + 1.0*y.
+
+        # Set the essential boundary conditions to zero. This is necessary because the stiffness 
+        # matrix is not symmetric.
         for j in self.ess_tdof_list:
             z[j] = 0.0
 
-        # Solve for d2udt2.
-        self.T_solver.Mult(z, d2udt2)
-
+        # Solves (M + fac0*K) * U''(t) = -K*U(t) - M2 * U(t) for U''(t).
+        self.T_solver.Mult(z, d2udt2);
+    
 
 
     def SetParameters(self, u):
@@ -194,13 +284,16 @@ def Simulate(mesh_file          : str   = "star.mesh",
              t_final            : float = 5.0,
              dt                 : float = 1e-2,
              c                  : float = 0.5,
+             m                  : float = 1.0,
              k                  : float = 20.0,
              dirichlet          : bool  = True,
              serialization_steps: int   = 5,
              num_positions      : int   = 1000,
              VisIt              : bool  = True) -> tuple[numpy.ndarray,numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """
-    Simulate the wave equation.
+    Simulate the Klein-Gordon equation.
+
+    
 
     ---------------------------------------------------------------------------------------------
     Arguments
@@ -224,16 +317,19 @@ def Simulate(mesh_file          : str   = "star.mesh",
         - 14: FoxGoodwinSolver
 
     t_final : float
-        The final time. We solve the wave equation from t = 0 to t = t_final.
+        The final time. We solve the Klein-Gordon equation from t = 0 to t = t_final.
 
     dt : float
-        The time step. We solve the wave equation using a time-stepping scheme with time step dt.
+        The time step. We solve the Klein-Gordon equation using a time-stepping scheme with time step dt.
 
     c : float
-        The speed of the wave.  
+        The speed of the wave. See the Klein-Gordon equation in the KleinGordonOperator class.
+
+    m : float
+        The mass of the field. See the Klein-Gordon equation in the KleinGordonOperator class.
 
     k : float
-        A coefficient used to define the initial solution: u(0, x) = exp(-k*|x|^2).
+        A constant used to define the initial solution (u(0, X)). See the cInitialSolution class.
 
     dirichlet : bool
         Whether to use Dirichlet boundary conditions. If True, we fix the position of the nodes on the 
@@ -276,7 +372,7 @@ def Simulate(mesh_file          : str   = "star.mesh",
     # ---------------------------------------------------------------------------------------------
     # 1. Setup 
     
-    LOGGER.info("Setting up wave equation simulation with MFEM.");
+    LOGGER.info("Setting up Klein-Gordon equation simulation with MFEM.");
     
     # Set the global variable c.
     global decay;
@@ -362,9 +458,9 @@ def Simulate(mesh_file          : str   = "star.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 5. Initialize the wave operator.
+    # 5. Initialize the Klein-Gordon operator.
 
-    LOGGER.info("Initializing the wave operator.");
+    LOGGER.info("Initializing the Klein-Gordon operator.");
 
     # Define the essential boundary conditions. 
     ess_bdr : mfem.intArray = mfem.intArray();
@@ -378,8 +474,8 @@ def Simulate(mesh_file          : str   = "star.mesh",
         else:
             ess_bdr.Assign(0);
 
-    # Initialize the wave operator.
-    oper : WaveOperator = WaveOperator(fespace = fespace, ess_bdr = ess_bdr, speed = c);
+    # Initialize the Klein-Gordon operator.
+    oper : KleinGordonOperator = KleinGordonOperator(fespace = fespace, ess_bdr = ess_bdr, c = c, m = m);
 
 
 
@@ -454,7 +550,7 @@ def Simulate(mesh_file          : str   = "star.mesh",
         LOGGER.info("Setting up VisIt visualization.");
 
         # Create the VisIt data collection.
-        visit_dc_path   : str                       = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "waveEq-fom");
+        visit_dc_path   : str                       = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "klein-gordan-fom");
         visit_dc        : mfem.VisItDataCollection  = mfem.VisItDataCollection(visit_dc_path, mesh);
         visit_dc.SetPrecision(8);
 
@@ -539,7 +635,7 @@ def Simulate(mesh_file          : str   = "star.mesh",
                 visit_dc.SetTime(t);
                 visit_dc.Save();
 
-        # Update the wave operator with the current solution.
+        # Update the Klein-Gordon operator with the current solution.
         oper.SetParameters(u);
 
 
