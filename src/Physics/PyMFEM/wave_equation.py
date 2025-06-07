@@ -34,7 +34,7 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
         """
         Initialize the WaveOperator. The strong form of the wave equation is:
 
-            d2udt2 = c^2*laplacian(u)
+            (d^2/dt^2)u = c^2*laplacian(u)
         
         where c is the speed of the wave. Therefore, given basis functions { \phi_i }_{i = 1}^{N}, 
         the weak form of the wave equation is:
