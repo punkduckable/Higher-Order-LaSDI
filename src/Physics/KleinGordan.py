@@ -2,7 +2,6 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-
 # Add the main directory to the search path.
 import  logging;
 import  os;
@@ -14,11 +13,10 @@ import  numpy;
 import  torch;
 
 from    Physics                         import  Physics;
-from    wave_equation                   import  Simulate;
+from    klein_gordan                    import  Simulate;
 
 
 LOGGER : logging.Logger = logging.getLogger(__name__);
-
 
 
 
@@ -64,7 +62,7 @@ class KleinGordan(Physics):
         assert(len(param_names) == 2);
         assert('k' in param_names);
         assert('m' in param_names);
-        assert('WaveEquation' in config);
+        assert('KleinGordan' in config);
 
         # Call the super class initializer.
         super().__init__(config         = config,
@@ -72,7 +70,7 @@ class KleinGordan(Physics):
                          Uniform_t_Grid = False);
 
         # Run a short simulation to determine the frame shape and positions.
-        U, DtU, X, T                        = Simulate(t_final = 0);
+        U, DtU, X, T                        = Simulate(t_final = 0, VisIt = False);
         self.Frame_Shape    : list[int]     = list(U.shape[1:]);
         self.X_Positions    : numpy.ndarray = numpy.copy(X);            # shape = (2, N)    
         LOGGER.debug("Frame shape: %s" % str(self.Frame_Shape));
@@ -173,7 +171,7 @@ class KleinGordan(Physics):
         assert(param.shape[0]   == self.n_p);
 
         # Solve the PDE using the external MFEM script.
-        U, DtU, _, Times = Simulate(k = param[self.k_idx], m = param[self.m_idx], VisIt = False);
+        U, DtU, _, Times = Simulate(k = param[self.k_idx], m = param[self.m_idx], VisIt = True);
 
         X       : list[torch.Tensor] = [torch.Tensor(U), torch.Tensor(DtU)];
         t_Grid  : torch.Tensor       = torch.Tensor(Times);

@@ -69,7 +69,7 @@ class Advection(Physics):
                          Uniform_t_Grid = False);
 
         # Run a short simulation to determine the frame shape and positions.
-        Sol, X, T, bb_min, bb_max           = Simulate(t_final = 0);
+        Sol, X, T, bb_min, bb_max           = Simulate(t_final = 0, VisIt = False);
         self.Frame_Shape    : list[int]     = list(Sol.shape[1:]);
         self.X_Positions    : numpy.ndarray = numpy.copy(X);            # shape = (2, N)
         self.bb_min         : numpy.ndarray = numpy.copy(bb_min);

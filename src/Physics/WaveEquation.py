@@ -72,7 +72,7 @@ class WaveEquation(Physics):
                          Uniform_t_Grid = False);
 
         # Run a short simulation to determine the frame shape and positions.
-        U, DtU, X, T                        = Simulate(t_final = 0);
+        U, DtU, X, T                        = Simulate(t_final = 0, VisIt = False);
         self.Frame_Shape    : list[int]     = list(U.shape[1:]);
         self.X_Positions    : numpy.ndarray = numpy.copy(X);            # shape = (2, N)    
         LOGGER.debug("Frame shape: %s" % str(self.Frame_Shape));
