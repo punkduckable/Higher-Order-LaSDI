@@ -206,18 +206,18 @@ class Explicit(Physics):
         
 
     
-    def residual(self, X_hist : list[numpy.ndarray]) -> tuple[numpy.ndarray, float]:
+    def residual(self, U_hist : list[numpy.ndarray]) -> tuple[numpy.ndarray, float]:
         """
         Because there is no governing PDE for this Physics model, "residual" doesn't make a 
         whole lot of sense for this class. Thus, we return an array of zeros whose shape matches
-        that of X_hist.
+        that of U_hist.
         
 
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
 
-        X_hist: list[numpy.ndarray], len = n_IC
+        U_hist: list[numpy.ndarray], len = n_IC
             d'th element is a 2d numpy.ndarray object of shape (n_t, n_x), where n_t is the number of 
             points along the temporal axis (this is specified by the configuration file) and n_x is the 
             number of points along the spatial axis. The i,j element of the d'th array should have the 
@@ -239,11 +239,11 @@ class Explicit(Physics):
         """
 
         # Run checks.
-        assert(len(X_hist[0].shape)     == 2);
-        assert(X_hist[0].shape[1]       == self.n_x);
+        assert(len(U_hist[0].shape)     == 2);
+        assert(U_hist[0].shape[1]       == self.n_x);
 
         # compute the residual + the norm of the residual.
-        r   : numpy.ndarray = numpy.zeros_like(X_hist[0]);
+        r   : numpy.ndarray = numpy.zeros_like(U_hist[0]);
         e   : float         = numpy.linalg.norm(r);
 
         # All done!

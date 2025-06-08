@@ -27,6 +27,7 @@ The code has been tested with the following packages:
 - scipy (1.14.1)
 - matplotlib (3.9.2)
 - seaborn (0.13.2)
+- ffmpeg (7.0.1)
 
 To run the non-linear elasticity example you will also need `PyMFEM` with parallel support.
 

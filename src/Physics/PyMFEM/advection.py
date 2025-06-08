@@ -360,19 +360,20 @@ class FE_Evolution(mfem.PyTimeDependentOperator):
 # Simulate function
 # -------------------------------------------------------------------------------------------------
 
-def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh", 
-                ser_ref_levels      : int       = 2,
-                par_ref_levels      : int       = 1,
-                order               : int       = 3,
-                ode_solver_type     : int       = 4,
-                t_final             : float     = 5.0,
-                time_step_size      : float     = 0.005,
-                w                   : float     = numpy.pi/2,
-                k                   : float     = 2.0,
-                serialization_steps : int       = 10,
-                num_positions       : int       = 1000,
-                VisIt               : bool      = True) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]:
-    """
+def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh", 
+                ser_ref_levels      : int           = 2,
+                par_ref_levels      : int           = 1,
+                order               : int           = 3,
+                ode_solver_type     : int           = 4,
+                t_final             : float         = 5.0,
+                time_step_size      : float         = 0.005,
+                Positions           : numpy.ndarray = None,
+                w                   : float         = numpy.pi/2,
+                k                   : float         = 2.0,
+                serialization_steps : int           = 10,
+                num_positions       : int           = 1000,
+                VisIt               : bool          = True) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]:
+    """     
     This examples solves a time dependent advection problem of the form
 
         (d/dt)u(X, t)   = -v(X) * \nabla(u(X, t)),
@@ -418,6 +419,11 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
     time_step_size : float 
         specifies the time step size.
 
+    Positions : numpy.ndarray, shape = (2, num_positions)
+        An optional argument. If None, we generate new positions from scratch. If it is not None, 
+        then Positions should be a 2D array whose i'th row holds the position of the i'th position 
+        at which we evaluate the solution.
+
     w : float 
         specifies the rotation speed of the velocity field (this becomes the gamma variable in 
         the EvalValue method in the velocity_coeff class).
@@ -459,6 +465,13 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
     bb_max : numpy.ndarray, shape = (2,)
         The maximum coordinates of the bounding box.
     """
+
+    if(Positions is not None):
+        assert(isinstance(Positions, numpy.ndarray));
+        assert(len(Positions.shape)     == 2);
+        assert(Positions.shape[0]       == 2);
+        assert(Positions.shape[1]       == num_positions);
+
 
     # ---------------------------------------------------------------------------------------------
     # 1. Setup 
@@ -561,9 +574,13 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
     # ---------------------------------------------------------------------------------------------
     # 5. Set up positions at which we will evaluate the solution.
 
-    if(myid == 0): LOGGER.info("Sampling %d positions in the mesh" % num_positions);
+    if(Positions is None):
+        if(myid == 0): LOGGER.info("Sampling %d positions in the mesh" % num_positions);
+    else:
+        if(myid == 0): LOGGER.info("Verifying the columns of Positions are in the problem domain");
 
     # Figure out the maximum/minimum x and y coordinates of the mesh.
+    bb_min, bb_max = mesh.GetBoundingBox();
     if(myid == 0): LOGGER.debug("The bounding box for the mesh is given by bb_min = %s, bb_max = %s" % (str(bb_min), str(bb_max)));
     x_min   : float = bb_min[0];
     x_max   : float = bb_max[0];
@@ -571,25 +588,29 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
     y_max   : float = bb_max[1];
     if(myid == 0): LOGGER.debug("x_min = %f, x_max = %f, y_min = %f, y_max = %f" % (x_min, x_max, y_min, y_max));
 
-    # Now, sample num_positions points evenly spaced between x_min and x_max, and y_min and y_max.
-    # If the mesh has an unusual shape, some of these points may lie outside the mesh. We sample 
-    # too many positions to account for this. Any points that lie outside the mesh will be ignored.
-    # We will sample new points if the number of points that lie inside the mesh is less than 
-    # num_positions.
+    # If we are sampling new points, then we sample num_positions points evenly spaced between 
+    # x_min and x_max, and y_min and y_max. If the mesh has an unusual shape, some of these points 
+    # may lie outside the mesh. We sample too many positions to account for this. Any points that 
+    # lie outside the mesh will be ignored. We will sample new points if the number of points that 
+    # lie inside the mesh is less than num_positions.
     Valid_Positions_List : list[numpy.ndarray] = [];
     Elements_List        : list[int]           = [];
     RefCoords_List       : list[numpy.ndarray] = [];
     num_valid_positions  : int = 0;
     
     while(num_valid_positions < num_positions):
-        if(myid == 0): LOGGER.debug("Sampling %d positions" % num_positions);
+        if(Positions is None):
+            if(myid == 0): LOGGER.debug("Sampling %d positions" % num_positions);
 
-        # Sample random x,y coordinates
-        x_positions : numpy.ndarray = numpy.random.uniform(x_min, x_max, num_positions);
-        y_positions : numpy.ndarray = numpy.random.uniform(y_min, y_max, num_positions);
+            # Sample random x,y coordinates
+            x_positions : numpy.ndarray = numpy.random.uniform(x_min, x_max, num_positions);
+            y_positions : numpy.ndarray = numpy.random.uniform(y_min, y_max, num_positions);
 
-        # Create array of points in format expected by FindPoints
-        points : numpy.ndarray = numpy.column_stack((x_positions, y_positions));
+            # Create array of points in format expected by FindPoints
+            points : numpy.ndarray = numpy.column_stack((x_positions, y_positions));
+
+        else:
+            points = Positions.T;
 
         # Find which points are in the mesh.
         count, elem_list, ref_coords = pmesh.FindPoints(points, warn = False, inv_trans = None);
@@ -608,14 +629,18 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
 
         # If we have not enough valid positions, sample again.
         if(num_valid_positions < num_positions):
-            if(myid == 0): LOGGER.debug("Not enough valid positions (current = %d, needed = %d), sampling again" % (num_valid_positions, num_positions));
+            if(Positions is not None):
+                if(myid == 0): LOGGER.error("%d/%d elements of Positions are invalid. Aborting" % (num_valid_positions, num_positions));
+                raise ValueError("Invalid Positions");
+            else:
+                if(myid == 0): LOGGER.debug("Not enough valid positions (current = %d, needed = %d), sampling again" % (num_valid_positions, num_positions));
 
     # Convert the lists to numpy arrays.
     Positions : numpy.ndarray = numpy.array(Valid_Positions_List).T;
     Elements  : numpy.ndarray = numpy.array(Elements_List);
     RefCoords : numpy.ndarray = numpy.array(RefCoords_List);
     if(myid == 0): LOGGER.debug("Positions has shape %s (dim = %d, num_positions = %d)" % (str(Positions.shape), dim, Positions.shape[1]));
-
+    
 
 
     # ---------------------------------------------------------------------------------------------

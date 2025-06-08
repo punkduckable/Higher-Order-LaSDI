@@ -171,7 +171,7 @@ class KleinGordan(Physics):
         assert(param.shape[0]   == self.n_p);
 
         # Solve the PDE using the external MFEM script.
-        U, DtU, _, Times = Simulate(k = param[self.k_idx], m = param[self.m_idx], VisIt = True);
+        U, DtU, _, Times = Simulate(k = param[self.k_idx], m = param[self.m_idx], Positions = self.X_Positions, VisIt = True);
 
         X       : list[torch.Tensor] = [torch.Tensor(U), torch.Tensor(DtU)];
         t_Grid  : torch.Tensor       = torch.Tensor(Times);

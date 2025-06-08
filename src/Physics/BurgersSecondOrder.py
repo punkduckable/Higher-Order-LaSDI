@@ -235,17 +235,17 @@ class Burgers(Physics):
     
 
     
-    def residual(self, X_hist : list[numpy.ndarray]) -> tuple[numpy.ndarray, float]:
+    def residual(self, U_hist : list[numpy.ndarray]) -> tuple[numpy.ndarray, float]:
         """
         This function computes the PDE residual (difference between the left and right hand side
-        of Burgers' equation when we substitute in the solution in X_hist).
+        of Burgers' equation when we substitute in the solution in U_hist).
 
 
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
 
-        X_hist : list[numpy.ndarray], len = 2
+        U_hist : list[numpy.ndarray], len = 2
             d'th element has shape (n_t, n_x), where n_t is the number of points along the 
             temporal axis (this is specified by the configuration file) and n_x is the number of 
             points along the spatial axis. The i,j element of the d'th array should hold the j'th 
@@ -267,11 +267,11 @@ class Burgers(Physics):
         """
 
         # Run checks.
-        assert(len(X_hist.shape)     == 2);
-        assert(X_hist.shape[1]       == self.n_x);
+        assert(len(U_hist.shape)     == 2);
+        assert(U_hist.shape[1]       == self.n_x);
 
         # Extract only the position data.
-        X_hist = X_hist[0];
+        U_hist = U_hist[0];
 
         # Compute dt. 
         n_t     : int           = self.config['Burgers']['n_t'];
@@ -280,17 +280,17 @@ class Burgers(Physics):
 
         # First, approximate the spatial and temporal derivatives.
         # first axis is time index, and second index is spatial index.
-        dUdx    : numpy.ndarray     = numpy.empty_like(X_hist);
-        dUdt    : numpy.ndarray     = numpy.empty_like(X_hist);
+        dUdx    : numpy.ndarray     = numpy.empty_like(U_hist);
+        dUdt    : numpy.ndarray     = numpy.empty_like(U_hist);
 
-        dUdx[:, :-1]    = (X_hist[:, 1:] - X_hist[:, :-1]) / self.dx;   # Use forward difference for all but the last time value.
+        dUdx[:, :-1]    = (U_hist[:, 1:] - U_hist[:, :-1]) / self.dx;   # Use forward difference for all but the last time value.
         dUdx[:, -1]     = dUdx[:, -2];                                  # Use backwards difference for the last time value
         
-        dUdt[:-1, :]    = (X_hist[1:, :] - X_hist[:-1, :]) / dt;        # Use forward difference for all but the last position
+        dUdt[:-1, :]    = (U_hist[1:, :] - U_hist[:-1, :]) / dt;        # Use forward difference for all but the last position
         dUdt[-1, :]     = dUdt[-2, :];                                  # Use backwards difference for the last time value.
 
         # compute the residual + the norm of the residual.
-        r   : numpy.ndarray = dUdt - X_hist * dUdx;
+        r   : numpy.ndarray = dUdt - U_hist * dUdx;
         e   : float         = numpy.linalg.norm(r);
 
         # All done!

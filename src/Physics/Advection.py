@@ -168,7 +168,7 @@ class Advection(Physics):
         assert(param.shape[0]   == self.n_p);
 
         # Solve the PDE using the external MFEM script.
-        Sol, _, Times, _, _ = Simulate(k = param[self.k_idx], w = param[self.w_idx], VisIt = False);
+        Sol, _, Times, _, _ = Simulate(k = param[self.k_idx], w = param[self.w_idx], Positions = self.X_Positions, VisIt = False);
 
         X       : list[torch.Tensor] = [torch.Tensor(Sol)];
         t_Grid  : torch.Tensor       = torch.Tensor(Times);

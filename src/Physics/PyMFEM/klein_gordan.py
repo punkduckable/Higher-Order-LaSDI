@@ -278,19 +278,20 @@ class cInitialRate(mfem.PyCoefficient):
 # Simulate function
 # -------------------------------------------------------------------------------------------------
 
-def Simulate(mesh_file          : str   = "star.mesh",
-             ref_levels         : int   = 2,
-             order              : int   = 2,
-             ode_solver_type    : int   = 10,
-             t_final            : float = 5.0,
-             dt                 : float = 1e-2,
-             c                  : float = 0.5,
-             m                  : float = 2.0,
-             k                  : float = 20.0,
-             dirichlet          : bool  = True,
-             serialization_steps: int   = 5,
-             num_positions      : int   = 1000,
-             VisIt              : bool  = True) -> tuple[numpy.ndarray,numpy.ndarray, numpy.ndarray, numpy.ndarray]:
+def Simulate(mesh_file          : str           = "star.mesh",
+             ref_levels         : int           = 2,
+             order              : int           = 2,
+             ode_solver_type    : int           = 10,
+             t_final            : float         = 5.0,
+             dt                 : float         = 1e-2,
+             Positions          : numpy.ndarray = None,
+             c                  : float         = 0.5,
+             m                  : float         = 2.0,
+             k                  : float         = 20.0,
+             dirichlet          : bool          = True,
+             serialization_steps: int           = 5,
+             num_positions      : int           = 1000,
+             VisIt              : bool          = True) -> tuple[numpy.ndarray,numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """
     Simulate the Klein-Gordon equation.
 
@@ -322,6 +323,11 @@ def Simulate(mesh_file          : str   = "star.mesh",
 
     dt : float
         The time step. We solve the Klein-Gordon equation using a time-stepping scheme with time step dt.
+    
+    Positions : numpy.ndarray, shape = (2, num_positions)
+        An optional argument. If None, we generate new positions from scratch. If it is not None, 
+        then Positions should be a 2D array whose i'th row holds the position of the i'th position 
+        at which we evaluate the solution.
 
     c : float
         The speed of the wave. See the Klein-Gordon equation in the KleinGordonOperator class.
@@ -368,7 +374,13 @@ def Simulate(mesh_file          : str   = "star.mesh",
     T : numpy.ndarray, shape = (Nt)
         i'th element holds the j'th time at which we evaluate the solution.
     """
-    
+
+    if(Positions is not None):
+        assert(isinstance(Positions, numpy.ndarray));
+        assert(len(Positions.shape)     == 2);
+        assert(Positions.shape[0]       == 2);
+        assert(Positions.shape[1]       == num_positions);  
+
 
     # ---------------------------------------------------------------------------------------------
     # 1. Setup 
@@ -481,37 +493,45 @@ def Simulate(mesh_file          : str   = "star.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 5. Set up positions at which we will evaluate the solution.
+    # 6. Set up positions at which we will evaluate the solution.
 
-    LOGGER.info("Sampling %d positions in the mesh" % num_positions);
+    if(Positions is None):
+        LOGGER.info("Sampling %d positions in the mesh" % num_positions);
+    else:
+        LOGGER.info("Verifying the columns of Positions are in the problem domain");
 
     # Figure out the maximum/minimum x and y coordinates of the mesh.
     bb_min, bb_max = mesh.GetBoundingBox();
+    LOGGER.debug("The bounding box for the mesh is given by bb_min = %s, bb_max = %s" % (str(bb_min), str(bb_max)));
     x_min   : float = bb_min[0];
     x_max   : float = bb_max[0];
     y_min   : float = bb_min[1];
     y_max   : float = bb_max[1];
     LOGGER.debug("x_min = %f, x_max = %f, y_min = %f, y_max = %f" % (x_min, x_max, y_min, y_max));
 
-    # Now, sample num_positions points evenly spaced between x_min and x_max, and y_min and y_max.
-    # If the mesh has an unusal shape, some of these points may lie outside the mesh. We sample 
-    # too many positions to account for this. Any points that lie outside the mesh will be ignored.
-    # We will sample new points if the number of points that lie inside the mesh is less than 
-    # num_positions.
+    # If we are sampling new points, then we sample num_positions points evenly spaced between 
+    # x_min and x_max, and y_min and y_max. If the mesh has an unusual shape, some of these points 
+    # may lie outside the mesh. We sample too many positions to account for this. Any points that 
+    # lie outside the mesh will be ignored. We will sample new points if the number of points that 
+    # lie inside the mesh is less than num_positions.
     Valid_Positions_List : list[numpy.ndarray] = [];
     Elements_List        : list[int]           = [];
     RefCoords_List       : list[numpy.ndarray] = [];
     num_valid_positions  : int = 0;
     
     while(num_valid_positions < num_positions):
-        LOGGER.debug("Sampling %d positions" % num_positions);
+        if(Positions is None):
+            LOGGER.debug("Sampling %d positions" % num_positions);
 
-        # Sample random x,y coordinates
-        x_positions : numpy.ndarray = numpy.random.uniform(x_min, x_max, num_positions);
-        y_positions : numpy.ndarray = numpy.random.uniform(y_min, y_max, num_positions);
+            # Sample random x,y coordinates
+            x_positions : numpy.ndarray = numpy.random.uniform(x_min, x_max, num_positions);
+            y_positions : numpy.ndarray = numpy.random.uniform(y_min, y_max, num_positions);
 
-        # Create array of points in format expected by FindPoints
-        points : numpy.ndarray = numpy.column_stack((x_positions, y_positions));
+            # Create array of points in format expected by FindPoints
+            points : numpy.ndarray = numpy.column_stack((x_positions, y_positions));
+
+        else:
+            points = Positions.T;
 
         # Find which points are in the mesh.
         count, elem_list, ref_coords = mesh.FindPoints(points, warn = False, inv_trans = None);
@@ -530,7 +550,11 @@ def Simulate(mesh_file          : str   = "star.mesh",
 
         # If we have not enough valid positions, sample again.
         if(num_valid_positions < num_positions):
-            LOGGER.debug("Not enough valid positions (current = %d, needed = %d), sampling again" % (num_valid_positions, num_positions));
+            if(Positions is not None):
+                LOGGER.error("%d/%d elements of Positions are invalid. Aborting" % (num_valid_positions, num_positions));
+                raise ValueError("Invalid Positions");
+            else:
+                LOGGER.debug("Not enough valid positions (current = %d, needed = %d), sampling again" % (num_valid_positions, num_positions));
 
     # Convert the lists to numpy arrays.
     Positions : numpy.ndarray = numpy.array(Valid_Positions_List).T;
@@ -541,7 +565,7 @@ def Simulate(mesh_file          : str   = "star.mesh",
 
     
     # ---------------------------------------------------------------------------------------------
-    # 6. VisIt
+    # 7. VisIt
 
     # Store the initial solution to u_gf and dudt_gf.
     u_gf.SetFromTrueDofs(u);
@@ -566,7 +590,7 @@ def Simulate(mesh_file          : str   = "star.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 7. Setup lists to store the solution + evaluate the initial solution at the positions.
+    # 8. Setup lists to store the solution + evaluate the initial solution at the positions.
 
     LOGGER.info("Setting up lists to store the time, U, and DtU at each time step.");
 
@@ -590,7 +614,7 @@ def Simulate(mesh_file          : str   = "star.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 8. Perform time-integration (looping over the time iterations, ti, with a time-step dt).
+    # 9. Perform time-integration (looping over the time iterations, ti, with a time-step dt).
 
     LOGGER.info("Performing time-integration (dt = %g, t_final = %g)" % (dt, t_final));
     
@@ -642,7 +666,7 @@ def Simulate(mesh_file          : str   = "star.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 9. Package everything up for returning.
+    # 10. Package everything up for returning.
 
     # Turn times, displacements, velocities lists into arrays.
     Times           = numpy.array(times_list,           dtype = numpy.float32);
