@@ -55,12 +55,12 @@ def Update_Train_Space(trainer : BayesianGLaSDI, config : dict) -> tuple[NextSte
 
     # Figure out if we need a new sample.
     #
-    # If this is the first step, trainer.X_Train will be empty, meaning that we need to run a
+    # If this is the first step, trainer.U_Train will be empty, meaning that we need to run a
     # simulation for every combination of parameters in the train_space.
     # 
     # By contrast, if this is not the initial step, we need to use greedy sampling to pick a new
     # combination of parameter values, then append it to the train space.
-    if(len(trainer.X_Train) != 0):
+    if(len(trainer.U_Train) != 0):
         new_sample  : numpy.ndarray = trainer.get_new_sample_point();
         trainer.param_space.appendTrainSpace(new_sample);
 
@@ -73,16 +73,16 @@ def Update_Train_Space(trainer : BayesianGLaSDI, config : dict) -> tuple[NextSte
 
 def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Result]:
     """
-    This function updates trainer.X_Train and trainer.X_Test by adding solutions generated from 
+    This function updates trainer.U_Train and trainer.U_Test by adding solutions generated from 
     parameter combinations in trainer.param_space.train_space and trainer.param_space.test_space.
 
     We assume that the user has added at least one testing or training point to trainer.param_space
-    which has not yet been added into trainer's X_Train or X_Test attributes. We assume that any 
+    which has not yet been added into trainer's U_Train or U_Test attributes. We assume that any 
     new training or testing points have been appended onto THE END of the param_space. 
 
     This function first determines how many testing/training parameter combinations are new (we 
     have not found the corresponding trajectories). We generate the trajectory for each of these
-    parameter combinations, then append those trajectories onto trainer.X_Train/X_Test. 
+    parameter combinations, then append those trajectories onto trainer.U_Train/U_Test. 
 
 
     
@@ -115,14 +115,14 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     
 
     # ---------------------------------------------------------------------------------------------
-    # Determine how many testing, training samples we need to add to X_Train/X_Test
+    # Determine how many testing, training samples we need to add to U_Train/U_Test
 
     # Figure out how many training parameters we have not generated solution trajectories for. 
-    if(len(trainer.X_Train) == 0):
+    if(len(trainer.U_Train) == 0):
         num_train_current   : int   = 0;
         num_train_new       : int   = trainer.param_space.n_train();
     else:
-        num_train_current   : int   = len(trainer.X_Train);
+        num_train_current   : int   = len(trainer.U_Train);
         num_train_new       : int   = trainer.param_space.n_train() - num_train_current;
     assert(num_train_new > 0);
     LOGGER.info("Adding %d new parameter combinations to the training set (currently has %d)" % (num_train_new, num_train_current));
@@ -138,11 +138,11 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     # Now do the same thing for testing parameters. Once again we assume that if the user added new
     # testing parameters, that they appended those parameters to the END of param_space's 
     # test_space attribute. 
-    if(len(trainer.X_Test) == 0):
+    if(len(trainer.U_Test) == 0):
         num_test_current    : int   = 0;
         num_test_new        : int   = trainer.param_space.n_test();
     else:
-        num_test_current    : int   = len(trainer.X_Test);
+        num_test_current    : int   = len(trainer.U_Test);
         num_test_new        : int   = trainer.param_space.n_test() - num_test_current;
     LOGGER.info("Adding %d new parameter combinations to the testing set (currently has %d)" % (num_test_new, num_test_current));
 
@@ -156,23 +156,23 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     # Generate new testing, training solutions.
 
     # Generate the FOM solutions for the new testing points. After we have generated them, we
-    # append them to trainer's X_Test variable.
+    # append them to trainer's U_Test variable.
     if (num_test_new > 0):
-        new_X_Test, new_t_Test  = trainer.physics.generate_solutions(new_test_params);
+        new_U_Test, new_t_Test  = trainer.physics.generate_solutions(new_test_params);
 
-        if(len(trainer.X_Test) == 0):
-            trainer.X_Test  : list[list[torch.Tensor]]  = new_X_Test;
+        if(len(trainer.U_Test) == 0):
+            trainer.U_Test  : list[list[torch.Tensor]]  = new_U_Test;
             trainer.t_Test  : list[torch.Tensor]        = new_t_Test;
         else:
-            trainer.X_Test : list[list[torch.Tensor]]   = trainer.X_Test + new_X_Test;
+            trainer.U_Test : list[list[torch.Tensor]]   = trainer.U_Test + new_U_Test;
             trainer.t_Test : list[torch.Tensor]         = trainer.t_Test + new_t_Test;
             
-        assert(len(trainer.X_Test) == trainer.param_space.n_test());
+        assert(len(trainer.U_Test) == trainer.param_space.n_test());
 
     # Do the same thing for the training points. We do this one at a time. If a particular set of
     # parameters is in the testing set, then we take the pre-generated solution from there rather
     # than re-generating the solution from scratch.
-    new_X_Train     : list[list[torch.Tensor]]  = [];
+    new_U_Train     : list[list[torch.Tensor]]  = [];
     new_t_Train     : list[torch.Tensor]        = [];
     for i in range(num_train_new):
         # Check if the i'th combination of training parameters is in the testing set.
@@ -185,7 +185,7 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
             # the i'th new training param. If so, copy the solution and t_Grid from trainer.
             if(numpy.any(numpy.all(trainer.param_space.test_space[j, :] == ith_Train_param))):
                 LOGGER.info("Train parameter %d is test parameter %d! Copying the solution and t_grid from the testing set!" % (i, j));
-                new_X_Train.append(trainer.X_Test[j]);
+                new_U_Train.append(trainer.U_Test[j]);
                 new_t_Train.append(trainer.t_Test[j]);
                 found_param_in_test = True;
                 break;
@@ -193,19 +193,19 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
         # If we could not find the training parameter, then we need to generate it.
         if(found_param_in_test == False):
             LOGGER.info("Couldn't find training parameter %d in the testing set; generating solution" % i);
-            ith_new_X_Train, ith_new_t_Train = trainer.physics.generate_solutions(new_train_params[i, :].reshape(1, -1));
-            new_X_Train = new_X_Train + ith_new_X_Train;
+            ith_new_U_Train, ith_new_t_Train = trainer.physics.generate_solutions(new_train_params[i, :].reshape(1, -1));
+            new_U_Train = new_U_Train + ith_new_U_Train;
             new_t_Train = new_t_Train + ith_new_t_Train;
     
-    # Now append the new training points to X_Train.
-    if(len(trainer.X_Train) == 0):
-        trainer.X_Train : list[list[torch.Tensor]]  = new_X_Train;
+    # Now append the new training points to U_Train.
+    if(len(trainer.U_Train) == 0):
+        trainer.U_Train : list[list[torch.Tensor]]  = new_U_Train;
         trainer.t_Train : list[torch.Tensor]        = new_t_Train;
     else:
-        trainer.X_Train : list[list[torch.Tensor]]  = trainer.X_Train + new_X_Train;
+        trainer.U_Train : list[list[torch.Tensor]]  = trainer.U_Train + new_U_Train;
         trainer.t_Train : list[torch.Tensor]        = trainer.t_Train + new_t_Train;
 
-    assert(len(trainer.X_Train) == trainer.param_space.n_train());
+    assert(len(trainer.U_Train) == trainer.param_space.n_train());
 
 
     # ---------------------------------------------------------------------------------------------

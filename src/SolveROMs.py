@@ -403,19 +403,19 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
             # Now decode the frames, one sample at a time.
             n_samples_i     : int           = Z_i.shape[0];
             n_t_i           : int           = Z_i.shape[1];
-            X_Pred_i        : numpy.ndarray = numpy.empty([n_samples_i, n_t_i] + model.reshape_shape, dtype = numpy.float32);
+            U_Pred_i        : numpy.ndarray = numpy.empty([n_samples_i, n_t_i] + model.reshape_shape, dtype = numpy.float32);
             for j in range(n_samples_i):
-                X_Pred_i[j, ...] = model.Decode(Z_i[j, :, :]).detach().numpy();
+                U_Pred_i[j, ...] = model.Decode(Z_i[j, :, :]).detach().numpy();
 
             # Compute the standard deviation across the sample axis. This gives us an array of shape 
             # (n_t, n_FOM) whose i,j element holds the (sample) standard deviation of the j'th component 
             # of the i'th frame of the FOM solution. In this case, the sample distribution consists of 
             # the set of j'th components of i'th frames of FOM solutions (one for each sample of the 
             # coefficient posterior distributions).
-            X_pred_i_std    : numpy.ndarray = X_Pred_i.std(0);
+            U_pred_i_std    : numpy.ndarray = U_Pred_i.std(0);
 
             # Now compute the maximum standard deviation across frames/FOM components.
-            max_std_i       : numpy.float32 = X_pred_i_std.max();
+            max_std_i       : numpy.float32 = U_pred_i_std.max();
 
             # If this is bigger than the biggest std we have seen so far, update the maximum.
             if max_std_i > max_std:
@@ -482,7 +482,7 @@ def Compute_Error_and_STD(  model           : torch.nn.Module,
                             latent_dynamics : LatentDynamics,
                             gp_list         : list[GaussianProcessRegressor],
                             t_Test          : list[torch.Tensor],
-                            X_Test          : list[list[torch.Tensor]],
+                            U_Test          : list[list[torch.Tensor]],
                             n_samples       : int) -> tuple[list[numpy.ndarray], list[numpy.ndarray]]:
     """
     This function draws n_samples samples of the coefficients for each combination of the 
@@ -521,7 +521,7 @@ def Compute_Error_and_STD(  model           : torch.nn.Module,
         value of the j'th time value at which we solve the latent dynamics for the i'th combination
         of parameter values.
 
-    X_Test : list[list[torch.Tensor]], len = n_test
+    U_Test : list[list[torch.Tensor]], len = n_test
         i'th element is an n_IC element list whose j'th element is a torch.Tensor of shape 
         (n_t(i), ...) whose k, ... slice holds the k'th frame of the j'th time derivative of the
         FOM model when we use the i'th combination of parameter values to define the FOM model.
@@ -550,7 +550,7 @@ def Compute_Error_and_STD(  model           : torch.nn.Module,
     # Run checks
     assert(isinstance(gp_list,          list));
     assert(isinstance(t_Test,           list));
-    assert(isinstance(X_Test,           list));
+    assert(isinstance(U_Test,           list));
 
     param_test  : numpy.ndarray         = param_space.test_space;
     assert(isinstance(param_test,       numpy.ndarray));
@@ -558,23 +558,23 @@ def Compute_Error_and_STD(  model           : torch.nn.Module,
     assert(isinstance(n_samples,        int));
     assert(len(gp_list)                 == latent_dynamics.n_coefs);
 
-    n_test  : int   = len(X_Test);   
-    assert(len(X_Test)                  == n_test);
+    n_test  : int   = len(U_Test);   
+    assert(len(U_Test)                  == n_test);
     assert(param_test.shape[0]          == n_test);
 
-    assert(isinstance(X_Test[0],        list));
-    n_IC    : int                       = len(X_Test[0]);
+    assert(isinstance(U_Test[0],        list));
+    n_IC    : int                       = len(U_Test[0]);
     for i in range(n_test):
-        assert(isinstance(X_Test[i],    list));
-        assert(len(X_Test[i])           == n_IC);
+        assert(isinstance(U_Test[i],    list));
+        assert(len(U_Test[i])           == n_IC);
     
         for j in range(n_IC):
             assert(isinstance(t_Test[j],    torch.Tensor));
             assert(len(t_Test[j].shape)     == 1);
             n_t_j   : int = t_Test[j].shape[0];
 
-            assert(isinstance(X_Test[i][j], torch.Tensor));
-            assert(X_Test[i][j].shape[0]    == n_t_j);
+            assert(isinstance(U_Test[i][j], torch.Tensor));
+            assert(U_Test[i][j].shape[0]    == n_t_j);
     
 
 
@@ -586,7 +586,7 @@ def Compute_Error_and_STD(  model           : torch.nn.Module,
     LOGGER.info("Generating latent dynamics trajectories using posterior distribution means for %d combinations of testing parameter" % (n_test));
     Zis_mean        : list[list[numpy.ndarray]] = average_rom(model, physics, latent_dynamics, gp_list, param_test, t_Test);               # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_z)
         
-    # Set up arrays to hold the average error between X_pred_mean and X_test, as well as the std of 
+    # Set up arrays to hold the average error between U_pred_mean and U_test, as well as the std of 
     # the predictions.
     max_rel_error   : list[numpy.ndarray]   = [];
     max_std          : list[numpy.ndarray]   = [];
@@ -597,9 +597,9 @@ def Compute_Error_and_STD(  model           : torch.nn.Module,
     # Pass the samples through the decoder. The way this works depends on what kind of model we are using. 
     if(isinstance(model, Autoencoder)):
         # Decode the mean predictions.
-        X_pred_mean     : list[list[numpy.ndarray]]     = [];   # len = n_test. i'th element has len n_IC whose j'th element has shape (n_t_i, n_x).
+        U_pred_mean     : list[list[numpy.ndarray]]     = [];   # len = n_test. i'th element has len n_IC whose j'th element has shape (n_t_i, n_x).
         for i in range(n_test):
-            X_pred_mean.append([model.Decode(torch.Tensor(Zis_mean[i][0])).detach().numpy()]);
+            U_pred_mean.append([model.Decode(torch.Tensor(Zis_mean[i][0])).detach().numpy()]);
 
         # Decode the Zis for each parameter and compute the corresponding STDs. 
         for i in range(n_test):
@@ -607,26 +607,26 @@ def Compute_Error_and_STD(  model           : torch.nn.Module,
             n_t_i           : int                   = len(t_Test[i]);
             FOM_Frame_Shape : list[int]            = physics.Frame_Shape;
 
-            ith_X_Pred   : numpy.ndarray            = numpy.empty([n_t_i, n_samples] + FOM_Frame_Shape, dtype = numpy.float32);
+            ith_U_Pred   : numpy.ndarray            = numpy.empty([n_t_i, n_samples] + FOM_Frame_Shape, dtype = numpy.float32);
 
             for j in range(n_samples):
-                X_Pred_ij                           = model.Decode(torch.Tensor(Zis_samples[i][0][:, j, :]));
-                ith_X_Pred[:, j, ...]               = X_Pred_ij.detach().numpy();
+                U_Pred_ij                           = model.Decode(torch.Tensor(Zis_samples[i][0][:, j, :]));
+                ith_U_Pred[:, j, ...]               = U_Pred_ij.detach().numpy();
 
             # For each component of each frame of the reconstruction using the i'th combination of
             # parameter values, we can compute the std (across the samples) of that component. We 
             # find the frame which has the component that gives the largest STD. This becomes the
             # i'th element of max_std[0].
-            max_std[0][i]                           = ith_X_Pred.std(axis = 1).max();
+            max_std[0][i]                           = ith_U_Pred.std(axis = 1).max();
         
         
 
     elif(isinstance(model, Autoencoder_Pair)):
         # Decode the mean predictions.
-        X_pred_mean     : list[list[numpy.ndarray]]     = [];   # len = n_test. i'th element has len n_IC whose j'th element has shape (n_t_i, n_x).
+        U_pred_mean     : list[list[numpy.ndarray]]     = [];   # len = n_test. i'th element has len n_IC whose j'th element has shape (n_t_i, n_x).
         for i in range(n_test):
             Disp_Pred_mean_i, Vel_Pred_mean_i   = model.Decode(torch.Tensor(Zis_mean[i][0]), torch.Tensor(Zis_mean[i][1]));
-            X_pred_mean.append([Disp_Pred_mean_i.detach().numpy(), Vel_Pred_mean_i.detach().numpy()]);
+            U_pred_mean.append([Disp_Pred_mean_i.detach().numpy(), Vel_Pred_mean_i.detach().numpy()]);
 
         # Decode the Zis for each parameter and compute the corresponding STDs. 
         for i in range(n_test):
@@ -653,23 +653,23 @@ def Compute_Error_and_STD(  model           : torch.nn.Module,
         raise TypeError("This function only works if mode is an Autoencoder or Autoencoder_Pair object. Got %s" % str(type(model)));
     
     # For each d \in {0, 1, ... , n_{IC} - 1} and k \in {1, 2, ... , n_test - 1}, find the mean 
-    # error between X_Pred_mean[d][k, ...] and X_test[d][k, ...].
+    # error between U_Pred_mean[d][k, ...] and U_test[d][k, ...].
     for d in range(n_IC):
         for k in range(n_test):        
             # Extract the prediction, true values for the d'th component of the FOM solution when we use 
             # the k'th parameter value. These have shape (n_t(k),) + physics.Frame_Shape.
-            kth_X_Pred_d            : numpy.ndarray = X_pred_mean[k][d];        # shape (n_t(k),) + physics.Frame_Shape
-            kth_X_Test_d            : numpy.ndarray = X_Test[k][d].numpy();     # shape (n_t(k),) + physics.Frame_Shape
+            kth_U_Pred_d            : numpy.ndarray = U_pred_mean[k][d];        # shape (n_t(k),) + physics.Frame_Shape
+            kth_U_Test_d            : numpy.ndarray = U_Test[k][d].numpy();     # shape (n_t(k),) + physics.Frame_Shape
 
             # Reshape them to have shape  (n_t(k), -1) so that we can easily compute norms across the time axis.
-            n_t_k   : int   = kth_X_Pred_d.shape[0];
-            kth_X_Pred_d = kth_X_Pred_d.reshape(n_t_k, -1);
-            kth_X_Test_d = kth_X_Test_d.reshape(n_t_k, -1);
+            n_t_k   : int   = kth_U_Pred_d.shape[0];
+            kth_U_Pred_d = kth_U_Pred_d.reshape(n_t_k, -1);
+            kth_U_Test_d = kth_U_Test_d.reshape(n_t_k, -1);
 
             # For each compute the relative error between the predicted and true values of the d'th 
             # derivative of the FOM solution at each time step when we use the k'th combination of 
             # parameter values.
-            kth_Relative_Errors_d   : numpy.ndarray = numpy.linalg.norm(kth_X_Pred_d - kth_X_Test_d, axis = 1) / numpy.linalg.norm(kth_X_Test_d, axis = 1);
+            kth_Relative_Errors_d   : numpy.ndarray = numpy.linalg.norm(kth_U_Pred_d - kth_U_Test_d, axis = 1) / numpy.linalg.norm(kth_U_Test_d, axis = 1);
             max_rel_error[d][k]                     = kth_Relative_Errors_d.max();
 
 

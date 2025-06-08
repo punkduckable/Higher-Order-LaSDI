@@ -7,10 +7,10 @@ time derivatives of tensor-valued time sequences.
 
 
 
-def Derivative1_Order2_NonUniform(X : torch.Tensor, t_Grid : torch.Tensor) -> torch.Tensor:
+def Derivative1_Order2_NonUniform(U : torch.Tensor, t_Grid : torch.Tensor) -> torch.Tensor:
     """
     This function finds an O(h^2) approximation of the time derivative to the time series stored in
-    the rows of X. We assume that there may be non-uniform time step sizes (the step size differs 
+    the rows of U. We assume that there may be non-uniform time step sizes (the step size differs 
     from step to step). This requires us to use non-standard finite difference techniques. 
 
     We use the following finite difference techniques to compute the derivative (see 
@@ -23,10 +23,10 @@ def Derivative1_Order2_NonUniform(X : torch.Tensor, t_Grid : torch.Tensor) -> to
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    X : torch.Tensor, shape = [Nt, ...]
-        A torch.Tensor object representing a time sequence. X[i, ...] represents the value of some 
-        function at the i'th time step. Specifically, we assume that X[i, ...] is the value of some 
-        function, X, at time t_Grid[i]
+    U : torch.Tensor, shape = [Nt, ...]
+        A torch.Tensor object representing a time sequence. U[i, ...] represents the value of some 
+        function at the i'th time step. Specifically, we assume that U[i, ...] is the value of some 
+        function, U, at time t_Grid[i]
 
     t_Grid : torch.Tensor, shape = (Nt)
         The i'th element of this Tensor should hold the time of the i'th time step.
@@ -36,19 +36,19 @@ def Derivative1_Order2_NonUniform(X : torch.Tensor, t_Grid : torch.Tensor) -> to
     Returns
     -----------------------------------------------------------------------------------------------
 
-    dX_dt : torch.Tensor, shape = X.shape
-        i'th row holds an O(h^2) approximation of the time derivative of X at the i'th time step.   
+    dU_dt : torch.Tensor, shape = U.shape
+        i'th row holds an O(h^2) approximation of the time derivative of U at the i'th time step.   
     """
 
     # Checks
     assert(isinstance(t_Grid, torch.Tensor));
-    assert(isinstance(X, torch.Tensor));
-    assert(X.shape[0]           >= 3);
+    assert(isinstance(U, torch.Tensor));
+    assert(U.shape[0]           >= 3);
     assert(len(t_Grid.shape)    == 1);
-    assert(len(t_Grid)          == X.shape[0]);
+    assert(len(t_Grid)          == U.shape[0]);
 
     # Initialize a tensor to hold the time derivative.
-    dX_dt   : torch.Tensor  = torch.empty_like(X);
+    dU_dt   : torch.Tensor  = torch.empty_like(U);
     Nt      : int           = len(t_Grid);
 
 
@@ -60,7 +60,7 @@ def Derivative1_Order2_NonUniform(X : torch.Tensor, t_Grid : torch.Tensor) -> to
     c1  : float     = (a + b)/(a*b);
     c2  : float     = -a/(b*(a + b));
 
-    dX_dt[0, ...]   = c0*X[0, ...] + c1*X[1, ...] + c2*X[2, ...];
+    dU_dt[0, ...]   = c0*U[0, ...] + c1*U[1, ...] + c2*U[2, ...];
 
 
     # Compute the derivative for all time steps for which we can use something like the difference rule.
@@ -71,11 +71,11 @@ def Derivative1_Order2_NonUniform(X : torch.Tensor, t_Grid : torch.Tensor) -> to
     c1  : torch.Tensor = torch.divide(b - a,  torch.multiply(a, b));
     c2  : torch.Tensor = torch.divide(a,      torch.multiply(b, a + b));
 
-    c0 = c0.reshape([-1] + [1]*(len(X.shape) - 1));
-    c1 = c1.reshape([-1] + [1]*(len(X.shape) - 1));
-    c2 = c2.reshape([-1] + [1]*(len(X.shape) - 1));
+    c0 = c0.reshape([-1] + [1]*(len(U.shape) - 1));
+    c1 = c1.reshape([-1] + [1]*(len(U.shape) - 1));
+    c2 = c2.reshape([-1] + [1]*(len(U.shape) - 1));
 
-    dX_dt[1:(Nt - 1), ...] = torch.multiply(c0, X[0:(Nt - 2), ...]) +  torch.multiply(c1, X[1:(Nt - 1), ...]) + torch.multiply(c2, X[2:Nt, ...]);
+    dU_dt[1:(Nt - 1), ...] = torch.multiply(c0, U[0:(Nt - 2), ...]) +  torch.multiply(c1, U[1:(Nt - 1), ...]) + torch.multiply(c2, U[2:Nt, ...]);
 
 
     # Compute the derivative for the final time step.
@@ -86,19 +86,19 @@ def Derivative1_Order2_NonUniform(X : torch.Tensor, t_Grid : torch.Tensor) -> to
     cm2  : float     = -(a + b)/(a*b);
     cm1  : float     = (2*a + b)/(a*(a + b));
 
-    dX_dt[-1, ...] = cm3*X[-3, ...] + cm2*X[-2, ...] + cm1*X[-1, ...];
+    dU_dt[-1, ...] = cm3*U[-3, ...] + cm2*U[-2, ...] + cm1*U[-1, ...];
     
 
     # All done!
-    return dX_dt;
+    return dU_dt;
 
 
 
 
-def Derivative1_Order2(X : torch.Tensor, h : float) -> torch.Tensor:
+def Derivative1_Order2(U : torch.Tensor, h : float) -> torch.Tensor:
     """
     This function finds an O(h^2) approximation of the time derivative to the time series stored 
-    in the rows of X. Specifically, we assume the i'th row of X represents a sample of a function, 
+    in the rows of U. Specifically, we assume the i'th row of U represents a sample of a function, 
     x, at time t_0 + i*h. We return a new tensor whose i'th row holds an O(h^2) approximation of 
     (d/dt)x(t_0 + i*h)
 
@@ -113,10 +113,10 @@ def Derivative1_Order2(X : torch.Tensor, h : float) -> torch.Tensor:
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    X : torch.Tensor, shape = [Nt, ...]
-        A torch.Tensor object representing a time sequence. X[i, ...] represents the value of some 
-        function at the i'th time step. Specifically, we assume that X[i, ...] is the value of some 
-        function, X, at time t_0 + i*h.
+    U : torch.Tensor, shape = [Nt, ...]
+        A torch.Tensor object representing a time sequence. U[i, ...] represents the value of some 
+        function at the i'th time step. Specifically, we assume that U[i, ...] is the value of some 
+        function, U, at time t_0 + i*h.
 
     h : float
         The time step size.
@@ -126,36 +126,36 @@ def Derivative1_Order2(X : torch.Tensor, h : float) -> torch.Tensor:
     Returns
     -----------------------------------------------------------------------------------------------
 
-    dX_dt : torch.Tensor, shape = X.shape
-        i'th row holds an O(h^2) approximation of the time derivative of X at the i'th time step.  
+    dU_dt : torch.Tensor, shape = U.shape
+        i'th row holds an O(h^2) approximation of the time derivative of U at the i'th time step.  
     """
 
-    # For this scheme to work, X must contain at least 3 rows.
-    assert(isinstance(X, torch.Tensor));
-    assert(X.shape[0] >= 3);
+    # For this scheme to work, U must contain at least 3 rows.
+    assert(isinstance(U, torch.Tensor));
+    assert(U.shape[0] >= 3);
 
     # Initialize a tensor to hold the time derivative.
-    dX_dt   : torch.Tensor  = torch.empty_like(X);
-    Nt      : int           = X.shape[0];
+    dU_dt   : torch.Tensor  = torch.empty_like(U);
+    Nt      : int           = U.shape[0];
 
     # Compute the derivative for the first time step.
-    dX_dt[0, ...] = (-3./2.)*X[0, ...] + 2*X[1, ...] - (1/2)*X[2, ...];
+    dU_dt[0, ...] = (-3./2.)*U[0, ...] + 2*U[1, ...] - (1/2)*U[2, ...];
 
     # Compute the derivative for all time steps for which we can use a central difference rule.
-    dX_dt[1:(Nt - 1), ...] = (1./2.)*(X[2:(Nt), ...] - X[0:(Nt - 2), ...]);
+    dU_dt[1:(Nt - 1), ...] = (1./2.)*(U[2:(Nt), ...] - U[0:(Nt - 2), ...]);
 
     # Compute the derivative for the final time step.
-    dX_dt[-1, ...] = (3./2.)*X[-1, ...] - 2*X[-2, ...] + (1./2.)*X[-3, ...];
+    dU_dt[-1, ...] = (3./2.)*U[-1, ...] - 2*U[-2, ...] + (1./2.)*U[-3, ...];
 
     # All done!
-    return (1./h)*dX_dt;
+    return (1./h)*dU_dt;
 
 
 
-def Derivative1_Order4(X : torch.Tensor, h : float) -> torch.Tensor:
+def Derivative1_Order4(U : torch.Tensor, h : float) -> torch.Tensor:
     """
     This function finds an O(h^4) approximation of the time derivative to the time series stored 
-    in the rows of X. Specifically, we assume the i'th row of X represents a sample of a function, 
+    in the rows of U. Specifically, we assume the i'th row of U represents a sample of a function, 
     x, at time t_0 + i*h. We return a new tensor whose i'th row holds an O(h^4) approximation of 
     (d/dt)x(t_0 + i*h)
     
@@ -171,10 +171,10 @@ def Derivative1_Order4(X : torch.Tensor, h : float) -> torch.Tensor:
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    X : torch.Tensor, shape = [Nt, ...]
-        A torch.Tensor object representing a time sequence. X[i, ...] represents the value of some 
-        function at the i'th time step. Specifically, we assume that X[i, ...] is the value of some 
-        function, X, at time t_0 + i*h.
+    U : torch.Tensor, shape = [Nt, ...]
+        A torch.Tensor object representing a time sequence. U[i, ...] represents the value of some 
+        function at the i'th time step. Specifically, we assume that U[i, ...] is the value of some 
+        function, U, at time t_0 + i*h.
 
     h : float
         The time step size.
@@ -184,39 +184,39 @@ def Derivative1_Order4(X : torch.Tensor, h : float) -> torch.Tensor:
     Returns
     -----------------------------------------------------------------------------------------------
 
-    dX_dt : torch.Tensor, shape = X.shape
-        i'th row holds an O(h^4) approximation of the time derivative of X at the i'th time step.  
+    dU_dt : torch.Tensor, shape = U.shape
+        i'th row holds an O(h^4) approximation of the time derivative of U at the i'th time step.  
     """
 
-    # For this scheme to work, X must contain at least 5 rows.
-    assert(isinstance(X, torch.Tensor));
-    assert(X.shape[0] >= 5);
+    # For this scheme to work, U must contain at least 5 rows.
+    assert(isinstance(U, torch.Tensor));
+    assert(U.shape[0] >= 5);
 
     # Initialize a tensor to hold the time derivative.
-    dX_dt   : torch.Tensor  = torch.empty_like(X);
-    Nt      : int           = X.shape[0];
+    dU_dt   : torch.Tensor  = torch.empty_like(U);
+    Nt      : int           = U.shape[0];
 
     # Compute the derivative for the first two time steps.
-    dX_dt[0, ...] = (-25./12.)*X[0, ...]    + (4)*X[1, ...]         + (-3)*X[2, ...]    + (4./3.)*X[3, ...]     + (-1./4.)*X[4, ...];
-    dX_dt[1, ...] = (-1./4.)*X[0, ...]      + (-5./6.)*X[1, ...]    + (3./2.)*X[2, ...] + (-1./2.)*X[3, ...]    + (1./12.)*X[4, ...];
+    dU_dt[0, ...] = (-25./12.)*U[0, ...]    + (4)*U[1, ...]         + (-3)*U[2, ...]    + (4./3.)*U[3, ...]     + (-1./4.)*U[4, ...];
+    dU_dt[1, ...] = (-1./4.)*U[0, ...]      + (-5./6.)*U[1, ...]    + (3./2.)*U[2, ...] + (-1./2.)*U[3, ...]    + (1./12.)*U[4, ...];
     
     # Compute the derivative for all time steps for which we can use a central difference rule.
-    dX_dt[2:(Nt - 2), ...] = (1./12.)*X[0:(Nt - 4), ...]  + (-2./3.)*X[1:(Nt - 3), ...]  + (2./3.)*X[3:(Nt - 1), ...]  + (-1./12.)*X[4:Nt, ...];
+    dU_dt[2:(Nt - 2), ...] = (1./12.)*U[0:(Nt - 4), ...]  + (-2./3.)*U[1:(Nt - 3), ...]  + (2./3.)*U[3:(Nt - 1), ...]  + (-1./12.)*U[4:Nt, ...];
 
     # Compute the derivative for the last two time steps.
-    dX_dt[-2, ...] = (1./4.)*X[-1, ...]     + (5./6.)*X[-2, ...]    + (-3./2.)*X[-3, ...]   + (1./2.)*X[-4, ...]    + (-1./12.)*X[-5, ...];
-    dX_dt[-1, ...] = (25./12.)*X[-1, ...]   + (-4.)*X[-2, ...]      + (3.)*X[-3, ...]       + (-4./3.)*X[-4, ...]   + (1./4.)*X[-5, ...];
+    dU_dt[-2, ...] = (1./4.)*U[-1, ...]     + (5./6.)*U[-2, ...]    + (-3./2.)*U[-3, ...]   + (1./2.)*U[-4, ...]    + (-1./12.)*U[-5, ...];
+    dU_dt[-1, ...] = (25./12.)*U[-1, ...]   + (-4.)*U[-2, ...]      + (3.)*U[-3, ...]       + (-4./3.)*U[-4, ...]   + (1./4.)*U[-5, ...];
 
     # All done!
-    return (1./h)*dX_dt;
+    return (1./h)*dU_dt;
 
 
 
 
-def Derivative2_Order2_NonUniform(X : torch.Tensor, t_Grid : torch.Tensor) -> torch.Tensor:
+def Derivative2_Order2_NonUniform(U : torch.Tensor, t_Grid : torch.Tensor) -> torch.Tensor:
     """
     This function finds an O(h^2) approximation of the second time derivative to the time series 
-    stored in the rows of X. Specifically, we assume the i'th row of X represents a sample of a 
+    stored in the rows of U. Specifically, we assume the i'th row of U represents a sample of a 
     function, x, at time t_0 + i*h. We return a new tensor whose i'th row holds an O(h^2) 
     approximation of (d^2/dt^2)x(t_0 + i*h)
     
@@ -231,10 +231,10 @@ def Derivative2_Order2_NonUniform(X : torch.Tensor, t_Grid : torch.Tensor) -> to
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    X : torch.Tensor, shape = [Nt, ...]
-        A torch.Tensor object representing a time sequence. X[i, ...] represents the value of some 
-        function at the i'th time step. Specifically, we assume that X[i, ...] is the value of some 
-        function, X, at time t_0 + i*h.
+    U : torch.Tensor, shape = [Nt, ...]
+        A torch.Tensor object representing a time sequence. U[i, ...] represents the value of some 
+        function at the i'th time step. Specifically, we assume that U[i, ...] is the value of some 
+        function, U, at time t_0 + i*h.
 
     t_Grid : torch.Tensor, shape = (Nt)
         The i'th element of this Tensor should hold the time of the i'th time step.
@@ -244,21 +244,21 @@ def Derivative2_Order2_NonUniform(X : torch.Tensor, t_Grid : torch.Tensor) -> to
     Returns
     -----------------------------------------------------------------------------------------------
 
-    d2X_dt2 : torch.Tensor, shape = X.shape
-        i'th row holds an O(h^2) approximation of the time derivative of X at the i'th time step.  
+    d2U_dt2 : torch.Tensor, shape = U.shape
+        i'th row holds an O(h^2) approximation of the time derivative of U at the i'th time step.  
     """
 
     # Checks. 
     assert(isinstance(t_Grid,   torch.Tensor));
-    assert(isinstance(X,        torch.Tensor));
-    assert(X.shape[0] >= 4);
+    assert(isinstance(U,        torch.Tensor));
+    assert(U.shape[0] >= 4);
     assert(len(t_Grid.shape)    == 1);
-    assert(len(t_Grid)          == X.shape[0]);
+    assert(len(t_Grid)          == U.shape[0]);
 
 
     # Initialize a tensor to hold the time derivative.
-    d2X_dt2 : torch.Tensor  = torch.empty_like(X);
-    Nt      : int           = X.shape[0];
+    d2U_dt2 : torch.Tensor  = torch.empty_like(U);
+    Nt      : int           = U.shape[0];
 
 
     # Compute the derivative for the first time step.
@@ -276,7 +276,7 @@ def Derivative2_Order2_NonUniform(X : torch.Tensor, t_Grid : torch.Tensor) -> to
     c2  : float     =  2*(2*a +   b + c)    / (b*c*(a + b));
     c3  : float     = -2*(2*a +   b)        / ((a + b + c)*(b + c)*c);
 
-    d2X_dt2[0, ...] = c0*X[0, ...] + c1*X[1, ...] + c2*X[2, ...] + c3*X[3, ...];
+    d2U_dt2[0, ...] = c0*U[0, ...] + c1*U[1, ...] + c2*U[2, ...] + c3*U[3, ...];
     
 
     # Compute the derivative for all but the last two time steps.
@@ -299,12 +299,12 @@ def Derivative2_Order2_NonUniform(X : torch.Tensor, t_Grid : torch.Tensor) -> to
     c1  : float     = torch.divide( 2*(b_c - a),        torch.multiply(b, torch.multiply(c, a_b)));
     c2  : float     = torch.divide(-2*(b - a),          torch.multiply(c, torch.multiply(b_c, a_b_c)));
 
-    cm1 = cm1.reshape([-1] + [1]*(len(X.shape) - 1));
-    c0  = c0.reshape( [-1] + [1]*(len(X.shape) - 1));
-    c1  = c1.reshape( [-1] + [1]*(len(X.shape) - 1));
-    c2  = c2.reshape( [-1] + [1]*(len(X.shape) - 1));
+    cm1 = cm1.reshape([-1] + [1]*(len(U.shape) - 1));
+    c0  = c0.reshape( [-1] + [1]*(len(U.shape) - 1));
+    c1  = c1.reshape( [-1] + [1]*(len(U.shape) - 1));
+    c2  = c2.reshape( [-1] + [1]*(len(U.shape) - 1));
 
-    d2X_dt2[1:(Nt - 2), ...] = cm1*X[0:(Nt - 3), ...] + c0*X[1:(Nt - 2), ...] + c1*X[2:(Nt - 1), ...] + c2*X[3:(Nt), ...];
+    d2U_dt2[1:(Nt - 2), ...] = cm1*U[0:(Nt - 3), ...] + c0*U[1:(Nt - 2), ...] + c1*U[2:(Nt - 1), ...] + c2*U[3:(Nt), ...];
 
 
     # Compute the derivative for the second to last time step
@@ -322,7 +322,7 @@ def Derivative2_Order2_NonUniform(X : torch.Tensor, t_Grid : torch.Tensor) -> to
     cm3     : float = ( 2*(b + c - a))                      / (b*c*(a + b));
     cm4     : float = (-2*(b - a))                          / (c*(b + c)*(a + b + c));
 
-    d2X_dt2[-2, ...]    = cm4*X[-4, ...] + cm3*X[-3, ...] + cm2*X[-2, ...] + cm1*X[-1, ...];
+    d2U_dt2[-2, ...]    = cm4*U[-4, ...] + cm3*U[-3, ...] + cm2*U[-2, ...] + cm1*U[-1, ...];
 
 
     # Compute the derivative for the final time step.
@@ -337,17 +337,17 @@ def Derivative2_Order2_NonUniform(X : torch.Tensor, t_Grid : torch.Tensor) -> to
     cm3     : float =  2*(2*a +   b + c)    / (b*c*(a + b));
     cm4     : float = -2*(2*a +   b)        / ((a + b + c)*(b + c)*c);
 
-    d2X_dt2[-1, ...] = cm1*X[-1, ...] + cm2*X[-2, ...] + cm3*X[-3, ...] + cm4*X[-4, ...];
+    d2U_dt2[-1, ...] = cm1*U[-1, ...] + cm2*U[-2, ...] + cm3*U[-3, ...] + cm4*U[-4, ...];
 
     # All done!
-    return d2X_dt2;
+    return d2U_dt2;
 
 
 
-def Derivative2_Order2(X : torch.Tensor, h : float) -> torch.Tensor:
+def Derivative2_Order2(U : torch.Tensor, h : float) -> torch.Tensor:
     """
     This function finds an O(h^2) approximation of the second time derivative to the time series 
-    stored in the rows of X. Specifically, we assume the i'th row of X represents a sample of a 
+    stored in the rows of U. Specifically, we assume the i'th row of U represents a sample of a 
     function, x, at time t_0 + i*h. We return a new tensor whose i'th row holds an O(h^2) 
     approximation of (d^2/dt^2)x(t_0 + i*h)
     
@@ -361,10 +361,10 @@ def Derivative2_Order2(X : torch.Tensor, h : float) -> torch.Tensor:
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    X : torch.Tensor, shape = [Nt, ...]
-        A torch.Tensor object representing a time sequence. X[i, ...] represents the value of some 
-        function at the i'th time step. Specifically, we assume that X[i, ...] is the value of some 
-        function, X, at time t_0 + i*h.
+    U : torch.Tensor, shape = [Nt, ...]
+        A torch.Tensor object representing a time sequence. U[i, ...] represents the value of some 
+        function at the i'th time step. Specifically, we assume that U[i, ...] is the value of some 
+        function, U, at time t_0 + i*h.
 
     h : float
         The time step size.
@@ -374,39 +374,39 @@ def Derivative2_Order2(X : torch.Tensor, h : float) -> torch.Tensor:
     Returns
     -----------------------------------------------------------------------------------------------
 
-    d2X_dt2 : torch.Tensor, shape = X.shape
-        i'th row holds an O(h^2) approximation of the time derivative of X at the i'th time step. 
+    d2U_dt2 : torch.Tensor, shape = U.shape
+        i'th row holds an O(h^2) approximation of the time derivative of U at the i'th time step. 
     """
 
-    # For this scheme to work, X must contain at least 4 rows.
-    assert(isinstance(X, torch.Tensor));
-    assert(X.shape[0] >= 4);
+    # For this scheme to work, U must contain at least 4 rows.
+    assert(isinstance(U, torch.Tensor));
+    assert(U.shape[0] >= 4);
 
     # Initialize a tensor to hold the time derivative.
-    d2X_dt2 : torch.Tensor  = torch.empty_like(X);
-    Nt      : int           = X.shape[0];
+    d2U_dt2 : torch.Tensor  = torch.empty_like(U);
+    Nt      : int           = U.shape[0];
 
     # Compute the derivative for the first time step.
     #   f''(x) = (1/h^2)[2 f(x) - 5 f(x + h) + 4 f(x + 2h) - f(x + 3h)] + O(h^2)
-    d2X_dt2[0, ...] = 2*X[0, ...] - 5*X[1, ...] + 4*X[2, ...] - X[3, ...];
+    d2U_dt2[0, ...] = 2*U[0, ...] - 5*U[1, ...] + 4*U[2, ...] - U[3, ...];
     
     # Compute the derivative for all time steps for which we can use a central difference rule.
     # f''(x) = (1/h^2)[ f(x - h) - 2f(x) + f(x + h)] + O(h^2)
-    d2X_dt2[1:(Nt - 1), ...] = X[0:(Nt - 2), ...] - 2*X[1:(Nt - 1), ...] + X[2:Nt, ...];
+    d2U_dt2[1:(Nt - 1), ...] = U[0:(Nt - 2), ...] - 2*U[1:(Nt - 1), ...] + U[2:Nt, ...];
 
     # Compute the derivative for the final time step.
     #   f''(x) = (1/h^2)[ -f(x - 3h) + 4 f(x - 2h) - 5 f(x + 2h) + 2f(x)] + O(h^2)
-    d2X_dt2[-1, ...] = 2*X[-1, ...] - 5*X[-2, ...] + 4*X[-3, ...] - X[-4, ...];
+    d2U_dt2[-1, ...] = 2*U[-1, ...] - 5*U[-2, ...] + 4*U[-3, ...] - U[-4, ...];
 
     # All done!
-    return (1./(h*h))*d2X_dt2;
+    return (1./(h*h))*d2U_dt2;
 
 
 
-def Derivative2_Order4(X : torch.Tensor, h : float) -> torch.Tensor:
+def Derivative2_Order4(U : torch.Tensor, h : float) -> torch.Tensor:
     """
     This function finds an O(h^4) approximation of the second time derivative to the time series 
-    stored in the rows of X. Specifically, we assume the i'th row of X represents a sample of a 
+    stored in the rows of U. Specifically, we assume the i'th row of U represents a sample of a 
     function, x, at time t_0 + i*h. We return a new tensor whose i'th row holds an O(h^4) 
     approximation of (d^2/dt^2)x(t_0 + i*h).
 
@@ -422,10 +422,10 @@ def Derivative2_Order4(X : torch.Tensor, h : float) -> torch.Tensor:
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    X : torch.Tensor, shape = [Nt, ...]
-        A torch.Tensor object representing a time sequence. X[i, ...] represents the value of some 
-        function at the i'th time step. Specifically, we assume that X[i, ...] is the value of some 
-        function, X, at time t_0 + i*h.
+    U : torch.Tensor, shape = [Nt, ...]
+        A torch.Tensor object representing a time sequence. U[i, ...] represents the value of some 
+        function at the i'th time step. Specifically, we assume that U[i, ...] is the value of some 
+        function, U, at time t_0 + i*h.
 
     h : float
         The time step size.
@@ -435,28 +435,28 @@ def Derivative2_Order4(X : torch.Tensor, h : float) -> torch.Tensor:
     Returns
     -----------------------------------------------------------------------------------------------
 
-    d2X_dt2 : torch.Tensor, shape = X.shape
-        i'th row holds an O(h^4) approximation of the time derivative of X at the i'th time step. 
+    d2U_dt2 : torch.Tensor, shape = U.shape
+        i'th row holds an O(h^4) approximation of the time derivative of U at the i'th time step. 
     """
 
-    # For this scheme to work, X must contain at least 6 rows.
-    assert(isinstance(X, torch.Tensor));
-    assert(X.shape[0] >= 6);
+    # For this scheme to work, U must contain at least 6 rows.
+    assert(isinstance(U, torch.Tensor));
+    assert(U.shape[0] >= 6);
 
     # Initialize a tensor to hold the time derivative.
-    d2X_dt2 : torch.Tensor  = torch.empty_like(X);
-    Nt      : int           = X.shape[0];
+    d2U_dt2 : torch.Tensor  = torch.empty_like(U);
+    Nt      : int           = U.shape[0];
 
     # Compute the derivative for the first two time steps.
-    d2X_dt2[0, ...] = (15./4.)*X[0, ...]    + (-12. - 5./6.)*X[1, ...]  + (17. + 5./6.)*X[2, ...]   + (-13.)*X[3, ...]  + (5. + 1./12.)*X[4, ...]   + (-5./6.)*X[5, ...];
-    d2X_dt2[1, ...] = (5./6.)*X[0, ...]     + (-5./4.)*X[1, ...]        + (-1./3.)*X[2, ...]        + (7./6.)*X[3, ...] + (-1./2.)*X[4, ...]        + (1./12.)*X[5, ...];
+    d2U_dt2[0, ...] = (15./4.)*U[0, ...]    + (-12. - 5./6.)*U[1, ...]  + (17. + 5./6.)*U[2, ...]   + (-13.)*U[3, ...]  + (5. + 1./12.)*U[4, ...]   + (-5./6.)*U[5, ...];
+    d2U_dt2[1, ...] = (5./6.)*U[0, ...]     + (-5./4.)*U[1, ...]        + (-1./3.)*U[2, ...]        + (7./6.)*U[3, ...] + (-1./2.)*U[4, ...]        + (1./12.)*U[5, ...];
 
     # Compute the derivative for all time steps for which we can use a central difference rule.
-    d2X_dt2[2:(Nt - 2), ...] = (-1./12.)*X[0:(Nt - 4), ...] + (4./3.)*X[1:(Nt - 3), ...] + (-5./2.)*X[2:(Nt - 2), ...] + (4./3.)*X[3:(Nt - 1), ...] + (-1./12.)*X[4:Nt, ...];
+    d2U_dt2[2:(Nt - 2), ...] = (-1./12.)*U[0:(Nt - 4), ...] + (4./3.)*U[1:(Nt - 3), ...] + (-5./2.)*U[2:(Nt - 2), ...] + (4./3.)*U[3:(Nt - 1), ...] + (-1./12.)*U[4:Nt, ...];
 
     # Compute the derivative for the final two time steps.
-    d2X_dt2[-2, ...] = (5./6.)*X[-1, ...]   + (-5./4.)*X[-2, ...]       + (-1./3.)*X[-3, ...]       + (7./6.)*X[-4, ...]    + (-1./2.)*X[-5, ...]       + (1./12.)*X[-6, ...];
-    d2X_dt2[-1, ...] = (15./4.)*X[-1, ...]  + (-12. - 5./6.)*X[-2, ...] + (17. + 5./6.)*X[-3, ...]  + (-13.)*X[-4, ...]     + (5. + 1./12.)*X[-5, ...]  + (-5./6.)*X[-6, ...];
+    d2U_dt2[-2, ...] = (5./6.)*U[-1, ...]   + (-5./4.)*U[-2, ...]       + (-1./3.)*U[-3, ...]       + (7./6.)*U[-4, ...]    + (-1./2.)*U[-5, ...]       + (1./12.)*U[-6, ...];
+    d2U_dt2[-1, ...] = (15./4.)*U[-1, ...]  + (-12. - 5./6.)*U[-2, ...] + (17. + 5./6.)*U[-3, ...]  + (-13.)*U[-4, ...]     + (5. + 1./12.)*U[-5, ...]  + (-5./6.)*U[-6, ...];
 
     # All done!
-    return (1./(h*h))*d2X_dt2;
+    return (1./(h*h))*d2U_dt2;

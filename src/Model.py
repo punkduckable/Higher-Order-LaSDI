@@ -146,7 +146,7 @@ class MultiLayerPerceptron(torch.nn.Module):
     
 
 
-    def forward(self, X : torch.Tensor) -> torch.Tensor:
+    def forward(self, U : torch.Tensor) -> torch.Tensor:
         """
         This function defines the forward pass through self.
 
@@ -165,7 +165,7 @@ class MultiLayerPerceptron(torch.nn.Module):
         Returns
         -------------------------------------------------------------------------------------------
 
-        X_Pred : torch.Tensor, shape = X.Shape
+        U_Pred : torch.Tensor, shape = X.Shape
             The image of X under the network's layers. If self.reshape_index == -1 and 
             self.reshape_shape has k elements, then we reshape the output so that the final k 
             elements of its shape match those of self.reshape_shape.
@@ -181,7 +181,7 @@ class MultiLayerPerceptron(torch.nn.Module):
             # tensor has a final dimension size that matches the input dimension size for the first
             # layer. The check below makes sure that the final k dimensions of the input, X, match
             # the stored reshape_shape.
-            assert(list(X.shape[-len(self.reshape_shape):]) == self.reshape_shape);
+            assert(list(U.shape[-len(self.reshape_shape):]) == self.reshape_shape);
             
             # Now that we know the final k dimensions of X have the correct shape, let's squeeze 
             # them into 1 dimension (so that we can pass the squeezed tensor through the first 
@@ -189,16 +189,16 @@ class MultiLayerPerceptron(torch.nn.Module):
             # replacing the last k with a single dimension whose size matches the dimensionality of
             # the domain of the first layer. Note that we use torch.Tensor.view instead of 
             # torch.Tensor.reshape in order to avoid data copying.
-            X = X.view(list(X.shape[:-len(self.reshape_shape)]) + [self.widths[self.reshape_index]]);
+            U = U.view(list(U.shape[:-len(self.reshape_shape)]) + [self.widths[self.reshape_index]]);
 
         # Pass X through the network layers (except for the final one, which has no activation 
         # function).
         for i in range(self.n_layers - 1):
-            X : torch.Tensor = self.layers[i](X)            # apply linear layer
-            X : torch.Tensor = self.activation_fn(X)        # apply activation
+            U : torch.Tensor = self.layers[i](U);           # apply linear layer
+            U : torch.Tensor = self.activation_fn(U);       # apply activation
 
         # Apply the final (output) layer.
-        X = self.layers[-1](X)
+        U = self.layers[-1](U);
 
         # If the reshape_index is -1, then we need to reshape the output before returning. 
         if (self.reshape_index == -1):
@@ -206,10 +206,10 @@ class MultiLayerPerceptron(torch.nn.Module):
             # layer, to match the reshape_shape. This is precisely what the line below does. Note
             # that we use torch.Tensor.view instead of torch.Tensor.reshape in order to avoid data 
             # copying. 
-            X = X.view(list(X.shape[:-1]) + self.reshape_shape)
+            U = U.view(list(U.shape[:-1]) + self.reshape_shape);
 
         # All done!
-        return X
+        return U;
     
 
 
@@ -323,7 +323,7 @@ class Autoencoder(torch.nn.Module):
 
 
 
-    def Encode(self, X : torch.Tensor) -> torch.Tensor:
+    def Encode(self, U : torch.Tensor) -> torch.Tensor:
         """
         This function encodes a set of displacement and velocity frames.
 
@@ -345,11 +345,11 @@ class Autoencoder(torch.nn.Module):
         """
 
         # Check that the inputs have the correct shape.
-        assert(len(X.shape)         ==  len(self.reshape_shape) + 1);
-        assert(list(X.shape[1:])    ==  self.reshape_shape);
+        assert(len(U.shape)         ==  len(self.reshape_shape) + 1);
+        assert(list(U.shape[1:])    ==  self.reshape_shape);
     
         # Encode the frames!
-        return self.encoder(X);
+        return self.encoder(U);
 
 
 
@@ -383,7 +383,7 @@ class Autoencoder(torch.nn.Module):
 
 
 
-    def forward(self, X : torch.Tensor) -> torch.Tensor:
+    def forward(self, U : torch.Tensor) -> torch.Tensor:
         """
         This function passes X through the encoder, producing a latent state, Z. It then passes 
         Z through the decoder; hopefully producing a vector that approximates X.
@@ -393,7 +393,7 @@ class Autoencoder(torch.nn.Module):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        X : torch.Tensor, shape = (n_Frames,) + self.reshape_shape
+        U : torch.Tensor, shape = (n_Frames,) + self.reshape_shape
             A tensor holding a batch of inputs. We pass this tensor through the encoder + decoder 
             and then return the result.
 
@@ -407,7 +407,7 @@ class Autoencoder(torch.nn.Module):
         """
 
         # Encoder the input
-        Z : torch.Tensor    = self.Encode(X);
+        Z : torch.Tensor    = self.Encode(U);
 
         # Now decode z.
         Y : torch.Tensor    = self.Decode(Z);

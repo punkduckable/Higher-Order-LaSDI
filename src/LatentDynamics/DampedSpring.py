@@ -217,11 +217,11 @@ class DampedSpring(LatentDynamics):
         # derivative of Z_V. We average the two so that the final loss depends on both.
         if(self.Uniform_t_Grid  == True):
             h : float = t_Grid[1] - t_Grid[0];
-            d2Z_dt2_from_Z_D    : torch.Tensor  = Derivative2_Order4(X = Z_D,   h = h);
-            d2Z_dt2_from_Z_V    : torch.Tensor  = Derivative1_Order4(X = Z_V,   h = h);
+            d2Z_dt2_from_Z_D    : torch.Tensor  = Derivative2_Order4(U = Z_D,   h = h);
+            d2Z_dt2_from_Z_V    : torch.Tensor  = Derivative1_Order4(U = Z_V,   h = h);
         else:
-            d2Z_dt2_from_Z_D    : torch.Tensor  = Derivative2_Order2_NonUniform(X = Z_D, t_Grid = t_Grid);
-            d2Z_dt2_from_Z_V    : torch.Tensor  = Derivative1_Order2_NonUniform(X = Z_V, t_Grid = t_Grid);
+            d2Z_dt2_from_Z_D    : torch.Tensor  = Derivative2_Order2_NonUniform(U = Z_D, t_Grid = t_Grid);
+            d2Z_dt2_from_Z_V    : torch.Tensor  = Derivative1_Order2_NonUniform(U = Z_V, t_Grid = t_Grid);
         d2Z_dt2             : torch.Tensor  = 0.5*(d2Z_dt2_from_Z_D + d2Z_dt2_from_Z_V);
 
         # Concatenate Z_D, Z_V and a column of 1's. We will solve for the matrix, E, which gives 
@@ -362,7 +362,7 @@ class DampedSpring(LatentDynamics):
                                                                                             IC      = ith_IC, 
                                                                                             t_Grid  = ith_t_Grid)[0];
 
-                # Add these results to X.
+                # Add these results to Z.
                 Z.append(ith_Results);
 
             # All done.

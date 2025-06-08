@@ -33,6 +33,7 @@ from    Initialize                  import  Initialize_Trainer;
 from    Sample                      import  Run_Samples, Update_Train_Space;
 from    Logging                     import  Initialize_Logger, Log_Dictionary;
 from    Plot                        import  Plot_Heatmap2d, Plot_GP2d;
+from    Animate                     import  make_solution_movies;
 
 # Set up the logger.
 Initialize_Logger(level = logging.INFO);
@@ -142,10 +143,31 @@ def main():
                                                 latent_dynamics = latent_dynamics,
                                                 gp_list         = gp_list,
                                                 t_Test          = trainer.t_Test,
-                                                X_Test          = trainer.X_Test,
+                                                U_Test          = trainer.U_Test,
                                                 n_samples       = trainer.n_samples);
 
     if(param_space.n_p == 2):
+        # Generate latent trajectories
+        from SolveROMs import average_rom
+        Zis_mean_np        : list[list[numpy.ndarray]] = average_rom(model, physics, latent_dynamics, gp_list, param_space.test_space, trainer.t_Test);               # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_z)
+        Zi_mean_np = Zis_mean_np[0];
+        Zi_mean = [];
+        for i in range(len(Zi_mean_np)):
+            Zi_mean.append(torch.Tensor(Zi_mean_np[i]));
+
+        # Decode
+        U_Pred  = model.Decode(*Zi_mean);
+        U_True  = trainer.U_Test[0];
+        X       = physics.X_Positions;
+        T       = trainer.t_Test[0];
+
+        from Animate import make_solution_movies;
+        make_solution_movies(U_True = U_True[0].detach().numpy(), U_Pred = U_Pred[0].detach().numpy(), X = X, T = T);
+        exit();
+
+
+
+        
         n_IC : int = latent_dynamics.n_IC;
         
         # Plot the mean and STD of the posterior distribution for each coefficient evaluated at
@@ -297,7 +319,7 @@ def step(trainer        : BayesianGLaSDI,
 
     elif (next_step is NextStep.RunSample):
         # Generate the trajectories for all new testing and training parameters. Append these new
-        # trajectories to trainer's X_Train and X_Test attributes.
+        # trajectories to trainer's U_Train and U_Test attributes.
         result, next_step = Run_Samples(trainer, config);
 
 

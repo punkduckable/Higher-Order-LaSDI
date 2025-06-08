@@ -21,8 +21,7 @@ def make_solution_movies(   U_True          : numpy.ndarray,
                             U_Pred          : numpy.ndarray,
                             X               : numpy.ndarray,
                             T               : numpy.ndarray,
-                            *,
-                            save_dir        : str | Path    = ".",
+                            save_dir        : str | Path    = "../Figures/",
                             fname_prefix    : str           = "solution",
                             fps             : int           = 20,
                             dpi             : int           = 150,
@@ -36,31 +35,30 @@ def make_solution_movies(   U_True          : numpy.ndarray,
     Parameters
     -----------------------------------------------------------------------------------------------
 
-    U_True, U_Pred
-        Arrays of shape ``(N_t, 1 or 2, N_x)`` holding the true and predicted
-        signal, respectively.  One component → scalar field, two components →
-        2-D vector field.
+    U_True, U_Pred : numpy.ndarray, shape = (N_t, 1, N_x) or (N_t, 2, N_x)
+        Arrays of shape holding the true and predicted signal, respectively. If they have shape 
+        (N_t, 1, N_x) then the solution should be a scalar field. If it is 2 then the solution 
+        should be a 2-D vector field. 
+
+    X : numpy.ndarray, shape = (2, N_x)
+        Each column gives the (x, y) coordinates of a sensor point.
     
-    X
-        Array of shape ``(2, N_x)``.  Each column gives the *(x, y)* coordinates
-        of a sensor point.
-    
-    T
-        1-D array of length ``N_t`` with times for each frame.
-    
-    save_dir
+    T : numpy.ndarray, shape = (N_t)
+        i'th element holds the value of the i'th time step.
+
+    save_dir : str
         Directory in which to write the resulting ``.mp4`` files.
     
-    fname_prefix
+    fname_prefix : str
         Prefix for the filenames (e.g. *prefix*`_True.mp4`).
     
-    fps
+    fps : int
         Frames per second for the saved movies.
     
-    dpi
+    dpi : int
         Resolution of the rendered frames.
    
-    cmap
+    cmap : str
         Matplotlib colour-map for scalar plots.
 
     
@@ -121,7 +119,22 @@ def make_solution_movies(   U_True          : numpy.ndarray,
     # ---------------------------------------------------------------------------------------------
     
     def _scalar_anim(   data: numpy.ndarray, title: str, fname: str ) -> Path:  # data shape (N_t, N_x)
-        vmin, vmax  = data.min(), data.max()
+        """
+        data : numpy.ndarray, shape = (N_t, N_x)
+            An array whose i,j element holds the value we want to plot at the j'th position in the
+            i'th frame.
+
+        title : str
+            The title for the movie we make
+        
+        fname : str
+            The name of the file where we want to save the animation.
+        """
+
+        # Determine axis scales. 
+        vmin, vmax  = data.min(), data.max();
+
+        # Make the plot.
         fig, ax     = plt.subplots()
         scat = ax.scatter(  X[0],
                             X[1],
@@ -129,7 +142,7 @@ def make_solution_movies(   U_True          : numpy.ndarray,
                             cmap        =   cmap,
                             vmin        =   vmin,
                             vmax        =   vmax,
-                            s           =   60,
+                            s           =   15,
                             linewidths  =   0.4,
                             edgecolors  =   "k")
         ax.set_aspect("equal")
@@ -147,14 +160,26 @@ def make_solution_movies(   U_True          : numpy.ndarray,
                             frames  = N_t, 
                             blit    = True, 
                             repeat  = False);
-        out_path = save_dir / fname
-        ani.save(out_path, writer = FFMpegWriter(fps = fps, codec = "libx264"))
-        plt.close(fig)
+        out_path = save_dir / fname;
+        ani.save(out_path, writer = FFMpegWriter(fps = fps, codec = "libx264"));
+        plt.close(fig);
         return out_path
 
 
 
     def _vector_anim(data: numpy.ndarray, title: str, fname: str) -> Path:  # data shape (N_t, 2, N_x)
+        """
+        data : numpy.ndarray, shape = (N_t, 2, N_x)
+            An array whose i,j,k element holds the j'th component of the vector we wants to plot at 
+            the k'th position in the i'th frame.
+
+        title : str
+            The title for the movie we make
+        
+        fname : str
+            The name of the file where we want to save the animation.
+        """
+        
         # Arrow colour encodes vector magnitude (helps readability)
         magnitudes = numpy.linalg.norm(data, axis = 1)
         vmin, vmax = magnitudes.min(), magnitudes.max()
@@ -200,15 +225,15 @@ def make_solution_movies(   U_True          : numpy.ndarray,
     # ---------------------------------------------------------------------------------------------
     
     if n_comp == 1:
-        t_path = _scalar_anim(  U_True[:, 0], 
+        t_path = _scalar_anim(  U_True[:, 0, :], 
                                 "True field", 
-                                f"{fname_prefix}_True.mp4")
-        p_path = _scalar_anim(  U_Pred[:, 0], 
+                                f"{fname_prefix}_True.mp4");
+        p_path = _scalar_anim(  U_Pred[:, 0, :], 
                                 "Predicted field", 
-                                f"{fname_prefix}_Pred.mp4")
-        e_path = _scalar_anim(  (U_Pred - U_True)[:, 0],
+                                f"{fname_prefix}_Pred.mp4");
+        e_path = _scalar_anim(  (U_Pred - U_True)[:, 0, :],
                                 "Prediction error",
-                                f"{fname_prefix}_error.mp4")
+                                f"{fname_prefix}_error.mp4");
     
     else:  # 2 components → vector field
         t_path = _vector_anim(  U_True, 

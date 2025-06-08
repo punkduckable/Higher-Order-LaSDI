@@ -336,7 +336,7 @@ class SINDy(LatentDynamics):
                                                                                             IC      = ith_IC, 
                                                                                             t_Grid  = ith_t_Grid)[0];
 
-                # Add these results to X.
+                # Add these results to Z.
                 Z.append(ith_Results);
 
             # All done.
@@ -383,7 +383,7 @@ class SINDy(LatentDynamics):
         if(isinstance(coefs, torch.Tensor)):
             f   = lambda t, z: b + torch.matmul(z, A.T);
 
-        # Solve the ODE forward in time. X should have shape (n_t, n(i), n_z). If we use the 
+        # Solve the ODE forward in time. U should have shape (n_t, n(i), n_z). If we use the 
         # same t values for each IC, then we can exploit the fact that the latent dynamics are 
         # autonomous to solve using each IC simultaneously. Otherwise, we need to run the latent
         # dynamics one IC at a time. 
