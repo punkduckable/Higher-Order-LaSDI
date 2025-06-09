@@ -145,8 +145,8 @@ class NonlinearElasticity(Physics):
         """
         Solves the following PDE when s = param[0]:
 
-            (dv/dt)(X, t)   = H(x(X, t)) + S v(X, t), 
-            (dx/dt)(X, t)   = v(X, t),
+            (dv/dt)(t, X)   = H(x(t, X)) + S v(t, X), 
+            (dx/dt)(t, X)   = v(t, X),
 
         with
 
