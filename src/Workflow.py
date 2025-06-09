@@ -35,7 +35,7 @@ from    Sample                      import  Run_Samples, Update_Train_Space;
 from    Logging                     import  Initialize_Logger, Log_Dictionary;
 from    Plot                        import  Plot_Heatmap2d, Plot_GP2d;
 from    Animate                     import  make_solution_movies;
-from    SolveROMs                   import  average_rom
+from    SolveROMs                   import  average_rom;
 
 
 # Set up the logger.

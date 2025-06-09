@@ -28,14 +28,14 @@ workflow:
 parameter_space:
   parameters:
     - name:                 m
-      min:                  1.0
-      max:                  3.0
+      min:                  1.5
+      max:                  2.5
       test_space_type:      uniform
       sample_size:          5
       log_scale:            false
     - name:                 k
-      min:                  15.0
-      max:                  25.0
+      min:                  18.0
+      max:                  22.0
       test_space_type:      uniform
       sample_size:          5
       log_scale:            false
