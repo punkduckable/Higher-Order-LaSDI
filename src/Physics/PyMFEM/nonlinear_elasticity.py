@@ -292,8 +292,8 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     """
     This examples solves a time dependent nonlinear elasticity problem of the form 
 
-        (d/dt)v(X, t)   = H(d(X, t)) + S v(X, t), 
-        (d/dt)d(X, t)   = v(X, t),
+        (d/dt)v(t, X)   = H(d(t, X)) + S v(t, X), 
+        (d/dt)d(t, X)   = v(t, X),
     
     where H is a hyperelastic model and S is a viscosity operator of Laplacian type. We also impose 
     with the following initial conditions:
@@ -631,26 +631,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 6. VisIt
-
-    # Setup VisIt visualization (if we are doing that)
-    if (VisIt == True):
-        if(myid == 0): LOGGER.info("Setting up VisIt visualization.");
-
-        dc_path : str   = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "nlelast-fom");
-        dc              = mfem.VisItDataCollection(dc_path, pmesh);
-        dc.SetPrecision(8);
-        # // To save the mesh using MFEM's parallel mesh format:
-        # // dc->SetFormat(DataCollection::PARALLEL_FORMAT);
-        dc.RegisterField("Disp",    D_gf);
-        dc.RegisterField("Vel",     V_gf);
-        dc.SetCycle(0);
-        dc.SetTime(0.0);
-        dc.Save();
-
-
-    # ---------------------------------------------------------------------------------------------
-    # 7. Setup lists to store the solution + evaluate the initial solution at the positions.
+    # 6. Setup lists to store the solution + evaluate the initial solution at the positions.
 
     LOGGER.info("Setting up lists to store the time, U, and DtU at each time step.");
 
@@ -670,6 +651,30 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     times_list.append(0);
     displacements_list.append(  D_Positions_0);
     velocities_list.append(     V_Positions_0);
+
+
+
+    # ---------------------------------------------------------------------------------------------
+    # 7. VisIt
+
+    # Setup VisIt visualization (if we are doing that)
+    if (VisIt == True):
+        if(myid == 0): LOGGER.info("Setting up VisIt visualization.");
+
+        # Create the VisIt data collection.
+        visit_dc_path   : str                       = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "NonLinElast-fom");
+        visit_dc        : mfem.VisItDataCollection  = mfem.VisItDataCollection(visit_dc_path, mesh);
+        visit_dc.SetPrecision(8);
+
+        # Register U and its time derivative.
+        visit_dc.RegisterField("Disp",    D_gf);
+        visit_dc.RegisterField("Vel",     V_gf);
+
+        # Set the cycle and time.
+        visit_dc.SetCycle(0);
+        visit_dc.SetTime(0.0);
+        visit_dc.Save();
+
 
 
 
@@ -726,9 +731,9 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
                 # Set the mesh to the current displacement
                 pmesh.SwapNodes(D_gf, 0);
 
-                dc.SetCycle(ti);
-                dc.SetTime(t);
-                dc.Save();  
+                visit_dc.SetCycle(ti);
+                visit_dc.SetTime(t);
+                visit_dc.Save();  
                 
                 # Now swap the deformed mesh back to reset everything.
                 pmesh.SwapNodes(D_gf, 0);        

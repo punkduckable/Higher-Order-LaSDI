@@ -376,11 +376,11 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
     """     
     This examples solves a time dependent advection problem of the form
 
-        (d/dt)u(X, t)   = -v(X) * \nabla(u(X, t)),
+        (d/dt)u(t, X)   = -v(X) * \nabla(u(t, X)),
     
     where v(X) is a velocity field. We also impose the following initial conditions:
         
-        u((x, y), 0)    =  sin(pi * omega * x~) * sin(pi * omega * y~)
+        u(0, (x, y))    =  sin(pi * k * x~) * sin(pi * k * y~)
 
     See the "u0_coeff" class for more details. We solve this PDE, then return the solution at 
     each time step. 
@@ -644,26 +644,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 6. VisIt
-
-    # Setup VisIt visualization (if we are doing that)
-    if (VisIt == True):
-        if(myid == 0): LOGGER.info("Setting up VisIt visualization.");
-
-        dc_path : str   = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "nlelast-fom");
-        dc              = mfem.VisItDataCollection(dc_path, pmesh);
-        dc.SetPrecision(8);
-        # // To save the mesh using MFEM's parallel mesh format:
-        # // dc->SetFormat(DataCollection::PARALLEL_FORMAT);
-        dc.RegisterField("u",    u_gf);
-        dc.SetCycle(0);
-        dc.SetTime(0.0);
-        dc.Save();
-
-
-
-    # ---------------------------------------------------------------------------------------------
-    # 7. Setup lists to store the solution + evaluate the initial solution at the positions.
+    # 6. Setup lists to store the solution + evaluate the initial solution at the positions.
 
     if(myid == 0): LOGGER.info("Setting up lists to store the time, solution at each time step.");
 
@@ -679,6 +660,28 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
     # Append the initial solution and time to their corresponding lists.
     times_list.append(0);
     u_list.append(  u_Positions_0);
+
+
+
+    # ---------------------------------------------------------------------------------------------
+    # 7. VisIt
+
+    # Setup VisIt visualization (if we are doing that)
+    if (VisIt == True):
+        LOGGER.info("Setting up VisIt visualization.");
+
+        # Create the VisIt data collection.
+        visit_dc_path   : str                       = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "Advection-fom");
+        visit_dc        : mfem.VisItDataCollection  = mfem.VisItDataCollection(visit_dc_path, mesh);
+        visit_dc.SetPrecision(8);
+
+        # Register U and its time derivative.
+        visit_dc.RegisterField("U",    u_gf);
+
+        # Set the cycle and time.
+        visit_dc.SetCycle(0);
+        visit_dc.SetTime(0.0);
+        visit_dc.Save();
 
 
 
@@ -725,9 +728,9 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
             # If visualizing, Save the solution to the VisIt object.
             if(VisIt):
                 # Save the mesh, solution, and time.
-                dc.SetCycle(ti);
-                dc.SetTime(t);
-                dc.Save();
+                visit_dc.SetCycle(ti);
+                visit_dc.SetTime(t);
+                visit_dc.Save();
 
 
 

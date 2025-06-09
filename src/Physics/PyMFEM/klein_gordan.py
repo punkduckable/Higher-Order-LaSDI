@@ -36,7 +36,7 @@ class KleinGordonOperator(mfem.SecondOrderTimeDependentOperator):
             
               (d^2/dt^2) u - c^2*laplacian(u) + m^2*u = 0
             
-        where u is the scalar field, c is the speed of light, and m is the mass of the field. Let 
+        where u is the scalar field, c is the wave speed, and m is the mass of the field. Let 
         { \phi_i } be the basis functions in the finite element space fespace. Then the weak form 
         of the Klein-Gordon operator is given by:
 
@@ -106,7 +106,9 @@ class KleinGordonOperator(mfem.SecondOrderTimeDependentOperator):
 
         # Build a matrix to hold K.
         self.Kmat0 = mfem.SparseMatrix();                                               # Initialize a matrix to hold K. This one is used to build K without setting the essential boundary conditions.
+                                                                                        # We need this version when computing the RHS of the linear system (need products of full matrices before zeroing out the BCs).
         self.Kmat  = mfem.SparseMatrix();                                               # Initialize a matrix to hold K. This one is used to build K with the essential boundary conditions set.
+                                                                                        # We need this version when we compute T in ImplicitSolve
         dummy      = mfem.intArray();
         K.FormSystemMatrix(dummy, self.Kmat0);                                          # This populates Kmat0 such that the i,j'th entry is B(\phi_i, \phi_j) = c^2*(\nabla \phi_i, \nabla \phi_j).
         K.FormSystemMatrix(self.ess_tdof_list, self.Kmat);                              # Does the same thing, but with all of the rows/columns corresponding to essential boundary conditions removed.
@@ -191,26 +193,22 @@ class KleinGordonOperator(mfem.SecondOrderTimeDependentOperator):
         # Solve the following equation for U''(t):
         #    M * U''(t) = -K(U(t)) - M2 * U(t)
 
-        # Compute the stiffness matrix, store in x.
-        x : mfem.Vector = mfem.Vector(u.Size());        # Initialize a vector to hold K(U(t)).
-        self.Kmat.Mult(u, x);                           # Computes K(U(t)) and stores it in x.
+        #  Compute -K*U(t)
+        KU : mfem.Vector = mfem.Vector(u.Size());       # Initialize a vector to hold K*U(t).
+        self.Kmat.Mult(u, KU);                          # Computes K*U(t) and stores it in KU.
+        KU.Neg();                                        # Now holds -K*U(t).
 
-        # Multiplies x by -1, it now holds -K*U(t).
-        x.Neg();                    
-
-        # Compute M2*U(t), store in y.
-        y : mfem.Vector = mfem.Vector(u.Size());        # Initialize a vector to hold M2(U(t)).
-        self.M2mat.Mult(u, y);                          # Computes M2(U(t)) and stores it in y.
-
-        # Multiplies y by -1, it now holds -M2 * U(t).
-        y.Neg();
+        # Compute -M2*U(t)
+        M2U : mfem.Vector = mfem.Vector(u.Size());      # Initialize a vector to hold M2(U(t)).
+        self.M2mat.Mult(u, M2U);                        # Computes M2(U(t)) and stores it in y.
+        M2U.Neg();                                      # Now holds -M2 * U(t).
 
         # Compute x + y = -K*U(t) - M2 * U(t), store in z.
-        z : mfem.Vector = mfem.Vector(u.Size());
-        mfem.add_vector(x, 1.0, y, z);                  # z = x + 1.0*y.
+        KU_M2U : mfem.Vector = mfem.Vector(u.Size());
+        mfem.add_vector(KU, 1.0, M2U, KU_M2U);          # KU_M2U = KU + 1.0*M2*U = -K*U(t) - M2*U(t)
 
-        # Solves M* U''(t) = -K(U(t)) - M2 * U(t) for U''(t).
-        self.M_solver.Mult(z, d2udt2);
+        # Solves M* U''(t) = -K*U(t) - M2*U(t) for U''(t).
+        self.M_solver.Mult(KU_M2U, d2udt2);
 
 
 
@@ -223,31 +221,27 @@ class KleinGordonOperator(mfem.SecondOrderTimeDependentOperator):
             self.T : mfem.SparseMatrix = mfem.Add(1.0, self.Mmat, fac0, self.Kmat);
             self.T_solver.SetOperator(self.T);
 
-        # Compute K(U(t)), store it in x.
-        x : mfem.Vector = mfem.Vector(u.Size());        # Initialize a vector to hold K(U(t)).
-        self.Kmat0.Mult(u, x);                          # Computes K(U(t)) and stores it in x.
+        # Compute -K*U(t).
+        KU : mfem.Vector = mfem.Vector(u.Size());       # Initialize a vector to hold K*U(t).
+        self.Kmat0.Mult(u, KU);                         # Computes K(U(t)) and stores it in x.
+        KU.Neg();                                       # Now holds -K*U(t).
 
-        # Multiplies x by -1, it now holds -K*U(t).
-        x.Neg();
+        # Compute -M2*U(t).
+        M2U : mfem.Vector = mfem.Vector(u.Size());      # Initialize a vector to hold M2*U(t).
+        self.M2mat.Mult(u, M2U);                        # Computes M2(U(t)) and stores it in y.
+        M2U.Neg();                                      # now holds -M2*U(t)
 
-        # Compute M2*U(t), store it in y.
-        y : mfem.Vector = mfem.Vector(u.Size());        # Initialize a vector to hold M2(U(t)).
-        self.M2mat.Mult(u, y);                          # Computes M2(U(t)) and stores it in y.
-
-        # Multiplies y by -1, it now holds -M2 * U(t).
-        y.Neg();
-
-        # Compute x + y = -K*U(t) - M2 * U(t), store in z.
-        z : mfem.Vector = mfem.Vector(u.Size());
-        mfem.add_vector(x, 1.0, y, z);                  # z = x + 1.0*y.
+        # Compute -K*U(t) - M2*U(t)
+        KU_M2U : mfem.Vector = mfem.Vector(u.Size());
+        mfem.add_vector(KU, 1.0, M2U, KU_M2U);          # KU_M2U = KU + 1.0*M2U = -K*U(t) - M2*U(t)
 
         # Set the essential boundary conditions to zero. This is necessary because the stiffness 
         # matrix is not symmetric.
         for j in self.ess_tdof_list:
-            z[j] = 0.0
+            KU_M2U[j] = 0.0
 
         # Solves (M + fac0*K) * U''(t) = -K*U(t) - M2 * U(t) for U''(t).
-        self.T_solver.Mult(z, d2udt2);
+        self.T_solver.Mult(KU_M2U, d2udt2);
     
 
 
@@ -256,10 +250,10 @@ class KleinGordonOperator(mfem.SecondOrderTimeDependentOperator):
 
 
 class cInitialSolution(mfem.PyCoefficient):
-    def EvalValue(self, x : numpy.ndarray) -> float:    
-        global decay;
-        norm2 : float = numpy.sum(x**2);
-        return numpy.exp(-norm2*decay);
+    def EvalValue(self, X : numpy.ndarray) -> float:    
+        global freq;
+        norm2 : float = numpy.sum(numpy.square(X));
+        return numpy.exp(-norm2) * numpy.sin(numpy.pi * freq * X[0]) * numpy.sin(numpy.pi * freq * X[1])
 
 
 
@@ -278,24 +272,32 @@ class cInitialRate(mfem.PyCoefficient):
 # Simulate function
 # -------------------------------------------------------------------------------------------------
 
-def Simulate(mesh_file          : str           = "star.mesh",
-             ref_levels         : int           = 2,
+def Simulate(mesh_file          : str           = "hexagon.mesh",
+             ref_levels         : int           = 3,
              order              : int           = 2,
              ode_solver_type    : int           = 10,
              t_final            : float         = 5.0,
              dt                 : float         = 1e-2,
              Positions          : numpy.ndarray = None,
-             c                  : float         = 0.5,
-             m                  : float         = 2.0,
-             k                  : float         = 20.0,
+             c                  : float         = 0.2,
+             m                  : float         = 0.5,
+             k                  : float         = 2.0,
              dirichlet          : bool          = True,
              serialization_steps: int           = 5,
              num_positions      : int           = 1000,
              VisIt              : bool          = True) -> tuple[numpy.ndarray,numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """
-    Simulate the Klein-Gordon equation.
+    Simulate the Klein-Gordon equation:
+                  
+        (d^2/dt^2) u - c^2*laplacian(u) + m^2*u = 0
 
-    
+    We also impose the following initial conditions:
+        
+        u(0, (x, y)) = sin(pi * omega * x) * sin(pi * omega * y)
+
+    We solve this PDE, then return the solution at each time step. 
+                  
+
 
     ---------------------------------------------------------------------------------------------
     Arguments
@@ -387,9 +389,9 @@ def Simulate(mesh_file          : str           = "star.mesh",
     
     LOGGER.info("Setting up Klein-Gordon equation simulation with MFEM.");
     
-    # Set the global variable c.
-    global decay;
-    decay = k;
+    # Set the global variable freq.
+    global freq;
+    freq = k;
 
     # Define the ODE solver used for time integration.
     LOGGER.debug("Defining the ODE solver.");
@@ -563,34 +565,9 @@ def Simulate(mesh_file          : str           = "star.mesh",
     LOGGER.debug("Positions has shape %s (dim = %d, num_positions = %d)" % (str(Positions.shape), dim, Positions.shape[1]));
 
 
-    
-    # ---------------------------------------------------------------------------------------------
-    # 7. VisIt
-
-    # Store the initial solution to u_gf and dudt_gf.
-    u_gf.SetFromTrueDofs(u);
-    dudt_gf.SetFromTrueDofs(dudt);
-
-    if(VisIt):
-        LOGGER.info("Setting up VisIt visualization.");
-
-        # Create the VisIt data collection.
-        visit_dc_path   : str                       = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "klein-gordan-fom");
-        visit_dc        : mfem.VisItDataCollection  = mfem.VisItDataCollection(visit_dc_path, mesh);
-        visit_dc.SetPrecision(8);
-
-        # Register U and its time derivative.
-        visit_dc.RegisterField("U",     u_gf);
-        visit_dc.RegisterField("DtU",   dudt_gf);
-
-        # Set the cycle and time.
-        visit_dc.SetCycle(0);
-        visit_dc.SetTime(0.0);
-        visit_dc.Save();
-
 
     # ---------------------------------------------------------------------------------------------
-    # 8. Setup lists to store the solution + evaluate the initial solution at the positions.
+    # 7. Setup lists to store the solution + evaluate the initial solution at the positions.
 
     LOGGER.info("Setting up lists to store the time, U, and DtU at each time step.");
 
@@ -611,6 +588,33 @@ def Simulate(mesh_file          : str           = "star.mesh",
     times_list.append(0);
     displacements_list.append(  u_Positions_0);
     velocities_list.append(     dudt_Positions_0);
+
+
+    
+    # ---------------------------------------------------------------------------------------------
+    # 8. VisIt
+
+    # Store the initial solution to u_gf and dudt_gf.
+    u_gf.SetFromTrueDofs(u);
+    dudt_gf.SetFromTrueDofs(dudt);
+
+    if(VisIt):
+        LOGGER.info("Setting up VisIt visualization.");
+
+        # Create the VisIt data collection.
+        visit_dc_path   : str                       = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "KleinGordan-fom");
+        visit_dc        : mfem.VisItDataCollection  = mfem.VisItDataCollection(visit_dc_path, mesh);
+        visit_dc.SetPrecision(8);
+
+        # Register U and its time derivative.
+        visit_dc.RegisterField("U",     u_gf);
+        visit_dc.RegisterField("DtU",   dudt_gf);
+
+        # Set the cycle and time.
+        visit_dc.SetCycle(0);
+        visit_dc.SetTime(0.0);
+        visit_dc.Save();
+
 
 
     # ---------------------------------------------------------------------------------------------

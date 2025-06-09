@@ -105,7 +105,9 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
         self.Kmat  = mfem.SparseMatrix();                                               # Initialize a matrix to hold K. This one is used to build K with the essential boundary conditions set.
         dummy      = mfem.intArray();
         K.FormSystemMatrix(dummy, self.Kmat0);                                          # This populates Kmat0 such that the i,j'th entry is B(\phi_i, \phi_j) = c^2*(\nabla \phi_i, \nabla \phi_j).
+                                                                                        # We need this version when we compute the RHS of the linear system (need products of full matrices before zeroing out the BCs)
         K.FormSystemMatrix(self.ess_tdof_list, self.Kmat);                              # Does the same thing, but with all of the rows/columns corresponding to essential boundary conditions removed.
+                                                                                        # We need this version when we compute T in ImplicitSolve
 
         # Definite the bilinear form corresponding to the term M in the weak form of the wave
         # equation (see the docstring above).
@@ -186,6 +188,7 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
         self.M_solver.Mult(z, d2udt2);
 
 
+
     def ImplicitSolve(self, fac0 : float, fac1 : float, u : mfem.Vector, dudt : mfem.Vector, d2udt2 : mfem.Vector) -> None:
         # Solve the following equation for U''(t):
         #    (M + fac0*K) * U''(t) = -K*U(t)
@@ -219,9 +222,9 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
 
 
 class cInitialSolution(mfem.PyCoefficient):
-    def EvalValue(self, x : numpy.ndarray) -> float:    
+    def EvalValue(self, X : numpy.ndarray) -> float:    
         global decay;
-        norm2 : float = numpy.sum(x**2);
+        norm2 : float = numpy.sum(numpy.square(X));
         return numpy.exp(-norm2*decay);
 
 
@@ -250,7 +253,18 @@ def Simulate(mesh_file          : str           = "star.mesh",
              num_positions      : int           = 1000,
              VisIt              : bool          = True) -> tuple[numpy.ndarray,numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """
-    Simulate the wave equation.
+    Simulate the wave equation:
+            
+            (d^2/dt^2)u = c^2*laplacian(u)
+
+    We also impose the following initial conditions:
+        
+        u(0, (x, y))    =  exp(-(x^2 + y^2)*k)
+
+    We solve this PDE, then return the solution at each time step. 
+
+
+
 
     ---------------------------------------------------------------------------------------------
     Arguments
@@ -306,6 +320,7 @@ def Simulate(mesh_file          : str           = "star.mesh",
         (visit.llnl.gov) can understand/work with.
         
 
+        
     ---------------------------------------------------------------------------------------------
     Returns
     ---------------------------------------------------------------------------------------------
@@ -338,7 +353,7 @@ def Simulate(mesh_file          : str           = "star.mesh",
     
     LOGGER.info("Setting up wave equation simulation with MFEM.");
     
-    # Set the global variable c.
+    # Set the global variable decay.
     global decay;
     decay = k;
 
@@ -514,34 +529,9 @@ def Simulate(mesh_file          : str           = "star.mesh",
     LOGGER.debug("Positions has shape %s (dim = %d, num_positions = %d)" % (str(Positions.shape), dim, Positions.shape[1]));
 
 
-    
-    # ---------------------------------------------------------------------------------------------
-    # 7. VisIt
-
-    # Store the initial solution to u_gf and dudt_gf.
-    u_gf.SetFromTrueDofs(u);
-    dudt_gf.SetFromTrueDofs(dudt);
-
-    if(VisIt):
-        LOGGER.info("Setting up VisIt visualization.");
-
-        # Create the VisIt data collection.
-        visit_dc_path   : str                       = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "waveEq-fom");
-        visit_dc        : mfem.VisItDataCollection  = mfem.VisItDataCollection(visit_dc_path, mesh);
-        visit_dc.SetPrecision(8);
-
-        # Register U and its time derivative.
-        visit_dc.RegisterField("U",     u_gf);
-        visit_dc.RegisterField("DtU",   dudt_gf);
-
-        # Set the cycle and time.
-        visit_dc.SetCycle(0);
-        visit_dc.SetTime(0.0);
-        visit_dc.Save();
-
 
     # ---------------------------------------------------------------------------------------------
-    # 8. Setup lists to store the solution + evaluate the initial solution at the positions.
+    # 7. Setup lists to store the solution + evaluate the initial solution at the positions.
 
     LOGGER.info("Setting up lists to store the time, U, and DtU at each time step.");
 
@@ -562,6 +552,33 @@ def Simulate(mesh_file          : str           = "star.mesh",
     times_list.append(0);
     displacements_list.append(  u_Positions_0);
     velocities_list.append(     dudt_Positions_0);
+
+
+
+    # ---------------------------------------------------------------------------------------------
+    # 8. VisIt
+
+    # Store the initial solution to u_gf and dudt_gf.
+    u_gf.SetFromTrueDofs(u);
+    dudt_gf.SetFromTrueDofs(dudt);
+
+    if(VisIt):
+        LOGGER.info("Setting up VisIt visualization.");
+
+        # Create the VisIt data collection.
+        visit_dc_path   : str                       = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "WaveEq-fom");
+        visit_dc        : mfem.VisItDataCollection  = mfem.VisItDataCollection(visit_dc_path, mesh);
+        visit_dc.SetPrecision(8);
+
+        # Register U and its time derivative.
+        visit_dc.RegisterField("U",     u_gf);
+        visit_dc.RegisterField("DtU",   dudt_gf);
+
+        # Set the cycle and time.
+        visit_dc.SetCycle(0);
+        visit_dc.SetTime(0.0);
+        visit_dc.Save();
+
 
 
     # ---------------------------------------------------------------------------------------------
