@@ -251,9 +251,9 @@ class KleinGordonOperator(mfem.SecondOrderTimeDependentOperator):
 
 class cInitialSolution(mfem.PyCoefficient):
     def EvalValue(self, X : numpy.ndarray) -> float:    
-        global freq;
+        global freq, decay;
         norm2 : float = numpy.sum(numpy.square(X));
-        return numpy.exp(-norm2) * numpy.sin(numpy.pi * freq * X[0]) * numpy.sin(numpy.pi * freq * X[1])
+        return numpy.exp(-decay*norm2) * numpy.sin(numpy.pi * freq * X[0]) * numpy.sin(numpy.pi * freq * X[1])
 
 
 
@@ -281,7 +281,8 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
              Positions          : numpy.ndarray = None,
              c                  : float         = 0.2,
              m                  : float         = 0.5,
-             k                  : float         = 2.0,
+             w                  : float         = 2.0,
+             k                  : float         = 1.0,
              dirichlet          : bool          = True,
              serialization_steps: int           = 5,
              num_positions      : int           = 1000,
@@ -289,11 +290,12 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
     """
     Simulate the Klein-Gordon equation:
                   
-        (d^2/dt^2) u - c^2*laplacian(u) + m^2*u = 0
+        (d^2/dt^2)u(t, X) - c^2*laplacian(u(t, X)) + m^2*u(t, X) = 0,
 
     We also impose the following initial conditions:
         
-        u(0, (x, y)) = sin(pi * omega * x) * sin(pi * omega * y)
+        u(0, (x, y))        = exp(-k*(x^2 + y^2)) * sin(pi*w*x) * sin(pi*w*y)
+        (d/dt)u(0, (x, y))  = 0
 
     We solve this PDE, then return the solution at each time step. 
                   
@@ -337,8 +339,11 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
     m : float
         The mass of the field. See the Klein-Gordon equation in the KleinGordonOperator class.
 
+    w : float
+        A constant used to specify the freuqnecy of peaks in the initial condition.
+        
     k : float
-        A constant used to define the initial solution (u(0, X)). See the cInitialSolution class.
+        A constant used to define the rate of decay in the initial condition
 
     dirichlet : bool
         Whether to use Dirichlet boundary conditions. If True, we fix the position of the nodes on the 
@@ -390,8 +395,9 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
     LOGGER.info("Setting up Klein-Gordon equation simulation with MFEM.");
     
     # Set the global variable freq.
-    global freq;
-    freq = k;
+    global freq, decay;
+    freq    = w;
+    decay   = k;
 
     # Define the ODE solver used for time integration.
     LOGGER.debug("Defining the ODE solver.");

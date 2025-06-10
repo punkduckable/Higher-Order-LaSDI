@@ -259,7 +259,9 @@ def Simulate(mesh_file          : str           = "star.mesh",
 
     We also impose the following initial conditions:
         
-        u(0, (x, y))    =  exp(-(x^2 + y^2)*k)
+        u(0, (x, y))        = exp(-k*(x^2 + y^2))
+        (d/dt)u(0, (x, y))  = 0
+
 
     We solve this PDE, then return the solution at each time step. 
 
