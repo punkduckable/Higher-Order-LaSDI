@@ -33,7 +33,7 @@ parameter_space:
       test_space_type:      uniform
       sample_size:          5
       log_scale:            false
-    - name:                 k
+    - name:                 w
       min:                  1.5
       max:                  2.5
       test_space_type:      uniform
