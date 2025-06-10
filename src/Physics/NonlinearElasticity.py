@@ -77,7 +77,7 @@ class NonlinearElasticity(Physics):
         # [2, N_Nodes, 2] and X_Positions has shape [N_Nodes, 2]. The issue is that we have to run 
         # a simulation to get N_Nodes. We run a simulation with a final time of zero; this prompts
         # the code to generate the mesh and nodes, but not to solve for anything
-        D, V, X, T                          = Simulate(t_final = 0);        # D, V have shape (Nt, 2, N_Nodes)
+        D, V, X, T                          = Simulate(t_final = 0, VisIt = False);     # D, V have shape (Nt, 2, N_Nodes)
         self.Frame_Shape    : list[int]     = list(D.shape[1:]);
         self.X_Positions    : numpy.ndarray = numpy.copy(X);
         LOGGER.debug("Frame shape: %s" % str(self.Frame_Shape));
@@ -184,7 +184,7 @@ class NonlinearElasticity(Physics):
         assert(param.shape[0]   == self.n_p);
         
         # Solve the PDE!
-        D, V, _, T  = Simulate(theta = param[self.s_idx], shear_modulus = param[self.mu_idx]);
+        D, V, _, T  = Simulate(theta = param[self.s_idx], shear_modulus = param[self.mu_idx], Positions = self.X_Positions);
 
         # All done!
         X       : list[torch.Tensor]    = [torch.Tensor(D), torch.Tensor(V)];

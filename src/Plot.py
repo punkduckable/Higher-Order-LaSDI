@@ -47,7 +47,7 @@ mpl.rcParams['ytick.direction'] = 'in';
 # Plotting code.
 # -------------------------------------------------------------------------------------------------
 
-def Plot_Reconstruction(X_True  : list[torch.Tensor], 
+def Plot_Reconstruction(U_True  : list[torch.Tensor], 
                         model   : torch.nn.Module, 
                         t_grid  : numpy.ndarray, 
                         x_grid  : numpy.ndarray, 
@@ -59,14 +59,14 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
     
     Further, if the underlying physics model requires n_IC initial conditions to initialize 
     (n_IC'th order dynamics) then we produce n_IC plots, the d'th one of which depicts the d'th 
-    derivative of the X_True and its reconstruction by model.
+    derivative of the U_True and its reconstruction by model.
 
      
     -----------------------------------------------------------------------------------------------
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    X_True : list[torch.Tensor], len = n_IC
+    U_True : list[torch.Tensor], len = n_IC
        k'th element is a torch.Tensor object of shape (n_t, n_x) whose i,j entry holds the value 
        of the k'th time derivative of the FOM solution at t_grid[i], x_grid[j].
     
@@ -95,8 +95,8 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
     
     # Run checks.
     n_IC            : int       =  model.n_IC;
-    assert(isinstance(X_True, list));
-    assert(len(X_True)          == n_IC);
+    assert(isinstance(U_True, list));
+    assert(len(U_True)          == n_IC);
     assert(isinstance(t_grid, numpy.ndarray));
     assert(isinstance(x_grid, numpy.ndarray));
     assert(len(t_grid.shape)    == 1);
@@ -106,10 +106,10 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
     assert(isinstance(figsize, tuple));
     assert(len(figsize)         == 2);
     for d in range(n_IC):
-        assert(isinstance(X_True[d], torch.Tensor));
-        assert(X_True[d].ndim       == 2);
-        assert(X_True[d].shape[0]   == n_t);
-        assert(X_True[d].shape[1]   == n_x);
+        assert(isinstance(U_True[d], torch.Tensor));
+        assert(U_True[d].ndim       == 2);
+        assert(U_True[d].shape[0]   == n_t);
+        assert(U_True[d].shape[1]   == n_x);
 
 
     LOGGER.info("Making a Reconstruction plot with n_t = %d, n_x = %d, and n_IC = %d" % (n_t, n_x, n_IC));
@@ -117,33 +117,33 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
 
     # Compute the predictions. 
     if(n_IC == 1):
-        X_Pred  : list[torch.Tensor]    = [model.forward(*X_True)];
+        U_Pred  : list[torch.Tensor]    = [model.forward(*U_True)];
     else:
-        X_Pred  : list[torch.Tensor]    = list(model.forward(*X_True));
+        U_Pred  : list[torch.Tensor]    = list(model.forward(*U_True));
 
     # Map both the true and predicted solutions to numpy arrays.
     # also set up list to hold the difference between the prediction and true solutions.
     Diff_X      : list[numpy.ndarray]   = [];
-    X_True_np   : list[numpy.ndarray]   = [];
-    X_Pred_np   : list[numpy.ndarray]   = [];
+    U_True_np   : list[numpy.ndarray]   = [];
+    U_Pred_np   : list[numpy.ndarray]   = [];
     for d in range(n_IC):
-        X_True_np.append(X_True[d].squeeze().numpy());
-        X_Pred_np.append(X_Pred[d].squeeze().detach().numpy());
-        Diff_X.append(X_True_np[d] - X_Pred_np[d]);
+        U_True_np.append(U_True[d].squeeze().numpy());
+        U_Pred_np.append(U_Pred[d].squeeze().detach().numpy());
+        Diff_X.append(U_True_np[d] - U_Pred_np[d]);
 
 
     # Get bounds.
     epsilon     : float         = .0001;
-    X_min       : list[float]   = [];
-    X_max       : list[float]   = [];
-    Diff_X_min  : list[float]   = [];
-    Diff_X_max  : list[float]   = [];
+    U_min       : list[float]   = [];
+    U_max       : list[float]   = [];
+    Diff_U_min  : list[float]   = [];
+    Diff_U_max  : list[float]   = [];
 
     for d in range(n_IC):
-        X_min.append(       min(numpy.min(X_True_np[d]), numpy.min(X_Pred_np[d])) - epsilon);
-        X_max.append(       max(numpy.max(X_True_np[d]), numpy.max(X_Pred_np[d])) + epsilon);
-        Diff_X_min.append(  numpy.min(Diff_X[d]) - epsilon);
-        Diff_X_max.append(  numpy.max(Diff_X[d]) + epsilon);
+        U_min.append(       min(numpy.min(U_True_np[d]), numpy.min(U_Pred_np[d])) - epsilon);
+        U_max.append(       max(numpy.max(U_True_np[d]), numpy.max(U_Pred_np[d])) + epsilon);
+        Diff_U_min.append(  numpy.min(Diff_X[d]) - epsilon);
+        Diff_U_max.append(  numpy.max(Diff_X[d]) + epsilon);
 
 
     # Now... plot the results!
@@ -152,20 +152,20 @@ def Plot_Reconstruction(X_True  : list[torch.Tensor],
         fig, ax  = plt.subplots(1, 5, width_ratios = [1, 0.05, 1, 1, 0.05], figsize = figsize);
         fig.tight_layout();
 
-        im0 = ax[0].contourf(t_grid, x_grid, X_True_np[d].T, levels = numpy.linspace(X_min[d], X_max[d], 200));  # Note: contourf(X, Y, Z) requires Z.shape = (Y.shape, X.shape) with Z[i, j] corresponding to Y[i] and X[j]
+        im0 = ax[0].contourf(t_grid, x_grid, U_True_np[d].T, levels = numpy.linspace(U_min[d], U_max[d], 200));  # Note: contourf(X, Y, Z) requires Z.shape = (Y.shape, X.shape) with Z[i, j] corresponding to Y[i] and X[j]
         ax[0].set_title("True");
         ax[0].set_xlabel("t");
         ax[0].set_ylabel("x", rotation = 0);
 
         fig.colorbar(im0, cax = ax[1], format = "%0.2f", location = "left");
 
-        ax[2].contourf(t_grid, x_grid, X_Pred_np[d].T, levels = numpy.linspace(X_min[d], X_max[d], 200));            
+        ax[2].contourf(t_grid, x_grid, U_Pred_np[d].T, levels = numpy.linspace(U_min[d], U_max[d], 200));            
         ax[2].set_title("Prediction");
         ax[2].set_xlabel("t");
         ax[2].set_ylabel("x", rotation = 0);
 
 
-        im3 = ax[3].contourf(t_grid, x_grid, Diff_X[d].T, levels = numpy.linspace(Diff_X_min[d], Diff_X_max[d], 200));
+        im3 = ax[3].contourf(t_grid, x_grid, Diff_X[d].T, levels = numpy.linspace(Diff_U_min[d], Diff_U_max[d], 200));
         ax[3].set_title("Difference");
         ax[3].set_xlabel("t");
         ax[3].set_ylabel("x", rotation = 0);
@@ -184,7 +184,7 @@ def Plot_Prediction(model           : torch.nn.Module,
                     gp_list         : list[GaussianProcessRegressor], 
                     param_grid      : numpy.ndarray, 
                     n_samples       : int, 
-                    X_True          : list[list[torch.Tensor]],
+                    U_True          : list[list[torch.Tensor]],
                     t_Grid          : list[torch.Tensor],
                     figsize         : tuple[int]        = (14, 8))            -> None:
     """
@@ -243,7 +243,7 @@ def Plot_Prediction(model           : torch.nn.Module,
     """
 
     # Run checks
-    assert(isinstance(X_True, list));
+    assert(isinstance(U_True, list));
     n_IC    : int   = latent_dynamics.n_IC;
     n_param : int   = param_grid.shape[0];
     n_p     : int   = param_grid.shape[1];
@@ -256,19 +256,19 @@ def Plot_Prediction(model           : torch.nn.Module,
 
     assert(isinstance(t_Grid, list));
     assert(len(t_Grid)  == n_param);
-    assert(len(X_True)  == n_param);
+    assert(len(U_True)  == n_param);
     for i in range(n_param):
         assert(isinstance(t_Grid[i], torch.Tensor));
         assert(len(t_Grid[i].shape) == 1);
         n_t_i : int = t_Grid[i].shape[0];
     
-        assert(isinstance(X_True[i], list));
-        assert(len(X_True[i]) == n_IC);
+        assert(isinstance(U_True[i], list));
+        assert(len(U_True[i]) == n_IC);
         for j in range(n_IC):
-            assert(isinstance(X_True[i][j], torch.Tensor));
-            assert(len(X_True[i][j].shape)  == 2);
-            assert(X_True[i][j].shape[0]    == n_t_i);
-            assert(X_True[i][j].shape[1]    == n_x);
+            assert(isinstance(U_True[i][j], torch.Tensor));
+            assert(len(U_True[i][j].shape)  == 2);
+            assert(U_True[i][j].shape[0]    == n_t_i);
+            assert(U_True[i][j].shape[1]    == n_x);
 
 
 
@@ -298,7 +298,7 @@ def Plot_Prediction(model           : torch.nn.Module,
         # Checks
 
         Latent_Trajectories_i_np    : list[numpy.ndarray]   = Latent_Trajectories[i];
-        X_True_i                    : list[torch.Tensor]    = X_True[i];
+        U_True_i                    : list[torch.Tensor]    = U_True[i];
         t_grid_i_np                 : numpy.ndarray         = t_Grid[i].detach().numpy();
 
         # Checks.
@@ -327,36 +327,36 @@ def Plot_Prediction(model           : torch.nn.Module,
             Latent_Trajectories_i.append(torch.Tensor(Latent_Trajectories_i_np[j]));
 
         # Decode the latent predictions, one sample at a time.
-        X_Pred_i        : list[torch.Tensor]    = [];
+        U_Pred_i        : list[torch.Tensor]    = [];
         for j in range(n_IC):
-            X_Pred_i.append(torch.empty((n_t_i, n_samples, n_x), dtype = torch.float32));
+            U_Pred_i.append(torch.empty((n_t_i, n_samples, n_x), dtype = torch.float32));
         
         for j in range(n_samples):
             Latent_Trajectories_ij   : list[torch.Tensor] = [];
             for k in range(n_IC):
                 Latent_Trajectories_ij.append(Latent_Trajectories_i[k][:, j, :]);
             
-            X_Pred_ij   : torch.Tensor | list[torch.Tensor] = model.Decode(*Latent_Trajectories_ij);
+            U_Pred_ij   : torch.Tensor | list[torch.Tensor] = model.Decode(*Latent_Trajectories_ij);
             if(n_IC == 1):
-                X_Pred_i[0][:, j, :] = X_Pred_ij
+                U_Pred_i[0][:, j, :] = U_Pred_ij
             else:
                 for k in range(n_IC):
-                    X_Pred_i[k][:, j, :] = X_Pred_ij[k];
+                    U_Pred_i[k][:, j, :] = U_Pred_ij[k];
 
         # Map the predictions and targets to numpy arrays (the plotting functions require this!)
-        X_Pred_i_np : list[numpy.ndarray] = [];
-        X_True_i_np : list[numpy.ndarray] = [];
+        U_Pred_i_np : list[numpy.ndarray] = [];
+        U_True_i_np : list[numpy.ndarray] = [];
         for j in range(n_IC):
-            X_Pred_i_np.append(X_Pred_i[j].detach().numpy());
-            X_True_i_np.append(X_True_i[j].detach().numpy());
+            U_Pred_i_np.append(U_Pred_i[j].detach().numpy());
+            U_True_i_np.append(U_True_i[j].detach().numpy());
 
 
         # Compute the mean, std of the predictions across the samples.
-        X_pred_i_mean_np : list[numpy.ndarray] = [];
-        X_pred_i_std_np : list[numpy.ndarray] = [];
+        U_pred_i_mean_np : list[numpy.ndarray] = [];
+        U_pred_i_std_np : list[numpy.ndarray] = [];
         for j in range(n_IC):
-            X_pred_i_mean_np.append( numpy.mean( X_Pred_i_np[j], axis = 1)); # X_Pred_i_mean[i] has shape (n_t, n_z).
-            X_pred_i_std_np.append(  numpy.std(  X_Pred_i_np[j], axis = 1));
+            U_pred_i_mean_np.append( numpy.mean( U_Pred_i_np[j], axis = 1)); # U_Pred_i_mean[i] has shape (n_t, n_z).
+            U_pred_i_std_np.append(  numpy.std(  U_Pred_i_np[j], axis = 1));
 
 
         # ---------------------------------------------------------------------------------------------
@@ -376,7 +376,7 @@ def Plot_Prediction(model           : torch.nn.Module,
 
             # Plot the mean of the d'th derivative of the FOM solution.
             plt.subplot(232);
-            plt.contourf(t_grid_i_np, x_grid, X_pred_i_mean_np[j].T, 100, cmap = plt.cm.jet);   # Note: contourf(X, Y, Z) requires Z.shape = (Y.shape, X.shape) with Z[i, j] corresponding to Y[i] and X[j].
+            plt.contourf(t_grid_i_np, x_grid, U_pred_i_mean_np[j].T, 100, cmap = plt.cm.jet);   # Note: contourf(X, Y, Z) requires Z.shape = (Y.shape, X.shape) with Z[i, j] corresponding to Y[i] and X[j].
             plt.colorbar();
             plt.xlabel("t");
             plt.ylabel("x", rotation = 0);
@@ -384,7 +384,7 @@ def Plot_Prediction(model           : torch.nn.Module,
             
             # Plot the std of the d'th derivative of the FOM solution.
             plt.subplot(233);
-            plt.contourf(t_grid_i_np, x_grid, X_pred_i_std_np[j].T, 100, cmap = plt.cm.jet);
+            plt.contourf(t_grid_i_np, x_grid, U_pred_i_std_np[j].T, 100, cmap = plt.cm.jet);
             plt.colorbar();
             plt.xlabel("t");
             plt.ylabel("x", rotation = 0);
@@ -392,7 +392,7 @@ def Plot_Prediction(model           : torch.nn.Module,
 
             # Plot the d'th derivative of the true FOM solution.
             plt.subplot(234);
-            plt.contourf(t_grid_i_np, x_grid, X_True_i_np[j].T, 100, cmap = plt.cm.jet);
+            plt.contourf(t_grid_i_np, x_grid, U_True_i_np[j].T, 100, cmap = plt.cm.jet);
             plt.colorbar();
             plt.xlabel("t");
             plt.ylabel("x", rotation = 0);
@@ -401,7 +401,7 @@ def Plot_Prediction(model           : torch.nn.Module,
             # Plot the error between the mean predicted d'th derivative and the true d'th derivative of
             # the FOM solution.
             plt.subplot(235);
-            error = numpy.abs(X_True_i_np[j] - X_pred_i_mean_np[j]);
+            error = numpy.abs(U_True_i_np[j] - U_pred_i_mean_np[j]);
             plt.contourf(t_grid_i_np, x_grid, error.T, 100, cmap = plt.cm.jet);
             plt.colorbar();
             plt.xlabel("t");

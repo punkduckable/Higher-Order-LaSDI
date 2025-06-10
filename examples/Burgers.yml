@@ -9,8 +9,6 @@ lasdi:
     rollout_update_freq:    100
     dp_per_update:          0.002
 
-    rollout_increase_amt:   1
-
     max_iter:               900
     n_iter:                 300
     max_greedy_iter:        900
@@ -58,7 +56,6 @@ latent_dynamics:
   type:                     spring
   coef_norm_order:          fro
   spring:
-  sindy:
 
 physics:
   type:                     BurgersSecondOrder

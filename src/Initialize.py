@@ -28,6 +28,7 @@ from    Explicit            import  Explicit;
 from    NonlinearElasticity import  NonlinearElasticity
 from    Advection           import  Advection;
 from    WaveEquation        import  WaveEquation;
+from    KleinGordan         import  KleinGordan;
 
 # Set up logger.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
@@ -50,7 +51,8 @@ physics_dict    =  {'Burgers'               : Burgers.Burgers,
                     'Explicit'              : Explicit,
                     'Advection'             : Advection,
                     'NonlinearElasticity'   : NonlinearElasticity,
-                    'WaveEquation'          : WaveEquation};
+                    'WaveEquation'          : WaveEquation,
+                    "KleinGordan"           : KleinGordan};
 
 
 

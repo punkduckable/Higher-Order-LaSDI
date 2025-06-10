@@ -561,35 +561,43 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     # ---------------------------------------------------------------------------------------------
     # 5. Extract the positions of the nodes.
 
-    if(myid == 0): LOGGER.info("Sampling %d positions in the mesh" % num_positions);
+    if(Positions is None):
+        if(myid == 0): LOGGER.info("Sampling %d positions in the mesh" % num_positions);
+    else:
+        if(myid == 0): LOGGER.info("Verifying the columns of Positions are in the problem domain");
 
     # Figure out the maximum/minimum x and y coordinates of the mesh.
-    bb_min, bb_max = pmesh.GetBoundingBox();
+    bb_min, bb_max = mesh.GetBoundingBox();
+    if(myid == 0): LOGGER.debug("The bounding box for the mesh is given by bb_min = %s, bb_max = %s" % (str(bb_min), str(bb_max)));
     x_min   : float = bb_min[0];
     x_max   : float = bb_max[0];
     y_min   : float = bb_min[1];
     y_max   : float = bb_max[1];
     if(myid == 0): LOGGER.debug("x_min = %f, x_max = %f, y_min = %f, y_max = %f" % (x_min, x_max, y_min, y_max));
 
-    # Now, sample num_positions points evenly spaced between x_min and x_max, and y_min and y_max.
-    # If the mesh has an unusal shape, some of these points may lie outside the mesh. We sample 
-    # too many positions to account for this. Any points that lie outside the mesh will be ignored.
-    # We will sample new points if the number of points that lie inside the mesh is less than 
-    # num_positions.
+    # If we are sampling new points, then we sample num_positions points evenly spaced between 
+    # x_min and x_max, and y_min and y_max. If the mesh has an unusual shape, some of these points 
+    # may lie outside the mesh. We sample too many positions to account for this. Any points that 
+    # lie outside the mesh will be ignored. We will sample new points if the number of points that 
+    # lie inside the mesh is less than num_positions.
     Valid_Positions_List : list[numpy.ndarray] = [];
-    elements_list        : list[int]           = [];
-    ref_coords_list      : list[numpy.ndarray] = [];
+    Elements_List        : list[int]           = [];
+    RefCoords_List       : list[numpy.ndarray] = [];
     num_valid_positions  : int = 0;
     
     while(num_valid_positions < num_positions):
-        if(myid == 0): LOGGER.debug("Sampling %d positions" % num_positions);
+        if(Positions is None):
+            if(myid == 0): LOGGER.debug("Sampling %d positions" % num_positions);
 
-        # Sample random x,y coordinates
-        x_positions : numpy.ndarray = numpy.random.uniform(x_min, x_max, num_positions);
-        y_positions : numpy.ndarray = numpy.random.uniform(y_min, y_max, num_positions);
+            # Sample random x,y coordinates
+            x_positions : numpy.ndarray = numpy.random.uniform(x_min, x_max, num_positions);
+            y_positions : numpy.ndarray = numpy.random.uniform(y_min, y_max, num_positions);
 
-        # Create array of points in format expected by FindPoints
-        points : numpy.ndarray = numpy.column_stack((x_positions, y_positions));
+            # Create array of points in format expected by FindPoints
+            points : numpy.ndarray = numpy.column_stack((x_positions, y_positions));
+
+        else:
+            points = Positions.T;
 
         # Find which points are in the mesh.
         count, elem_list, ref_coords = pmesh.FindPoints(points, warn = False, inv_trans = None);
@@ -598,8 +606,8 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
         for i in range(num_positions):
             if elem_list[i] >= 0:  # -1 indicates point not found in any element
                 Valid_Positions_List.append(points[i]);
-                elements_list.append(elem_list[i]);
-                ref_coords_list.append(ref_coords[i]);
+                Elements_List.append(elem_list[i]);
+                RefCoords_List.append(ref_coords[i]);
                 num_valid_positions += 1;
 
                 # If we have enough valid positions, break.
@@ -608,12 +616,16 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
 
         # If we have not enough valid positions, sample again.
         if(num_valid_positions < num_positions):
-            if(myid == 0): LOGGER.debug("Not enough valid positions (current = %d, needed = %d), sampling again" % (num_valid_positions, num_positions));
+            if(Positions is not None):
+                if(myid == 0): LOGGER.error("%d/%d elements of Positions are invalid. Aborting" % (num_valid_positions, num_positions));
+                raise ValueError("Invalid Positions");
+            else:
+                if(myid == 0): LOGGER.debug("Not enough valid positions (current = %d, needed = %d), sampling again" % (num_valid_positions, num_positions));
 
-    # Convert the list of valid positions to a numpy array.
+    # Convert the lists to numpy arrays.
     Positions : numpy.ndarray = numpy.array(Valid_Positions_List).T;
-    Elements  : numpy.ndarray = numpy.array(elements_list);
-    RefCoords : numpy.ndarray = numpy.array(ref_coords_list);
+    Elements  : numpy.ndarray = numpy.array(Elements_List);
+    RefCoords : numpy.ndarray = numpy.array(RefCoords_List);
     if(myid == 0): LOGGER.debug("Positions has shape %s (dim = %d, num_positions = %d)" % (str(Positions.shape), dim, Positions.shape[1]));
 
 
@@ -662,7 +674,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 7. Perform time-integration (looping over the time iterations, ti, with a time-step dt).
+    # 8. Perform time-integration (looping over the time iterations, ti, with a time-step dt).
     
     if(myid == 0): LOGGER.info("Running time stepping from t = 0 to t = %f with dt %f" % (t_final, dt));
 
@@ -724,7 +736,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 7. Package everything up for returning.
+    # 9. Package everything up for returning.
 
     # Turn times, displacements, velocities lists into arrays.
     Times           = numpy.array(times_list,           dtype = numpy.float32);

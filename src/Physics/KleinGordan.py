@@ -2,7 +2,6 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-
 # Add the main directory to the search path.
 import  logging;
 import  os;
@@ -14,11 +13,10 @@ import  numpy;
 import  torch;
 
 from    Physics                         import  Physics;
-from    wave_equation                   import  Simulate;
+from    klein_gordan                    import  Simulate;
 
 
 LOGGER : logging.Logger = logging.getLogger(__name__);
-
 
 
 
@@ -26,16 +24,16 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # WaveEquation class
 # -------------------------------------------------------------------------------------------------
 
-class WaveEquation(Physics):
+class KleinGordan(Physics):
     def __init__(self, config : dict, param_names : list[str] = None) -> None:
         """
-        Initialize a WaveEquation object. This class acts as a wrapper around the MFEM-based solver 
-        implemented in ``wave_equation.py`` within the ``PyMFEM`` sub-directory. The solver models 
-        the propagation of a wave in a two dimensional domain:
+        Initialize a KleinGordan object. This class acts as a wrapper around the MFEM-based solver 
+        implemented in ``klein_gordan.py`` within the ``PyMFEM`` sub-directory. The solver models 
+        the propagation of a Klein-Gordan in a two dimensional domain:
 
-                (d^2/dt^2)u = c^2*laplacian(u)
-        
+                      (d^2/dt^2) u - c^2*laplacian(u) + m^2*u = 0
 
+                      
         
         -------------------------------------------------------------------------------------------
         Arguments
@@ -46,9 +44,9 @@ class WaveEquation(Physics):
             ``physics`` sub-dictionary of the configuration file.
         
         param_names : list[str], optional
-            Names of parameters appearing in the initial condition. The wave equation has two 
-            parameters, "c" and "k". "k" impacts the rate of decay of the initial condition (see
-            initial_condition) while "c" changes the governing equation (see above).
+            Names of parameters appearing in the initial condition. This should include "k" and
+            "m" parameters. "k" controls the rate of decay of the IC (see initial_condition) while
+            "m" impacts the governing equation (see above). "c" in the equation is fixed.
 
         
         
@@ -62,9 +60,9 @@ class WaveEquation(Physics):
         # Run checks
         assert(isinstance(param_names, list));
         assert(len(param_names) == 2);
-        assert('c' in param_names);
         assert('k' in param_names);
-        assert('WaveEquation' in config);
+        assert('m' in param_names);
+        assert('KleinGordan' in config);
 
         # Call the super class initializer.
         super().__init__(config         = config,
@@ -82,8 +80,8 @@ class WaveEquation(Physics):
         self.n_IC           : int           = 2;
 
         # Determine which index corresponds to c (wave speed) and which to k (decay rate in the IC).
-        self.c_idx  : int   = self.param_names.index('c');
-        self.k_idx  : int   = self.param_names.index('k');        
+        self.k_idx  : int   = self.param_names.index('k');
+        self.m_idx  : int   = self.param_names.index('m');        
         return;
 
 
@@ -173,7 +171,7 @@ class WaveEquation(Physics):
         assert(param.shape[0]   == self.n_p);
 
         # Solve the PDE using the external MFEM script.
-        U, DtU, _, Times = Simulate(k = param[self.k_idx], c = param[self.c_idx], Positions = self.X_Positions, VisIt = False);
+        U, DtU, _, Times = Simulate(k = param[self.k_idx], m = param[self.m_idx], Positions = self.X_Positions, VisIt = True);
 
         X       : list[torch.Tensor] = [torch.Tensor(U), torch.Tensor(DtU)];
         t_Grid  : torch.Tensor       = torch.Tensor(Times);

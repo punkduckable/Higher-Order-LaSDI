@@ -190,6 +190,145 @@ class inflow_coeff(mfem.PyCoefficient):
 
 
 
+class AdvectionOperator(mfem.PyTimeDependentOperator):
+    def __init__(self, fespace : mfem.FiniteElementSpace, velocity : velocity_coeff, g : inflow_coeff) -> None:
+        """
+        This class implements the Advection operator. The Advection operator is given by:
+            
+            (d/dt)u(t, X) + v(X) \cdot \nabla(u(t, X)) = 0
+            
+        where u is the scalar field, v(X) is the velocity field. Let { \phi_i } be the basis 
+        functions in the finite element space fespace. Then the weak form of the Advection operator 
+        is given by:
+
+            (\phi_i(X), (d/dt) u(t, X)) + (\phi_i(X), v(X) \cdot \nabla u(t, X)) = 0
+        
+        Using integration by parts on the second term gives
+
+            (\phi_i(X), (d/dt) u(t, X)) + (-v(X) \cdot \nabla \phi_i(X), u(t, X)) + \int_{F} \hat{u}(v(X) \cdot n) \phi_i(X) = \int_{Bd(\Omega)} g(v(X) \cdot \phi_i(X))
+      
+        Where \Omega is the problem domain, g defines the flow into the problem domain, and \hat{u} 
+        is decided by the upwind scheme and n is the unit normal vector to the boundary between 
+        elements at X. Specifically, 
+        
+            \hat{u}(v(X) \cdot n) = { u^-(X)            (v \cdot n)(X) \geq 0     
+                                    { u^+(X)            (v \cdot n)(X) \leq 0 \hat{u} 
+        
+        flow into the problem domain. If we assume the solution is of the form 
+        
+            u(t, X) = \sum_{j = 1}^{N} \phi_j(X) U_j(t)
+        
+        then the weak form of the Klein-Gordon operator becomes:
+        
+            (\phi_i(X), \sum_{j = 1}^{N} \phi_j(X) U_j'(t)) 
+            + (- v(X) \cdot \phi_i(X), \sum_{j = 1}^{N} \phi_j(X) U_j(t)) 
+            + \sum_{j = 1}^N \int_{F} \hat{U_j(t)}(v(X) \cdot n(X)) \phi_i(X) 
+            = \int_{Bd(\Omega)} g(v(X) \cdot \eta)
+
+        Here, \hat{u} is decided by the upwind scheme and n is the unit normal vector to the 
+        boundary between elements at X. Specifically, 
+        
+            \hat{u}(v(X) \cdot n) = { u^-(X)            (v \cdot n)(X) \geq 0     
+                                    { u^+(X)            (v \cdot n)(X) \leq 0 
+
+        Where u^- is the approximation to the solution in "downstream" of the normal n(X) (the 
+        element we end up in if we move from the boundary, F, in the direction of n(X)). 
+        u^+ is the opposite element. This equation engenders the following system 
+        of equations:
+
+            M*U'(t) = K*U(t) + b
+
+        where M is the mass matrix, K is the stiffness matrix, U(t) is the vector whose j'th 
+        entry is U_j(t), and b is a vector. The entires of M, K, and b are defined as follows:
+        
+            M_{ij}  = (\phi_i(X), \phi_j(X))
+            K_{ij}  = (\phi_i(X), v(X) * \nabla \phi_j(X)) + \int_{F} \hat{U_j(t)}(v(X) \cdot n(X)) \phi_i(X) 
+            b_i     = \int_{Bd(\Omega)} g(v(X) \cdot \phi_i(X))
+                
+
+            
+        ---------------------------------------------------------------------------------------------
+        Arguments
+        ---------------------------------------------------------------------------------------------
+
+        fespace : mfem.FiniteElementSpace
+            The finite element space to use. 
+
+        velocity : velocity_coeff
+            A velocity_coeff object which defines "v(X)" in the equations above. 
+
+        g : inflow_coeff
+            A inflow_coeff object which defines the "g" term in the boundary condition. 
+        """ 
+
+        # Define the bilinear form corresponding to the term M in the weak form of the 
+        # Advection equation (see the docstring above).
+        M : mfem.ParBilinearForm = mfem.ParBilinearForm(fespace);                           # Initialize the bilinear form
+        M.AddDomainIntegrator(mfem.MassIntegrator());                                       # Sets m to the bilinear form B(\phi, \eta) = (\phi, \eta)
+
+        # Run the super class initializer. Note that fespace.GetTrueVSize() returns the number of 
+        # "true" unknown DOFs after removing those that are constrained by Dirichlet BCs.
+        mfem.PyTimeDependentOperator.__init__(self, M.Height())
+
+        # Define the bilinear form corresponding to the term K in the docstring above.
+        K : mfem.ParBilinearForm = mfem.ParBilinearForm(fespace);                           # Initialize the bilinear form.
+        K.AddDomainIntegrator(mfem.ConvectionIntegrator(velocity, -1.0));                   # Sets k to the bilinear form B(\phi, \eta) = (\phi, -v(X) * \nabla \eta)
+        K.AddInteriorFaceIntegrator(
+            mfem.TransposeIntegrator(mfem.DGTraceIntegrator(velocity, 1.0, -0.5)));         # Adds \int_{F} \hat{U_j(X)}(v(X) \cdot n) \phi_i(X) for faces between elements
+        K.AddBdrFaceIntegrator( 
+            mfem.TransposeIntegrator(mfem.DGTraceIntegrator(velocity, 1.0, -0.5)));         # Adds the term \int_{F} \hat{U_j(X)}(v(X) \cdot n) \phi_i(X) for boundary faces
+
+        # Define a linear form corresponding to the vector b in the docstring above. 
+        b : mfem.ParLinearForm = mfem.ParLinearForm(fespace);                               # Initialize the linear form.
+        b.AddBdrFaceIntegrator(mfem.BoundaryFlowIntegrator(g, velocity, -1.0, -0.5));       # Set b(\phi) = \int_{Bd(\Omega)} g(v(X) \cdot \phi(X))
+
+        # Assemble the forms.
+        M.Assemble();                                                                       # Computes B(\phi_i, \phi_j) = (\phi_i, \phi_j) for all i, j using the basis functions in fespace.
+        M.Finalize();                                                                       # completes any needed preprocessing.
+        skip_zeros = 0; 
+        K.Assemble(skip_zeros);                                                             # Computes B(\phi_i, \phi_j) = (\phi_i, -v(X) * \nabla \eta_j) for all i, j using the basis functions in fespace, eliminating any rows/columns corresponding to boundary conditions
+        K.Finalize(skip_zeros);                                                             # Completes any needed preprocessing (e.g. imposing Dirichlet zeros).
+        b.Assemble();                                                                       # Computes b(\phi_i) = \int_{Bd(\Omega)} g(v(X) \cdot \phi_i(X)) using the basis functions in fespace.
+
+        # Build matrices to hold M, K, and b in the expression above
+        self.Mmat : mfem._par.hypre.HypreParMatrix = M.ParallelAssemble();
+        self.Kmat : mfem._par.hypre.HypreParMatrix = K.ParallelAssemble();
+        self.bvec : mfem._par.hypre.HypreParVector = b.ParallelAssemble();
+
+        # Initialize the solver and preconditioner for Mult (see below).
+        self.M_prec     : mfem.HypreSmoother    = mfem.HypreSmoother();
+        self.M_prec.SetType(mfem.HypreSmoother.Jacobi);
+
+        self.M_solver   : mfem.CGSolver         = mfem.CGSolver(self.Mmat.GetComm());
+        self.M_solver.SetPreconditioner(self.M_prec);           # Tells the CG solver "the linear system I want to solve is Mx = b.
+        self.M_solver.SetOperator(self.Mmat);
+        self.M_solver.iterative_mode = False;                   
+        self.M_solver.SetRelTol(1e-9);                          # Says "stop when the relative residual is < 1e-9"
+        self.M_solver.SetAbsTol(0.0);                           # Says "no absolute‐residual stopping condition."
+        self.M_solver.SetMaxIter(100);                          # Sets the maximum number of cg iterations.
+        self.M_solver.SetPrintLevel(0);                         # Silences all CG output.
+
+        self.z          : mfem.Vector           = mfem.Vector(M.Height());
+
+
+
+    def Mult(self, x : mfem.Vector, y : mfem.Vector) -> None:
+        # Solve the following equation for U'(t).
+        #    M * U'(t) = -K(U(t)) + b
+
+        # Compute K*U(t), store the result to self.z. This sets self.z to K(U(t))
+        self.Kmat.Mult(x, self.z)
+
+        # Add b to K(U(t)).
+        self.z += self.bvec
+
+        # Solve for U'(t) in M U'(t) = K U(t) + b, store the result in y. 
+        self.M_solver.Mult(self.z, y)
+
+
+
+
+
 class FE_Evolution(mfem.PyTimeDependentOperator):
     def __init__(self, M, K, b):
         mfem.PyTimeDependentOperator.__init__(self, M.Height())
@@ -210,13 +349,6 @@ class FE_Evolution(mfem.PyTimeDependentOperator):
         self.M_solver.SetMaxIter(100)
         self.M_solver.SetPrintLevel(0)
 
-
-#    def EvalMult(self, x):
-#        if you want to impolement Mult in using python objects,
-#        such as numpy.. this needs to be implemented and don't
-#        overwrite Mult
-
-
     def Mult(self, x, y):
         self.K.Mult(x, self.z)
         self.z += self.b
@@ -228,31 +360,30 @@ class FE_Evolution(mfem.PyTimeDependentOperator):
 # Simulate function
 # -------------------------------------------------------------------------------------------------
 
-def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh", 
-                ser_ref_levels      : int       = 2,
-                par_ref_levels      : int       = 1,
-                order               : int       = 3,
-                ode_solver_type     : int       = 4,
-                t_final             : float     = 5.0,
-                time_step_size      : float     = 0.005,
-                w                   : float     = numpy.pi/2,
-                k                   : float     = 2.0,
-                serialization_steps : int       = 10,
-                num_positions       : int       = 1000,
-                VisIt               : bool      = True) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]:
-    """
-    This examples solves a time dependent nonlinear elasticity problem of the form 
+def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh", 
+                ser_ref_levels      : int           = 2,
+                par_ref_levels      : int           = 1,
+                order               : int           = 3,
+                ode_solver_type     : int           = 4,
+                t_final             : float         = 5.0,
+                time_step_size      : float         = 0.005,
+                Positions           : numpy.ndarray = None,
+                w                   : float         = numpy.pi/2,
+                k                   : float         = 2.0,
+                serialization_steps : int           = 10,
+                num_positions       : int           = 1000,
+                VisIt               : bool          = True) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]:
+    """     
+    This examples solves a time dependent advection problem of the form
 
-        (d/dt)u(X, t)   = -v(X) * grad(u(X, t)),
+        (d/dt)u(X, t)   = -v(X) * \nabla(u(X, t)),
     
-    where H is a hyperelastic model and S is a viscosity operator of Laplacian type. We also impose 
-    with the following initial conditions:
+    where v(X) is a velocity field. We also impose the following initial conditions:
         
-        u((x, y), 0)         =  sin(pi * x) * sin(pi * y)
+        u((x, y), 0)    =  sin(pi * omega * x~) * sin(pi * omega * y~)
 
-    See the c++ version of example 9 in the MFEM library for more detail.
-
-    We solve this PDE, then return the solution at each time step. 
+    See the "u0_coeff" class for more details. We solve this PDE, then return the solution at 
+    each time step. 
 
         
 
@@ -287,6 +418,11 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
 
     time_step_size : float 
         specifies the time step size.
+
+    Positions : numpy.ndarray, shape = (2, num_positions)
+        An optional argument. If None, we generate new positions from scratch. If it is not None, 
+        then Positions should be a 2D array whose i'th row holds the position of the i'th position 
+        at which we evaluate the solution.
 
     w : float 
         specifies the rotation speed of the velocity field (this becomes the gamma variable in 
@@ -329,6 +465,13 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
     bb_max : numpy.ndarray, shape = (2,)
         The maximum coordinates of the bounding box.
     """
+
+    if(Positions is not None):
+        assert(isinstance(Positions, numpy.ndarray));
+        assert(len(Positions.shape)     == 2);
+        assert(Positions.shape[0]       == 2);
+        assert(Positions.shape[1]       == num_positions);
+
 
     # ---------------------------------------------------------------------------------------------
     # 1. Setup 
@@ -402,15 +545,15 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
     #    polynomial order on the refined mesh.
 
     if(myid == 0): LOGGER.info("Setting up the FEM space.");
-    fec : mfem.DG_FECollection          = mfem.DG_FECollection(order, dim, mfem.BasisType.GaussLobatto);
-    fes : mfem.ParFiniteElementSpace    = mfem.ParFiniteElementSpace(pmesh, fec);
+    fec         : mfem.DG_FECollection          = mfem.DG_FECollection(order, dim, mfem.BasisType.GaussLobatto);
+    fespace     : mfem.ParFiniteElementSpace    = mfem.ParFiniteElementSpace(pmesh, fec);
 
-    global_vSize : int = fes.GlobalTrueVSize();
+    global_vSize : int = fespace.GlobalTrueVSize();
     if(myid == 0): LOGGER.info("Number of unknowns: " + str(global_vSize));
 
     # Setup the grid function to hold the initial condition.
     if(myid == 0): LOGGER.debug("Setting up the grid function to hold the initial condition.");
-    u_gf    : mfem.ParGridFunction                  = mfem.ParGridFunction(fes);
+    u_gf    : mfem.ParGridFunction                  = mfem.ParGridFunction(fespace);
 
 
 
@@ -429,49 +572,15 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 5. Set up and assemble the bilinear and linear forms corresponding to the DG discretization. 
-    # The DGTraceIntegrator involves integrals over mesh interior faces.
+    # 5. Set up positions at which we will evaluate the solution.
 
-    # Setup the bilinear forms.
-    LOGGER.debug("Setting up the bilinear forms.");
-    m : mfem.ParBilinearForm = mfem.ParBilinearForm(fes);
-    m.AddDomainIntegrator(mfem.MassIntegrator());
-    k : mfem.ParBilinearForm = mfem.ParBilinearForm(fes);
-    k.AddDomainIntegrator(mfem.ConvectionIntegrator(velocity, -1.0))
-    k.AddInteriorFaceIntegrator(
-        mfem.TransposeIntegrator(mfem.DGTraceIntegrator(velocity, 1.0, -0.5)))
-    k.AddBdrFaceIntegrator(
-        mfem.TransposeIntegrator(mfem.DGTraceIntegrator(velocity, 1.0, -0.5)))
-
-    # Setup the linear forms.
-    LOGGER.debug("Setting up the linear forms.");
-    b : mfem.ParLinearForm = mfem.ParLinearForm(fes);
-    b.AddBdrFaceIntegrator(
-        mfem.BoundaryFlowIntegrator(inflow, velocity, -1.0, -0.5))
-
-    # Assemble the forms.
-    LOGGER.debug("Assembling the bilinear forms.");
-    m.Assemble()
-    m.Finalize()
-    skip_zeros = 0
-    k.Assemble(skip_zeros)
-    k.Finalize(skip_zeros)
-    b.Assemble()
-
-    # Parallel assemble the forms.
-    LOGGER.debug("Parallel assembling the bilinear forms.");
-    M : mfem._par.hypre.HypreParMatrix = m.ParallelAssemble();
-    K : mfem._par.hypre.HypreParMatrix = k.ParallelAssemble();
-    B : mfem._par.hypre.HypreParMatrix = b.ParallelAssemble();
-
-
-
-    # ---------------------------------------------------------------------------------------------
-    # 6. Set up positions at which we will evaluate the solution.
-
-    if(myid == 0): LOGGER.info("Sampling %d positions in the mesh" % num_positions);
+    if(Positions is None):
+        if(myid == 0): LOGGER.info("Sampling %d positions in the mesh" % num_positions);
+    else:
+        if(myid == 0): LOGGER.info("Verifying the columns of Positions are in the problem domain");
 
     # Figure out the maximum/minimum x and y coordinates of the mesh.
+    bb_min, bb_max = mesh.GetBoundingBox();
     if(myid == 0): LOGGER.debug("The bounding box for the mesh is given by bb_min = %s, bb_max = %s" % (str(bb_min), str(bb_max)));
     x_min   : float = bb_min[0];
     x_max   : float = bb_max[0];
@@ -479,25 +588,29 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
     y_max   : float = bb_max[1];
     if(myid == 0): LOGGER.debug("x_min = %f, x_max = %f, y_min = %f, y_max = %f" % (x_min, x_max, y_min, y_max));
 
-    # Now, sample num_positions points evenly spaced between x_min and x_max, and y_min and y_max.
-    # If the mesh has an unusual shape, some of these points may lie outside the mesh. We sample 
-    # too many positions to account for this. Any points that lie outside the mesh will be ignored.
-    # We will sample new points if the number of points that lie inside the mesh is less than 
-    # num_positions.
+    # If we are sampling new points, then we sample num_positions points evenly spaced between 
+    # x_min and x_max, and y_min and y_max. If the mesh has an unusual shape, some of these points 
+    # may lie outside the mesh. We sample too many positions to account for this. Any points that 
+    # lie outside the mesh will be ignored. We will sample new points if the number of points that 
+    # lie inside the mesh is less than num_positions.
     Valid_Positions_List : list[numpy.ndarray] = [];
     Elements_List        : list[int]           = [];
     RefCoords_List       : list[numpy.ndarray] = [];
     num_valid_positions  : int = 0;
     
     while(num_valid_positions < num_positions):
-        if(myid == 0): LOGGER.debug("Sampling %d positions" % num_positions);
+        if(Positions is None):
+            if(myid == 0): LOGGER.debug("Sampling %d positions" % num_positions);
 
-        # Sample random x,y coordinates
-        x_positions : numpy.ndarray = numpy.random.uniform(x_min, x_max, num_positions);
-        y_positions : numpy.ndarray = numpy.random.uniform(y_min, y_max, num_positions);
+            # Sample random x,y coordinates
+            x_positions : numpy.ndarray = numpy.random.uniform(x_min, x_max, num_positions);
+            y_positions : numpy.ndarray = numpy.random.uniform(y_min, y_max, num_positions);
 
-        # Create array of points in format expected by FindPoints
-        points : numpy.ndarray = numpy.column_stack((x_positions, y_positions));
+            # Create array of points in format expected by FindPoints
+            points : numpy.ndarray = numpy.column_stack((x_positions, y_positions));
+
+        else:
+            points = Positions.T;
 
         # Find which points are in the mesh.
         count, elem_list, ref_coords = pmesh.FindPoints(points, warn = False, inv_trans = None);
@@ -516,18 +629,22 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
 
         # If we have not enough valid positions, sample again.
         if(num_valid_positions < num_positions):
-            if(myid == 0): LOGGER.debug("Not enough valid positions (current = %d, needed = %d), sampling again" % (num_valid_positions, num_positions));
+            if(Positions is not None):
+                if(myid == 0): LOGGER.error("%d/%d elements of Positions are invalid. Aborting" % (num_valid_positions, num_positions));
+                raise ValueError("Invalid Positions");
+            else:
+                if(myid == 0): LOGGER.debug("Not enough valid positions (current = %d, needed = %d), sampling again" % (num_valid_positions, num_positions));
 
     # Convert the lists to numpy arrays.
     Positions : numpy.ndarray = numpy.array(Valid_Positions_List).T;
     Elements  : numpy.ndarray = numpy.array(Elements_List);
     RefCoords : numpy.ndarray = numpy.array(RefCoords_List);
     if(myid == 0): LOGGER.debug("Positions has shape %s (dim = %d, num_positions = %d)" % (str(Positions.shape), dim, Positions.shape[1]));
-
+    
 
 
     # ---------------------------------------------------------------------------------------------
-    # 7. VisIt
+    # 6. VisIt
 
     # Setup VisIt visualization (if we are doing that)
     if (VisIt == True):
@@ -546,7 +663,7 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 8. Setup lists to store the solution + evaluate the initial solution at the positions.
+    # 7. Setup lists to store the solution + evaluate the initial solution at the positions.
 
     if(myid == 0): LOGGER.info("Setting up lists to store the time, solution at each time step.");
 
@@ -566,10 +683,10 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
 
 
     # --------------------------------------------------------------------------------------------- 
-    # 9.  Perform time-integration.
+    # 8.  Perform time-integration.
 
     # Setup the ODE solver.
-    adv : FE_Evolution = FE_Evolution(M, K, B);
+    adv = AdvectionOperator(fespace = fespace, velocity = velocity, g = inflow);
 
     # Initialize the ODE solver.
     ode_solver.Init(adv);
@@ -615,7 +732,7 @@ def Simulate(   meshfile_name       : str       = "periodic-hexagon.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 7. Package everything up for returning.
+    # 9. Package everything up for returning.
 
     # Turn times, displacements, velocities lists into arrays.
     Times       : numpy.ndarray = numpy.array(times_list,           dtype = numpy.float32);

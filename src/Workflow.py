@@ -16,6 +16,7 @@ import  yaml;
 import  argparse;
 import  logging;
 import  time;
+import  random;
 
 import  numpy;
 import  torch;
@@ -33,6 +34,9 @@ from    Initialize                  import  Initialize_Trainer;
 from    Sample                      import  Run_Samples, Update_Train_Space;
 from    Logging                     import  Initialize_Logger, Log_Dictionary;
 from    Plot                        import  Plot_Heatmap2d, Plot_GP2d;
+from    Animate                     import  make_solution_movies;
+from    SolveROMs                   import  average_rom;
+
 
 # Set up the logger.
 Initialize_Logger(level = logging.INFO);
@@ -142,8 +146,53 @@ def main():
                                                 latent_dynamics = latent_dynamics,
                                                 gp_list         = gp_list,
                                                 t_Test          = trainer.t_Test,
-                                                X_Test          = trainer.X_Test,
+                                                U_Test          = trainer.U_Test,
                                                 n_samples       = trainer.n_samples);
+
+    # If X_Positions has the form (2, N_Positions), then the solution must either be a 
+    # scalar field or a 2d vector field. Let's plot the solution.
+    if(len(physics.X_Positions.shape) == 2 and  physics.X_Positions.shape[0] == 2):
+        
+        # First, generate latent trajectories for a random element of the test set.
+        n_test      : int   = param_space.n_test();
+        i_random    : int   = random.randrange(0, n_test);
+        LOGGER.debug("Generating trajectory plot for testing combination %d: %s" % (i_random, param_space.test_space[i_random]));
+
+        # Generate the solution trajectory using the mean for the posterior distribution.
+        param_random    : numpy.ndarray         = param_space.test_space[i_random, :].reshape(1, -1);
+        t_random        : numpy.ndarray         = trainer.t_Test[i_random];
+        U_True          : list[torch.Tensor]    = trainer.U_Test[i_random];
+        Zi_mean_np      : list[numpy.ndarray]   = average_rom(  model           = model,            # n_IC element list whose j'th element has shape (n_t(i), n_z)
+                                                                physics         = physics, 
+                                                                latent_dynamics = latent_dynamics, 
+                                                                gp_list         = gp_list, 
+                                                                param_grid      = param_random, 
+                                                                t_Grid          = [t_random])[0];  
+
+        # Map Zi_mean_np to a tensor and then decode.
+        Zi_mean     : list[torch.Tensor]    = [];
+        for i in range(len(Zi_mean_np)):
+            Zi_mean.append(torch.Tensor(Zi_mean_np[i]));
+        U_Pred      : list[torch.Tensor]    = model.Decode(*Zi_mean);
+    
+        # Fetch the positions.
+        X           : numpy.ndarray         = physics.X_Positions;
+
+        # Make a movie for each derivative of the solution.
+        n_IC        : int                   = physics.n_IC;
+        for i in range(n_IC):
+            if(i == 0):
+                prefix : str = "U";
+            else:
+                prefix : str = "(Dt^%d)U" % i;
+
+            make_solution_movies(U_True         = U_True[i].detach().numpy(), 
+                                 U_Pred         = U_Pred[i].detach().numpy(), 
+                                 X              = X, 
+                                 T              = t_random,
+                                 fname_prefix   = prefix);
+    
+
 
     if(param_space.n_p == 2):
         n_IC : int = latent_dynamics.n_IC;
@@ -297,7 +346,7 @@ def step(trainer        : BayesianGLaSDI,
 
     elif (next_step is NextStep.RunSample):
         # Generate the trajectories for all new testing and training parameters. Append these new
-        # trajectories to trainer's X_Train and X_Test attributes.
+        # trajectories to trainer's U_Train and U_Test attributes.
         result, next_step = Run_Samples(trainer, config);
 
 
