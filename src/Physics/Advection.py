@@ -31,8 +31,20 @@ class Advection(Physics):
         """
         Initialize an Advection object. This class acts as a wrapper around the MFEM-based solver 
         implemented in ``advection.py`` within the ``PyMFEM`` sub-directory. The solver models 
-        the transport of a scalar quantity on a two dimensional domain.
+        the transport of a scalar quantity on a two dimensional domain. Specifically, it solves 
+        the following PDE:
 
+            (d/dt)u(t, X) + v(X) \cdot \nabla(u(t, X)) = 0
+
+        with the following initial condition:
+            
+            u(0, (x, y))    = exp(-k*(x~^2 + y~^2)) * sin(pi*w*x~) * sin(pi*w*y~))
+        
+        Here, x~ and y~ are rescaled coordinates. See the u0_coeff class in ./MFEM/acvetion.py for
+        details. 
+            
+
+            
         
         -------------------------------------------------------------------------------------------
         Arguments
@@ -44,7 +56,7 @@ class Advection(Physics):
         
         param_names : list[str], optional
             Names of parameters appearing in the initial condition. The advection model has two 
-            parameters w (which specifies the rotation speed of the velocity field) and k (which 
+            parameters g (which specifies the rotation speed of the velocity field) and w (which 
             specifies the frequency of peaks in the initial condition).
 
         
@@ -59,8 +71,8 @@ class Advection(Physics):
         # Run checks
         assert(isinstance(param_names, list));
         assert(len(param_names) == 2);
-        assert('k' in param_names);
         assert('w' in param_names);
+        assert('g' in param_names);
         assert('Advection' in config);
 
         # Call the super class initializer.
@@ -81,8 +93,8 @@ class Advection(Physics):
         self.n_IC           : int           = 1;
 
         # Make sure the config dictionary is actually for the advection model.
-        self.k_idx  : int   = self.param_names.index('k');
-        self.w_idx  : int   = self.param_names.index('w');        
+        self.w_idx  : int   = self.param_names.index('w');
+        self.g_idx  : int   = self.param_names.index('g');        
         return;
 
 
@@ -93,12 +105,9 @@ class Advection(Physics):
         ``self.X_Positions``. For the default problem considered in the MFEM example, the initial 
         state is defined by
              
-            u_0(x, t) = sin(pi * k * x) * sin(pi * k * y)
+            u(0, (x, y)) = exp(-w(x^2 + y^2)) * sin(pi*k*x) * sin(pi*k*y)
 
-        Here, k = param[0] and w = param[1] (w defines the governing equation but is unused in the 
-        initial condition).
-
-        Note: The initial condition is defined on the unit square.
+        Here, w  = 1.0 is fixed while k is derived from params. 
         
 
         -------------------------------------------------------------------------------------------
@@ -130,7 +139,8 @@ class Advection(Physics):
         X      : numpy.ndarray = 2.0 * (self.X_Positions - center.reshape(-1, 1)) / (self.bb_max - self.bb_min).reshape(-1, 1);
 
         # Evaluate the initial condition.
-        u0     : numpy.ndarray = numpy.sin(numpy.pi * param[self.k_idx] * X[0]) * numpy.sin(numpy.pi * param[self.k_idx] * X[1]);
+        k       : float         = 1.0;
+        u0     : numpy.ndarray  = numpy.exp(-k*numpy.sum(numpy.square(X), axis = 0)) * numpy.sin(numpy.pi * param[self.w_idx] * X[0]) * numpy.sin(numpy.pi * param[self.w_idx] * X[1]);
         return [u0.reshape(1, -1)];
 
 
@@ -168,7 +178,7 @@ class Advection(Physics):
         assert(param.shape[0]   == self.n_p);
 
         # Solve the PDE using the external MFEM script.
-        Sol, _, Times, _, _ = Simulate(k = param[self.k_idx], w = param[self.w_idx], Positions = self.X_Positions, VisIt = False);
+        Sol, _, Times, _, _ = Simulate(w = param[self.w_idx], g = param[self.g_idx], Positions = self.X_Positions, VisIt = False);
 
         X       : list[torch.Tensor] = [torch.Tensor(Sol)];
         t_Grid  : torch.Tensor       = torch.Tensor(Times);

@@ -94,8 +94,8 @@ class NonlinearElasticity(Physics):
         """
         Evaluates the initial condition at the points in self.X_Positions. In this case,
 
-        x((x, y), 0)        =   (x, y)
-        v((x, y), 0)        =   (-s*x^2, s*x^2 (8.0 - x))
+            d((x, y), 0)        = (x, y)
+            v((x, y), 0)        = (-s*x^2, s*x^2 (8.0 - x))
 
         Here, s = param[0].
 
