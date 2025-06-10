@@ -266,9 +266,9 @@ class TelegraphersOperator(mfem.SecondOrderTimeDependentOperator):
 
 class cInitialSolution(mfem.PyCoefficient):
     def EvalValue(self, X : numpy.ndarray) -> float:    
-        global decay;
+        global decay, freq;
         norm2 : float = numpy.sum(numpy.square(X));
-        return numpy.exp(-norm2*decay);
+        return numpy.exp(-decay*norm2) * numpy.sin(numpy.pi * freq * X[0]) * numpy.sin(numpy.pi * freq * X[1]);
 
 
 
@@ -287,18 +287,19 @@ class cInitialRate(mfem.PyCoefficient):
 # Simulate function
 # -------------------------------------------------------------------------------------------------
 
-def Simulate(mesh_file          : str           = "periodic-hexagon.mesh",
+def Simulate(mesh_file          : str           = "hexagon.mesh",
              ref_levels         : int           = 3,
              order              : int           = 2,
              ode_solver_type    : int           = 10,
              t_final            : float         = 5.0,
              dt                 : float         = 1e-2,
              Positions          : numpy.ndarray = None,
-             c                  : float         = 0.5,
-             alpha              : float         = 2.0,
-             k                  : float         = 20.0,
+             c                  : float         = 0.2,
+             alpha              : float         = 0.2,
+             k                  : float         = 3.0,
+             w                  : float         = 2.0,
              dirichlet          : bool          = True,
-             serialization_steps: int           = 5,
+             serialization_steps: int           = 2,
              num_positions      : int           = 1000,
              VisIt              : bool          = True) -> tuple[numpy.ndarray,numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """
@@ -308,7 +309,7 @@ def Simulate(mesh_file          : str           = "periodic-hexagon.mesh",
 
     We also impose the following initial conditions:
         
-        u(0, (x, y))        =  exp(-k*(x^2 + y^2))
+        u(0, (x, y))        = exp(-k*(x^2 + y^2)) * sin(pi*w*x) * sin(pi*w*y)
         (d/dt)u(0, (x, y))  = 0
 
     We solve this PDE, then return the solution at each time step. 
@@ -356,6 +357,9 @@ def Simulate(mesh_file          : str           = "periodic-hexagon.mesh",
     k : float
         specifies the decay rate of in the initial condition. 
 
+    w : float
+        A constant used to specify the freuqnecy of peaks in the initial condition.
+        
     dirichlet : bool
         Whether to use Dirichlet boundary conditions. If True, we fix the position of the nodes on the 
         boundary. If False, we allow the nodes to move freely on the boundary.
@@ -406,8 +410,9 @@ def Simulate(mesh_file          : str           = "periodic-hexagon.mesh",
     LOGGER.info("Setting up Telegrapher's equation simulation with MFEM.");
     
     # Set the global variable decay.
-    global decay;
-    decay = k;
+    global decay, freq;
+    decay   = k;
+    freq    = w;
 
     # Define the ODE solver used for time integration.
     LOGGER.debug("Defining the ODE solver.");
