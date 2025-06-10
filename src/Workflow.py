@@ -182,9 +182,9 @@ def main():
         n_IC        : int                   = physics.n_IC;
         for i in range(n_IC):
             if(i == 0):
-                prefix : str = "U";
+                prefix : str = "U_%s" % config["physics"]["type"];
             else:
-                prefix : str = "(Dt^%d)U" % i;
+                prefix : str = "(Dt^%d)U_%s" % (i, config["physics"]["type"]);
 
             make_solution_movies(U_True         = U_True[i].detach().numpy(), 
                                  U_Pred         = U_Pred[i].detach().numpy(), 
