@@ -284,7 +284,7 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
              w                  : float         = 2.0,
              k                  : float         = 1.0,
              dirichlet          : bool          = True,
-             serialization_steps: int           = 1,
+             serialization_steps: int           = 2,
              num_positions      : int           = 1000,
              VisIt              : bool          = True) -> tuple[numpy.ndarray,numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """

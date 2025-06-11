@@ -249,7 +249,7 @@ def Simulate(mesh_file          : str           = "star.mesh",
              c                  : float         = 0.5,
              k                  : float         = 20.0,
              dirichlet          : bool          = True,
-             serialization_steps: int           = 2,
+             serialization_steps: int           = 4,
              num_positions      : int           = 1000,
              VisIt              : bool          = True) -> tuple[numpy.ndarray,numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """
