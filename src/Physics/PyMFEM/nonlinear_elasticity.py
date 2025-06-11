@@ -287,7 +287,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
                 bulk_modulus    : float         = 5.0,
                 num_positions   : int           = 1000,
                 theta           : float         = 1.0,
-                serialize_steps : int           = 10, 
+                serialize_steps : int           = 5, 
                 VisIt           : bool          = True) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """
     This examples solves a time dependent nonlinear elasticity problem of the form 

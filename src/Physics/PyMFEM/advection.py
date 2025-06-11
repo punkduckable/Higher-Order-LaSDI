@@ -349,7 +349,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
                 g                   : float         = numpy.pi/2,
                 k                   : float         = 2.0,
                 w                   : float         = 1.0,
-                serialization_steps : int           = 10,
+                serialization_steps : int           = 2,
                 num_positions       : int           = 1000,
                 VisIt               : bool          = True) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """     
@@ -657,7 +657,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
 
         # Create the VisIt data collection.
         visit_dc_path   : str                       = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "Advection-fom");
-        visit_dc        : mfem.VisItDataCollection  = mfem.VisItDataCollection(visit_dc_path, mesh);
+        visit_dc        : mfem.VisItDataCollection  = mfem.VisItDataCollection(visit_dc_path, pmesh);
         visit_dc.SetPrecision(8);
 
         # Register U and its time derivative.

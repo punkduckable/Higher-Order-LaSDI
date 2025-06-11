@@ -253,7 +253,7 @@ class cInitialSolution(mfem.PyCoefficient):
     def EvalValue(self, X : numpy.ndarray) -> float:    
         global freq, decay;
         norm2 : float = numpy.sum(numpy.square(X));
-        return numpy.exp(-decay*norm2) * numpy.sin(numpy.pi * freq * X[0]) * numpy.sin(numpy.pi * freq * X[1])
+        return numpy.exp(-decay*norm2) * numpy.sin(numpy.pi * freq * X[0]) * numpy.sin(numpy.pi * freq * X[1]);
 
 
 
@@ -277,14 +277,14 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
              order              : int           = 2,
              ode_solver_type    : int           = 10,
              t_final            : float         = 5.0,
-             dt                 : float         = 1e-2,
+             dt                 : float         = .01,
              Positions          : numpy.ndarray = None,
              c                  : float         = 0.2,
              m                  : float         = 0.5,
              w                  : float         = 2.0,
              k                  : float         = 1.0,
              dirichlet          : bool          = True,
-             serialization_steps: int           = 5,
+             serialization_steps: int           = 1,
              num_positions      : int           = 1000,
              VisIt              : bool          = True) -> tuple[numpy.ndarray,numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """
