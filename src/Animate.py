@@ -98,44 +98,76 @@ def _scalar_anim(   data        : numpy.ndarray,
         The name of the file where we want to save the animation.
     """
 
+    # Setup.
     N_t         : int   = T.shape[0];
+    vmin                = data.min();
+    vmax                = data.max();
 
-    # Determine axis scales. 
-    vmin, vmax  = data.min(), data.max();
+    # Create a new figure and a single subplot (axes) object
+    fig, ax = plt.subplots();
 
-    # Make the plot.
-    fig, ax     = plt.subplots()
-    scat = ax.scatter(  X[0],
-                        X[1],
-                        c           =   data[0],
-                        cmap        =   cmap,
-                        vmin        =   vmin,
-                        vmax        =   vmax,
-                        s           =   15,
-                        linewidths  =   0.4,
-                        edgecolors  =   "k")
-    ax.set_aspect("equal")
-    cb = fig.colorbar(scat, ax = ax)
-    cb.set_label(title.replace("\n", " "))
-    time_text = ax.set_title(f"{title}\n$t$ = {T[0]:.3f}")
+    # Plot the initial frame of the data as a filled triangular contour plot
+    scat = ax.scatter(  X[0],                   # array of x coordinates for the triangulation
+                        X[1],                   # array of y coordinates for the triangulation
+                        c           = data[0],  # data values at those (x,y) positions for the first time slice
+                        cmap        = cmap,     # what colormap we use
+                        vmin        = vmin,     # lower bounds for color scaling
+                        vmax        = vmax,     # upper bounds for color scaling
+                        s           = 15);      # number of distinct colors used for plotting.
+
+    # Force the x and y axes to have equal scaling (so a unit in x equals a unit in y)
+    ax.set_aspect("equal");
+
+    # Add a colorbar to the figure, linked to the contour collection `scat`
+    cb = fig.colorbar(scat, ax = ax);
+
+    # Label the colorbar, using the provided title (strip out any newlines)
+    cb.set_label(title.replace("\n", " "));
+
+    # Set the initial title of the axes, including the time at T[0]
+    time_text = ax.set_title(f"{title}\n$t$ = {T[0]:.3f}");
 
     def update(frame: int):
-        scat.set_array(data[frame])
-        time_text.set_text(f"{title}\n$t$ = {T[frame]:.3f}")
-        return scat, time_text
+        """
+        This function will be called for each frame of the animation.
+        - frame : the current frame index (0 <= frame < N_t)
+        Inside, we:
+        1. Update the contour data to the new time slice
+        2. Update the title to display the new time
+        3. Return the updated artists so FuncAnimation knows what to redraw
+        """
+        
+        # Replace the contour array with the new frame's data
+        scat.set_array(data[frame]);
+        
+        # Update the title text to show the current time
+        time_text.set_text(f"{title}\n$t$ = {T[frame]:.3f}");
+        
+        return scat, time_text;
 
-    ani = FuncAnimation(fig, 
-                        update, 
-                        frames  = N_t, 
-                        blit    = True, 
-                        repeat  = False);
+    # Create the animation
+    ani = FuncAnimation(fig,                # the Figure object to animate
+                        update,             # the function that draws each frame
+                        frames  = N_t,      # total number of frames (N_t)
+                        blit    = True,     # whether to use blitting for faster animation (only redraws changed parts)
+                        repeat  = False);   # whether the animation should loop when it reaches the end
+
+    # Build the full output path by joining the directory and filename
     out_path = os.path.join(save_dir, fname);
+
+    # For debugging, print the path strings
     print(out_path);
     print(save_dir / fname);
-    ani.save(out_path, writer = FFMpegWriter(fps = fps, codec = "libx264"));
+
+    # Save the animation to a file using ffmpeg
+    ani.save(   out_path,
+                writer      =   FFMpegWriter(   fps = fps,              # frames per second
+                                                codec = "libx264"));    # video codec (libx264 for H.264)
+
+    # Close the figure to free up memory.
     plt.close(fig);
 
-    # All done!
+    # Return the path to the saved animation file
     return out_path;
 
 
@@ -206,46 +238,68 @@ def _vector_anim(   data        : numpy.ndarray,
     * As for `_scalar_anim`, FFmpeg must be available.
     """
     
-    # Arrow colour encodes vector magnitude (helps readability)
-    magnitudes          = numpy.linalg.norm(data, axis = 1);
-    vmin                = magnitudes.min();
-    vmax                = magnitudes.min();
+    # Setup.
     N_t         : int   = T.shape[0];
+    magnitudes          = numpy.linalg.norm(data, axis = 1);
+    vmin                = data.min();
+    vmax                = data.max();
 
     # Make a quiver plot using the data
     fig, ax = plt.subplots();
-    q = ax.quiver(  X[0],
-                    X[1],
-                    data[0, 0],
-                    data[0, 1],
-                    magnitudes[0],
-                    cmap            =   cmap,
-                    clim            =   (vmin, vmax),
-                    angles          =   "xy",
-                    scale_units     =   "xy",
-                    scale           =   1.0,
-                    width           =   0.007)
+
+    # Create a new figure and a single subplot (axes) object
+    q = ax.quiver(  X[0],                           # 1D array of x-coordinates for arrow bases
+                    X[1],                           # 1D array of y-coordinates for arrow bases
+                    data[0, 0],                     # 1D array of x-components of vectors at frame 0
+                    data[0, 1],                     # 1D array of y-components of vectors at frame 0
+                    magnitudes[0],                  # scalar values used to color each arrow by its length
+                    cmap            = cmap,         # colormap mapping magnitudes → colors
+                    clim            = (vmin, vmax), # set color limits
+                    angles          = "xy",         # interpret U/V in Cartesian coords
+                    scale_units     = "xy",         # scale arrow lengths in data units
+                    scale           = 1.0,          # no additional scaling
+                    width           = 0.007);       # arrow shaft width
     
+    # Keep x and y axes at the same scale so arrows aren’t distorted
     ax.set_aspect("equal");
+
+    # Add and label a colorbar for the magnitudes
     cb = fig.colorbar(q, ax = ax);
     cb.set_label("|value|");
+
+    # Set initial plot title including the time stamp for frame 0
     time_text = ax.set_title(f"{title}\n$t$ = {T[0]:.3f}");
 
     def update(frame: int):
+        """
+        Called once per frame by FuncAnimation.
+        - Updates arrow U, V components and colors for the given frame index.
+        - Updates the title text to reflect the current time.
+        """
+        
+        # Update the quiver vectors and their color values
         q.set_UVC(data[frame, 0], data[frame, 1], magnitudes[frame]);
+        
+        # Update the title with the new time
         time_text.set_text(f"{title}\n$t$ = {T[frame]:.3f}");
+        
         return q, time_text;
 
+    
     ani = FuncAnimation(fig, 
                         update, 
-                        frames  = N_t, 
-                        blit    = False, 
-                        repeat  = False);
+                        frames  = N_t,      # total frames to animate
+                        blit    = False,    # redraw entire frame each update
+                        repeat  = False);   # do not loop
+    
+    # Construct output filepath and save the animation using ffmpeg
     out_path = save_dir / fname;
     ani.save(out_path, writer = FFMpegWriter(fps = fps, codec = "libx264"));
+
+    # Close the figure to free memory
     plt.close(fig);
 
-    # All done!
+    # Return the path to the saved animation file
     return out_path;
 
 
@@ -377,7 +431,7 @@ def make_solution_movies(   U_True          : numpy.ndarray,
                                 X           = X,
                                 T           = T);
     
-    else:  # 2 components → vector field
+    else:  # 2 components: vector field  >:(   B)    >:U
         t_path = _vector_anim(  data        = U_True, 
                                 title       = "True vector field", 
                                 fname       = f"{fname_prefix}_True.mp4",
