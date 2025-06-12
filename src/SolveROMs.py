@@ -744,7 +744,7 @@ def Compute_Error_and_STD(  model           : torch.nn.Module,
             STD[i][1]       = numpy.std(V_Pred_i, axis = 1);
 
             max_STD[i, 0]   = STD[i][0].max();  
-            max_STD[i, 0]   = STD[i][1].max();  
+            max_STD[i, 1]   = STD[i][1].max();  
 
 
     # All done!

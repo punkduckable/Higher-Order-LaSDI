@@ -201,6 +201,7 @@ class BayesianGLaSDI:
 
         # Set up variables to aide checkpointing.
         self.best_coefs     : numpy.ndarray = None;             # The best coefficients from the iteration with lowest testing loss
+        self.best_epoch     : int           = -1;
         self.restart_iter   : int           = 0;                # Iteration number at the end of the last training period
         
         # All done!
@@ -699,6 +700,7 @@ class BayesianGLaSDI:
                 
                 # Update the best set of parameters. 
                 self.best_coefs : numpy.ndarray = coefs;
+                self.best_epoch : int           = iter;
                 best_loss       : float         = loss.item();
 
             self.timer.end("Backwards Pass");
@@ -744,16 +746,12 @@ class BayesianGLaSDI:
         # Now that we have completed another round of training, update the restart iteration.
         self.restart_iter += self.n_iter;
 
-        # Recover the model + coefficients which attained the lowest loss. If we recorded 
-        # our best loss in this round of training, then we replace the model's parameters 
-        # with those from the iteration that got the best loss. Otherwise, we use the current 
-        # set of coefficients and serialize the current model.
-        if ((self.best_coefs is not None) and (self.best_coefs.shape[0] == n_train)):
-            state_dict  = torch.load(self.path_checkpoint + '/' + 'checkpoint.pt');
-            self.model.load_state_dict(state_dict);
-        else:
-            self.best_coefs : numpy.ndarray = coefs;
-            torch.save(model_device.cpu().state_dict(), self.path_checkpoint + '/' + 'checkpoint.pt');
+        # Recover the model + coefficients which attained the lowest loss from this round of 
+        # training.
+        assert(self.best_coefs is not None);
+        LOGGER.info("Model attained it's best performance on epoch %d. Replacing model with the checkpoint from that epoch" % self.best_epoch);
+        state_dict  = torch.load(self.path_checkpoint + '/' + 'checkpoint.pt');
+        self.model.load_state_dict(state_dict);
 
         # Report timing information.
         self.timer.end("finalize");
