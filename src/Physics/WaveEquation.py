@@ -33,8 +33,13 @@ class WaveEquation(Physics):
         implemented in ``wave_equation.py`` within the ``PyMFEM`` sub-directory. The solver models 
         the propagation of a wave in a two dimensional domain:
 
-                (d^2/dt^2)u = c^2*laplacian(u)
+                (d^2/dt^2)u(t, X) = c^2*laplacian(u(t, X))
+
+        Subject to the following initial conditions:
         
+            u(0, (x, y))        = exp(-k*(x^2 + y^2))
+            (d/dt)u(0, (x, y))  = 0
+            
 
         
         -------------------------------------------------------------------------------------------
@@ -94,13 +99,13 @@ class WaveEquation(Physics):
         ``self.X_Positions``. For the default problem considered in the MFEM example, the initial 
         state is defined by
              
-            u_0(x, t) = exp(-k * |x|^2)
+            u(0, (x, y)) = exp(-k*(x^2 + y^2))
 
         Here, k = param[0] and c = param[1]. 
         
         Note 1: c is unused in the IC but defines the wave speed in wave equation, 
         
-                d^2u/dt^2 = c^2 * d^2u/dx^2,
+            d^2u/dt^2 = c^2 * d^2u/dx^2,
        
         Note 2: The initial condition is defined on a star-shaped domain.
         

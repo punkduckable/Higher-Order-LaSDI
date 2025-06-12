@@ -483,11 +483,20 @@ def Compute_Error_and_STD(  model           : torch.nn.Module,
                             gp_list         : list[GaussianProcessRegressor],
                             t_Test          : list[torch.Tensor],
                             U_Test          : list[list[torch.Tensor]],
-                            n_samples       : int) -> tuple[list[numpy.ndarray], list[numpy.ndarray]]:
+                            n_samples       : int) -> tuple[numpy.ndarray, numpy.ndarray, list[list[numpy.ndarray]], list[list[numpy.ndarray]]]:
     """
-    This function draws n_samples samples of the coefficients for each combination of the 
-    parameter values, then solves the corresponding latent dynamics and computes the std 
-    and maximum relative error between the FOM frames and their reconstruction.
+    This function compute the STD of each frame of each derivative of the FOM solution for
+    each combination of the parameter values. Likewise, we compute the relative error between the
+    mean predicted solution and the true solution for each frame of each derivative of the 
+    FOM solution for each combination of parameter values. We then find the maximum STD and 
+    relative error (across the frames and components) for each derivative for each combination
+    of parameter values.
+
+    Note: If X_1, ... , X_M \in \mathbb{R}^N are vectors then the STD of this collection is the 
+    vector whose i'th component holds the (sample) STD of {X_1[i], ... , X_M[i]}.
+    
+    Note: If X, Y in \mathbb{R}^N are vectors then we define the relative error of X relative to 
+    Y as the vector whose i'th component is given by (x_i - y_i)/||y||_{\inf}. 
 
 
     -----------------------------------------------------------------------------------------------
@@ -536,15 +545,26 @@ def Compute_Error_and_STD(  model           : torch.nn.Module,
     Returns
     -----------------------------------------------------------------------------------------------
 
-    max_rel_error, max_std
+    max_Rel_Error, max_STD, Rel_Error, STD
 
-    max_rel_error : list[numpy.ndarray], len = n_IC
-        i'th element is a 1d numpy.ndarray of shape (n_test) whose j'th element holds the maximum
-        relative error between a frame of the FOM solution's i'th derivative and its reconstruction
-        when the FOM uses the j'th combination of parameter values. 
+    max_Rel_Error : numpy.ndarray, shape = (n_Test, n_IC)
+        i, j element holds the maximum of rel_error[i][j] (see below).
     
-    max_std : list[numpy.ndarray], len = n_IC
-        i'th element is a 1d numpy.ndarray of shape (n_test) whose j'th element holds the std
+    max_STD : numpy.ndarray, shape = (n_Test, n_IC)
+        i, j element holds the maximum of STD[i][j] (see below).
+
+    Rel_Error : list[list[numpy.ndarray]], len = n_Test
+        i'th element is an n_IC element list whose j'th element is an numpy.ndarray whose shape 
+        matches that of U_Test[i][j]. The [k, ...] element of this array holds the relative error
+        between k'th frame of the mean prediction and for the j'th derivative of the FOM solution 
+        for the i'th combination of parameter values and U_Test[i][j][k, ...]. 
+    
+    STD : list[list[numpy.ndarray]], len = n_Test
+        i'th element is an n_IC element list whose j'th element is an numpy.ndarray whose shape
+        matches that of U_Test[i][j]. The [k, ...] element of this array holds the std (across 
+        the samples) of the k'th frame of the reconstruction of the j'th derivative of the FOM 
+        solution when we use the i'th combination of testing parameters.
+        
     """ 
 
     # Run checks
@@ -558,13 +578,13 @@ def Compute_Error_and_STD(  model           : torch.nn.Module,
     assert(isinstance(n_samples,        int));
     assert(len(gp_list)                 == latent_dynamics.n_coefs);
 
-    n_test  : int   = len(U_Test);   
-    assert(len(U_Test)                  == n_test);
-    assert(param_test.shape[0]          == n_test);
+    n_Test  : int   = len(U_Test);   
+    assert(len(U_Test)                  == n_Test);
+    assert(param_test.shape[0]          == n_Test);
 
     assert(isinstance(U_Test[0],        list));
     n_IC    : int                       = len(U_Test[0]);
-    for i in range(n_test):
+    for i in range(n_Test):
         assert(isinstance(U_Test[i],    list));
         assert(len(U_Test[i])           == n_IC);
     
@@ -577,110 +597,155 @@ def Compute_Error_and_STD(  model           : torch.nn.Module,
             assert(U_Test[i][j].shape[0]    == n_t_j);
     
 
+    # ---------------------------------------------------------------------------------------------
+    # Draw n_samples samples of the posterior distribution.
 
     # For each combination of parameter values in the testing set, sample the latent coefficients 
     # and solve the latent dynamics forward in time. 
-    LOGGER.info("Generating latent dynamics trajectories for %d samples of the coefficients for %d combinations of testing parameter" % (n_samples, n_test));
+    LOGGER.info("Generating latent dynamics trajectories for %d samples of the coefficients for %d combinations of testing parameter" % (n_samples, n_Test));
     Zis_samples     : list[list[numpy.ndarray]] = sample_roms(model, physics, latent_dynamics, gp_list, param_test, t_Test, n_samples);    # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_samples, n_z)
 
-    LOGGER.info("Generating latent dynamics trajectories using posterior distribution means for %d combinations of testing parameter" % (n_test));
+    LOGGER.info("Generating latent dynamics trajectories using posterior distribution means for %d combinations of testing parameter" % (n_Test));
     Zis_mean        : list[list[numpy.ndarray]] = average_rom(model, physics, latent_dynamics, gp_list, param_test, t_Test);               # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_z)
         
-    # Set up arrays to hold the average error between U_pred_mean and U_test, as well as the std of 
-    # the predictions.
-    max_rel_error   : list[numpy.ndarray]   = [];
-    max_std          : list[numpy.ndarray]   = [];
-    for d in range(n_IC):
-        max_rel_error.append(   numpy.zeros(n_test, dtype = numpy.float32));
-        max_std.append(         numpy.zeros(n_test, dtype = numpy.float32));
 
-    # Pass the samples through the decoder. The way this works depends on what kind of model we are using. 
-    if(isinstance(model, Autoencoder)):
-        # Decode the mean predictions.
-        U_pred_mean     : list[list[numpy.ndarray]]     = [];   # len = n_test. i'th element has len n_IC whose j'th element has shape (n_t_i, n_x).
-        for i in range(n_test):
-            U_pred_mean.append([model.Decode(torch.Tensor(Zis_mean[i][0])).detach().numpy()]);
+    # ---------------------------------------------------------------------------------------------
+    # Set up Rel_Error, STD, max_Rel_Error, and max_STD.
 
-        # Decode the Zis for each parameter and compute the corresponding STDs. 
-        for i in range(n_test):
-            # Decode the latent trajectories for each sample of the i'th combination of parameter values.
-            n_t_i           : int                   = len(t_Test[i]);
-            FOM_Frame_Shape : list[int]            = physics.Frame_Shape;
+    STD         : list[list[numpy.ndarray]] = [];           # (n_Test)
+    Rel_Error   : list[list[numpy.ndarray]] = [];           # (n_Test)
 
-            ith_U_Pred   : numpy.ndarray            = numpy.empty([n_t_i, n_samples] + FOM_Frame_Shape, dtype = numpy.float32);
+    for i in range(n_Test):
+        # Initialize lists for the i'th combination of parameter values
+        STD_i       : list[numpy.ndarray]   = [];
+        Rel_Error_i : list[numpy.ndarray]   = [];
 
-            for j in range(n_samples):
-                U_Pred_ij                           = model.Decode(torch.Tensor(Zis_samples[i][0][:, j, :]));
-                ith_U_Pred[:, j, ...]               = U_Pred_ij.detach().numpy();
+        # Build an array for each derivative of the FOM solution.
+        for j in range(n_IC):
+            STD_i.append(numpy.zeros_like(U_Test[i][j].numpy()));
+            Rel_Error_i.append(numpy.zeros_like(U_Test[i][j].numpy()));
 
-            # For each component of each frame of the reconstruction using the i'th combination of
-            # parameter values, we can compute the std (across the samples) of that component. We 
-            # find the frame which has the component that gives the largest STD. This becomes the
-            # i'th element of max_std[0].
-            max_std[0][i]                           = ith_U_Pred.std(axis = 1).max();
-        
-        
-
-    elif(isinstance(model, Autoencoder_Pair)):
-        # Decode the mean predictions.
-        U_pred_mean     : list[list[numpy.ndarray]]     = [];   # len = n_test. i'th element has len n_IC whose j'th element has shape (n_t_i, n_x).
-        for i in range(n_test):
-            Disp_Pred_mean_i, Vel_Pred_mean_i   = model.Decode(torch.Tensor(Zis_mean[i][0]), torch.Tensor(Zis_mean[i][1]));
-            U_pred_mean.append([Disp_Pred_mean_i.detach().numpy(), Vel_Pred_mean_i.detach().numpy()]);
-
-        # Decode the Zis for each parameter and compute the corresponding STDs. 
-        for i in range(n_test):
-            # Decode the latent trajectories for each sample of the i'th combination of parameter values.
-            n_t_i           : int                   = len(t_Test[i]);
-            FOM_Frame_Shape : list[int]             = physics.Frame_Shape;
-
-            ith_Disp_Pred   : numpy.ndarray         = numpy.empty([n_t_i, n_samples] + FOM_Frame_Shape, dtype = numpy.float32);
-            ith_Vel_Pred    : numpy.ndarray         = numpy.empty([n_t_i, n_samples] + FOM_Frame_Shape, dtype = numpy.float32);
-            for j in range(n_samples):
-                Disp_Pred_ij, Vel_Pred_ij           = model.Decode(Latent_Displacement  = torch.Tensor(Zis_samples[i][0][:, j, :]), 
-                                                                   Latent_Velocity      = torch.Tensor(Zis_samples[i][1][:, j, :]));
-                ith_Disp_Pred[:, j, ...]            = Disp_Pred_ij.detach().numpy();
-                ith_Vel_Pred[:, j, ...]             = Vel_Pred_ij.detach().numpy();
-
-            # For each component of each frame of the reconstruction using the i'th combination of
-            # parameter values, we can compute the std (across the samples) of that component. We 
-            # find the frame which has the component that gives the largest STD. This becomes the
-            # i'th element of max_std[0] and max_std[1].
-            max_std[0][i]                           = ith_Disp_Pred.std(axis = 1).max();
-            max_std[1][i]                           = ith_Vel_Pred.std(axis = 1).max();
-
-    else: 
-        raise TypeError("This function only works if mode is an Autoencoder or Autoencoder_Pair object. Got %s" % str(type(model)));
+        # Append the lists for the i'th combination to the overall lists.
+        STD.append(STD_i);
+        Rel_Error.append(Rel_Error_i);
     
-    # For each d \in {0, 1, ... , n_{IC} - 1} and k \in {1, 2, ... , n_test - 1}, find the mean 
-    # error between U_Pred_mean[d][k, ...] and U_test[d][k, ...].
-    for d in range(n_IC):
-        for k in range(n_test):        
-            # Extract the prediction, true values for the d'th component of the FOM solution when we use 
-            # the k'th parameter value. These have shape (n_t(k),) + physics.Frame_Shape.
-            kth_U_Pred_d            : numpy.ndarray = U_pred_mean[k][d];        # shape (n_t(k),) + physics.Frame_Shape
-            kth_U_Test_d            : numpy.ndarray = U_Test[k][d].numpy();     # shape (n_t(k),) + physics.Frame_Shape
-
-            # Reshape them to have shape  (n_t(k), -1) so that we can easily compute norms across the time axis.
-            n_t_k   : int   = kth_U_Pred_d.shape[0];
-            kth_U_Pred_d = kth_U_Pred_d.reshape(n_t_k, -1);
-            kth_U_Test_d = kth_U_Test_d.reshape(n_t_k, -1);
-
-            # For each compute the relative error between the predicted and true values of the d'th 
-            # derivative of the FOM solution at each time step when we use the k'th combination of 
-            # parameter values.
-            kth_Relative_Errors_d   : numpy.ndarray = numpy.linalg.norm(kth_U_Pred_d - kth_U_Test_d, axis = 1) / numpy.linalg.norm(kth_U_Test_d, axis = 1);
-            max_rel_error[d][k]                     = kth_Relative_Errors_d.max();
+    max_Rel_Error   = numpy.empty((n_Test, n_IC), dtype = numpy.float32);
+    max_STD         = numpy.empty((n_Test, n_IC), dtype = numpy.float32);
 
 
-    # Reshape each element of max_rel_error and max_std has shape (N(1), ... , N(n_p)), where N(k) 
-    # is the number of distinct values of the k'th parameter in the training set. The i(1), ... , i(n_p) 
-    # element of the d'th element of these lists will hold the mean error and std of the prediction of 
-    # the d'th derivative of the FOM solution when we use the i(k)'th value of the k'th parameter, 
-    # respectively.
-    for d in range(n_IC):
-        max_rel_error[d]    = max_rel_error[d].reshape(param_space.test_grid_sizes);
-        max_std[d]          = max_std[d].reshape(param_space.test_grid_sizes);
+
+    # ---------------------------------------------------------------------------------------------
+    # Compute std, max_std. 
+
+    if(isinstance(model, Autoencoder)):
+        for i in range(n_Test):
+            # -------------------------------------------------------------------------------------
+            # Relative Error
+
+            # Decode the mean latent trajectories for each combination of parameter values.
+            U_Pred_Mean_i   : numpy.ndarray = model.Decode(torch.Tensor(Zis_mean[i][0])).detach().numpy();
+
+            # Fetch the corresponding test predictions.
+            U_Test_i        : numpy.ndarray = U_Test[i][0].detach().numpy();        # (n_t_i, ...)
+
+            # Compute the Absolute Error.
+            Abs_Error_i     : numpy.ndarray = numpy.abs(U_Pred_Mean_i - U_Test_i);  # (n_t_i, ...)
+
+            # Compute the norm of each frame.
+            n_t_i           : int           = Abs_Error_i.shape[0];
+            Norms_i         : numpy.ndarray = numpy.linalg.norm(Abs_Error_i.reshape(n_t_i, -1), axis = 1);  # (n_t_i)
+
+            # Compute the relative error for the i'th combination of parameter values.
+            for k in range(n_t_i):
+                # Replace all zero frames with a norm of 1 to prevent division by 0.
+                if(Norms_i[k] == 0): 
+                    LOGGER.warning("Frame %d of the derivative %d of the FOM solution has for testing parameter combination %d is all zero" % (k, 0, i));
+                    Norms_i[k] = 1;
+            
+                Rel_Error[i][0][k, ...] = Abs_Error_i[k, ...]/Norms_i[k];
+            
+            # Now compute the corresponding element of max_Rel_Error
+            max_Rel_Error[i, 0] = Rel_Error[i][0].max();
+        
+
+            # -------------------------------------------------------------------------------------
+            # Standard Deviation
+
+            # Set up an array to hold the decoding of latent trajectory.
+            FOM_Frame_Shape : list[int]         = physics.Frame_Shape;
+            U_Pred_i        : numpy.ndarray     = numpy.empty([n_t_i, n_samples] + FOM_Frame_Shape, dtype = numpy.float32);
+
+            # Decode the latent trajectory for each sample.
+            for j in range(n_samples):
+                U_Pred_ij   : numpy.ndarray     = model.Decode(torch.Tensor(Zis_samples[i][0][:, j, :])).detach().numpy();
+                U_Pred_i[:, j, ...]             = U_Pred_ij;
+        
+            # Compute the STD across the sample axis.
+            STD[i][0]       = numpy.std(U_Pred_i, axis = 1);
+            max_STD[i, 0]   = STD[i][0].max();
+        
+    elif(isinstance(model, Autoencoder_Pair)):
+        for i in range(n_Test):
+            # -------------------------------------------------------------------------------------
+            # Relative Error
+
+            # Decode the mean latent trajectories for each combination of parameter values.
+            U_Pred_Mean_i   : list[torch.Tensor]    = model.Decode(torch.Tensor(Zis_mean[i][0]), torch.Tensor(Zis_mean[i][1]));
+            D_Pred_Mean_i   : numpy.ndarray         = U_Pred_Mean_i[0].detach().numpy();
+            V_Pred_Mean_i   : numpy.ndarray         = U_Pred_Mean_i[1].detach().numpy();
+
+            # Fetch the corresponding test predictions.
+            D_Test_i        : numpy.ndarray = U_Test[i][0].detach().numpy();            # (n_t_i, ...)
+            V_Test_i        : numpy.ndarray = U_Test[i][1].detach().numpy();            # (n_t_i, ...)
+
+            # Compute the Absolute Error.
+            D_Abs_Error_i   : numpy.ndarray = numpy.abs(D_Pred_Mean_i - D_Test_i);      # (n_t_i, ...)
+            V_Abs_Error_i   : numpy.ndarray = numpy.abs(V_Pred_Mean_i - V_Test_i);      # (n_t_i, ...)
+
+            # Compute the norm of each frame.
+            n_t_i           : int           = D_Abs_Error_i.shape[0];
+            D_Norms_i       : numpy.ndarray = numpy.linalg.norm(D_Abs_Error_i.reshape(n_t_i, -1), axis = 1);    # (n_t_i)
+            V_Norms_i       : numpy.ndarray = numpy.linalg.norm(V_Abs_Error_i.reshape(n_t_i, -1), axis = 1);
+
+            # Compute the relative error for the i'th combination of parameter values.
+            for k in range(n_t_i):
+                # Replace all zero frames with a norm of 1 to prevent division by 0.
+                if(D_Norms_i[k] == 0): 
+                    LOGGER.warning("Frame %d of the derivative %d of the FOM solution has for testing parameter combination %d is all zero" % (k, 0, i));
+                    D_Norms_i[k] = 1;
+                if(V_Norms_i[k] == 0): 
+                    LOGGER.warning("Frame %d of the derivative %d of the FOM solution has for testing parameter combination %d is all zero" % (k, 1, i));
+                    V_Norms_i[k] = 1;
+            
+                Rel_Error[i][0][k, ...] = D_Abs_Error_i[k, ...]/D_Norms_i[k];
+                Rel_Error[i][1][k, ...] = V_Abs_Error_i[k, ...]/V_Norms_i[k];
+            
+            # Now compute the corresponding element of max_Rel_Error
+            max_Rel_Error[i, 0] = Rel_Error[i][0].max();
+            max_Rel_Error[i, 1] = Rel_Error[i][1].max();
+
+
+            # -------------------------------------------------------------------------------------
+            # Standard Deviation
+
+            # Set up an array to hold the decoding of latent trajectory.
+            FOM_Frame_Shape : list[int]         = physics.Frame_Shape;
+            D_Pred_i        : numpy.ndarray     = numpy.empty([n_t_i, n_samples] + FOM_Frame_Shape, dtype = numpy.float32);
+            V_Pred_i        : numpy.ndarray     = numpy.empty([n_t_i, n_samples] + FOM_Frame_Shape, dtype = numpy.float32);
+
+            # Decode the latent trajectory for each sample.
+            for j in range(n_samples):
+                U_Pred_ij   : list[torch.Tensor]    = model.Decode(torch.Tensor(Zis_samples[i][0][:, j, :]), torch.Tensor(Zis_samples[i][1][:, j, :]));
+                D_Pred_i[:, j, ...]                 = U_Pred_ij[0].detach().numpy();
+                V_Pred_i[:, j, ...]                 = U_Pred_ij[1].detach().numpy();
+
+            # Compute the STD across the sample axis.
+            STD[i][0]       = numpy.std(D_Pred_i, axis = 1);
+            STD[i][1]       = numpy.std(V_Pred_i, axis = 1);
+
+            max_STD[i, 0]   = STD[i][0].max();  
+            max_STD[i, 1]   = STD[i][1].max();  
+
 
     # All done!
-    return max_rel_error, max_std;
+    return max_Rel_Error, max_STD, Rel_Error, STD;

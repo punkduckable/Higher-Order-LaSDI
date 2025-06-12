@@ -26,42 +26,41 @@ mfem_version : int = (mfem.MFEM_VERSION_MAJOR*100 + mfem.MFEM_VERSION_MINOR*10+
 
 
 # -------------------------------------------------------------------------------------------------
-# Wave Equation class
+# Telegraphers Operator class
 # -------------------------------------------------------------------------------------------------
 
-class WaveOperator(mfem.SecondOrderTimeDependentOperator):
-    def __init__(self, fespace : mfem.FiniteElementSpace, ess_bdr : mfem.intArray, speed : float) -> None:
+class TelegraphersOperator(mfem.SecondOrderTimeDependentOperator):
+    def __init__(self, fespace : mfem.FiniteElementSpace, ess_bdr : mfem.intArray, c : float, alpha : float) -> None:
         """
-        Initialize the WaveOperator. The strong form of the wave equation is:
+        This class implements the Telegraphers operator. The Telegraphers operator is given by:
+            
+              (d^2/dt^2)u(t, X) - c^2*laplacian(u(t, X)) + 2*\alpha*(d/dt)u(t, X) = 0
+            
+        where u is the scalar field, c is the wave speed, and m is the mass of the field. Let 
+        { \phi_i } be the basis functions in the finite element space fespace. Then the weak form 
+        of the Telegrapher's operator is given by:
 
-            (d^2/dt^2)u = c^2*laplacian(u)
+            (\phi_i, (d^2/dt^2) u) + c^2*(\nabla \phi_i, \nabla u) + 2*\alpha*(\phi_i, (d/dt) u) = 0
         
-        where c is the speed of the wave. Therefore, given basis functions { \phi_i }_{i = 1}^{N}, 
-        the weak form of the wave equation is:
+        If we assume the solution is of the form u(x, t) = \sum_{j = 1}^{N} \phi_j(x) U_j(t), then 
+        the weak form of the Telegrapher's operator becomes:
         
-            (\phi_i, (d^2/dt^2) u) + c^2*(grad(\phi_i), grad(u)) = 0
-        
-        If we assume that the solution is of the form u(x, t) = \sum_{j = 1}^{N} \phi_j(x) U_j(t),
-        then the weak form of the wave equation becomes:
-
-            (\phi_i, \sum_{j = 1}^{N} \phi_j(x) U_j''(t)) + c^2 * (\nabla \phi_i, \nabla \sum_{j = 1}^{N} \phi_j(x) U_j(t)) = 0
+            (\phi_i, \sum_{j = 1}^{N} \phi_j(x) U_j''(t)) + c^2*(\nabla \phi_i, \nabla \sum_{j = 1}^{N} \phi_j(x) U_j(t)) + 2*\alpha*(\phi_i, \sum_{j = 1}^{N} \phi_j(x) U_j'(t)) = 0
 
         This engenders the following system of equations:
 
-            M * U''(t) + K*U(t) = 0
+            M*U''(t) + K*U(t) + A*U'(t) = 0
 
-        where M is the mass matrix, K is the stiffness matrix, and U(t) is the vector whose j'th 
-        entry is U_j(t). The entries of the mass and stiffness matrices are given by:   
+        where U(t) is the vector whose j'th entry is U_j(t). Likewise, M, K, and A are the matrices
+        defined by  
 
-            M_{ij} = (\phi_i, \phi_j)
-            K_{ij} = c^2 * (\nabla \phi_i, \nabla \phi_j)
+            M_{ij}  = (\phi_i, \phi_j)
+            K_{ij}  = c^2*(\nabla \phi_i, \nabla \phi_j)
+            A_{ij}  = 2*\alpha*(\phi_i, \phi_j)
+
+        where \Omega is the domain.
         
-        Thus, to solve the wave equation with MFEM, we need two bilinear forms: one for the mass 
-        matrix and one for the stiffness matrix. The former needs to be a mass type bilinear form, 
-        and the latter needs to be a diffusion type bilinear form (See documentation for more 
-        details). 
 
-        
         ---------------------------------------------------------------------------------------------
         Arguments
         ---------------------------------------------------------------------------------------------
@@ -75,8 +74,12 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
             is essential (i.e., fixed). If the integer is 0, then the boundary condition is natural 
             (i.e., free).
 
-        speed : float   
-            The speed of the wave in the direction of the wave's propagation.
+        c : float   
+            The speed of the wave in the direction of the wave's propagation. See the Telegrapher's 
+            equation above.
+
+        alpha : float
+            The  of the field. See the Telegrapher's equation above.
         """ 
 
         # ---------------------------------------------------------------------------------------------
@@ -93,24 +96,24 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
         self.ess_tdof_list : mfem.intArray = mfem.intArray();
         fespace.GetEssentialTrueDofs(ess_bdr, self.ess_tdof_list);
 
-        # Define the bilinear form corresponding to the term K in the weak form of the wave
-        # equation (see the docstring above).
-        c2  : mfem.ConstantCoefficient  = mfem.ConstantCoefficient(speed*speed);        # c^2
+        # Define the bilinear form corresponding K in the weak form of the Telegrapher's equation 
+        # (see the docstring above).
+        c2  : mfem.ConstantCoefficient  = mfem.ConstantCoefficient(c*c);                # c^2
         K   : mfem.BilinearForm         = mfem.BilinearForm(fespace);                   # Initialize the bilinear form.
         K.AddDomainIntegrator(mfem.DiffusionIntegrator(c2));                            # Sets K to the bilinear form B(u, v) = c^2*(\nabla u, \nabla v)
         K.Assemble();                                                                   # Computes B(\phi_i, \phi_j) = c^2*(\nabla \phi_i, \nabla \phi_j) for all i, j using the basis functions in fespace.
 
         # Build a matrix to hold K.
         self.Kmat0 = mfem.SparseMatrix();                                               # Initialize a matrix to hold K. This one is used to build K without setting the essential boundary conditions.
+                                                                                        # We need this version when computing the RHS of the linear system (need products of full matrices before zeroing out the BCs).
         self.Kmat  = mfem.SparseMatrix();                                               # Initialize a matrix to hold K. This one is used to build K with the essential boundary conditions set.
-        dummy      = mfem.intArray();
-        K.FormSystemMatrix(dummy, self.Kmat0);                                          # This populates Kmat0 such that the i,j'th entry is B(\phi_i, \phi_j) = c^2*(\nabla \phi_i, \nabla \phi_j).
-                                                                                        # We need this version when we compute the RHS of the linear system (need products of full matrices before zeroing out the BCs)
+                                                                                        # We need this version when we compute T in ImplicitSolve.
+        Kdummy     = mfem.intArray();
+        K.FormSystemMatrix(Kdummy, self.Kmat0);                                         # This populates Kmat0 such that the i,j'th entry is B(\phi_i, \phi_j) = c^2*(\nabla \phi_i, \nabla \phi_j).
         K.FormSystemMatrix(self.ess_tdof_list, self.Kmat);                              # Does the same thing, but with all of the rows/columns corresponding to essential boundary conditions removed.
-                                                                                        # We need this version when we compute T in ImplicitSolve
 
-        # Definite the bilinear form corresponding to the term M in the weak form of the wave
-        # equation (see the docstring above).
+        # Define the bilinear form corresponding to M in the weak form of the Telegrapher's equation 
+        # (see the docstring above).
         M = mfem.BilinearForm(fespace);                                                 # Initialize the bilinear form.
         M.AddDomainIntegrator(mfem.MassIntegrator());                                   # Sets M to the bilinear form B(u, v) = (u, v)
         M.Assemble();                                                                   # Computes B(\phi_i, \phi_j) = (\phi_i, \phi_j) for all i, j using the basis functions in fespace.
@@ -119,16 +122,39 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
         self.Mmat = mfem.SparseMatrix();                                                # Initialize a matrix to hold M.
         M.FormSystemMatrix(self.ess_tdof_list, self.Mmat);                              # Build M, stores it in self.Mmat.
 
-        # In older MFEM (< 4.7.1), FormSystemMatrix(dummy, Kmat0) might not have worked earlier. 
-        # This block simply ensures that self.Kmat0 always exists, even in older releases.
-        if mfem_version < 471:
-            dummy       : mfem.intArray     = mfem.intArray();
-            self.Kmat0  : mfem.SparseMatrix = mfem.SparseMatrix();
-            K.FormSystemMatrix(dummy, self.Kmat0);
+        # Define the bilinear form corresponding to A in the weak form of the Telegrapher's equation 
+        # (see the docstring above).
+        two_alpha   : mfem.ConstantCoefficient  = mfem.ConstantCoefficient(2*alpha);    # 2 alpha
+        A           : mfem.BilinearForm         = mfem.BilinearForm(fespace);           # Initialize the bilinear form.
+        A.AddDomainIntegrator(mfem.MassIntegrator(two_alpha));                          # Sets A to the bilinear form B(u, v) = 2*\alpha*(u, v)
+        A.Assemble();                                                                   # Computes B(\phi_i, \phi_j) = 2\alpha*(\phi_i, \phi_j) for all i, j using the basis functions in fespace.
+        
+        # Build a matrix to hold A.
+        self.Amat0 = mfem.SparseMatrix();                                               # Initialize a matrix to hold A. This one is used to build K without setting the essential boundary conditions. 
+                                                                                        # We need this version when computing the RHS of the linear system (need products of full matrices before zeroing out the BCs).
+        self.Amat  = mfem.SparseMatrix();                                               # Initialize a matrix to hold A. This one is used to build A with the essential boundary conditions set. 
+                                                                                        # We need this version when we compute T in ImplicitSolve.
+        Adummy     = mfem.intArray();
+        A.FormSystemMatrix(Adummy, self.Amat0);                                         # Build A, stores it in self.Amat.
+        A.FormSystemMatrix(self.ess_tdof_list, self.Amat);                              #Does the same thing, but with all of the rows/columns corresponding to essential boundary conditions removed.
 
-        # Store the stiffness and mass matrices. 
-        self.K : mfem.BilinearForm = K;                                                 # i,j entry is c^2*(\nabla \phi_i, \nabla \phi_j)
-        self.M : mfem.BilinearForm = M;                                                 # i,j entry is (\phi_i, \phi_j) 
+        # In older MFEM (< 4.7.1), FormSystemMatrix(dummy, Kmat0) and/or 
+        # A.FormSystemMatrix(Adummy, self.Amat0) may not have worked earlier. 
+        # This block simply ensures that self.Kmat0 and self.Amat0 always exists, even in older 
+        # releases.
+        if mfem_version < 471:
+            Kdummy      : mfem.intArray     = mfem.intArray();
+            self.Kmat0  : mfem.SparseMatrix = mfem.SparseMatrix();
+            K.FormSystemMatrix(Kdummy, self.Kmat0);
+        
+            Adummy      : mfem.intArray     = mfem.intArray();
+            self.Amat0  : mfem.SparseMatrix = mfem.SparseMatrix();
+            A.FormSystemMatrix(Adummy, self.Amat0);
+            
+        # Store the K, M, and A matrices. 
+        self.K  : mfem.BilinearForm = K;                                                # i,j entry is c^2*(\nabla \phi_i, \nabla \phi_j)
+        self.M  : mfem.BilinearForm = M;                                                # i,j entry is (\phi_i, \phi_j) 
+        self.A  : mfem.BilinearForm = A;                                                # i,j entry is 2*alpha*(\phi_i, \phi_j)
 
         # Define the relative tolerance (for the solver)
         rel_tol : float = 1e-8;
@@ -138,8 +164,8 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
         # ---------------------------------------------------------------------------------------------
         # 2. Initialize the solvers and preconditioners.
 
-        # The wave solver needs to invert the mass matrix M many times (e.g., if you do a Newmark 
-        # or implicit‐time‐stepping scheme), and it also needs some solver/preconditioner for 
+        # The Telegrapher's solver needs to invert the mass matrix M many times (e.g., if you do a 
+        # Newmark or implicit‐time‐stepping scheme), and it also needs some solver/preconditioner for 
         # whatever "T" operator you will define later. (In many implementations, "T" is something 
         # like M + a*K or some combination used in the time‐update step.) In this code, we 
         # initialize two separate CG (Conjugate Gradient) solvers, each with a diagonal smoother 
@@ -175,57 +201,74 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
         
     def Mult(self, u : mfem.Vector, du_dt : mfem.Vector, d2udt2 : mfem.Vector) -> None:
         # Solve the following equation for U''(t):
-        #    M * U''(t) = -K(U(t))
+        #    M * U''(t) = -K*U(t) - A * U'(t)
 
-        # Compute the stiffness matrix, store in z.
-        z = mfem.Vector(u.Size());      # Initialize a vector to hold K(U(t)).
-        self.Kmat.Mult(u, z);           # Computes K(U(t)) and stores it in z.
+        # Compute -K*U(t) 
+        KU          = mfem.Vector(u.Size());        # Initialize a vector to hold K*U(t).
+        self.Kmat.Mult(u,       KU);                # Computes K*U(t) and stores it in KU.
+        KU.Neg();                                   # Now holds -K*U(t)    
 
-        # Multiplies z by -1. z now holds -K*U(t).
-        z.Neg();                    
+        # Compute -A*U'(t)
+        AdUdt       = mfem.Vector(u.Size());        # Initialize a vector to hold A*U'(t).
+        self.Amat.Mult(du_dt,   AdUdt);             # Computes A*U'(t) and stores it in adUdt.                
+        AdUdt.Neg();                                # Now holds -A*U'(t)
 
-        # Solves M* U''(t) = -K(U(t)) for U''(t).
-        self.M_solver.Mult(z, d2udt2);
+        # Add the two together
+        KU_AdUdt    = mfem.Vector(u.Size());    
+        mfem.add_vector(KU, 1.0, AdUdt, KU_AdUdt);  # KU_AdUdt = -K*U - A*U'(t) = KU + 1.0*AdUdt. 
+
+        # Solves M * U''(t) = -K*U(t) - A*U'(t) for U''(t).
+        self.M_solver.Mult(KU_AdUdt, d2udt2);
 
 
 
     def ImplicitSolve(self, fac0 : float, fac1 : float, u : mfem.Vector, dudt : mfem.Vector, d2udt2 : mfem.Vector) -> None:
         # Solve the following equation for U''(t):
-        #    (M + fac0*K) * U''(t) = -K*U(t)
+        #    (M + fac0*K + fac1*A)*U''(t) = -K*U(t) - A*U'(t)
 
         if self.T is None:
-            # Build the matrix T = M + fac0*K.
+            # Start with T = M + fac0*K.
             self.T : mfem.SparseMatrix = mfem.Add(1.0, self.Mmat, fac0, self.Kmat);
+
+            # Add fac1*A to get T = M + fac0*K + fac1*A
+            self.T.Add(fac1, self.Amat)
+            
+            # Hand T to the linear solver
             self.T_solver.SetOperator(self.T);
 
+        # Compute -K*U(t)
+        KU = mfem.Vector(u.Size());                 # Initialize a vector to hold -K*U(t).
+        self.Kmat0.Mult(u, KU);                     # Computes K*U(t), stores it in KU
+        KU.Neg();                                   # Now holds -K*U(t)
 
-        # Compute K(U(t)), store it in z.
-        z = mfem.Vector(u.Size());
-        self.Kmat0.Mult(u, z);              # Computes K(U(t)) and stores it in z.
+        # Compute -A U'(t)
+        AdUdt = mfem.Vector(u.Size());              # Initialize a vector to hold -A*U'(t)
+        self.Amat0.Mult(dudt, AdUdt);               # Computes A*U'(t), stores it in AdUdt
+        AdUdt.Neg();                                # Now holds -A*U'(t)
 
-        # Multiplies z by -1. z now holds -K*U(t).
-        z.Neg();
+        # Compute = -K*U(t) - M2 * U(t), store in z.
+        KU_AdUdt : mfem.Vector = mfem.Vector(u.Size());
+        mfem.add_vector(KU, 1.0, AdUdt, KU_AdUdt);  # KU_AdUdt = KU + AdUdt = -K*U(t) - A*U'(t)
 
         # Set the essential boundary conditions to zero. This is necessary because the stiffness 
         # matrix is not symmetric.
         for j in self.ess_tdof_list:
-            z[j] = 0.0
+            KU_AdUdt[j] = 0.0;
 
-        # Solves (M + fac0*K) * U''(t) = -K*U(t) for U''(t).
-        self.T_solver.Mult(z, d2udt2);
-
+        # Solves (M + fac0*K + fac1*A) * U''(t) = -K*U(t) - A*U'(t) for U''(t).
+        self.T_solver.Mult(KU_AdUdt, d2udt2);
+    
 
 
     def SetParameters(self, u):
         self.T = None
 
 
-
 class cInitialSolution(mfem.PyCoefficient):
     def EvalValue(self, X : numpy.ndarray) -> float:    
-        global decay;
+        global decay, freq;
         norm2 : float = numpy.sum(numpy.square(X));
-        return numpy.exp(-norm2*decay);
+        return numpy.exp(-decay*norm2) * numpy.sin(numpy.pi * freq * X[0]) * numpy.sin(numpy.pi * freq * X[1]);
 
 
 
@@ -235,38 +278,43 @@ class cInitialRate(mfem.PyCoefficient):
 
 
 
+
+
+
+
+
 # -------------------------------------------------------------------------------------------------
 # Simulate function
 # -------------------------------------------------------------------------------------------------
 
-def Simulate(mesh_file          : str           = "star.mesh",
-             ref_levels         : int           = 2,
+def Simulate(mesh_file          : str           = "hexagon.mesh",
+             ref_levels         : int           = 3,
              order              : int           = 2,
              ode_solver_type    : int           = 10,
-             t_final            : float         = 10.0,
+             t_final            : float         = 5.0,
              dt                 : float         = .01,
              Positions          : numpy.ndarray = None,
-             c                  : float         = 0.5,
-             k                  : float         = 20.0,
+             c                  : float         = 0.2,
+             alpha              : float         = 0.2,
+             k                  : float         = 3.0,
+             w                  : float         = 2.0,
              dirichlet          : bool          = True,
-             serialization_steps: int           = 4,
+             serialization_steps: int           = 1,
              num_positions      : int           = 1000,
              VisIt              : bool          = True) -> tuple[numpy.ndarray,numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """
-    Simulate the wave equation:
-            
-            (d^2/dt^2)u = c^2*laplacian(u)
+    Simulate the Telegraphers equation:
+
+        (d^2/dt^2)u(t, X) - c^2*laplacian(u(t, X)) + 2*\alpha*(d/dt)u(t, X) = 0
 
     We also impose the following initial conditions:
         
-        u(0, (x, y))        = exp(-k*(x^2 + y^2))
+        u(0, (x, y))        = exp(-k*(x^2 + y^2)) * sin(pi*w*x) * sin(pi*w*y)
         (d/dt)u(0, (x, y))  = 0
-
 
     We solve this PDE, then return the solution at each time step. 
 
-
-
+    
 
     ---------------------------------------------------------------------------------------------
     Arguments
@@ -290,22 +338,28 @@ def Simulate(mesh_file          : str           = "star.mesh",
         - 14: FoxGoodwinSolver
 
     t_final : float
-        The final time. We solve the wave equation from t = 0 to t = t_final.
+        The final time. We solve the Telegrapher's equation from t = 0 to t = t_final.
 
     dt : float
-        The time step. We solve the wave equation using a time-stepping scheme with time step dt.
-
+        The time step. We solve the Telegrapher's equation using a time-stepping scheme with time step dt.
+    
     Positions : numpy.ndarray, shape = (2, num_positions)
         An optional argument. If None, we generate new positions from scratch. If it is not None, 
         then Positions should be a 2D array whose i'th row holds the position of the i'th position 
         at which we evaluate the solution.
 
     c : float
-        The speed of the wave.  
+        The speed of the wave. See the Telegrapher's equation in the TelegraphersOperator class.
+
+    alpha : float
+        See the Telegrapher's equation in the TelegraphersOperator class.
 
     k : float
-        A coefficient used to define the initial solution: u(0, x) = exp(-k*|x|^2).
+        specifies the decay rate of in the initial condition. 
 
+    w : float
+        A constant used to specify the freuqnecy of peaks in the initial condition.
+        
     dirichlet : bool
         Whether to use Dirichlet boundary conditions. If True, we fix the position of the nodes on the 
         boundary. If False, we allow the nodes to move freely on the boundary.
@@ -322,7 +376,6 @@ def Simulate(mesh_file          : str           = "star.mesh",
         (visit.llnl.gov) can understand/work with.
         
 
-        
     ---------------------------------------------------------------------------------------------
     Returns
     ---------------------------------------------------------------------------------------------
@@ -343,21 +396,23 @@ def Simulate(mesh_file          : str           = "star.mesh",
     T : numpy.ndarray, shape = (Nt)
         i'th element holds the j'th time at which we evaluate the solution.
     """
-    
+
     if(Positions is not None):
         assert(isinstance(Positions, numpy.ndarray));
         assert(len(Positions.shape)     == 2);
         assert(Positions.shape[0]       == 2);
         assert(Positions.shape[1]       == num_positions);  
 
+
     # ---------------------------------------------------------------------------------------------
     # 1. Setup 
     
-    LOGGER.info("Setting up wave equation simulation with MFEM.");
+    LOGGER.info("Setting up Telegrapher's equation simulation with MFEM.");
     
     # Set the global variable decay.
-    global decay;
-    decay = k;
+    global decay, freq;
+    decay   = k;
+    freq    = w;
 
     # Define the ODE solver used for time integration.
     LOGGER.debug("Defining the ODE solver.");
@@ -399,7 +454,7 @@ def Simulate(mesh_file          : str           = "star.mesh",
     # 3. Define the finite element space and grid functions to hold the solution and the time 
     # derivative of the solution.
 
-    LOGGER.info("Defining the finite element space and grid functions to hold U and (d/dt)U.");
+    LOGGER.info("Defining the finite element space and grid functions to hold U(t) and U'(t).");
 
     LOGGER.debug("Defining the finite element space.");
     fe_coll : mfem.FiniteElementCollection  = mfem.H1_FECollection(order, dim);         # Basis functions
@@ -416,9 +471,9 @@ def Simulate(mesh_file          : str           = "star.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 4. Set the initial conditions for U and (d/dt)U.
+    # 4. Set the initial conditions for U(t) and U'(t).
 
-    LOGGER.info("Setting the initial conditions for U and (d/dt)U.");
+    LOGGER.info("Setting the initial conditions for U and U'(t).");
 
     # Set the initial conditions for u. All boundaries are considered natural.
     u_0     : mfem.PyCoefficient = cInitialSolution();
@@ -433,15 +488,15 @@ def Simulate(mesh_file          : str           = "star.mesh",
     # Project the initial conditions onto the finite element space.
     dudt_gf.ProjectCoefficient(dudt_0);
     dudt : mfem.Vector = mfem.Vector();     # Vector that will hold the true degrees of freedom (i.e., the 
-                                            # values of (d/dt)U at the nodes) for (d/dt)U.
+                                            # values of U'(t) at the nodes) for U'(t).
     dudt_gf.GetTrueDofs(dudt);
 
 
 
     # ---------------------------------------------------------------------------------------------
-    # 5. Initialize the wave operator.
+    # 5. Initialize the Telegrapher's operator.
 
-    LOGGER.info("Initializing the wave operator.");
+    LOGGER.info("Initializing the Telegrapher's operator.");
 
     # Define the essential boundary conditions. 
     ess_bdr : mfem.intArray = mfem.intArray();
@@ -455,8 +510,8 @@ def Simulate(mesh_file          : str           = "star.mesh",
         else:
             ess_bdr.Assign(0);
 
-    # Initialize the wave operator.
-    oper : WaveOperator = WaveOperator(fespace = fespace, ess_bdr = ess_bdr, speed = c);
+    # Initialize the Telegrapher's operator.
+    oper : TelegraphersOperator = TelegraphersOperator(fespace = fespace, ess_bdr = ess_bdr, c = c, alpha = alpha);
 
 
 
@@ -531,7 +586,6 @@ def Simulate(mesh_file          : str           = "star.mesh",
     LOGGER.debug("Positions has shape %s (dim = %d, num_positions = %d)" % (str(Positions.shape), dim, Positions.shape[1]));
 
 
-
     # ---------------------------------------------------------------------------------------------
     # 7. Setup lists to store the solution + evaluate the initial solution at the positions.
 
@@ -556,7 +610,6 @@ def Simulate(mesh_file          : str           = "star.mesh",
     velocities_list.append(     dudt_Positions_0);
 
 
-
     # ---------------------------------------------------------------------------------------------
     # 8. VisIt
 
@@ -568,7 +621,7 @@ def Simulate(mesh_file          : str           = "star.mesh",
         LOGGER.info("Setting up VisIt visualization.");
 
         # Create the VisIt data collection.
-        visit_dc_path   : str                       = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "WaveEq-fom");
+        visit_dc_path   : str                       = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "Telegraphers-fom");
         visit_dc        : mfem.VisItDataCollection  = mfem.VisItDataCollection(visit_dc_path, mesh);
         visit_dc.SetPrecision(8);
 
@@ -580,7 +633,6 @@ def Simulate(mesh_file          : str           = "star.mesh",
         visit_dc.SetCycle(0);
         visit_dc.SetTime(0.0);
         visit_dc.Save();
-
 
 
     # ---------------------------------------------------------------------------------------------
@@ -630,7 +682,7 @@ def Simulate(mesh_file          : str           = "star.mesh",
                 visit_dc.SetTime(t);
                 visit_dc.Save();
 
-        # Update the wave operator with the current solution.
+        # Update the Telegrapher's operator with the current solution.
         oper.SetParameters(u);
 
 

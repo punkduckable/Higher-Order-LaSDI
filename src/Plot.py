@@ -491,7 +491,7 @@ def Plot_GP2d(  p1_mesh         : numpy.ndarray,
     assert(isinstance(param_names, list));
     
     assert(isinstance(figsize, tuple));
-    assert(len(figsize) == 2);
+    assert(len(figsize)         == 2);
 
     assert(p1_mesh.ndim         == 2);
     assert(p2_mesh.ndim         == 2);

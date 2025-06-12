@@ -139,7 +139,7 @@ def main():
     gp_pred_mean    = gp_pred_mean.reshape(param_space.test_grid_sizes + [-1]);
     gp_pred_std     = gp_pred_std.reshape(param_space.test_grid_sizes + [-1]);
 
-    Max_Rel_Error, Max_STD  = SolveROMs.Compute_Error_and_STD(
+    Max_Rel_Error, Max_STD, _, _  = SolveROMs.Compute_Error_and_STD(
                                                 model           = model, 
                                                 physics         = physics,
                                                 param_space     = param_space,
@@ -151,7 +151,7 @@ def main():
 
     # If X_Positions has the form (2, N_Positions), then the solution must either be a 
     # scalar field or a 2d vector field. Let's plot the solution.
-    if(len(physics.X_Positions.shape) == 2 and  physics.X_Positions.shape[0] == 2):
+    if(False and len(physics.X_Positions.shape) == 2 and  physics.X_Positions.shape[0] == 2):
         
         # First, generate latent trajectories for a random element of the test set.
         n_test      : int   = param_space.n_test();
@@ -182,9 +182,9 @@ def main():
         n_IC        : int                   = physics.n_IC;
         for i in range(n_IC):
             if(i == 0):
-                prefix : str = "U";
+                prefix : str = "U_%s" % config["physics"]["type"];
             else:
-                prefix : str = "(Dt^%d)U" % i;
+                prefix : str = "(Dt^%d)U_%s" % (i, config["physics"]["type"]);
 
             make_solution_movies(U_True         = U_True[i].detach().numpy(), 
                                  U_Pred         = U_Pred[i].detach().numpy(), 
@@ -212,13 +212,13 @@ def main():
         # corresponding reconstructions.
         for d in range(n_IC):
             if(d == 0):
-                title   : str   = r'$max_{t} \frac{\left\| u_\bar{\xi}(t, x) - u(t, x) \right\|_x} {\| u(t, x)\|_x}$';
+                title   : str   = r'$\text{max}_{t, i} \frac{\left| u_{\bar{\xi}}(t, x_i) - u_{\text{True}}(t, x_i) \right|} {\text{max}_{j} \left| u_{\text{True}}(t, x_j) \right|}$';
             elif(d == 1):
-                title   : str   = r'$max_{t} \frac{\left\| \frac{d}{dt}u_{\bar{\xi}}(t, x) - \frac{d}{dt}u(t, x) \right\|_x}{\left\| \frac{d}{dt}u(t, x) \right\|_x}$';
+                title   : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d}{dt}u_{\bar{\xi}}(t, x_i) - \frac{d}{dt}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d}{dt}u_{\text{True}}(t, x_j) \right|}$';
             else:
-                title   : str   = r'$max_{t} \frac{\left\| \frac{d^{%d}}{dt^{%d}}u_{\bar{\xi}}(t, x) - \frac{d^{%d}}{dt^{%d}}u(t, x) \right\|_x}{\left\| \frac{d^{%d}}{dt^{%d}}u(t, x) \right\|_x}$' % (d, d, d, d, d, d);
+                title   : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d^{%d}}{dt^{%d}}u_{\bar{\xi}}(t, x_i) - \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_j) \right|}$' % (d, d, d, d, d, d);
 
-            Plot_Heatmap2d(     values          = Max_Rel_Error[d] * 100, 
+            Plot_Heatmap2d(     values          = Max_Rel_Error[:, d].reshape(param_space.test_grid_sizes) * 100, 
                                 param_space     = param_space,
                                 title           = title);
 
@@ -227,13 +227,13 @@ def main():
         # parameter values and derivative of the FOM solution.
         for d in range(n_IC):
             if(d == 0):
-                title   : str   = r'$max_{(t, x)} \sigma_{i \in \{1, \ldots, %d\}} \left[ u_{\xi^i} \right]$' % trainer.n_samples;
+                title   : str   = r'$\text{max}_{(t, i)} \sigma_{j \in \{1, \ldots, %d\}} \left[ u_{\xi(j)}(t, x_i) \right]$' % trainer.n_samples;
             elif(d == 1):
-                title   : str   = r'$max_{(t, x)} \sigma_{i \in \{ 1, \ldots, %d\}} \left[\frac{d}{dt}u_{\xi^i} \right]$' % (trainer.n_samples);
+                title   : str   = r'$\text{max}_{(t, i)} \sigma_{j \in \{ 1, \ldots, %d\}} \left[\frac{d}{dt}u_{\xi(j)}(t, x_i) \right]$' % (trainer.n_samples);
             else:
-                title   : str   = r'$max_{(t, x)} \sigma_{i \in \{ 1, \ldots, %d\}} \left[\frac{d^{%d}}{dt^{%d}}u_{\xi^i} \right]$' % (trainer.n_samples, d, d);
+                title   : str   = r'$\text{max}_{(t, i)} \sigma_{j \in \{ 1, \ldots, %d\}} \left[\frac{d^{%d}}{dt^{%d}}u_{\xi(j)}(t, x_i) \right]$' % (trainer.n_samples, d, d);
 
-            Plot_Heatmap2d( values          = Max_STD[d] * 100,
+            Plot_Heatmap2d( values          = Max_STD[:, d].reshape(param_space.test_grid_sizes) * 100,
                             param_space     = param_space, 
                             title           = title);
 

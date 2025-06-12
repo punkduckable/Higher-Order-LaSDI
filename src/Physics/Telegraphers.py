@@ -13,7 +13,7 @@ import  numpy;
 import  torch;
 
 from    Physics                         import  Physics;
-from    klein_gordan                    import  Simulate;
+from    telegraphers                    import  Simulate;
 
 
 LOGGER : logging.Logger = logging.getLogger(__name__);
@@ -24,20 +24,19 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # WaveEquation class
 # -------------------------------------------------------------------------------------------------
 
-class KleinGordan(Physics):
+class Telegraphers(Physics):
     def __init__(self, config : dict, param_names : list[str] = None) -> None:
         """
-        Initialize a KleinGordan object. This class acts as a wrapper around the MFEM-based solver 
-        implemented in ``klein_gordan.py`` within the ``PyMFEM`` sub-directory. We solve the 
-        Klein-Gordon equation in a two dimensional spatial domain:
+        Initialize a Telegraphers object. This class acts as a wrapper around the MFEM-based solver 
+        implemented in ``Telegraphers.py`` within the ``PyMFEM`` sub-directory. We solve the 
+        Telegrapher's equation in a two dimensional spatial domain:
 
-            (d^2/dt^2)u(t X) - c^2*laplacian(u(t, X)) + m^2*u(t, X) = 0
+            (d^2/dt^2)u(t, X) - c^2*laplacian(u(t, X)) + 2 \alpha (d/dt)u(t, X) = 0
 
-        with the following initial condition:
-
-            u(0, (x, y))        = exp(-k*(x^2 + y^2)) * sin(pi*w*x) * sin(pi*w*y)
-            (du/dt)(0, (x, y))  = 0
-
+        with the following initial conditions:
+        
+            u(0, (x, y))        = exp(-k*(x^2 + y^2))
+            (d/dt)u(0, (x, y))  = 0
 
                       
         
@@ -50,9 +49,9 @@ class KleinGordan(Physics):
             ``physics`` sub-dictionary of the configuration file.
         
         param_names : list[str], optional
-            Names of parameters appearing in the initial condition. This should include "w" and
-            "m" parameters. "w" controls the frequency of peaks in the IC (see initial_condition) 
-            while "m" impacts the governing equation (see above). "c" in the equation is fixed.
+            Names of parameters appearing in the initial condition. This should include "alpha" and
+            "w" parameters. "k" controls the rate of decay of the IC (see initial_condition) while
+            "alpha" impacts the governing equation (see above). "c" in the equation is fixed.
 
         
         
@@ -66,9 +65,9 @@ class KleinGordan(Physics):
         # Run checks
         assert(isinstance(param_names, list));
         assert(len(param_names) == 2);
-        assert('w' in param_names);
-        assert('m' in param_names);
-        assert('KleinGordan' in config);
+        assert('alpha'          in param_names);
+        assert('k'              in param_names);
+        assert('Telegraphers'   in config);
 
         # Call the super class initializer.
         super().__init__(config         = config,
@@ -85,9 +84,10 @@ class KleinGordan(Physics):
         self.spatial_dim    : int           = 2;
         self.n_IC           : int           = 2;
 
-        # Determine which index corresponds to c (wave speed) and which to k (decay rate in the IC).
-        self.w_idx  : int   = self.param_names.index('w');
-        self.m_idx  : int   = self.param_names.index('m');        
+        # Determine which index corresponds to k (frequency of peaks in the IC) and alpha (controls 
+        # the coefficient of the of the (d/dt)U term in the PDE).
+        self.alpha_idx  : int   = self.param_names.index('alpha');
+        self.k_idx      : int   = self.param_names.index('k');        
         return;
 
 
@@ -98,16 +98,8 @@ class KleinGordan(Physics):
         ``self.X_Positions``. For the default problem considered in the MFEM example, the initial 
         state is defined by
              
-            u(0, (x, y))        = exp(-k*(x^2 + y^2)) * sin(pi*w*x) * sin(pi*w*y)
-            (du/dt)(0, (x, y))  = 0
-
-        Here, w = param[w_idx] and c = param[c_kdx], and k = 1.0. 
-        
-        Note 1: c is unused in the IC but defines the wave speed in wave equation, 
-        
-            d^2u/dt^2 = c^2 * d^2u/dx^2,
-       
-        Note 2: The initial condition is defined on a star-shaped domain.
+            u(0, (x, y))        =  exp(-(x^2 + y^2)*k)
+            (d/dt)u(0, (x, y))  = 0
         
 
         -------------------------------------------------------------------------------------------
@@ -136,13 +128,10 @@ class KleinGordan(Physics):
         assert(self.X_Positions is not None);
 
         # Evaluate the initial condition.
-        k       : float             = 1.0;
-        w       : float             = param[self.w_idx];
-        X       : numpy.ndarray     = self.X_Positions;     # (2, N_x)
-        norm2   : float             = numpy.sum(numpy.square(X), axis = 0);
-        u0      : numpy.ndarray     = numpy.multiply(numpy.exp(-k*numpy.sum(numpy.square(X), axis = 0)), numpy.sin(numpy.pi*w*X[0, :]) * numpy.sin(numpy.pi*w*X[1, :])).reshape(1, -1);
-        v0      : numpy.ndarray     = numpy.zeros_like(u0);
-     
+        norm2 : float           = numpy.sum(numpy.square(self.X_Positions), axis = 0);
+        u0    : numpy.ndarray   = numpy.exp(-norm2*param[self.k_idx]).reshape(1, -1);
+        v0    : numpy.ndarray   = numpy.zeros_like(u0);
+        
         return [u0, v0];
 
 
@@ -181,7 +170,7 @@ class KleinGordan(Physics):
         assert(param.shape[0]   == self.n_p);
 
         # Solve the PDE using the external MFEM script.
-        U, DtU, _, Times = Simulate(w = param[self.w_idx], m = param[self.m_idx], Positions = self.X_Positions, VisIt = True);
+        U, DtU, _, Times = Simulate(k = param[self.k_idx], alpha = param[self.alpha_idx], Positions = self.X_Positions, VisIt = True);
 
         X       : list[torch.Tensor] = [torch.Tensor(U), torch.Tensor(DtU)];
         t_Grid  : torch.Tensor       = torch.Tensor(Times);

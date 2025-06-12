@@ -23,7 +23,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 
 
 # -------------------------------------------------------------------------------------------------
-# Advection classes
+# Coefficient
 # -------------------------------------------------------------------------------------------------
 
 class velocity_coeff(mfem.VectorPyCoefficient):
@@ -113,7 +113,7 @@ class u0_coeff(mfem.PyCoefficient):
         Initialize a u0_coeff object. This class is used to define the initial condition for the 
         advection problem. The initial condition is defined by
 
-            u_0(x, t) = sin(pi * omega * x~) * sin(pi * omega * y~)
+            u(0, (x, y)) = exp(-k*(x^2 + y^2)) * sin(pi*w*x~) * sin(pi*w*y~)
 
         where x~ and y~ are the non-dimensionalized coordinates. Specifically, 
 
@@ -142,7 +142,7 @@ class u0_coeff(mfem.PyCoefficient):
         """
         This function returns the initial condition for the advection problem:
 
-            u_0(x, t) = sin(pi * omega * x~) * sin(pi * omega * y~)
+            u_0(x, y) = exp(-k(x~^2 + y~^2))*sin(pi*w*x~) * sin(pi*w*y~)
 
         where x~ and y~ are the non-dimensionalized coordinates. Specifically, 
 
@@ -178,8 +178,11 @@ class u0_coeff(mfem.PyCoefficient):
         X : numpy.ndarray = 2 * (x - center) / (self.bb_max - self.bb_min);
         
         # Return the initial condition.
-        global omega;
-        return numpy.sin(numpy.pi * omega * X[0]) * numpy.sin(numpy.pi * omega * X[1])
+        global freq, decay;
+        norm2 : float = numpy.sum(numpy.square(X),);
+        return numpy.exp(-decay*norm2) * numpy.sin(numpy.pi * freq * X[0]) * numpy.sin(numpy.pi * freq * X[1])
+
+
 
 
 
@@ -189,6 +192,10 @@ class inflow_coeff(mfem.PyCoefficient):
         return 0
 
 
+
+# -------------------------------------------------------------------------------------------------
+# Advection Class
+# -------------------------------------------------------------------------------------------------
 
 class AdvectionOperator(mfem.PyTimeDependentOperator):
     def __init__(self, fespace : mfem.FiniteElementSpace, velocity : velocity_coeff, g : inflow_coeff) -> None:
@@ -327,35 +334,6 @@ class AdvectionOperator(mfem.PyTimeDependentOperator):
 
 
 
-
-
-class FE_Evolution(mfem.PyTimeDependentOperator):
-    def __init__(self, M, K, b):
-        mfem.PyTimeDependentOperator.__init__(self, M.Height())
-
-        self.M_prec     : mfem.HypreSmoother    = mfem.HypreSmoother();
-        self.M_solver   : mfem.CGSolver         = mfem.CGSolver(M.GetComm());
-        self.z          : mfem.Vector           = mfem.Vector(M.Height());
-
-        self.K          : mfem.HypreParMatrix   = K;
-        self.M          : mfem.HypreParMatrix   = M;
-        self.b          : mfem.HypreParVector   = b;
-        self.M_prec.SetType(mfem.HypreSmoother.Jacobi);
-        self.M_solver.SetPreconditioner(self.M_prec);
-        self.M_solver.SetOperator(M)
-        self.M_solver.iterative_mode = False
-        self.M_solver.SetRelTol(1e-9)
-        self.M_solver.SetAbsTol(0.0)
-        self.M_solver.SetMaxIter(100)
-        self.M_solver.SetPrintLevel(0)
-
-    def Mult(self, x, y):
-        self.K.Mult(x, self.z)
-        self.z += self.b
-        self.M_solver.Mult(self.z, y)
-
-
-
 # -------------------------------------------------------------------------------------------------
 # Simulate function
 # -------------------------------------------------------------------------------------------------
@@ -366,21 +344,23 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
                 order               : int           = 3,
                 ode_solver_type     : int           = 4,
                 t_final             : float         = 5.0,
-                time_step_size      : float         = 0.005,
+                time_step_size      : float         = 0.01,
                 Positions           : numpy.ndarray = None,
-                w                   : float         = numpy.pi/2,
+                g                   : float         = numpy.pi/2,
                 k                   : float         = 2.0,
-                serialization_steps : int           = 10,
+                w                   : float         = 1.0,
+                serialization_steps : int           = 2,
                 num_positions       : int           = 1000,
                 VisIt               : bool          = True) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """     
     This examples solves a time dependent advection problem of the form
 
-        (d/dt)u(X, t)   = -v(X) * \nabla(u(X, t)),
+        (d/dt)u(t, X) + v(X) * \nabla(u(t, X)) = 0,
     
     where v(X) is a velocity field. We also impose the following initial conditions:
         
-        u((x, y), 0)    =  sin(pi * omega * x~) * sin(pi * omega * y~)
+        u(0, (x, y))        =  exp(-k*(x~^2 + y~^2)) * sin(pi*w*x~) * sin(pi*w*y~)
+
 
     See the "u0_coeff" class for more details. We solve this PDE, then return the solution at 
     each time step. 
@@ -424,13 +404,17 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
         then Positions should be a 2D array whose i'th row holds the position of the i'th position 
         at which we evaluate the solution.
 
-    w : float 
+    g : float 
         specifies the rotation speed of the velocity field (this becomes the gamma variable in 
         the EvalValue method in the velocity_coeff class).
 
-    k : float
-        specifies the frequency of peaks in the initial condition (this becomes the omega variable 
+    w : float
+        specifies the frequency of peaks in the initial condition (this becomes the freq variable 
         in the EvalValue method in the u0_coeff class).
+
+    k : float
+        Specifies the rate of decay in the initial condition (this becomes the decay variable in 
+        the EvalValue method in the u0_coeff class).
 
     serialization_steps : int
         Specifies how frequently we serialize (save) and visualize the solution.
@@ -485,9 +469,10 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
 
     # Set variables.
     dt                  : float = time_step_size;
-    global gamma; global omega;
-    gamma = w;
-    omega = k;
+    global gamma; global freq; global decay;
+    gamma   = g;
+    freq    = w;
+    decay   = k;
 
     # Define the ODE solver used for time integration. Several explicit Runge-Kutta methods are 
     # available.
@@ -644,26 +629,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 6. VisIt
-
-    # Setup VisIt visualization (if we are doing that)
-    if (VisIt == True):
-        if(myid == 0): LOGGER.info("Setting up VisIt visualization.");
-
-        dc_path : str   = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "nlelast-fom");
-        dc              = mfem.VisItDataCollection(dc_path, pmesh);
-        dc.SetPrecision(8);
-        # // To save the mesh using MFEM's parallel mesh format:
-        # // dc->SetFormat(DataCollection::PARALLEL_FORMAT);
-        dc.RegisterField("u",    u_gf);
-        dc.SetCycle(0);
-        dc.SetTime(0.0);
-        dc.Save();
-
-
-
-    # ---------------------------------------------------------------------------------------------
-    # 7. Setup lists to store the solution + evaluate the initial solution at the positions.
+    # 6. Setup lists to store the solution + evaluate the initial solution at the positions.
 
     if(myid == 0): LOGGER.info("Setting up lists to store the time, solution at each time step.");
 
@@ -679,6 +645,28 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
     # Append the initial solution and time to their corresponding lists.
     times_list.append(0);
     u_list.append(  u_Positions_0);
+
+
+
+    # ---------------------------------------------------------------------------------------------
+    # 7. VisIt
+
+    # Setup VisIt visualization (if we are doing that)
+    if (VisIt == True):
+        LOGGER.info("Setting up VisIt visualization.");
+
+        # Create the VisIt data collection.
+        visit_dc_path   : str                       = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "Advection-fom");
+        visit_dc        : mfem.VisItDataCollection  = mfem.VisItDataCollection(visit_dc_path, pmesh);
+        visit_dc.SetPrecision(8);
+
+        # Register U and its time derivative.
+        visit_dc.RegisterField("U",    u_gf);
+
+        # Set the cycle and time.
+        visit_dc.SetCycle(0);
+        visit_dc.SetTime(0.0);
+        visit_dc.Save();
 
 
 
@@ -725,9 +713,9 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
             # If visualizing, Save the solution to the VisIt object.
             if(VisIt):
                 # Save the mesh, solution, and time.
-                dc.SetCycle(ti);
-                dc.SetTime(t);
-                dc.Save();
+                visit_dc.SetCycle(ti);
+                visit_dc.SetTime(t);
+                visit_dc.Save();
 
 
 

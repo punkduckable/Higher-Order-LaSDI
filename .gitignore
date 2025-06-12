@@ -9,3 +9,5 @@ examples/checkpoint
 src/Physics/PyMFEM/VisIt
 build
 docs/build
+*.mp4
+*.png
