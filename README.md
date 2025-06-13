@@ -28,6 +28,9 @@ The code has been tested with the following packages:
 - matplotlib (3.9.2)
 - seaborn (0.13.2)
 - ffmpeg (7.0.1)
+- mfem (4.7.0.1)
+- cmake (3.28.1)
+- mpi4py (4.0.3)
 
 To run the non-linear elasticity example you will also need `PyMFEM` with parallel support.
 
