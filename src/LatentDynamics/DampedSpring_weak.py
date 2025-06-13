@@ -26,10 +26,10 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 
 
 # -------------------------------------------------------------------------------------------------
-# DampedSpring class
+# DampedSpring_weak class
 # -------------------------------------------------------------------------------------------------
 
-class DampedSpring(LatentDynamics):
+class DampedSpring_weak(LatentDynamics):
     def __init__(   self, 
                     n_z             :   int, 
                     coef_norm_order :   str | float, 
