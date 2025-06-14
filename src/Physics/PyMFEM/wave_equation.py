@@ -243,13 +243,13 @@ def Simulate(mesh_file          : str           = "star.mesh",
              ref_levels         : int           = 2,
              order              : int           = 2,
              ode_solver_type    : int           = 10,
-             t_final            : float         = 10.0,
+             t_final            : float         = 5.0,
              dt                 : float         = .01,
              Positions          : numpy.ndarray = None,
-             c                  : float         = 0.5,
+             c                  : float         = 0.1,
              k                  : float         = 20.0,
              dirichlet          : bool          = True,
-             serialization_steps: int           = 4,
+             serialization_steps: int           = 1,
              num_positions      : int           = 1000,
              VisIt              : bool          = True) -> tuple[numpy.ndarray,numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """
@@ -304,7 +304,7 @@ def Simulate(mesh_file          : str           = "star.mesh",
         The speed of the wave.  
 
     k : float
-        A coefficient used to define the initial solution: u(0, x) = exp(-k*|x|^2).
+        A coefficient used to define the initial solution: u(0, (x, y)) = exp(-k*(x^2 + y^2)).
 
     dirichlet : bool
         Whether to use Dirichlet boundary conditions. If True, we fix the position of the nodes on the 
