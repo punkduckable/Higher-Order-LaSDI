@@ -199,8 +199,8 @@ class BayesianGLaSDI:
         else:
             self.device = 'cpu';
 
-        # Set up variables to aide checkpointing.
-        self.best_coefs     : numpy.ndarray = None;             # The best coefficients from the iteration with lowest testing loss
+        # Set up variables to aide checkpointing
+        self.best_coefs     : numpy.ndarray = None;             # Coefficients from the iteration with lowest testing loss. Shape = (n_train, n_coefs).
         self.best_epoch     : int           = -1;
         self.restart_iter   : int           = 0;                # Iteration number at the end of the last training period
         
@@ -695,11 +695,11 @@ class BayesianGLaSDI:
             # Check if we hit a new minimum loss. If so, make a checkpoint, record the loss and 
             # the iteration number. 
             if loss.item() < best_loss:
-                LOGGER.debug("Got a new lowest loss (%f) on epoch %d" % (loss.item(), iter));
+                LOGGER.info("Got a new lowest loss (%f) on epoch %d" % (loss.item(), iter));
                 torch.save(model_device.cpu().state_dict(), self.path_checkpoint + '/' + 'checkpoint.pt');
                 
                 # Update the best set of parameters. 
-                self.best_coefs : numpy.ndarray = coefs;
+                self.best_coefs : numpy.ndarray = coefs.copy();             # Shape = (n_train, n_coefs).
                 self.best_epoch : int           = iter;
                 best_loss       : float         = loss.item();
 
@@ -972,7 +972,7 @@ class BayesianGLaSDI:
         assert(len(self.U_Test)             == self.param_space.n_test());
         assert(self.best_coefs.shape[0]     == self.param_space.n_train());
 
-        coefs : numpy.ndarray = self.best_coefs;
+        coefs : numpy.ndarray = self.best_coefs;                        # Shape = (n_train, n_coefs).
         LOGGER.info('\n~~~~~~~ Finding New Point ~~~~~~~');
 
         # Move the model to the cpu (this is where all the GP stuff happens) and load the model 
@@ -1095,7 +1095,7 @@ class BayesianGLaSDI:
                  'lr'               : self.lr, 
                  'n_iter'           : self.n_iter,
                  'n_samples'        : self.n_samples, 
-                 'best_coefs'       : self.best_coefs, 
+                 'best_coefs'       : self.best_coefs,                      # Shape = (n_train, n_coefs).
                  'max_iter'         : self.max_iter,
                  'max_iter'         : self.max_iter, 
                  'weights'          : self.loss_weights, 
@@ -1136,7 +1136,7 @@ class BayesianGLaSDI:
         self.t_Train        : list[numpy.ndarray]       = dict_['t_Train'];
         self.t_Test         : list[numpy.ndarray]       = dict_['t_Test'];
 
-        self.best_coefs     : numpy.ndarray             = dict_['best_coefs'];
+        self.best_coefs     : numpy.ndarray             = dict_['best_coefs'];          # Shape = (n_train, n_coefs).
         self.restart_iter   : int                       = dict_['restart_iter'];
 
         # Load the timer / optimizer. 

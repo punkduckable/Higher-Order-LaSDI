@@ -142,7 +142,7 @@ class MultiLayerPerceptron(torch.nn.Module):
                     % (str(self.widths), self.activation, str(self.reshape_shape), self.reshape_index));
 
         # All done!
-        return
+        return;
     
 
 
@@ -221,8 +221,8 @@ class MultiLayerPerceptron(torch.nn.Module):
 
         # TODO(kevin): support other initializations?
         for layer in self.layers:
-            torch.nn.init.xavier_uniform_(layer.weight)
-            torch.nn.init.zeros_(layer.bias)
+            torch.nn.init.xavier_uniform_(layer.weight);
+            torch.nn.init.zeros_(layer.bias);
         
         # All done!
         return
