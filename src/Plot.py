@@ -626,7 +626,8 @@ def Plot_GP2d(  p1_mesh         : numpy.ndarray,
 def Plot_Heatmap2d( values          : numpy.ndarray, 
                     param_space     : ParameterSpace,
                     figsize         : tuple[int]    = (10, 10), 
-                    title           : str           = '') -> None:
+                    title           : str           = '',
+                    save_file_name  : str           = "Heatmap") -> None:
     """
     This plot makes a "heatmap". Specifically, we assume that values represents the samples of 
     a function which depends on two paramaters, p1 and p2 (the two variables in the 
@@ -658,6 +659,9 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
 
     title : str
         The plot title.
+
+    save_file_name : str
+        The name of the file in which we want to save the figure in the Figures directiory.
     
 
 
@@ -751,7 +755,11 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     ax.set_xlabel(param_names[0], fontsize = 15);
     ax.set_ylabel(param_names[1], fontsize = 15, rotation = 0);
     ax.set_title(title, fontsize = 25);
-    plt.show();
 
-    # All done!
+    # Save the figure.
+    save_file_path : str = os.path.join(os.path.join(os.path.pardir, "Figures"), save_file_name);
+    fig.savefig(save_file_path);
+    
+    # Show the plot and then return!
+    plt.show();
     return;
