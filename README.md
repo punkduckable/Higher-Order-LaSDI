@@ -53,22 +53,18 @@ Below is a tutorial on how to install PyMFEM in a way that (hopefully) avoids mo
 
 First, create a new conda environment to install PyMFEM:
 
-$$
-\begin{aligned}
+$$\begin{aligned}
 &\text{conda create --name=PyMFEM python=3.10} \\
-&\test{conda activate PyLASDI} 
-\end{aligned}
-$$
+&\text{conda activate PyLASDI} 
+\end{aligned}$$
 
 Next, clone the PyMFEM repository (below is the SSH version) and checkout the version 4.7.0.1 release: 
 
-$$
-\begin{aligned}
+$$\begin{aligned}
 &\text{git clone git@github.com:mfem/PyMFEM.git} \\
 &\text{cd ./PyMFEM/} \\
 &\text{git checkout v_4.7.0.1}
-\end{aligned}
-$$
+\end{aligned}$$
 
 Next, install the package's dependencies. This will probably install the wrong version of a few packages; we we will fix those issues next. 
 
@@ -76,12 +72,10 @@ $$\text{pip install -r requirements.txt}$$
 
 PyMFEM (at least version 4.7.0.1) is not compatible with cmake 4.0 and beyond. Thus, we need to install an earlier version of cmake:
 
-$$
-\begin{aligned}
+$$\begin{aligned}
 &\text{pip uninstall cmake} \\
-&\text{pip install cmake==3.28.} 
-\end{aligned}
-$$
+&\text{pip install cmake==3.28} 
+\end{aligned}$$
 
 Next, you need to install MPI to get MFEM running in parallel. On a mac (with homebrew), you can do the following:
 
