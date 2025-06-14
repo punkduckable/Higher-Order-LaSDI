@@ -63,7 +63,7 @@ Next, clone the PyMFEM repository (below is the SSH version) and checkout the ve
 $$\begin{aligned}
 &\text{git clone git@github.com:mfem/PyMFEM.git} \\
 &\text{cd ./PyMFEM/} \\
-&\text{git checkout v_4.7.0.1}
+&\text{git checkout v\_4.7.0.1}
 \end{aligned}$$
 
 Next, install the package's dependencies. This will probably install the wrong version of a few packages; we we will fix those issues next. 
