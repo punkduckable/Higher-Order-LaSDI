@@ -28,7 +28,7 @@ from    Explicit            import  Explicit;
 from    NonlinearElasticity import  NonlinearElasticity
 from    Advection           import  Advection;
 from    WaveEquation        import  WaveEquation;
-from    KleinGordan         import  KleinGordan;
+from    KleinGordon         import  KleinGordon;
 from    Telegraphers        import  Telegraphers;
 
 # Set up logger.
@@ -53,7 +53,7 @@ physics_dict    =  {'Burgers'               : Burgers.Burgers,
                     'Advection'             : Advection,
                     'NonlinearElasticity'   : NonlinearElasticity,
                     'WaveEquation'          : WaveEquation,
-                    "KleinGordan"           : KleinGordon,
+                    "KleinGordon"           : KleinGordon,
                     "Telegraphers"          : Telegraphers};
 
 

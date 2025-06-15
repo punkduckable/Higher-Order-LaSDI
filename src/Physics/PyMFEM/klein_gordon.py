@@ -608,7 +608,7 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
         LOGGER.info("Setting up VisIt visualization.");
 
         # Create the VisIt data collection.
-        visit_dc_path   : str                       = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "KleinGordan-fom");
+        visit_dc_path   : str                       = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "KleinGordon-fom");
         visit_dc        : mfem.VisItDataCollection  = mfem.VisItDataCollection(visit_dc_path, mesh);
         visit_dc.SetPrecision(8);
 
