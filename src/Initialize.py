@@ -53,7 +53,7 @@ physics_dict    =  {'Burgers'               : Burgers.Burgers,
                     'Advection'             : Advection,
                     'NonlinearElasticity'   : NonlinearElasticity,
                     'WaveEquation'          : WaveEquation,
-                    "KleinGordan"           : KleinGordan,
+                    "KleinGordan"           : KleinGordon,
                     "Telegraphers"          : Telegraphers};
 
 
