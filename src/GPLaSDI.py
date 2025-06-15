@@ -209,7 +209,7 @@ class BayesianGLaSDI:
 
 
 
-    def train(self) -> None:
+    def train(self, reset_optim : bool = True) -> None:
         """
         Runs a round of training on the model.
 
@@ -218,7 +218,9 @@ class BayesianGLaSDI:
         Arguments
         -------------------------------------------------------------------------------------------
 
-        None!
+        reset_optim : bool
+            If True, we re-initialize self's optimizer before training. 
+
 
 
         -------------------------------------------------------------------------------------------
@@ -231,6 +233,10 @@ class BayesianGLaSDI:
         # Make sure we have at least one training data point.
         assert(len(self.U_Train) > 0);
         assert(len(self.U_Train) == self.param_space.n_train());
+
+
+        # Reset optimizer, if desirable. 
+        if(reset_optim == True): self._reset_optimizer();
 
 
         # -------------------------------------------------------------------------------------
@@ -286,7 +292,7 @@ class BayesianGLaSDI:
                 p_rollout  += self.dp_per_update;
                 p_rollout   = min(0.75, p_rollout);
 
-                LOGGER.info("p_rollout is now %f (increased %d)" % (p_rollout, self.dp_per_update));
+                LOGGER.info("p_rollout is now %f (increased %f)" % (p_rollout, self.dp_per_update));
 
                 self.timer.start("Rollout Setup");
                 t_Grid_rollout, n_rollout_frames, U_Rollout_Targets = self._rollout_setup(
@@ -608,8 +614,8 @@ class BayesianGLaSDI:
 
                 # Setup
                 self.timer.start("Rollout Loss");
-                loss_rollout_Z_D    : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
-                loss_rollout_Z_V    : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
+                #loss_rollout_Z_D    : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
+                #loss_rollout_Z_V    : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
                 loss_rollout_D      : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
                 loss_rollout_V      : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
 
@@ -653,8 +659,8 @@ class BayesianGLaSDI:
                     V_Rollout_Target_i      : torch.Tensor          = U_Rollout_Target_i[1];
                 
                     # Compute the losses for the i'th combination of parameter values!
-                    loss_rollout_Z_D  = loss_rollout_Z_D + self.MSE(Z_D_Rollout_Target_i, Z_D_Rollout_Predict_i);
-                    loss_rollout_Z_V  = loss_rollout_Z_V + self.MSE(Z_V_Rollout_Target_i, Z_V_Rollout_Predict_i);
+                    #loss_rollout_Z_D  = loss_rollout_Z_D + self.MSE(Z_D_Rollout_Target_i, Z_D_Rollout_Predict_i);
+                    #loss_rollout_Z_V  = loss_rollout_Z_V + self.MSE(Z_V_Rollout_Target_i, Z_V_Rollout_Predict_i);
                     loss_rollout_D    = loss_rollout_D + self.MSE(D_Rollout_Target_i,   D_Rollout_Predict_i);
                     loss_rollout_V    = loss_rollout_V + self.MSE(V_Rollout_Target_i,   V_Rollout_Predict_i);
 
@@ -667,7 +673,7 @@ class BayesianGLaSDI:
                 loss_recon          : torch.Tensor  = loss_recon_D + loss_recon_V;
                 loss_consistency    : torch.Tensor  = loss_consistency_Z + loss_consistency_U;
                 loss_chain_rule     : torch.Tensor  = loss_chain_rule_U + loss_chain_rule_Z;
-                loss_rollout        : torch.Tensor  = loss_rollout_Z_D + loss_rollout_Z_V + loss_rollout_D + loss_rollout_V;
+                loss_rollout        : torch.Tensor  = loss_rollout_D + loss_rollout_V #+ loss_rollout_Z_D + loss_rollout_Z_V;
 
                 # Compute the final loss.
                 loss = (self.loss_weights['recon']          * loss_recon + 
@@ -716,8 +722,8 @@ class BayesianGLaSDI:
                 LOGGER.info("Iter: %05d/%d, Total: %3.10f, Recon: %3.10f, LD: %3.10f, Coef: %3.10f, max|c|: %04.1f, "
                             % (iter + 1, self.max_iter, loss.item(), loss_recon.item(), loss_LD.item(), loss_coef.item(), max_coef));
             elif(isinstance(model_device, Autoencoder_Pair)):
-                LOGGER.info("Iter: %05d/%d, Total: %3.6f, Recon D: %3.6f, Recon V: %3.6f, CR U: %3.6f, CR Z: %3.6f, Cons Z: %3.6f, Cons U: %3.6f, Roll D: %3.6f, Roll V: %3.6f, Roll ZD: %3.6f, Roll ZV: %3.6f, LD: %3.6f, Coef: %3.6f, max|c|: %04.1f, "
-                            % (iter + 1, self.max_iter, loss.item(), loss_recon_D.item(), loss_recon_V.item(), loss_chain_rule_U.item(), loss_chain_rule_Z.item(), loss_consistency_Z.item(), loss_consistency_U.item(), loss_rollout_D.item(), loss_rollout_V.item(), loss_rollout_Z_D.item(), loss_rollout_Z_V.item(), loss_LD.item(), loss_coef.item(), max_coef)); 
+                LOGGER.info("Iter: %05d/%d, Total: %3.6f, Recon D: %3.6f, Recon V: %3.6f, CR U: %3.6f, CR Z: %3.6f, Cons Z: %3.6f, Cons U: %3.6f, Roll D: %3.6f, Roll V: %3.6f, LD: %3.6f, Coef: %3.6f, max|c|: %04.1f, "
+                            % (iter + 1, self.max_iter, loss.item(), loss_recon_D.item(), loss_recon_V.item(), loss_chain_rule_U.item(), loss_chain_rule_Z.item(), loss_consistency_Z.item(), loss_consistency_U.item(), loss_rollout_D.item(), loss_rollout_V.item(), loss_LD.item(), loss_coef.item(), max_coef)); 
 
             # If there are fewer than 6 training examples, report the set of parameter combinations.
             if n_train < 6:
@@ -761,6 +767,17 @@ class BayesianGLaSDI:
         return;
 
 
+    def _reset_optimizer(self) -> None:
+        """
+        Re-initializes self's optimizer. After each training round, the momentum from the previous
+        epoch may point us in the wrong direction. Reinitializing the optimizer eliminates this 
+        problem by resetting the momentum. 
+        """
+
+        self.optimizer          : Optimizer = torch.optim.Adam(self.model.parameters(), lr = self.lr);
+
+
+    
     def _rollout_setup( self, 
                         t           : list[torch.Tensor], 
                         U           : list[list[torch.Tensor]], 
