@@ -139,7 +139,7 @@ def main():
     gp_pred_mean    = gp_pred_mean.reshape(param_space.test_grid_sizes + [-1]);
     gp_pred_std     = gp_pred_std.reshape(param_space.test_grid_sizes + [-1]); 
 
-    Max_Rel_Error, Max_STD, _, _  = SolveROMs.Compute_Error_and_STD(
+    Max_Rel_Error, Max_STD, Rel_Error, STD  = SolveROMs.Compute_Error_and_STD(
                                                 model           = model, 
                                                 physics         = physics,
                                                 param_space     = param_space,
@@ -147,7 +147,23 @@ def main():
                                                 gp_list         = gp_list,
                                                 t_Test          = trainer.t_Test,
                                                 U_Test          = trainer.U_Test,
-                                                n_samples       = trainer.n_samples);
+                                                n_samples       = trainer.n_samples,
+                                                skip_proportion = .05);
+
+    # Plot Rel_Error for one combinations of parameters.
+    n_plot : int = random.randrange(0, param_space.n_test());
+    for i in range(physics.n_IC):
+        plt.figure();
+        plt.plot(trainer.t_Test[n_plot], Rel_Error[n_plot][i]);
+        plt.xlabel("time (s)");
+        plt.ylabel("Relative Error");
+
+        if(i == 0):     title_str : str = "Relative Error of the reconstruction of U for parameter combination %d"          % n_plot;
+        elif(i == 1):   title_str : str = "Relative Error of the reconstruction of D_t U for parameter combination %d"      % n_plot;
+        else:           title_str : str = "Relative Error of the reconstruction of D_t^%d U for parameter combination %d"   % (d, n_plot);
+        plt.title(title_str);
+    plt.show();
+
 
     # If X_Positions has the form (2, N_Positions), then the solution must either be a 
     # scalar field or a 2d vector field. Let's plot the solution.
@@ -182,9 +198,9 @@ def main():
         n_IC        : int                   = physics.n_IC;
         for i in range(n_IC):
             if(i == 0):
-                prefix : str = "U_%s" % config["physics"]["type"];
+                prefix : str = "%s_U" % config["physics"]["type"];
             else:
-                prefix : str = "(Dt^%d)U_%s" % (i, config["physics"]["type"]);
+                prefix : str = "%s_(Dt^%d)U" % (i, config["physics"]["type"]);
 
             make_solution_movies(U_True         = U_True[i].detach().numpy(), 
                                  U_Pred         = U_Pred[i].detach().numpy(), 
@@ -196,7 +212,8 @@ def main():
 
     if(param_space.n_p == 2):
         n_IC : int = latent_dynamics.n_IC;
-        
+
+        """        
         # Plot the mean and STD of the posterior distribution for each coefficient evaluated at
         # each combination of parameter values.
         Plot_GP2d(  p1_mesh     = param_space.test_meshgrid[0], 
@@ -206,6 +223,7 @@ def main():
                     param_train = param_space.train_space, 
                     param_names = param_space.param_names, 
                     n_cols      = 5);
+        """
         
         # Plot maximum (across the frames) relative reconstruction error between each frame of each 
         # derivative of the FOM solution for each combination of parameter values and their 
