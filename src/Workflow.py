@@ -200,7 +200,7 @@ def main():
             if(i == 0):
                 prefix : str = "%s_U" % config["physics"]["type"];
             else:
-                prefix : str = "%s_(Dt^%d)U" % (i, config["physics"]["type"]);
+                prefix : str = "%s_(Dt^%d)U" % (config["physics"]["type"], i);
 
             make_solution_movies(U_True         = U_True[i].detach().numpy(), 
                                  U_Pred         = U_Pred[i].detach().numpy(), 
