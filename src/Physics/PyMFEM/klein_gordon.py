@@ -279,12 +279,12 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
              t_final            : float         = 5.0,
              dt                 : float         = .01,
              Positions          : numpy.ndarray = None,
-             c                  : float         = 0.2,
-             m                  : float         = 0.5,
+             c                  : float         = 0.1,
+             m                  : float         = 0.25,
              w                  : float         = 2.0,
              k                  : float         = 1.0,
              dirichlet          : bool          = True,
-             serialization_steps: int           = 2,
+             serialization_steps: int           = 1,
              num_positions      : int           = 1000,
              VisIt              : bool          = True) -> tuple[numpy.ndarray,numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """
@@ -608,7 +608,7 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
         LOGGER.info("Setting up VisIt visualization.");
 
         # Create the VisIt data collection.
-        visit_dc_path   : str                       = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "KleinGordan-fom");
+        visit_dc_path   : str                       = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "KleinGordon-fom");
         visit_dc        : mfem.VisItDataCollection  = mfem.VisItDataCollection(visit_dc_path, mesh);
         visit_dc.SetPrecision(8);
 

@@ -130,10 +130,10 @@ def eval_gp(gp_list : list[GaussianProcessRegressor], Inputs : numpy.ndarray) ->
     assert(len(Inputs.shape) == 2);
 
     # Setup 
-    n_GPs       : int   = len(gp_list);
-    n_inputs    : int   = Inputs.shape[0];
-    pred_mean   : numpy.ndarray     = numpy.zeros([n_inputs, n_GPs]);
-    pred_std    : numpy.ndarray     = numpy.zeros([n_inputs, n_GPs]);
+    n_GPs       : int           = len(gp_list);
+    n_inputs    : int           = Inputs.shape[0];
+    pred_mean   : numpy.ndarray = numpy.zeros([n_inputs, n_GPs]);
+    pred_std    : numpy.ndarray = numpy.zeros([n_inputs, n_GPs]);
 
     # Find the means and SDs of the posterior distribution for each GP evaluated at the 
     # various inputs.

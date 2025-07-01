@@ -137,9 +137,9 @@ def main():
 
     gp_pred_mean, gp_pred_std = eval_gp(gp_list, param_space.test_space);
     gp_pred_mean    = gp_pred_mean.reshape(param_space.test_grid_sizes + [-1]);
-    gp_pred_std     = gp_pred_std.reshape(param_space.test_grid_sizes + [-1]);
+    gp_pred_std     = gp_pred_std.reshape(param_space.test_grid_sizes + [-1]); 
 
-    Max_Rel_Error, Max_STD, _, _  = SolveROMs.Compute_Error_and_STD(
+    Max_Rel_Error, Max_STD, Rel_Error, STD  = SolveROMs.Compute_Error_and_STD(
                                                 model           = model, 
                                                 physics         = physics,
                                                 param_space     = param_space,
@@ -147,11 +147,27 @@ def main():
                                                 gp_list         = gp_list,
                                                 t_Test          = trainer.t_Test,
                                                 U_Test          = trainer.U_Test,
-                                                n_samples       = trainer.n_samples);
+                                                n_samples       = trainer.n_samples,
+                                                skip_proportion = .05);
+
+    # Plot Rel_Error for one combinations of parameters.
+    n_plot : int = random.randrange(0, param_space.n_test());
+    for i in range(physics.n_IC):
+        plt.figure();
+        plt.plot(trainer.t_Test[n_plot], Rel_Error[n_plot][i]);
+        plt.xlabel("time (s)");
+        plt.ylabel("Relative Error");
+
+        if(i == 0):     title_str : str = "Relative Error of the reconstruction of U for parameter combination %d"          % n_plot;
+        elif(i == 1):   title_str : str = "Relative Error of the reconstruction of D_t U for parameter combination %d"      % n_plot;
+        else:           title_str : str = "Relative Error of the reconstruction of D_t^%d U for parameter combination %d"   % (d, n_plot);
+        plt.title(title_str);
+    plt.show();
+
 
     # If X_Positions has the form (2, N_Positions), then the solution must either be a 
     # scalar field or a 2d vector field. Let's plot the solution.
-    if(False and len(physics.X_Positions.shape) == 2 and  physics.X_Positions.shape[0] == 2):
+    if(len(physics.X_Positions.shape) == 2 and  physics.X_Positions.shape[0] == 2):
         
         # First, generate latent trajectories for a random element of the test set.
         n_test      : int   = param_space.n_test();
@@ -182,9 +198,9 @@ def main():
         n_IC        : int                   = physics.n_IC;
         for i in range(n_IC):
             if(i == 0):
-                prefix : str = "U_%s" % config["physics"]["type"];
+                prefix : str = "%s_U" % config["physics"]["type"];
             else:
-                prefix : str = "(Dt^%d)U_%s" % (i, config["physics"]["type"]);
+                prefix : str = "%s_(Dt^%d)U" % (config["physics"]["type"], i);
 
             make_solution_movies(U_True         = U_True[i].detach().numpy(), 
                                  U_Pred         = U_Pred[i].detach().numpy(), 
@@ -196,7 +212,8 @@ def main():
 
     if(param_space.n_p == 2):
         n_IC : int = latent_dynamics.n_IC;
-        
+
+        """        
         # Plot the mean and STD of the posterior distribution for each coefficient evaluated at
         # each combination of parameter values.
         Plot_GP2d(  p1_mesh     = param_space.test_meshgrid[0], 
@@ -206,36 +223,46 @@ def main():
                     param_train = param_space.train_space, 
                     param_names = param_space.param_names, 
                     n_cols      = 5);
+        """
         
         # Plot maximum (across the frames) relative reconstruction error between each frame of each 
         # derivative of the FOM solution for each combination of parameter values and their 
         # corresponding reconstructions.
         for d in range(n_IC):
             if(d == 0):
-                title   : str   = r'$\text{max}_{t, i} \frac{\left| u_{\bar{\xi}}(t, x_i) - u_{\text{True}}(t, x_i) \right|} {\text{max}_{j} \left| u_{\text{True}}(t, x_j) \right|}$';
+                title           : str   = r'$\text{max}_{t, i} \frac{\left| u_{\bar{\xi}}(t, x_i) - u_{\text{True}}(t, x_i) \right|} {\text{max}_{j} \left| u_{\text{True}}(t, x_j) \right|}$';
+                save_file_name  : str   = config["physics"]["type"] + "_U_Relative_Error_Heatmap";
             elif(d == 1):
-                title   : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d}{dt}u_{\bar{\xi}}(t, x_i) - \frac{d}{dt}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d}{dt}u_{\text{True}}(t, x_j) \right|}$';
+                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d}{dt}u_{\bar{\xi}}(t, x_i) - \frac{d}{dt}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d}{dt}u_{\text{True}}(t, x_j) \right|}$';
+                save_file_name  : str   = config["physics"]["type"] + "_Dt_U_Relative_Error_Heatmap";
             else:
-                title   : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d^{%d}}{dt^{%d}}u_{\bar{\xi}}(t, x_i) - \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_j) \right|}$' % (d, d, d, d, d, d);
+                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d^{%d}}{dt^{%d}}u_{\bar{\xi}}(t, x_i) - \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_j) \right|}$' % (d, d, d, d, d, d);
+                save_file_name  : str   = config["physics"]["type"] + "_Dt^%d_U_Relative_Error_Heatmap" % d;
 
             Plot_Heatmap2d(     values          = Max_Rel_Error[:, d].reshape(param_space.test_grid_sizes) * 100, 
                                 param_space     = param_space,
-                                title           = title);
+                                title           = title, 
+                                save_file_name  = save_file_name);
 
         # Plot the std of the component of the frame with the largest std (across the samples) in 
         # the reconstruction of that component of that frame. Do this for each combination of 
         # parameter values and derivative of the FOM solution.
         for d in range(n_IC):
             if(d == 0):
-                title   : str   = r'$\text{max}_{(t, i)} \sigma_{j \in \{1, \ldots, %d\}} \left[ u_{\xi(j)}(t, x_i) \right]$' % trainer.n_samples;
+                title           : str   = r'$\text{max}_{(t, i)} \sigma_{j \in \{1, \ldots, %d\}} \left[ u_{\xi(j)}(t, x_i) \right]$' % trainer.n_samples;
+                save_file_name  : str   = config["physics"]["type"] + "_U_STD_Heatmap";
             elif(d == 1):
-                title   : str   = r'$\text{max}_{(t, i)} \sigma_{j \in \{ 1, \ldots, %d\}} \left[\frac{d}{dt}u_{\xi(j)}(t, x_i) \right]$' % (trainer.n_samples);
+                title           : str   = r'$\text{max}_{(t, i)} \sigma_{j \in \{ 1, \ldots, %d\}} \left[\frac{d}{dt}u_{\xi(j)}(t, x_i) \right]$' % (trainer.n_samples);
+                save_file_name  : str   = config["physics"]["type"] + "_Dt_U_STD_Heatmap";      
             else:
-                title   : str   = r'$\text{max}_{(t, i)} \sigma_{j \in \{ 1, \ldots, %d\}} \left[\frac{d^{%d}}{dt^{%d}}u_{\xi(j)}(t, x_i) \right]$' % (trainer.n_samples, d, d);
+                title           : str   = r'$\text{max}_{(t, i)} \sigma_{j \in \{ 1, \ldots, %d\}} \left[\frac{d^{%d}}{dt^{%d}}u_{\xi(j)}(t, x_i) \right]$' % (trainer.n_samples, d, d);
+                save_file_name  : str   = config["physics"]["type"] + "_Dt^%d_U_STD_Heatmap" % d;
+
 
             Plot_Heatmap2d( values          = Max_STD[:, d].reshape(param_space.test_grid_sizes) * 100,
                             param_space     = param_space, 
-                            title           = title);
+                            title           = title,
+                            save_file_name  = save_file_name);
 
 
 

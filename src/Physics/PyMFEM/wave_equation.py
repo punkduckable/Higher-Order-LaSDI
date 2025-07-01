@@ -150,7 +150,7 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
         M_prec       : mfem.DSmoother       = mfem.DSmoother();
         M_solver.iterative_mode = False;
         M_solver.SetRelTol(rel_tol);                        # Says "stop when the relative residual is < rel_tol"
-        M_solver.SetAbsTol(0.0);                            # says "no absolute‐residual stopping condition.""
+        M_solver.SetAbsTol(0.0);                            # says "no absolute‐residual stopping condition."
         M_solver.SetMaxIter(30);                            # Sets the maximum number of iterations.
         M_solver.SetPrintLevel(0);                          # Silences all CG output.
         M_solver.SetPreconditioner(M_prec);                 # Attaches a diagonal smoother as a pre-conditioner to speed up the solver.
@@ -163,7 +163,7 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
         T_prec          : mfem.DSmoother    = mfem.DSmoother();
         T_solver.iterative_mode = False;                    # Tells the CG solver "I want to solve a linear system Tx = b where T = M + fac0*K."
         T_solver.SetRelTol(rel_tol);                        # Says "stop when the relative residual is < rel_tol"
-        T_solver.SetAbsTol(0.0);                            # says "no absolute‐residual stopping condition.""
+        T_solver.SetAbsTol(0.0);                            # says "no absolute‐residual stopping condition."
         T_solver.SetMaxIter(100);                           # Sets the maximum number of iterations.
         T_solver.SetPrintLevel(0);                          # Silences all CG output.     
         T_solver.SetPreconditioner(T_prec);                 # Attaches a diagonal smoother as a pr-conditioner to speed up the solver.
@@ -243,13 +243,13 @@ def Simulate(mesh_file          : str           = "star.mesh",
              ref_levels         : int           = 2,
              order              : int           = 2,
              ode_solver_type    : int           = 10,
-             t_final            : float         = 10.0,
+             t_final            : float         = 5.0,
              dt                 : float         = .01,
              Positions          : numpy.ndarray = None,
-             c                  : float         = 0.5,
+             c                  : float         = 0.1,
              k                  : float         = 20.0,
              dirichlet          : bool          = True,
-             serialization_steps: int           = 4,
+             serialization_steps: int           = 1,
              num_positions      : int           = 1000,
              VisIt              : bool          = True) -> tuple[numpy.ndarray,numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """
@@ -304,7 +304,7 @@ def Simulate(mesh_file          : str           = "star.mesh",
         The speed of the wave.  
 
     k : float
-        A coefficient used to define the initial solution: u(0, x) = exp(-k*|x|^2).
+        A coefficient used to define the initial solution: u(0, (x, y)) = exp(-k*(x^2 + y^2)).
 
     dirichlet : bool
         Whether to use Dirichlet boundary conditions. If True, we fix the position of the nodes on the 

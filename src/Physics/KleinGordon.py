@@ -13,7 +13,7 @@ import  numpy;
 import  torch;
 
 from    Physics                         import  Physics;
-from    klein_gordan                    import  Simulate;
+from    klein_gordon                    import  Simulate;
 
 
 LOGGER : logging.Logger = logging.getLogger(__name__);
@@ -24,11 +24,11 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # WaveEquation class
 # -------------------------------------------------------------------------------------------------
 
-class KleinGordan(Physics):
+class KleinGordon(Physics):
     def __init__(self, config : dict, param_names : list[str] = None) -> None:
         """
-        Initialize a KleinGordan object. This class acts as a wrapper around the MFEM-based solver 
-        implemented in ``klein_gordan.py`` within the ``PyMFEM`` sub-directory. We solve the 
+        Initialize a KleinGordon object. This class acts as a wrapper around the MFEM-based solver 
+        implemented in ``klein_gordon.py`` within the ``PyMFEM`` sub-directory. We solve the 
         Klein-Gordon equation in a two dimensional spatial domain:
 
             (d^2/dt^2)u(t X) - c^2*laplacian(u(t, X)) + m^2*u(t, X) = 0
@@ -68,7 +68,7 @@ class KleinGordan(Physics):
         assert(len(param_names) == 2);
         assert('w' in param_names);
         assert('m' in param_names);
-        assert('KleinGordan' in config);
+        assert('KleinGordon' in config);
 
         # Call the super class initializer.
         super().__init__(config         = config,

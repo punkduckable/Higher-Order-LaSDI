@@ -7,13 +7,10 @@ import      sys;
 import      logging;
 from        os.path                 import  expanduser, join, dirname;
 
-from        mfem.common.arg_parser  import  ArgParser;
 import      mfem.par                as      mfem;
 from        mfem.par                import  intArray, add_vector, Add;
 from        mpi4py                  import  MPI 
 import      numpy;
-from        numpy                   import  sqrt, pi, cos, sin, hypot, arctan2;
-from        scipy.special           import  erfc;
 
 utils_path : str        = os.path.join(os.path.join(os.path.pardir, os.path.pardir), "Utilities");
 sys.path.append(utils_path);
@@ -28,51 +25,60 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # Nonlinear Elasticity Classes
 # -------------------------------------------------------------------------------------------------
 
-
 class InitialVelocity(mfem.VectorPyCoefficient):
     """
-    Defines the initial velocity field for the nonlinear elasticity problem. The velocity is zero 
-    in all dimensions except the last, where it follows a sinusoidal pattern.
-    """
-    def EvalValue(self, x: numpy.ndarray) -> numpy.ndarray:
-        """
-        Evaluates the initial velocity at position x.
+    Defines the initial velocity field for the nonlinear elasticity problem. In this case, the 
+    initial velocity is 
 
+            v(0, (x, y)) = ( 0, -(s/80)*sin(s*x) )
         
+    """
+    def EvalValue(self, x : numpy.ndarray) -> numpy.ndarray:
+        """
+        Implements the following initial velocity field:
 
-        -----------------------------------------------------------------------------------------------
+            v(0, (x, y)) = ( 0, -(s/80)*sin(s*x) )
+        
+        Here, s is a global variable (the theta variable in the Simulate function).
+
+
+        -------------------------------------------------------------------------------------------
         Arguments
-        -----------------------------------------------------------------------------------------------
-        x : numpy.ndarray
-            Position vector at which to evaluate the velocity.
+        -------------------------------------------------------------------------------------------
+        
+        x : numpy.ndarray, shape = (2)
+            A 2-element vector holding the (x, y) coordinates of the point at which we want to 
+            evaluate the initial velocity. 
 
             
             
-        -----------------------------------------------------------------------------------------------
+        -------------------------------------------------------------------------------------------
         Returns
-        -----------------------------------------------------------------------------------------------
-        v : numpy.ndarray
+        -------------------------------------------------------------------------------------------
+
+        v : numpy.ndarray, shape = (2)
             Initial velocity vector at position x. Has same dimension as x. Only the last component 
             is non-zero, given by: -(s/80.0)*sin(s*x[0]) where s is a global parameter controlling 
             the oscillation frequency.
         """
-        dim : int = len(x)
         
-        # Access global parameter s that controls oscillation frequency
-        global s
-
         # Initialize velocity vector to zeros
-        v : numpy.ndarray = numpy.zeros(len(x))
+        v : numpy.ndarray = numpy.zeros_like(x);
         
         # Set only the last component to be non-zero
-        v[-1] = -(s/80.0) * sin(s * x[0])
-        return v
+        global s;
+        v[-1] = -(s/80.0) * numpy.sin(s * x[0]);
+        return v;
+
 
 
 class InitialDeformation(mfem.VectorPyCoefficient):
     """
-    Defines the initial deformation field for the nonlinear elasticity problem. The initial 
-    deformation is simply the identity map (no deformation).
+    Defines the initial deformation field for the nonlinear elasticity problem. In this case,t he 
+    initial deformation is 
+
+        D(0, (x, y)) = (x, y)
+
     """
     def EvalValue(self, x: numpy.ndarray) -> numpy.ndarray:
         """
@@ -80,24 +86,27 @@ class InitialDeformation(mfem.VectorPyCoefficient):
 
         
 
-        -----------------------------------------------------------------------------------------------
+        -------------------------------------------------------------------------------------------
         Arguments
-        -----------------------------------------------------------------------------------------------
-        x : numpy.ndarray
-            Position vector at which to evaluate the deformation.
-
+        -------------------------------------------------------------------------------------------
+        
+        x : numpy.ndarray, shape = (2)
+            A 2-element vector holding the (x, y) coordinates of the point at which we want to 
+            evaluate the initial deformation. 
             
         
-        -----------------------------------------------------------------------------------------------
+        -------------------------------------------------------------------------------------------
         Returns
-        -----------------------------------------------------------------------------------------------
-        y : numpy.ndarray
-            Initial deformation vector at position x. Returns a copy of x, representing no initial 
-            deformation.
+        -------------------------------------------------------------------------------------------
+        
+        d : numpy.ndarray
+            A copy of x.
         """
-        from copy import deepcopy
-        y : numpy.ndarray = deepcopy(x)
-        return y
+
+        from copy import deepcopy;
+        d : numpy.ndarray = deepcopy(x);
+        return d;
+
 
 
 class ElasticEnergyCoefficient(mfem.PyCoefficient):
@@ -106,50 +115,56 @@ class ElasticEnergyCoefficient(mfem.PyCoefficient):
     coefficient is used to compute the elastic energy at each point in the domain based on the 
     deformation gradient and a constitutive model.
 
+    
     -----------------------------------------------------------------------------------------------
     Arguments
     -----------------------------------------------------------------------------------------------
+    
     model : mfem.PyNonlinearFormIntegrator
         The constitutive model that defines the strain energy density function.
     
     x : mfem.GridFunction
         The deformation field whose energy we want to compute.
     """
-    def __init__(self, model: mfem.PyNonlinearFormIntegrator, x: mfem.GridFunction):
+    def __init__(self, model : mfem.PyNonlinearFormIntegrator, x : mfem.GridFunction):
+        # Set attributes.
         self.x       : mfem.GridFunction                 = x;
         self.model   : mfem.PyNonlinearFormIntegrator    = model;
-        self.J       : mfem.DenseMatrix                  = mfem.DenseMatrix();
+        self.J       : mfem.DenseMatrix                  = mfem.DenseMatrix();      # Will hold the deformation gradient.
+        
+        # Call the superclass initializer.
         mfem.PyCoefficient.__init__(self);
 
 
 
-    def Eval(self, T: mfem.ElementTransformation, ip: mfem.IntegrationPoint) -> float:
+    def Eval(self, T : mfem.ElementTransformation, ip : mfem.IntegrationPoint) -> float:
         """
         Evaluates the elastic energy density at a given point.
 
-        
 
-        -----------------------------------------------------------------------------------------------
+        -------------------------------------------------------------------------------------------
         Arguments
-        -----------------------------------------------------------------------------------------------
+        -------------------------------------------------------------------------------------------
+        
         T : mfem.ElementTransformation
             The transformation from reference to physical coordinates.
         
         ip : mfem.IntegrationPoint
             The integration point at which to evaluate the energy.
 
-            
 
-        -----------------------------------------------------------------------------------------------
+        -------------------------------------------------------------------------------------------
         Returns
-        -----------------------------------------------------------------------------------------------
+        -------------------------------------------------------------------------------------------
+        
         float
             The elastic energy density divided by the Jacobian determinant.
         """
-        # Set the current transformation
+
+        # Set the current transformation.
         self.model.SetTransformation(T);
         
-        # Get the deformation gradient
+        # Get the deformation gradient of T at each point in x, store it in J.
         self.x.GetVectorGradient(T, self.J);
         
         # Return elastic energy density divided by Jacobian determinant
@@ -158,24 +173,43 @@ class ElasticEnergyCoefficient(mfem.PyCoefficient):
 
 
 class HyperelasticOperator(mfem.PyTimeDependentOperator):
-    def __init__(self, fespace: mfem.ParFiniteElementSpace, ess_tdof_list_: list[int], visc: float, mu: float, K: float) -> None:
+    def __init__(self, 
+                 fespace        : mfem.ParFiniteElementSpace, 
+                 ess_tdof_list_ : mfem.intArray, 
+                 visc           : float, 
+                 mu             : float, 
+                 K              : float) -> None:
         """
-        Initialize the hyperelastic operator.
+        Initialize the hyper-elastic operator. This solves the following PDE:
+            
+            (d/dt)v(t, X)   = H(d(t, X)) + S v(t, X), 
+            (d/dt)d(t, X)   = v(t, X),
 
-        Parameters
-        ----------
+            
+        
+        -------------------------------------------------------------------------------------------       
+        Arguments
+        -------------------------------------------------------------------------------------------
+        
         fespace : mfem.ParFiniteElementSpace
             The finite element space
-        ess_tdof_list_ : list[int] 
-            List of essential true degrees of freedom
+
+        ess_tdof_list_ : 
+            An intArray holding the indices of the DOFs of the DOFs that are constrained by
+            Dirichlet BCs.
+
         visc : float
             Viscosity coefficient
+
         mu : float
             Shear modulus
+
         K : float
             Bulk modulus
         """
-        # Initialize parent class with size = 2*fespace.TrueVSize() and t=0.0
+
+        # Initialize parent class. We use twice the VSize to account for the fact that there are
+        # two components to the solution (displacement and velocity).
         mfem.PyTimeDependentOperator.__init__(self, 2*fespace.TrueVSize(), 0.0)
 
         # Set solver parameters
@@ -192,48 +226,62 @@ class HyperelasticOperator(mfem.PyTimeDependentOperator):
         self.fespace        : mfem.ParFiniteElementSpace = fespace;
         self.viscosity      : float = visc;
 
-        # Initialize bilinear and nonlinear forms
-        M : mfem.ParBilinearForm    = mfem.ParBilinearForm(fespace);
+
+        # -----------------------------------------------------------------------------------------
+        # Define M, S, and H.
+
+        # Setup mass matrix M
+        M : mfem.ParBilinearForm        = mfem.ParBilinearForm(fespace);
+        rho = mfem.ConstantCoefficient(ref_density);                        # A constant
+        M.AddDomainIntegrator(mfem.VectorMassIntegrator(rho));              # Sets M to the bilinear form B(u, v) = rho*(u, v) 
+        M.Assemble(skip_zero_entries);                                      # Computes B(\phi_i, \phi_j) = rho*(\phi_i, \phi_j) using the basis functions in fespace. 
+        M.Finalize(skip_zero_entries);                                      # Completes any needed preprocessing.
+        self.Mmat : mfem.HypreParMatrix = M.ParallelAssemble();             # Build the matrix M, stores it in self.Mmat.
+        self.Mmat.EliminateRowsCols(self.ess_tdof_list);                    # If a Row/Column is listed in ess_tdof_list, this sets all its off-diagonal entries to zero and its diagonal entry to 1 (essentially sets Dirchilet BCs)
+
+        # Build the Viscosity operator, S.
         S : mfem.ParBilinearForm    = mfem.ParBilinearForm(fespace);
-        H : mfem.ParNonlinearForm   = mfem.ParNonlinearForm(fespace);
-        self.M : mfem.ParBilinearForm    = M;
+        visc_coeff = mfem.ConstantCoefficient(visc);                        # A constant.
+        S.AddDomainIntegrator(mfem.VectorDiffusionIntegrator(visc_coeff));  # Sets S to the bilinear form B(u, v) = visc_coeff*(\nabla u, \nabla v)
+        S.Assemble(skip_zero_entries);                                      # Computes B(\phi_i, \phi_j) = rho*(\phi_i, \phi_j) using the basis functions in fespace. 
+        S.Finalize(skip_zero_entries);                                      # Completes any needed preprocessing.
+        self.Smat = mfem.HypreParMatrix();                                  
+        S.FormSystemMatrix(self.ess_tdof_list, self.Smat);                  # Computes the Matrix S whose i, j entry is B(\phi_i, \phi_j), stores it in self.Smat
+
+        # Builds the non-linear hyper-elastic operator, H.
+        H : mfem.ParNonlinearForm   = mfem.ParNonlinearForm(fespace);       # Initializes a non-linear form.
+        model = mfem.NeoHookeanModel(mu, K);                                # Set model to the function J(X) -> (\mu/2)(I_1 - 2) + (K/2)[det(J(X)) - 1]^2, where I_1 = dTr(J(X)J(X)^T)/Det(J(X))
+        H.AddDomainIntegrator(mfem.HyperelasticNLFIntegrator(model));       # Sets H to the model F(U) = \int_{\Omega} W(J(X)) dX, where W is the operator defined by model.
+        H.SetEssentialTrueDofs(self.ess_tdof_list);                         # ???
+        self.model = model;                                                 #
+
+        # Store M, S, and H.
+        self.M : mfem.ParBilinearForm     = M;
         self.H : mfem.ParNonlinearForm    = H;
         self.S : mfem.ParBilinearForm     = S;
 
-        # Setup mass matrix M
-        rho: mfem.ConstantCoefficient = mfem.ConstantCoefficient(ref_density)
-        M.AddDomainIntegrator(mfem.VectorMassIntegrator(rho))
-        M.Assemble(skip_zero_entries)
-        M.Finalize(skip_zero_entries)
-        self.Mmat: mfem.HypreParMatrix = M.ParallelAssemble()
-        self.Mmat.EliminateRowsCols(self.ess_tdof_list)
 
-        # Setup mass matrix solver
-        M_solver: mfem.CGSolver = mfem.CGSolver(fespace.GetComm())
-        M_prec: mfem.HypreSmoother = mfem.HypreSmoother()
-        M_solver.iterative_mode = False
-        M_solver.SetRelTol(rel_tol)
-        M_solver.SetAbsTol(0.0)
-        M_solver.SetMaxIter(30)
-        M_solver.SetPrintLevel(0)
-        M_prec.SetType(mfem.HypreSmoother.Jacobi)
-        M_solver.SetPreconditioner(M_prec)
-        M_solver.SetOperator(self.Mmat)
+        # -----------------------------------------------------------------------------------------
+        # Build the solver + pre-conditioner
 
-        self.M_solver = M_solver
-        self.M_prec = M_prec
+        # Set the solver + pre-conditioner for the Mult function (see below).
+        M_solver    : mfem.CGSolver         = mfem.CGSolver(fespace.GetComm()); 
+        M_prec      : mfem.HypreSmoother    = mfem.HypreSmoother();                 
+        M_solver.iterative_mode             = False;
+        M_solver.SetRelTol(rel_tol);                                        # Says "stop when the relative residual is < rel_tol"
+        M_solver.SetAbsTol(0.0);                                            # says "no absolute‐residual stopping condition."
+        M_solver.SetMaxIter(30);                                            # Sets the maximum number of CG iterations.
+        M_solver.SetPrintLevel(0);                                          # Silences all CG output.
+        M_prec.SetType(mfem.HypreSmoother.Jacobi);                          # Sets the pre-conditioner to a Jacobi type conditioner
+        M_solver.SetPreconditioner(M_prec);                                 # Attaches the pre-conditioner to speed up the solver.
+        M_solver.SetOperator(self.Mmat);                                    # Stash M_solver and M_prec so that whenever the time‐integrator needs to compute M^{-1}b, it can just call M_solver.Mult(b, x).
 
-        model = mfem.NeoHookeanModel(mu, K)
-        H.AddDomainIntegrator(mfem.HyperelasticNLFIntegrator(model))
-        H.SetEssentialTrueDofs(self.ess_tdof_list)
-        self.model = model
+        # Set the solver + pre-conditioner 
+        self.M_solver   = M_solver
+        self.M_prec     = M_prec;
 
-        visc_coeff = mfem.ConstantCoefficient(visc)
-        S.AddDomainIntegrator(mfem.VectorDiffusionIntegrator(visc_coeff))
-        S.Assemble(skip_zero_entries)
-        S.Finalize(skip_zero_entries)
-        self.Smat = mfem.HypreParMatrix()
-        S.FormSystemMatrix(self.ess_tdof_list, self.Smat)
+
+
 
     def Mult(self, vx, dvx_dt):
         sc = self.Height() // 2
@@ -255,14 +303,20 @@ class HyperelasticOperator(mfem.PyTimeDependentOperator):
         dx_dt.Assign(v) # this changes dvx_dt
         self.dvxdt_sp.Assign(dvx_dt)
 
+
+
     def ElasticEnergy(self, x):
         return self.H.GetEnergy(x)
+
+
 
     def KineticEnergy(self, v):
         from mpi4py import MPI
         local_energy = 0.5*self.M.InnerProduct(v, v)
         energy = MPI.COMM_WORLD.allreduce(local_energy, op=MPI.SUM)
         return energy
+
+
 
     def GetElasticEnergyDensity(self, x, w):
         w_coeff = ElasticEnergyCoefficient(self.model, x)
@@ -748,7 +802,6 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     Displacements   = numpy.array(displacements_list,   dtype = numpy.float32);
     Velocities      = numpy.array(velocities_list,      dtype = numpy.float32);
 
-
     return Displacements, Velocities, Positions, Times;
 
 
@@ -757,12 +810,3 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
 if __name__ == "__main__":
     Logging.Initialize_Logger(level = logging.INFO);
     D, V, X, T = Simulate();
-
-    print("D.shape = " + str(D.shape));
-    print("V.shape = " + str(V.shape));
-    print("X.shape = " + str(X.shape));
-    print("T.shape = " + str(T.shape));
-    print("D[:, 0, 0] = " + str(D[:, 0, 0]));
-    print("V[:, 0, 0] = " + str(V[:, 0, 0]));
-    print("X[:, 0] = " + str(X[:, 0]));
-    exit();
