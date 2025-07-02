@@ -158,10 +158,21 @@ def main():
         plt.xlabel("time (s)");
         plt.ylabel("Relative Error");
 
-        if(i == 0):     title_str : str = "Relative Error of the reconstruction of U for parameter combination %d"          % n_plot;
-        elif(i == 1):   title_str : str = "Relative Error of the reconstruction of D_t U for parameter combination %d"      % n_plot;
-        else:           title_str : str = "Relative Error of the reconstruction of D_t^%d U for parameter combination %d"   % (d, n_plot);
+        if(i == 0):     
+            title_str       : str = "Relative Error of the reconstruction of U for parameter combination %d"        % n_plot;
+            save_file_name  : str = config["physics"]["type"] + "_U_Relative_Error_%d"                              % n_plot;   
+        elif(i == 1):   
+            title_str       : str = "Relative Error of the reconstruction of D_t U for parameter combination %d"    % n_plot;
+            save_file_name  : str = config["physics"]["type"] + "_Dt_U_Relative_Error_%d"                           % n_plot;
+        else:           
+            title_str       : str = "Relative Error of the reconstruction of D_t^%d U for parameter combination %d" % (i, n_plot);
+            save_file_name  : str = config["physics"]["type"] + "_Dt^%d_U_Relative_Error_%d"                        % (i, n_plot);
+
+        # Plot the figure.
         plt.title(title_str);
+    
+        # Now save the figure.
+        plt.savefig(os.path.join(os.path.join(os.path.pardir, "Figures"), save_file_name));
     plt.show();
 
 
@@ -213,7 +224,7 @@ def main():
     if(param_space.n_p == 2):
         n_IC : int = latent_dynamics.n_IC;
 
-        """        
+        """
         # Plot the mean and STD of the posterior distribution for each coefficient evaluated at
         # each combination of parameter values.
         Plot_GP2d(  p1_mesh     = param_space.test_meshgrid[0], 
