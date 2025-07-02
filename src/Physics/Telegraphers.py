@@ -127,9 +127,14 @@ class Telegraphers(Physics):
         assert(param.shape[0]   == self.n_p);
         assert(self.X_Positions is not None);
 
+        # Extract the k and alpha parameters.
+        k     : float = param[self.k_idx];
+        alpha : float = param[self.alpha_idx];
+        w     : float = 2.0;                        # Hardcoded in the 
+
         # Evaluate the initial condition.
         norm2 : float           = numpy.sum(numpy.square(self.X_Positions), axis = 0);
-        u0    : numpy.ndarray   = numpy.exp(-norm2*param[self.k_idx]).reshape(1, -1);
+        u0    : numpy.ndarray   = numpy.multiply(numpy.exp(-norm2*param[self.k_idx]), numpy.sin(numpy.pi*w*self.X_Positions[0, :]) * numpy.sin(numpy.pi*w*self.X_Positions[1, :])).reshape(1, -1);
         v0    : numpy.ndarray   = numpy.zeros_like(u0);
         
         return [u0, v0];

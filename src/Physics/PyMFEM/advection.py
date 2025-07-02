@@ -529,7 +529,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
     # 3. Define the discontinuous DG finite element space of the given
     #    polynomial order on the refined mesh.
 
-    if(myid == 0): LOGGER.info("Setting up the FEM space.");
+    if(myid == 0): LOGGER.debug("Setting up the FEM space.");
     fec         : mfem.DG_FECollection          = mfem.DG_FECollection(order, dim, mfem.BasisType.GaussLobatto);
     fespace     : mfem.ParFiniteElementSpace    = mfem.ParFiniteElementSpace(pmesh, fec);
 
@@ -545,7 +545,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
     # ---------------------------------------------------------------------------------------------
     # 4. Define the initial condition objects.
     
-    if(myid == 0): LOGGER.info("Setting up the coefficient objects.");
+    if(myid == 0): LOGGER.debug("Setting up the coefficient objects.");
     velocity    = velocity_coeff(dim, bb_min, bb_max);
     inflow      = inflow_coeff();
     u0          = u0_coeff(bb_min, bb_max); 
@@ -631,7 +631,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
     # ---------------------------------------------------------------------------------------------
     # 6. Setup lists to store the solution + evaluate the initial solution at the positions.
 
-    if(myid == 0): LOGGER.info("Setting up lists to store the time, solution at each time step.");
+    if(myid == 0): LOGGER.debug("Setting up lists to store the time, solution at each time step.");
 
     # Setup for time stepping.
     times_list          : list[float]           = [];    
@@ -673,6 +673,8 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
     # --------------------------------------------------------------------------------------------- 
     # 8.  Perform time-integration.
 
+    if(myid == 0): LOGGER.info("Running time stepping from t = 0 to t = %f with dt %f" % (t_final, dt));
+
     # Setup the ODE solver.
     adv = AdvectionOperator(fespace = fespace, velocity = velocity, g = inflow);
 
@@ -696,7 +698,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
 
         # Should we serialize?
         if last_step or (ti % serialization_steps == 0):
-            if(myid == 0): LOGGER.info("time step: " + str(ti) + ", time: " + str(numpy.round(t, 3)));
+            if(myid == 0): LOGGER.debug("time step: " + str(ti) + ", time: " + str(numpy.round(t, 3)));
 
             # Update the solution to the grid functions
             u_gf.Assign(U);

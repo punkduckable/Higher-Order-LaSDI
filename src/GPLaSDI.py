@@ -176,6 +176,7 @@ class BayesianGLaSDI:
                      % (self.n_samples, self.lr, self.n_iter, self.loss_weights['LD'], self.loss_weights['coef']));
 
         # Set up the optimizer and loss function.
+        LOGGER.info("Setting up the optimizer with a learning rate of %f" % (self.lr));
         self.optimizer          : Optimizer = torch.optim.Adam(model.parameters(), lr = self.lr);
         self.MSE                            = torch.nn.MSELoss();
 
@@ -209,7 +210,7 @@ class BayesianGLaSDI:
 
 
 
-    def train(self, reset_optim : bool = True) -> None:
+    def train(self, reset_optim : bool = False) -> None:
         """
         Runs a round of training on the model.
 
@@ -313,13 +314,13 @@ class BayesianGLaSDI:
                 # Setup. 
                 Latent_States       : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_t_i, n_z) arrays.
 
-                loss_recon          : torch.Tensor  = torch.zeros(1, dtype = torch.float32);
+                loss_recon          : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
     
                 Z_Rollout_IC        : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_rollout_frames[i], n_z) arrays.
                 Z_Rollout_Targets   : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_rollout_frames[i], n_z) arrays.
 
-                loss_rollout_FOM    : torch.Tensor  = torch.zeros(1, dtype = torch.float32);
-                loss_rollout_ROM    : torch.Tensor  = torch.zeros(1, dtype = torch.float32);
+                loss_rollout_FOM    : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_rollout_ROM    : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
 
 
                 # Cycle through the combinations of parameter values
@@ -458,14 +459,14 @@ class BayesianGLaSDI:
                 Z_Rollout_IC        : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 2 element list of (n_rollout_frames[i], n_z) arrays.
                 Z_Rollout_Targets   : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 2 element list of (n_rollout_frames[i], n_z) arrays.
 
-                loss_recon_D        : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
-                loss_recon_V        : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
+                loss_recon_D        : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_recon_V        : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
 
-                loss_consistency_Z  : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
-                loss_consistency_U  : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
+                loss_consistency_Z  : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_consistency_U  : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
 
-                loss_chain_rule_U   : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
-                loss_chain_rule_Z   : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
+                loss_chain_rule_U   : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_chain_rule_Z   : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
 
 
                 # Cycle through the combinations of parameter values.
@@ -491,7 +492,7 @@ class BayesianGLaSDI:
                     # steps in the solution for the i'th combination of parameter values. 
                     Z_i     : list[torch.Tensor]        = list(model_device.Encode(*U_Train_device[i]));
                     Z_D_i   : torch.Tensor              = Z_i[0];       # shape (n_t(i), n_z)
-                    Z_V_i   : torch.Tensor              = Z_i[1];       # shape (n_t(i), )
+                    Z_V_i   : torch.Tensor              = Z_i[1];       # shape (n_t(i), n_z)
                     Latent_States.append(Z_i);
 
                     U_Pred_i    : list[torch.Tensor]    = list(model_device.Decode(*Z_i));
@@ -614,8 +615,8 @@ class BayesianGLaSDI:
 
                 # Setup
                 self.timer.start("Rollout Loss");
-                #loss_rollout_Z_D    : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
-                #loss_rollout_Z_V    : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
+                loss_rollout_Z_D    : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
+                loss_rollout_Z_V    : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
                 loss_rollout_D      : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
                 loss_rollout_V      : torch.Tensor              = torch.zeros(1, dtype = torch.float32);
 
@@ -659,8 +660,8 @@ class BayesianGLaSDI:
                     V_Rollout_Target_i      : torch.Tensor          = U_Rollout_Target_i[1];
                 
                     # Compute the losses for the i'th combination of parameter values!
-                    #loss_rollout_Z_D  = loss_rollout_Z_D + self.MSE(Z_D_Rollout_Target_i, Z_D_Rollout_Predict_i);
-                    #loss_rollout_Z_V  = loss_rollout_Z_V + self.MSE(Z_V_Rollout_Target_i, Z_V_Rollout_Predict_i);
+                    loss_rollout_Z_D  = loss_rollout_Z_D + self.MSE(Z_D_Rollout_Target_i, Z_D_Rollout_Predict_i);
+                    loss_rollout_Z_V  = loss_rollout_Z_V + self.MSE(Z_V_Rollout_Target_i, Z_V_Rollout_Predict_i);
                     loss_rollout_D    = loss_rollout_D + self.MSE(D_Rollout_Target_i,   D_Rollout_Predict_i);
                     loss_rollout_V    = loss_rollout_V + self.MSE(V_Rollout_Target_i,   V_Rollout_Predict_i);
 
@@ -670,10 +671,10 @@ class BayesianGLaSDI:
                 # --------------------------------------------------------------------------------
                 # Total loss
 
-                loss_recon          : torch.Tensor  = loss_recon_D + loss_recon_V;
-                loss_consistency    : torch.Tensor  = loss_consistency_Z + loss_consistency_U;
-                loss_chain_rule     : torch.Tensor  = loss_chain_rule_U + loss_chain_rule_Z;
-                loss_rollout        : torch.Tensor  = loss_rollout_D + loss_rollout_V #+ loss_rollout_Z_D + loss_rollout_Z_V;
+                loss_recon          : torch.Tensor  = loss_recon_D          + loss_recon_V;
+                loss_consistency    : torch.Tensor  = loss_consistency_Z    + loss_consistency_U;
+                loss_chain_rule     : torch.Tensor  = loss_chain_rule_U     + loss_chain_rule_Z;
+                loss_rollout        : torch.Tensor  = loss_rollout_D        + loss_rollout_V + loss_rollout_Z_D + loss_rollout_Z_V;
 
                 # Compute the final loss.
                 loss = (self.loss_weights['recon']          * loss_recon + 
@@ -719,11 +720,11 @@ class BayesianGLaSDI:
 
             # Report the current iteration number and losses
             if(isinstance(model_device, Autoencoder)):
-                LOGGER.info("Iter: %05d/%d, Total: %3.10f, Recon: %3.10f, LD: %3.10f, Coef: %3.10f, max|c|: %04.1f, "
-                            % (iter + 1, self.max_iter, loss.item(), loss_recon.item(), loss_LD.item(), loss_coef.item(), max_coef));
+                LOGGER.info("Iter: %05d/%d, Total: %3.10f, Recon: %3.10f, Roll FOM: %3.10f, Roll ROM: %3.10f, LD: %3.10f, Coef: %3.10f, max|c|: %.3f, "
+                            % (iter + 1, self.max_iter, loss.item(), loss_recon.item(), loss_rollout_FOM.item(), loss_rollout_ROM.item(), loss_LD.item(), loss_coef.item(), max_coef));
             elif(isinstance(model_device, Autoencoder_Pair)):
-                LOGGER.info("Iter: %05d/%d, Total: %3.6f, Recon D: %3.6f, Recon V: %3.6f, CR U: %3.6f, CR Z: %3.6f, Cons Z: %3.6f, Cons U: %3.6f, Roll D: %3.6f, Roll V: %3.6f, LD: %3.6f, Coef: %3.6f, max|c|: %04.1f, "
-                            % (iter + 1, self.max_iter, loss.item(), loss_recon_D.item(), loss_recon_V.item(), loss_chain_rule_U.item(), loss_chain_rule_Z.item(), loss_consistency_Z.item(), loss_consistency_U.item(), loss_rollout_D.item(), loss_rollout_V.item(), loss_LD.item(), loss_coef.item(), max_coef)); 
+                LOGGER.info("Iter: %05d/%d, Total: %3.6f, Recon D: %3.6f, Recon V: %3.6f, Consistency Z: %3.6f, Consistency U: %3.6f, CR U: %3.6f, CR Z: %3.6f, Roll D: %3.6f, Roll V: %3.6f, Roll ZD: %3.6f, Roll ZV: %3.6f, LD: %3.6f, Coef: %3.6f, max|c|: %.3f, "
+                            % (iter + 1, self.max_iter, loss.item(), loss_recon_D.item(), loss_recon_V.item(), loss_consistency_Z.item(), loss_consistency_U.item(), loss_chain_rule_U.item(), loss_chain_rule_Z.item(), loss_rollout_D.item(), loss_rollout_V.item(), loss_rollout_Z_D.item(), loss_rollout_Z_V.item(), loss_LD.item(), loss_coef.item(), max_coef)); 
 
             # If there are fewer than 6 training examples, report the set of parameter combinations.
             if n_train < 6:
@@ -880,7 +881,8 @@ class BayesianGLaSDI:
 
             # The final rollout time for this combination of parameter values. Remember that 
             # t_rollout is the proportion of t_final_i - t_0_i over which we simulate.
-            t_rollout_final_i   : float         = p_rollout*(t_final_i - t_0_i) + t_0_i;
+            t_rollout_i         : float         = p_rollout*(t_final_i - t_0_i);
+            t_rollout_final_i   : float         = t_rollout_i + t_0_i;
             LOGGER.info("We will rollout the first frame for parameter combination #%d to t = %f" % (i, t_rollout_final_i));
 
             # Now figure out how many time steps occur before t_rollout_final_i.
@@ -899,7 +901,7 @@ class BayesianGLaSDI:
             # Now figure out how many times occur less than t_rollout_final_i from t_final_i.
             n_rollout_frames_i : int = 0;
             for j in range(n_t_i):
-                if(t_i[j] + t_rollout_final_i > t_final_i):
+                if(t_i[j] + t_rollout_i > t_final_i):
                     break;
 
                 n_rollout_frames_i += 1;
@@ -908,7 +910,7 @@ class BayesianGLaSDI:
 
 
             # Finally, create the target times.
-            t_Grid_rollout_targets.append(t_i[:n_rollout_frames_i].detach().numpy() + (t_rollout_final_i - t_0_i)*numpy.ones(n_rollout_frames_i, dtype = numpy.float32));
+            t_Grid_rollout_targets.append(t_i[:n_rollout_frames_i].detach().numpy() + t_rollout_i*numpy.ones(n_rollout_frames_i, dtype = numpy.float32)); # shape = (n_rollout_frames[i])
 
 
         # -----------------------------------------------------------------------------------------
@@ -918,21 +920,21 @@ class BayesianGLaSDI:
             LOGGER.debug("Finding targets for parameter combination #%d" % i);
 
             # Interpolate U_Train[i], then evaluate it at t_Grid_rollout_targets[i]
-            U_Train_i               : list[torch.Tensor]    = U[i];
-            t_Train_i               : numpy.ndarray         = t[i].detach().numpy();
+            U_Train_i               : list[torch.Tensor]    = U[i];                         # len = n_IC, i'th element is a torch.Tensor of shape (n_t(i), ...)
+            t_Train_i               : numpy.ndarray         = t[i].detach().numpy();        # shape = (n_t(i))
             
-            t_Targets_i             : numpy.ndarray         = t_Grid_rollout_targets[i];        # shape = (n_rollout_frames[i])
+            t_Targets_i             : numpy.ndarray         = t_Grid_rollout_targets[i];    # shape = (n_rollout_frames[i]) 
 
             U_Rollout_Targets_i     : list[torch.Tensor]    = [];
             for j in range(n_IC):
                 # Interpolate the j'th component of U_Train_i.
-                U_Train_ij          : numpy.ndarray = U_Train_i[j].detach().numpy();
+                U_Train_ij          : numpy.ndarray = U_Train_i[j].detach().numpy();        # shape = (n_t(i), ...)
                 U_Train_ij_interp                   = interpolate.CubicSpline(x = t_Train_i, y = U_Train_ij);
 
 
                 # Evaluate the interpolation at the final rollout times for the i'th combination of
                 # parameter values.
-                U_Rollout_Targets_i.append(torch.from_numpy(U_Train_ij_interp(t_Targets_i)).to(dtype = torch.float32)); 
+                U_Rollout_Targets_i.append(torch.from_numpy(U_Train_ij_interp(t_Targets_i)).to(dtype = torch.float32)); # shape = (n_rollout_frames[i], ...)
             U_Rollout_Targets.append(U_Rollout_Targets_i);
     
 

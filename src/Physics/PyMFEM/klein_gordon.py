@@ -439,7 +439,7 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
     # 3. Define the finite element space and grid functions to hold the solution and the time 
     # derivative of the solution.
 
-    LOGGER.info("Defining the finite element space and grid functions to hold U and (d/dt)U.");
+    LOGGER.debug("Defining the finite element space and grid functions to hold U and (d/dt)U.");
 
     LOGGER.debug("Defining the finite element space.");
     fe_coll : mfem.FiniteElementCollection  = mfem.H1_FECollection(order, dim);         # Basis functions
@@ -447,7 +447,7 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
 
     # Get the number of degrees of freedom in the finite element space.
     fe_size : int = fespace.GetTrueVSize();
-    LOGGER.debug("Number of unknowns to solve for: %d" % fe_size);
+    LOGGER.info("Number of unknowns to solve for: %d" % fe_size);
 
     # Initialize the grid functions for the solution and the time derivative of the solution.
     u_gf    : mfem.GridFunction = mfem.GridFunction(fespace);
@@ -458,7 +458,7 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
     # ---------------------------------------------------------------------------------------------
     # 4. Set the initial conditions for U and (d/dt)U.
 
-    LOGGER.info("Setting the initial conditions for U and (d/dt)U.");
+    LOGGER.debug("Setting the initial conditions for U and (d/dt)U.");
 
     # Set the initial conditions for u. All boundaries are considered natural.
     u_0     : mfem.PyCoefficient = cInitialSolution();
@@ -481,7 +481,7 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
     # ---------------------------------------------------------------------------------------------
     # 5. Initialize the Klein-Gordon operator.
 
-    LOGGER.info("Initializing the Klein-Gordon operator.");
+    LOGGER.debug("Initializing the Klein-Gordon operator.");
 
     # Define the essential boundary conditions. 
     ess_bdr : mfem.intArray = mfem.intArray();
@@ -575,7 +575,7 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
     # ---------------------------------------------------------------------------------------------
     # 7. Setup lists to store the solution + evaluate the initial solution at the positions.
 
-    LOGGER.info("Setting up lists to store the time, U, and DtU at each time step.");
+    LOGGER.debug("Setting up lists to store the time, U, and DtU at each time step.");
 
     # Setup for time stepping.
     times_list          : list[float]           = [];    
@@ -645,7 +645,7 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
 
         # Should we serialize?
         if last_step or (ti % serialization_steps == 0):
-            LOGGER.info("time step: " + str(ti) + ", time: " + str(numpy.round(t, 3)));
+            LOGGER.debug("time step: " + str(ti) + ", time: " + str(numpy.round(t, 3)));
 
             # Update the solution to the grid functions
             u_gf.Assign(u);

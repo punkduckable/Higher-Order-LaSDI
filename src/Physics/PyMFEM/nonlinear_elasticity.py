@@ -451,12 +451,12 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     # ---------------------------------------------------------------------------------------------
     # 1. Setup 
 
-    LOGGER.info("Setting up non-linear elasticity simulation with MFEM.");
-
     # Fetch thread information.
     comm                = MPI.COMM_WORLD
     myid        : int   = comm.Get_rank()
     num_procs   : int   = comm.Get_size()
+
+    if(myid == 0): LOGGER.info("Setting up non-linear elasticity simulation with MFEM.");
 
     # Set variable aliases.
     dt          : float = time_step_size;
@@ -465,10 +465,9 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     K           : float = bulk_modulus;
     global s;
     s = theta;
-    if(myid == 0): LOGGER.info("Simulating with theta = %f" % theta);
 
     # Select the ODE solver.
-    LOGGER.debug("Selecting the ODE solver");
+    if(myid == 0): LOGGER.debug("Selecting the ODE solver");
     if ode_solver_type == 1:
         ode_solver = mfem.BackwardEulerSolver();
     elif ode_solver_type == 2:
@@ -528,7 +527,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     #    we group them together in block vector vx, with offsets given by the
     #    fe_offset array.
 
-    if(myid == 0): LOGGER.info("Setting up the FEM space.");
+    if(myid == 0): LOGGER.debug("Setting up the FEM space.");
     fe_coll             = mfem.H1_FECollection(order, dim);                 # Basis functions
     fespace             = mfem.ParFiniteElementSpace(pmesh, fe_coll, dim);  # FEM space (span of basis functions).
     glob_size   : int   = fespace.GlobalTrueVSize();
@@ -560,7 +559,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     # 3. Set the initial conditions for v and x, and the boundary conditions on
     #    a beam-like mesh (see description above).
 
-    if(myid == 0): LOGGER.info("Settng initial and boundary conditions");
+    if(myid == 0): LOGGER.debug("Settng initial and boundary conditions");
 
     # Set up objects to hold the ICs
     if(myid == 0): LOGGER.debug("Setting up objects to hold the initial conditions;");
@@ -600,15 +599,15 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     # ---------------------------------------------------------------------------------------------
     # 4. Define HyperelasticOperator and initialize it the initial energies.
     
-    if(myid == 0): LOGGER.info("Setting up Hyperelastic operator.");
+    if(myid == 0): LOGGER.debug("Setting up Hyperelastic operator.");
 
     oper = HyperelasticOperator(fespace, ess_bdr, visc, mu, K);
     ee0 = oper.ElasticEnergy(D_gf);
     ke0 = oper.KineticEnergy(V_gf);
 
-    if(myid == 0): LOGGER.info("initial elastic energy (EE) = " + str(ee0));
-    if(myid == 0): LOGGER.info("initial kinetic energy (KE) = " + str(ke0));
-    if(myid == 0): LOGGER.info("initial   total energy (TE) = " + str(ee0 + ke0));
+    if(myid == 0): LOGGER.debug("initial elastic energy (EE) = " + str(ee0));
+    if(myid == 0): LOGGER.debug("initial kinetic energy (KE) = " + str(ke0));
+    if(myid == 0): LOGGER.debug("initial   total energy (TE) = " + str(ee0 + ke0));
 
 
 
@@ -687,7 +686,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     # ---------------------------------------------------------------------------------------------
     # 6. Setup lists to store the solution + evaluate the initial solution at the positions.
 
-    LOGGER.info("Setting up lists to store the time, U, and DtU at each time step.");
+    if(myid == 0): LOGGER.debug("Setting up lists to store the time, U, and DtU at each time step.");
 
     # Setup for time stepping.
     times_list          : list[float]           = [];    
@@ -713,7 +712,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
 
     # Setup VisIt visualization (if we are doing that)
     if (VisIt == True):
-        if(myid == 0): LOGGER.info("Setting up VisIt visualization.");
+        if(myid == 0): LOGGER.debug("Setting up VisIt visualization.");
 
         # Create the VisIt data collection.
         visit_dc_path   : str                       = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "NonLinElast-fom");
@@ -762,7 +761,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
                 text : str  = ( "step " + str(ti) + ", t = " + str(t) + ", EE = " +
                                 str(ee) + ", KE = " + str(ke) +
                                 ", dTE = " + str((ee + ke) - (ee0 + ke0)));
-                LOGGER.info(text);
+                LOGGER.debug(text);
 
             # Update the solution to the grid functions
             V_gf.Assign(VD.GetBlock(0));
