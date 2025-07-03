@@ -210,7 +210,7 @@ class BayesianGLaSDI:
 
 
 
-    def train(self, reset_optim : bool = False) -> None:
+    def train(self, reset_optim : bool = True) -> None:
         """
         Runs a round of training on the model.
 
@@ -770,12 +770,30 @@ class BayesianGLaSDI:
 
     def _reset_optimizer(self) -> None:
         """
-        Re-initializes self's optimizer. After each training round, the momentum from the previous
-        epoch may point us in the wrong direction. Reinitializing the optimizer eliminates this 
-        problem by resetting the momentum. 
+        Set the optimizer's m_t and v_t attributes (first and second moments) to zero. After each 
+        training round, the momentum from the previous epoch may point us in the wrong direction. 
+        Resetting the momentum eliminates this problem.
         """
 
-        self.optimizer          : Optimizer = torch.optim.Adam(self.model.parameters(), lr = self.lr);
+        # Cycle through the optimizer's parameter groups.
+        for group in self.optimizer.param_groups:
+
+            # Cycle through the parameters in the group.
+            for p in group['params']:
+                state : dict = self.optimizer.state[p];
+
+                # If the state is empty, skip this parameter.
+                if not state:
+                    continue;
+                
+                # zero the biased first moment estimate
+                state['exp_avg'].zero_();
+
+                # zero the biased second moment estimate
+                state['exp_avg_sq'].zero_();
+                # if you’re using amsgrad:
+                if 'max_exp_avg_sq' in state:
+                    state['max_exp_avg_sq'].zero_();
 
 
     
