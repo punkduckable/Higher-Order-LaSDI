@@ -110,9 +110,9 @@ def RK1(f       : Callable,
 
     # Stack the results.
     if(isinstance(y0, numpy.ndarray)):
-        Y = numpy.stack(Y_list, axis = 0);  # shape = (n_t, n_i, n_z)
+        Y = numpy.stack(Y_list, axis = 0);  # shape = (n_t, y0.shape)
     elif(isinstance(y0, torch.Tensor)):
-        Y = torch.stack(Y_list, axis = 0);  # shape = (n_t, n_i, n_z)
+        Y = torch.stack(Y_list, axis = 0);  # shape = (n_t, y0.shape)
 
     # All done!
     return Y;
@@ -205,9 +205,9 @@ def RK2(f       : Callable,
     
     # Stack the results.
     if(isinstance(y0, numpy.ndarray)):
-        Y = numpy.stack(Y_list, axis = 0);  # shape = (n_t, n_i, n_z)
+        Y = numpy.stack(Y_list, axis = 0);  # shape = (n_t, y0.shape)
     elif(isinstance(y0, torch.Tensor)):
-        Y = torch.stack(Y_list, axis = 0);  # shape = (n_t, n_i, n_z)
+        Y = torch.stack(Y_list, axis = 0);  # shape = (n_t, y0.shape)
 
     # All done!
     return Y;
@@ -311,9 +311,9 @@ def RK4(f       : Callable,
     
     # Stack the results.
     if(isinstance(y0, numpy.ndarray)):
-        Y = numpy.stack(Y_list, axis = 0);  # shape = (n_t, n_i, n_z)
+        Y = numpy.stack(Y_list, axis = 0);  # shape = (n_t, y0.shape)
     elif(isinstance(y0, torch.Tensor)):
-        Y = torch.stack(Y_list, axis = 0);  # shape = (n_t, n_i, n_z)
+        Y = torch.stack(Y_list, axis = 0);  # shape = (n_t, y0.shape)
 
     # All done!
     return Y;

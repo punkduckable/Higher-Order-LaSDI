@@ -193,11 +193,11 @@ def RK1(f       : Callable,
 
     # Stack the results.
     if(isinstance(y0, numpy.ndarray)):
-        D = numpy.stack(D_list, axis = 0);  # shape = (n_t, n_i, n_z)
-        V = numpy.stack(V_list, axis = 0);  # shape = (n_t, n_i, n_z)
+        D = numpy.stack(D_list, axis = 0);  # shape = (n_t, y0.shape)
+        V = numpy.stack(V_list, axis = 0);  # shape = (n_t, Dy0.shape)
     elif(isinstance(y0, torch.Tensor)):
-        D = torch.stack(D_list, axis = 0);  # shape = (n_t, n_i, n_z)
-        V = torch.stack(V_list, axis = 0);  # shape = (n_t, n_i, n_z)
+        D = torch.stack(D_list, axis = 0);  # shape = (n_t, y0.shape)
+        V = torch.stack(V_list, axis = 0);  # shape = (n_t, Dy0.shape)
 
     # All done!
     return (D, V);
@@ -315,11 +315,11 @@ def RK2(f       : Callable,
 
     # Stack the results.
     if(isinstance(y0, numpy.ndarray)):
-        D = numpy.stack(D_list, axis = 0);  # shape = (n_t, n_i, n_z)
-        V = numpy.stack(V_list, axis = 0);  # shape = (n_t, n_i, n_z)
+        D = numpy.stack(D_list, axis = 0);  # shape = (n_t, y0.shape)
+        V = numpy.stack(V_list, axis = 0);  # shape = (n_t, Dy0.shape)
     elif(isinstance(y0, torch.Tensor)):
-        D = torch.stack(D_list, axis = 0);  # shape = (n_t, n_i, n_z)
-        V = torch.stack(V_list, axis = 0);  # shape = (n_t, n_i, n_z)
+        D = torch.stack(D_list, axis = 0);  # shape = (n_t, y0.shape)
+        V = torch.stack(V_list, axis = 0);  # shape = (n_t, Dy0.shape)
 
     # All done!
     return (D, V);
@@ -453,11 +453,11 @@ def RK4(f       : Callable,
     
     # Stack the results.
     if(isinstance(y0, numpy.ndarray)):
-        D = numpy.stack(D_list, axis = 0);  # shape = (n_t, n_i, n_z)
-        V = numpy.stack(V_list, axis = 0);  # shape = (n_t, n_i, n_z)
+        D = numpy.stack(D_list, axis = 0);  # shape = (n_t, y0.shape)
+        V = numpy.stack(V_list, axis = 0);  # shape = (n_t, Dy0.shape)
     elif(isinstance(y0, torch.Tensor)):
-        D = torch.stack(D_list, axis = 0);  # shape = (n_t, n_i, n_z)
-        V = torch.stack(V_list, axis = 0);  # shape = (n_t, n_i, n_z)
+        D = torch.stack(D_list, axis = 0);  # shape = (n_t, y0.shape)
+        V = torch.stack(V_list, axis = 0);  # shape = (n_t, Dy0.shape)
 
     # All done!
     return (D, V);
