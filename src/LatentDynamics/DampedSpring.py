@@ -206,35 +206,34 @@ class DampedSpring(LatentDynamics):
         # -----------------------------------------------------------------------------------------
         # Evaluate for one combination of parameter values case.
 
-        Z       : torch.Tensor  = Latent_States[0];
-        t_Grid  : torch.Tensor  = t_Grid[0];
-        n_t     : int           = len(t_Grid);
+        Z       : torch.Tensor  = Latent_States[0];         # len = n_IC, i'th element is a torch.Tensor of shape (n_t, n_z)
+        t_Grid  : torch.Tensor  = t_Grid[0];                # shape = (n_t)
 
-        Z_D     : torch.Tensor  = Z[0];
-        Z_V     : torch.Tensor  = Z[1];
+        Z_D     : torch.Tensor  = Z[0];                     # shape = (n_t, n_z)
+        Z_V     : torch.Tensor  = Z[1];                     # shape = (n_t, n_z)
         
         # First, compute the second time derivative of Z_D. This should also be the first time 
         # derivative of Z_V. We average the two so that the final loss depends on both.
         if(self.Uniform_t_Grid  == True):
             h : float = t_Grid[1] - t_Grid[0];
-            d2Z_dt2_from_Z_D    : torch.Tensor  = Derivative2_Order4(U = Z_D,   h = h);
-            d2Z_dt2_from_Z_V    : torch.Tensor  = Derivative1_Order4(U = Z_V,   h = h);
+            #d2Z_dt2_from_Z_D    : torch.Tensor  = Derivative2_Order4(U = Z_D,   h = h);                     # shape = (n_t, n_z)
+            d2Z_dt2_from_Z_V    : torch.Tensor  = Derivative1_Order4(U = Z_V,   h = h);                     # shape = (n_t, n_z)
         else:
-            d2Z_dt2_from_Z_D    : torch.Tensor  = Derivative2_Order2_NonUniform(U = Z_D, t_Grid = t_Grid);
-            d2Z_dt2_from_Z_V    : torch.Tensor  = Derivative1_Order2_NonUniform(U = Z_V, t_Grid = t_Grid);
-        d2Z_dt2             : torch.Tensor  = 0.5*(d2Z_dt2_from_Z_D + d2Z_dt2_from_Z_V);
+            #d2Z_dt2_from_Z_D    : torch.Tensor  = Derivative2_Order2_NonUniform(U = Z_D, t_Grid = t_Grid);  # shape = (n_t, n_z)
+            d2Z_dt2_from_Z_V    : torch.Tensor  = Derivative1_Order2_NonUniform(U = Z_V, t_Grid = t_Grid);  # shape = (n_t, n_z)
+        d2Z_dt2             : torch.Tensor  = d2Z_dt2_from_Z_V #0.5*(d2Z_dt2_from_Z_D + d2Z_dt2_from_Z_V);                    # shape = (n_t, n_z)
 
         # Concatenate Z_D, Z_V and a column of 1's. We will solve for the matrix, E, which gives 
         # the best fit for the system d2Z_dt2 = cat[Z_D, Z_V, 1] E. This matrix has the form 
         # E^T = [-K, -C, b]. Thus, we can extract K, C, and b from Z_1.
-        Z_1   : torch.Tensor  = torch.cat([Z_D, Z_V, torch.ones((Z_D.shape[0], 1))], dim = 1);
+        Z_1   : torch.Tensor  = torch.cat([Z_D, Z_V, torch.ones((Z_D.shape[0], 1))], dim = 1);              # shape = (n_t, 2*n_z + 1)
 
         # For each j, solve the least squares problem 
         #   min{ || d2Z_dt2[:, j] - Z_1 E(j)|| : E(j) \in \mathbb{R}^(n_z*(2*n_z + 1)) }
         # We store the resulting solutions in a matrix, coefs, whose j'th column holds the 
         # results for the j'th column of Z_V. Thus, coefs is a 2d tensor with shape 
         # (2*n_z + 1, n_z).
-        coefs   : torch.Tensor  = torch.linalg.lstsq(Z_1, d2Z_dt2).solution;
+        coefs   : torch.Tensor  = torch.linalg.lstsq(Z_1, d2Z_dt2).solution;                                # shape = (2*n_z + 1, n_z)
 
         # Compute the losses
         Loss_LD     = self.LD_LossFunction(d2Z_dt2, torch.matmul(Z_1, coefs));

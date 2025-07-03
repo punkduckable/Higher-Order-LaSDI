@@ -168,23 +168,16 @@ def RK1(f       : Callable,
     # Next, fetch N.
     N : int = t_Grid.size;
 
-    # Initialize D, V.
-    if(isinstance(y0, numpy.ndarray)):
-        D : numpy.ndarray = numpy.empty((N,) + y0.shape, dtype = numpy.float32);
-        V : numpy.ndarray = numpy.empty((N,) + y0.shape, dtype = numpy.float32);
-    elif(isinstance(y0, torch.Tensor)):
-        D : torch.Tensor = torch.empty((N,) + y0.shape, dtype = torch.Tensor);
-        V : torch.Tensor = torch.empty((N,) + y0.shape, dtype = torch.Tensor);
-
-    D[0, ...] = y0;
-    V[0, ...] = Dy0;
+    # Initialize lists to hold the results.
+    D_list : list[torch.Tensor] | list[numpy.ndarray] = [y0];
+    V_list : list[torch.Tensor] | list[numpy.ndarray] = [Dy0];
 
     # Now, run the time stepping!
     for n in range(N - 1):
         # Fetch the current time, displacement, velocity.
         tn  : float                         = t_Grid[n];
-        yn  : numpy.ndarray | torch.Tensor  = D[n, ...];
-        Dyn : numpy.ndarray | torch.Tensor  = V[n, ...];
+        yn  : numpy.ndarray | torch.Tensor  = D_list[n];
+        Dyn : numpy.ndarray | torch.Tensor  = V_list[n];
         hn  : float                         = t_Grid[n + 1] - t_Grid[n];
 
         # Compute l_1.
@@ -195,8 +188,16 @@ def RK1(f       : Callable,
         Dyn1    : numpy.ndarray | torch.Tensor  = Dyn + hn*l_1
 
         # All done with this step!
-        D[n + 1, ...] = yn1;
-        V[n + 1, ...] = Dyn1;
+        D_list.append(yn1);
+        V_list.append(Dyn1);
+
+    # Stack the results.
+    if(isinstance(y0, numpy.ndarray)):
+        D = numpy.stack(D_list, axis = 0);  # shape = (n_t, n_i, n_z)
+        V = numpy.stack(V_list, axis = 0);  # shape = (n_t, n_i, n_z)
+    elif(isinstance(y0, torch.Tensor)):
+        D = torch.stack(D_list, axis = 0);  # shape = (n_t, n_i, n_z)
+        V = torch.stack(V_list, axis = 0);  # shape = (n_t, n_i, n_z)
 
     # All done!
     return (D, V);
@@ -288,23 +289,16 @@ def RK2(f       : Callable,
     # Next, fetch N.
     N : int = t_Grid.size;
 
-    # Initialize D, V.
-    if(isinstance(y0, numpy.ndarray)):
-        D : numpy.ndarray   = numpy.empty((N,) + y0.shape, dtype = numpy.float32);
-        V : numpy.ndarray   = numpy.empty((N,) + y0.shape, dtype = numpy.float32);
-    elif(isinstance(y0, torch.Tensor)):
-        D : torch.Tensor    = torch.empty((N,) + y0.shape, dtype = torch.float32);
-        V : torch.Tensor    = torch.empty((N,) + y0.shape, dtype = torch.float32);
-
-    D[0, :] = y0;
-    V[0, :] = Dy0;
+    # Initialize lists to hold the results.
+    D_list : list[torch.Tensor] | list[numpy.ndarray] = [y0];
+    V_list : list[torch.Tensor] | list[numpy.ndarray] = [Dy0];
 
     # Now, run the time stepping!
     for n in range(N - 1):
         # Fetch the current time, displacement, velocity.
         tn  : float                         = t_Grid[n];
-        yn  : numpy.ndarray | torch.Tensor  = D[n, :];
-        Dyn : numpy.ndarray | torch.Tensor  = V[n, :];
+        yn  : numpy.ndarray | torch.Tensor  = D_list[n];
+        Dyn : numpy.ndarray | torch.Tensor  = V_list[n];
         hn  : float                         = t_Grid[n + 1] - t_Grid[n];
 
         # Compute l_1, l_2.
@@ -316,8 +310,16 @@ def RK2(f       : Callable,
         Dyn1    : numpy.ndarray | torch.Tensor  = Dyn + (hn/2)*(l_1 + l_2);
 
         # All done with this step!
-        D[n + 1, :] = yn1;
-        V[n + 1, :] = Dyn1;
+        D_list.append(yn1);
+        V_list.append(Dyn1);
+
+    # Stack the results.
+    if(isinstance(y0, numpy.ndarray)):
+        D = numpy.stack(D_list, axis = 0);  # shape = (n_t, n_i, n_z)
+        V = numpy.stack(V_list, axis = 0);  # shape = (n_t, n_i, n_z)
+    elif(isinstance(y0, torch.Tensor)):
+        D = torch.stack(D_list, axis = 0);  # shape = (n_t, n_i, n_z)
+        V = torch.stack(V_list, axis = 0);  # shape = (n_t, n_i, n_z)
 
     # All done!
     return (D, V);
@@ -423,23 +425,16 @@ def RK4(f       : Callable,
     # Next, fetch N.
     N : int = t_Grid.size;
 
-    # Initialize D, V.
-    if(isinstance(y0, numpy.ndarray)):
-        D : numpy.ndarray   = numpy.empty((N,) + y0.shape, dtype = numpy.float32);
-        V : numpy.ndarray   = numpy.empty((N,) + y0.shape, dtype = numpy.float32);
-    elif(isinstance(y0, torch.Tensor)):
-        D : torch.Tensor    = torch.empty((N,) + y0.shape, dtype = torch.float32);
-        V : torch.Tensor    = torch.empty((N,) + y0.shape, dtype = torch.float32);
-
-    D[0, ...] = y0;
-    V[0, ...] = Dy0;
+    # Initialize lists to hold the results.
+    D_list : list[torch.Tensor] | list[numpy.ndarray] = [y0];
+    V_list : list[torch.Tensor] | list[numpy.ndarray] = [Dy0];
 
     # Now, run the time stepping!
     for n in range(N - 1):
         # Fetch the current time, displacement, velocity.
         tn  : float                         = t_Grid[n];
-        yn  : numpy.ndarray | torch.Tensor  = D[n, ...];
-        Dyn : numpy.ndarray | torch.Tensor  = V[n, ...];
+        yn  : numpy.ndarray | torch.Tensor  = D_list[n];
+        Dyn : numpy.ndarray | torch.Tensor  = V_list[n];
         hn  : float                         = t_Grid[n + 1] - t_Grid[n];
 
         # Compute l_1, l_2, l_3, l_4.
@@ -453,9 +448,17 @@ def RK4(f       : Callable,
         Dyn1    : numpy.ndarray | torch.Tensor  = Dyn + (hn/6)*(l_1 + 2*l_2 + 2*l_3 + l_4);
 
         # All done with this step!
-        D[n + 1, ...] = yn1;
-        V[n + 1, ...] = Dyn1;
+        D_list.append(yn1);
+        V_list.append(Dyn1);
     
+    # Stack the results.
+    if(isinstance(y0, numpy.ndarray)):
+        D = numpy.stack(D_list, axis = 0);  # shape = (n_t, n_i, n_z)
+        V = numpy.stack(V_list, axis = 0);  # shape = (n_t, n_i, n_z)
+    elif(isinstance(y0, torch.Tensor)):
+        D = torch.stack(D_list, axis = 0);  # shape = (n_t, n_i, n_z)
+        V = torch.stack(V_list, axis = 0);  # shape = (n_t, n_i, n_z)
+
     # All done!
     return (D, V);
     
