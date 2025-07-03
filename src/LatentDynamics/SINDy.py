@@ -422,9 +422,9 @@ class SINDy(LatentDynamics):
 
             # Stack the results.
             if(isinstance(coefs, numpy.ndarray)):
-                Z = numpy.stack(Z_list, axis = 0);  # shape = (n_t, n_i, n_z)
+                Z = numpy.concatenate(Z_list, axis = 1);    # shape = (n_t, n_i, n_z)
             elif(isinstance(coefs, torch.Tensor)):
-                Z = torch.stack(Z_list, axis = 0);  # shape = (n_t, n_i, n_z)
+                Z = torch.cat(Z_list, axis = 1);            # shape = (n_t, n_i, n_z)
         
         # All done!
         return [[Z]];

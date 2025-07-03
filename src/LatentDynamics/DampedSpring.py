@@ -405,7 +405,7 @@ class DampedSpring(LatentDynamics):
         # First, we need to extract -K, -C, and b from coefs. We know that coefs is the least 
         # squares solution to d2Z_dt2 = hstack[Z, dZdt, 1] E^T. Thus, we expect that.
         # E = [-K, -C, b]. 
-        E   : numpy.ndarray | torch.Tensor = coefs.reshape([2*self.n_z + 1, self.n_z]).T;
+        E   : numpy.ndarray | torch.Tensor = coefs.reshape(2*self.n_z + 1, self.n_z).T;
 
         # Extract K, C, and b. Note that we need to reshape b to have shape (1, n_z) to enable
         # broadcasting.
@@ -442,12 +442,11 @@ class DampedSpring(LatentDynamics):
 
             # Stack the results.
             if(isinstance(coefs, numpy.ndarray)):
-                D = numpy.stack(D_list, axis = 0);  # shape = (n_t, n_i, n_z)
-                V = numpy.stack(V_list, axis = 0);  # shape = (n_t, n_i, n_z)
+                D = numpy.concatenate(D_list, axis = 1);  # shape = (n_t, n_i, n_z)
+                V = numpy.concatenate(V_list, axis = 1);  # shape = (n_t, n_i, n_z)
             elif(isinstance(coefs, torch.Tensor)):
-                D = torch.stack(D_list, axis = 0);  # shape = (n_t, n_i, n_z)
-                V = torch.stack(V_list, axis = 0);  # shape = (n_t, n_i, n_z)
-
-
+                D = torch.cat(D_list, axis = 1);  # shape = (n_t, n_i, n_z)
+                V = torch.cat(V_list, axis = 1);  # shape = (n_t, n_i, n_z)
+        
         # All done!
         return [[D, V]];

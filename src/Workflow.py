@@ -151,22 +151,22 @@ def main():
                                                 skip_proportion = .05);
 
     # Plot Rel_Error for one combinations of parameters.
-    n_plot : int = random.randrange(0, param_space.n_test());
+    i_random    : int   = random.randrange(0, param_space.n_test());
     for i in range(physics.n_IC):
         plt.figure();
-        plt.plot(trainer.t_Test[n_plot], Rel_Error[n_plot][i]);
+        plt.plot(trainer.t_Test[i_random], Rel_Error[i_random][i]);
         plt.xlabel("time (s)");
         plt.ylabel("Relative Error");
 
         if(i == 0):     
-            title_str       : str = "Relative Error of the reconstruction of U for parameter combination %d"        % n_plot;
-            save_file_name  : str = config["physics"]["type"] + "_U_Relative_Error_%d"                              % n_plot;   
+            title_str       : str = "Relative Error of the reconstruction of U for parameter combination %d"        % i_random;
+            save_file_name  : str = config["physics"]["type"] + "_U_Relative_Error_%d"                              % i_random;   
         elif(i == 1):   
-            title_str       : str = "Relative Error of the reconstruction of D_t U for parameter combination %d"    % n_plot;
-            save_file_name  : str = config["physics"]["type"] + "_Dt_U_Relative_Error_%d"                           % n_plot;
+            title_str       : str = "Relative Error of the reconstruction of D_t U for parameter combination %d"    % i_random;
+            save_file_name  : str = config["physics"]["type"] + "_Dt_U_Relative_Error_%d"                           % i_random;
         else:           
-            title_str       : str = "Relative Error of the reconstruction of D_t^%d U for parameter combination %d" % (i, n_plot);
-            save_file_name  : str = config["physics"]["type"] + "_Dt^%d_U_Relative_Error_%d"                        % (i, n_plot);
+            title_str       : str = "Relative Error of the reconstruction of D_t^%d U for parameter combination %d" % (i, i_random);
+            save_file_name  : str = config["physics"]["type"] + "_Dt^%d_U_Relative_Error_%d"                        % (i, i_random);
 
         # Plot the figure.
         plt.title(title_str);
@@ -180,9 +180,7 @@ def main():
     # scalar field or a 2d vector field. Let's plot the solution.
     if(len(physics.X_Positions.shape) == 2 and  physics.X_Positions.shape[0] == 2):
         
-        # First, generate latent trajectories for a random element of the test set.
-        n_test      : int   = param_space.n_test();
-        i_random    : int   = random.randrange(0, n_test);
+        # First, generate latent trajectories for the i_random'th element of the test set.
         LOGGER.debug("Generating trajectory plot for testing combination %d: %s" % (i_random, param_space.test_space[i_random]));
 
         # Generate the solution trajectory using the mean for the posterior distribution.

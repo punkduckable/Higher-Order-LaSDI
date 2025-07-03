@@ -21,6 +21,8 @@ lasdi:
       coef:                 0.0001
       consistency:          1.0
 
+    learnable_coefs:        true
+
 workflow:
   use_restart:              false
   restart_file:            
