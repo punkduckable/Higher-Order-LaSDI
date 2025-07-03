@@ -86,7 +86,8 @@ class LatentDynamics:
 
     def calibrate(  self, 
                     Latent_States   : list[list[torch.Tensor]], 
-                    t_Grid          : list[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+                    t_Grid          : list[torch.Tensor], 
+                    input_coefs     : list[torch.Tensor] = None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         The user must implement this class on any latent dynamics sub-class. Each latent dynamics 
         object should implement a parameterized model for the dynamics in the latent space. A 
@@ -116,6 +117,12 @@ class LatentDynamics:
             time value corresponding to the j'th frame when we use the i'th combination of 
             parameter values.
 
+        input_coefs : list[torch.Tensor], len = n_param, optional
+            The i'th element of this list is a 1d tensor of shape (n_coefs) holding the 
+            coefficients for the i'th combination of parameter values. If input_coefs is None, 
+            input_coefs is None, then we will learn the coefficients using Least Squares. If 
+            input_coefs is not None, then we will use the provided coefficients to compute the 
+            loss.
 
         
         -------------------------------------------------------------------------------------------

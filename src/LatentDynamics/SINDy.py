@@ -101,7 +101,8 @@ class SINDy(LatentDynamics):
 
     def calibrate(  self,  
                     Latent_States   : list[list[torch.Tensor]], 
-                    t_Grid          : list[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+                    t_Grid          : list[torch.Tensor], 
+                    input_coefs     : list[torch.Tensor] = None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         r"""
         This function computes the optimal SINDy coefficients using the current latent time 
         series. Specifically, let us consider the case when Z has two dimensions (the case when 
@@ -129,14 +130,20 @@ class SINDy(LatentDynamics):
             value corresponding to the j'th frame when we use the i'th combination of parameter 
             values.
 
-        
+        input_coefs : list[torch.Tensor], len = n_param, optional
+            The i'th element of this list is a 1d tensor of shape (n_coefs) holding the 
+            coefficients for the i'th combination of parameter values. If input_coefs is None, 
+            then we will learn the coefficients using Least Squares. If input_coefs is not None, 
+            then we will use the provided coefficients to compute the loss.
+
+            
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        coefs, loss_sindy, loss_coef. 
+        output_coefs, loss_sindy, loss_coef. 
         
-        coefs : torch.Tensor, shape = (n_train, n_coef)
+        output_coefs : torch.Tensor, shape = (n_train, n_coef)
             A matrix of shape (n_train, n_coef), where n_train is the number of parameter 
             combinations in the training set and n_coef is the number of coefficients in the latent 
             dynamics. The i,j entry of this array holds the value of the j'th coefficient when we 
@@ -168,6 +175,15 @@ class SINDy(LatentDynamics):
                 assert(len(Latent_States[i][j].shape)   == 2);
                 assert(Latent_States[i][j].shape[-1]    == n_z);
 
+        # Run checks on input_coefs.
+        if(input_coefs is not None):
+            assert(isinstance(input_coefs, list));
+            assert(len(input_coefs) == n_param);
+            for i in range(n_param):
+                assert(isinstance(input_coefs[i], torch.Tensor));
+                assert(len(input_coefs[i].shape) == 1);
+                assert(input_coefs[i].shape[0] == self.n_coefs);
+
 
         # -----------------------------------------------------------------------------------------
         # If there are multiple combinations of parameter values, loop through them.
@@ -175,7 +191,7 @@ class SINDy(LatentDynamics):
         if (n_param > 1):
             # Prepare an array to house the flattened coefficient matrices for each combination of
             # parameter values.
-            coefs = torch.empty([n_param, self.n_coefs], dtype = torch.float32);
+            output_coefs_list : list[torch.Tensor] = [];
 
             # Compute the losses, coefficients for each combination of parameter values.
             loss_sindy  = torch.zeros(1, dtype = torch.float32);
@@ -189,16 +205,21 @@ class SINDy(LatentDynamics):
                 
                 Note that Result a 3 element tuple.
                 """
-                result : tuple[torch.Tensor] = self.calibrate(Latent_States = [Latent_States[i]], 
-                                                              t_Grid        = [t_Grid[i]]);
+                if(input_coefs is None):
+                    result : tuple[torch.Tensor] = self.calibrate(Latent_States = [Latent_States[i]], 
+                                                                  t_Grid        = [t_Grid[i]]);
+                else:
+                    result : tuple[torch.Tensor] = self.calibrate(Latent_States = [Latent_States[i]], 
+                                                                  t_Grid        = [t_Grid[i]],
+                                                                  input_coefs   = [input_coefs[i]]);
 
                 # Package the results from this combination of parameter values.
-                coefs[i, :] = result[0];
+                output_coefs_list.append(result[0]);
                 loss_sindy  = loss_sindy + result[1];
                 loss_coef   = loss_coef + result[2];
             
             # Package everything to return!
-            return coefs, loss_sindy, loss_coef;
+            return torch.stack(output_coefs_list), loss_sindy, loss_coef;
             
 
         # -----------------------------------------------------------------------------------------
@@ -222,13 +243,16 @@ class SINDy(LatentDynamics):
         # dynamics.
         Z_1     : torch.Tensor  = torch.cat([torch.ones(n_t, 1), Z], dim = 1)
         
-        # For each j, solve the least squares problem 
-        #   min{ || dZdt[:, j] - Z_1 c_j|| : C_j \in \mathbb{R}ˆNl }
-        # where Nl is the number of library terms (in this case, just n_z + 1, since we only allow
-        # constant and linear terms). We store the resulting solutions in a matrix, coefs, whose 
-        # j'th column holds the results for the j'th column of dZdt. Thus, coefs is a 2d tensor
-        # with shape (Nl, n_z).
-        coefs   : torch.Tensor  = torch.linalg.lstsq(Z_1, dZdt).solution
+        if(input_coefs is None):
+            # For each j, solve the least squares problem 
+            #   min{ || dZdt[:, j] - Z_1 c_j|| : C_j \in \mathbb{R}ˆNl }
+            # where Nl is the number of library terms (in this case, just n_z + 1, since we only allow
+            # constant and linear terms). We store the resulting solutions in a matrix, coefs, whose 
+            # j'th column holds the results for the j'th column of dZdt. Thus, coefs is a 2d tensor
+            # with shape (Nl, n_z).
+            coefs   : torch.Tensor  = torch.linalg.lstsq(Z_1, dZdt).solution
+        else:
+            coefs   : torch.Tensor  = input_coefs[0].reshape(self.n_z + 1, self.n_z);
 
         # Compute the losses.
         loss_sindy = self.MSE(dZdt, Z_1 @ coefs)
@@ -237,8 +261,8 @@ class SINDy(LatentDynamics):
 
         # Prepare coefs and the losses to return. Note that we flatten the coefficient matrix.
         # Note: output of lstsq is not contiguous in memory.
-        coefs   : torch.Tensor  = coefs.detach().flatten()
-        return coefs, loss_sindy, loss_coef
+        output_coefs   : torch.Tensor  = coefs.flatten()
+        return output_coefs, loss_sindy, loss_coef
 
 
 
@@ -390,16 +414,17 @@ class SINDy(LatentDynamics):
         if(Same_t_Grid == True):
             Z : torch.Tensor | numpy.ndarray = RK4(f = f, y0 = Z0, t_Grid = t_Grid);
         else:
-            # Set up arrays to hold the results of each simulation.
-            if(isinstance(coefs, numpy.ndarray)):
-                Z : numpy.ndarray   = numpy.empty((n_t_i, n_i, self.n_z), dtype = numpy.float32);
-            elif(isinstance(coefs, torch.Tensor)):
-                Z : torch.Tensor    = torch.empty((n_t_i, n_i, self.n_z), dtype = torch.float32);
-            
-            # Now cycle through the ICs.
+            # Cycle through the ICs.
+            Z_list : list[torch.Tensor] | list[numpy.ndarray] = [];   
             for j in range(n_i):
-                Z_j         = RK4(f = f, y0 = Z0[j, :], t_Grid = t_Grid[j, :]);
-                Z[:, j, :]  = Z_j;
+                Z_j         = RK4(f = f, y0 = Z0[j, :].reshape(1, -1), t_Grid = t_Grid[j, :]);
+                Z_list.append(Z_j);
+
+            # Stack the results.
+            if(isinstance(coefs, numpy.ndarray)):
+                Z = numpy.stack(Z_list, axis = 0);  # shape = (n_t, n_i, n_z)
+            elif(isinstance(coefs, torch.Tensor)):
+                Z = torch.stack(Z_list, axis = 0);  # shape = (n_t, n_i, n_z)
         
         # All done!
         return [[Z]];

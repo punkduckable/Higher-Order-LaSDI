@@ -98,7 +98,8 @@ class DampedSpring(LatentDynamics):
 
     def calibrate(self, 
                   Latent_States : list[torch.Tensor],
-                  t_Grid        : list[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+                  t_Grid        : list[torch.Tensor],
+                  input_coefs   : list[torch.Tensor] = None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         r"""
         For each combination of parameter values, this function computes the optimal K, C, and b 
         coefficients in the sequence of latent states for that combination of parameter values.
@@ -110,10 +111,11 @@ class DampedSpring(LatentDynamics):
         
                 z''(t) = -K z(t) - C z'(t) + b
         
-        We find K, C, and b corresponding to the dynamical system that best agrees with the 
-        snapshots in the rows of Z (the K, C, and b which minimize the mean square difference 
-        between the left and right hand side of this equation across the snapshots in the rows 
-        of Z).
+        If input_coefs is None, then we find K, C, and b corresponding to the dynamical system that 
+        best agrees with the snapshots in the rows of Z (the K, C, and b which minimize the mean 
+        square difference between the left and right hand side of this equation across the 
+        snapshots in the rows of Z). If input_coefs is not None, then we use the provided 
+        coefficients to compute the loss.
 
 
         -------------------------------------------------------------------------------------------
@@ -131,18 +133,26 @@ class DampedSpring(LatentDynamics):
             value corresponding to the j'th frame when we use the i'th combination of parameter 
             values.
 
-        
+        input_coefs : list[torch.Tensor], len = n_param, optional, default = None
+            The i'th element of this list is a 1d tensor of shape (n_coefs) holding the 
+            coefficients for the i'th combination of parameter values. If input_coefs is None, 
+            then we will learn the coefficients using Least Squares. If input_coefs is not None, 
+            then we will use the provided coefficients to compute the loss.
+
+
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        coefs, loss_sindy, loss_coef. 
+        output_coefs, loss_sindy, loss_coef. 
         
-        coefs : torch.Tensor, shape = (n_train, n_coef)
+        output_coefs : torch.Tensor, shape = (n_train, n_coef)
             A matrix of shape (n_train, n_coef), where n_train is the number of parameter 
             combinations in the training set and n_coef is the number of coefficients in the latent 
             dynamics. The i,j entry of this array holds the value of the j'th coefficient when we 
-            use the i'th combination of parameter values.
+            use the i'th combination of parameter values. If input_coefs is None, then we will learn 
+            the coefficients using Least Squares. If input_coefs is not None, then output_coefs will 
+            be equal to input_coefs.
 
         loss_sindy : torch.Tensor, shape = []
             A 0-dimensional tensor whose lone element holds the sum of the SINDy losses across the 
@@ -169,51 +179,71 @@ class DampedSpring(LatentDynamics):
                 assert(isinstance(Latent_States[i][j], torch.Tensor));
                 assert(len(Latent_States[i][j].shape)   == 2);
                 assert(Latent_States[i][j].shape[-1]    == n_z);
+    
+        if(input_coefs is not None):
+            assert(isinstance(input_coefs, list));
+            assert(len(input_coefs) == n_param);
+            for i in range(n_param):
+                assert(isinstance(input_coefs[i], torch.Tensor));
+                assert(len(input_coefs[i].shape) == 1);
+                assert(input_coefs[i].shape[0] == self.n_coefs);
+
 
 
         # -----------------------------------------------------------------------------------------
         # If there are multiple combinations of parameter values, loop through them.
-        
-        if (n_param > 1):
-            # Prepare an array to house the flattened coefficient matrices for each combination of
-            # parameter values.
-            coefs = torch.empty([n_param, self.n_coefs], dtype = torch.float32);
+        # -----------------------------------------------------------------------------------------
 
+        if (n_param > 1):
             # Compute the losses, coefficients for each combination of parameter values.
             loss_sindy  = torch.zeros(1, dtype = torch.float32);
             loss_coef   = torch.zeros(1, dtype = torch.float32);
+
+            # Prepare an array to house the flattened coefficient matrices for each combination of
+            # parameter values.
+            output_coefs_list : list[torch.Tensor] = [];
+            
             for i in range(n_param):
-                """"
-                Get the optimal SINDy coefficients for the i'th combination of parameter values. 
-                Remember that Latent_States[i][0] is a tensor of shape (n_t(j), n_z) whose (j, k) 
-                entry holds the k'th component of the j'th frame of the latent trajectory for the 
-                i'th combination of parameter values. 
-                
-                Note that Result a 3 element tuple.
-                """
-                result : tuple[torch.Tensor] = self.calibrate(Latent_States = [Latent_States[i]], 
-                                                              t_Grid        = [t_Grid[i]]);
+                # Calibrate on the i'th combination of parameter values.
+                if(input_coefs is None):
+                    result : tuple[torch.Tensor] = self.calibrate(Latent_States = [Latent_States[i]], 
+                                                                  t_Grid        = [t_Grid[i]]);
+                else:
+                    result : tuple[torch.Tensor] = self.calibrate(Latent_States = [Latent_States[i]], 
+                                                                  t_Grid        = [t_Grid[i]],
+                                                                  input_coefs   = [input_coefs[i]]);
 
                 # Package the results from this combination of parameter values.
-                coefs[i, :] = result[0];
-                loss_sindy  = loss_sindy + result[1];
-                loss_coef   = loss_coef + result[2];
+                output_coefs_list.append(result[0]);
+                loss_sindy          += result[1];
+                loss_coef           += result[2];
             
             # Package everything to return!
-            return coefs, loss_sindy, loss_coef;
+            return torch.stack(output_coefs_list), loss_sindy, loss_coef;
         
+
 
         # -----------------------------------------------------------------------------------------
         # Evaluate for one combination of parameter values case.
+        # -----------------------------------------------------------------------------------------
+
+        # -----------------------------------------------------------------------------------------
+        # Concatenate the latent displacement and velocity.
 
         Z       : torch.Tensor  = Latent_States[0];         # len = n_IC, i'th element is a torch.Tensor of shape (n_t, n_z)
         t_Grid  : torch.Tensor  = t_Grid[0];                # shape = (n_t)
 
         Z_D     : torch.Tensor  = Z[0];                     # shape = (n_t, n_z)
         Z_V     : torch.Tensor  = Z[1];                     # shape = (n_t, n_z)
-        
-        # First, compute the second time derivative of Z_D. This should also be the first time 
-        # derivative of Z_V. We average the two so that the final loss depends on both.
+        # Concatenate Z_D, Z_V and a column of 1's. We will solve for the matrix, E, which gives 
+        # the best fit for the system d2Z_dt2 = cat[Z_D, Z_V, 1] E. This matrix has the form 
+        # E^T = [-K, -C, b]. Thus, we can extract K, C, and b from Z_1.
+        Z_1   : torch.Tensor  = torch.cat([Z_D, Z_V, torch.ones((Z_D.shape[0], 1))], dim = 1);              # shape = (n_t, 2*n_z + 1)
+
+
+        # -----------------------------------------------------------------------------------------
+        # Compute the second time derivative of the latent state.
+
         if(self.Uniform_t_Grid  == True):
             h : float = t_Grid[1] - t_Grid[0];
             #d2Z_dt2_from_Z_D    : torch.Tensor  = Derivative2_Order4(U = Z_D,   h = h);                     # shape = (n_t, n_z)
@@ -221,47 +251,32 @@ class DampedSpring(LatentDynamics):
         else:
             #d2Z_dt2_from_Z_D    : torch.Tensor  = Derivative2_Order2_NonUniform(U = Z_D, t_Grid = t_Grid);  # shape = (n_t, n_z)
             d2Z_dt2_from_Z_V    : torch.Tensor  = Derivative1_Order2_NonUniform(U = Z_V, t_Grid = t_Grid);  # shape = (n_t, n_z)
-        d2Z_dt2             : torch.Tensor  = d2Z_dt2_from_Z_V #0.5*(d2Z_dt2_from_Z_D + d2Z_dt2_from_Z_V);                    # shape = (n_t, n_z)
+        d2Z_dt2             : torch.Tensor  = d2Z_dt2_from_Z_V #0.5*(d2Z_dt2_from_Z_D + d2Z_dt2_from_Z_V);  # shape = (n_t, n_z)
 
-        # Concatenate Z_D, Z_V and a column of 1's. We will solve for the matrix, E, which gives 
-        # the best fit for the system d2Z_dt2 = cat[Z_D, Z_V, 1] E. This matrix has the form 
-        # E^T = [-K, -C, b]. Thus, we can extract K, C, and b from Z_1.
-        Z_1   : torch.Tensor  = torch.cat([Z_D, Z_V, torch.ones((Z_D.shape[0], 1))], dim = 1);              # shape = (n_t, 2*n_z + 1)
 
-        # For each j, solve the least squares problem 
-        #   min{ || d2Z_dt2[:, j] - Z_1 E(j)|| : E(j) \in \mathbb{R}^(n_z*(2*n_z + 1)) }
-        # We store the resulting solutions in a matrix, coefs, whose j'th column holds the 
-        # results for the j'th column of Z_V. Thus, coefs is a 2d tensor with shape 
-        # (2*n_z + 1, n_z).
-        coefs   : torch.Tensor  = torch.linalg.lstsq(Z_1, d2Z_dt2).solution;                                # shape = (2*n_z + 1, n_z)
+        # -----------------------------------------------------------------------------------------
+        # Set up coefs (either using Least Squares or using the provided coefficients).
 
-        # Compute the losses
+        if(input_coefs is None):
+            # For each j, solve the least squares problem 
+            #   min{ || d2Z_dt2[:, j] - Z_1 E(j)|| : E(j) \in \mathbb{R}^(n_z*(2*n_z + 1)) }
+            # We store the resulting solutions in a matrix, coefs, whose j'th column holds the 
+            # results for the j'th column of Z_V. Thus, coefs is a 2d tensor with shape 
+            # (2*n_z + 1, n_z).
+            coefs   : torch.Tensor  = torch.linalg.lstsq(Z_1, d2Z_dt2).solution;                            # shape = (2*n_z + 1, n_z)
+        else:
+            coefs   : torch.Tensor  = input_coefs[0].reshape(2*self.n_z + 1, self.n_z);                     # shape = (2*n_z + 1, n_z)
+
+
+        # -----------------------------------------------------------------------------------------
+        # Compute the losses and return.
+    
         Loss_LD     = self.LD_LossFunction(d2Z_dt2, torch.matmul(Z_1, coefs));
         Loss_Coef   = torch.norm(coefs, self.coef_norm_order);
 
-        if(False):
-            # Extract K, C, and b from coefs.
-            E   : torch.Tensor  = coefs.T;
-            K   : torch.Tensor  = -E[:, 0:self.n_z];
-            C   : torch.Tensor  = -E[:, self.n_z:(2*self.n_z)];
-            b   : torch.Tensor  = E[:, 2*self.n_z:(2*self.n_z + 1)];
-            
-            # Compute the RHS of the diff eq using coefs and the matrices we found.
-            RHS_coefs           = torch.matmul(Z_1, coefs);
-            RHS_Manual          = torch.matmul(torch.ones((Z_D.shape[0], 1)), b.T) - torch.matmul(Z_V, C.T) - torch.matmul(Z_D, K.T);
-
-            # Select a random row to sample.
-            import random;
-            row : int           = random.randint(a = 0, b = Z_D.shape[0]);
-
-            print("Row %d of RHS using coefs:                   %s" % (row, str(RHS_coefs[row, :])));
-            print("Row %d of RHS using K, C, and b:             %s" % (row, str(RHS_Manual[row, :])));
-            print("Max diff between RHS with coefs and K/C/b:   %f" % torch.max(torch.abs(RHS_coefs - RHS_Manual)));
-
-        # Prepare coefs and the losses to return. 
-        # Note: we flatten the coefficient matrix.
-        coefs   : torch.Tensor  = coefs.detach().flatten();
-        return coefs, Loss_LD, Loss_Coef;
+        # Prepare coefs and the losses to return.
+        output_coefs   : torch.Tensor  = coefs.flatten();
+        return output_coefs, Loss_LD, Loss_Coef;
     
 
 
@@ -416,19 +431,23 @@ class DampedSpring(LatentDynamics):
         if(Same_t_Grid == True):
             D, V = RK4(f = f, y0 = D0, Dy0 = V0, t_Grid = t_Grid);
         else:
-            # Set up arrays to hold the results of each simulation.
-            if(isinstance(coefs, numpy.ndarray)):
-                D : numpy.ndarray   = numpy.empty((n_t_i, n_i, self.n_z), dtype = numpy.float32);
-                V : numpy.ndarray   = numpy.empty((n_t_i, n_i, self.n_z), dtype = numpy.float32);
-            elif(isinstance(coefs, torch.Tensor)):
-                D : torch.Tensor    = torch.empty((n_t_i, n_i, self.n_z), dtype = torch.float32);
-                V : torch.Tensor    = torch.empty((n_t_i, n_i, self.n_z), dtype = torch.float32);
-            
-            # Now cycle through the ICs.
+            # Cycle through the ICs.
+            D_list : list[torch.Tensor] | list[numpy.ndarray] = [];
+            V_list : list[torch.Tensor] | list[numpy.ndarray] = []; 
+
             for j in range(n_i):
-                D_j, V_j    = RK4(f = f, y0 = D0[j, :], Dy0 = V0[j, :], t_Grid = t_Grid[j, :]);
-                D[:, j, :]  = D_j;
-                V[:, j, :]  = V_j;
+                D_j, V_j    = RK4(f = f, y0 = D0[j, :].reshape(1, -1), Dy0 = V0[j, :].reshape(1, -1), t_Grid = t_Grid[j, :]);
+                D_list.append(D_j);
+                V_list.append(V_j);
+
+            # Stack the results.
+            if(isinstance(coefs, numpy.ndarray)):
+                D = numpy.stack(D_list, axis = 0);  # shape = (n_t, n_i, n_z)
+                V = numpy.stack(V_list, axis = 0);  # shape = (n_t, n_i, n_z)
+            elif(isinstance(coefs, torch.Tensor)):
+                D = torch.stack(D_list, axis = 0);  # shape = (n_t, n_i, n_z)
+                V = torch.stack(V_list, axis = 0);  # shape = (n_t, n_i, n_z)
+
 
         # All done!
         return [[D, V]];
