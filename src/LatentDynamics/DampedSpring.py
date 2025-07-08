@@ -235,10 +235,11 @@ class DampedSpring(LatentDynamics):
 
         Z_D     : torch.Tensor  = Z[0];                     # shape = (n_t, n_z)
         Z_V     : torch.Tensor  = Z[1];                     # shape = (n_t, n_z)
+
         # Concatenate Z_D, Z_V and a column of 1's. We will solve for the matrix, E, which gives 
         # the best fit for the system d2Z_dt2 = cat[Z_D, Z_V, 1] E. This matrix has the form 
         # E^T = [-K, -C, b]. Thus, we can extract K, C, and b from Z_1.
-        Z_1   : torch.Tensor  = torch.cat([Z_D, Z_V, torch.ones((Z_D.shape[0], 1))], dim = 1);              # shape = (n_t, 2*n_z + 1)
+        ZD_ZV_1   : torch.Tensor  = torch.cat([Z_D, Z_V, torch.ones((Z_D.shape[0], 1))], dim = 1);          # shape = (n_t, 2*n_z + 1)
 
 
         # -----------------------------------------------------------------------------------------
@@ -263,19 +264,38 @@ class DampedSpring(LatentDynamics):
             # We store the resulting solutions in a matrix, coefs, whose j'th column holds the 
             # results for the j'th column of Z_V. Thus, coefs is a 2d tensor with shape 
             # (2*n_z + 1, n_z).
-            coefs   : torch.Tensor  = torch.linalg.lstsq(Z_1, d2Z_dt2).solution;                            # shape = (2*n_z + 1, n_z)
+            coefs   : torch.Tensor  = torch.linalg.lstsq(ZD_ZV_1, d2Z_dt2).solution;                            # shape = (2*n_z + 1, n_z)
+        
+            # Now compute the loss.
+            LD_RHS  : torch.Tensor = torch.matmul(ZD_ZV_1, coefs);
+
         else:
+            # First, reshape input_coefs to have shape (2*n_z + 1, n_z).
             coefs   : torch.Tensor  = input_coefs[0].reshape(2*self.n_z + 1, self.n_z);                     # shape = (2*n_z + 1, n_z)
+
+            # Next, extract -K, -C, and b from coefs.
+            E   : torch.Tensor  = coefs.T;
+            K   : torch.Tensor  = -E[:, 0:self.n_z];
+            C   : torch.Tensor  = -E[:, self.n_z:(2*self.n_z)];
+            b   : torch.Tensor  = E[:, 2*self.n_z].reshape(1, -1);
+        
+            # Now compute the right hand side of the latent dynamics.
+            LD_RHS  : torch.Tensor = b - torch.matmul(Z_V, C.T) - torch.matmul(Z_D, K.T);
+            
+            """
+            # Now compute the right hand side of the latent dynamics.
+            LD_RHS  : torch.Tensor = torch.matmul(ZD_ZV_1, coefs);\
+            """
 
 
         # -----------------------------------------------------------------------------------------
-        # Compute the losses and return.
-    
-        Loss_LD     = self.LD_LossFunction(d2Z_dt2, torch.matmul(Z_1, coefs));
+        # Compute the coefficient losses and return.
+
+        Loss_LD     = self.LD_LossFunction(d2Z_dt2, LD_RHS);
         Loss_Coef   = torch.norm(coefs, self.coef_norm_order);
 
         # Prepare coefs and the losses to return.
-        output_coefs   : torch.Tensor  = coefs.flatten();
+        output_coefs   : torch.Tensor  = coefs.reshape(-1);
         return output_coefs, Loss_LD, Loss_Coef;
     
 
@@ -402,6 +422,20 @@ class DampedSpring(LatentDynamics):
         V0  : numpy.ndarray | torch.Tensor  = IC[0][1];
         n_i : int                           = D0.shape[0];
 
+        """
+        # Reshape coefs to have shape (2*n_z + 1, n_z).
+        coefs : numpy.ndarray | torch.Tensor = coefs.reshape(2*self.n_z + 1, self.n_z);
+
+        # Set up lambda functions to compute the latent dynamics. We expect z and dz_dt to have 
+        # shape (n(i), n_z). We concatenate z and dz_dt and a column of 1's to get a matrix with 
+        # shape (n(i), 2*n_z + 1). We then multiply this by coefs to get a tensor of shape (n(i), n_z)
+        # which holds the rhs of the latent dynamics.
+        if(isinstance(coefs, numpy.ndarray)):
+            f   = lambda t, z, dz_dt: torch.matmul(torch.cat([z, dz_dt, torch.ones((z.shape[0], 1))], dim = 1), coefs);
+        if(isinstance(coefs, torch.Tensor)):
+            f   = lambda t, z, dz_dt: torch.matmul(torch.cat([z, dz_dt, torch.ones((z.shape[0], 1))], dim = 1), coefs);
+        """
+
         # First, we need to extract -K, -C, and b from coefs. We know that coefs is the least 
         # squares solution to d2Z_dt2 = hstack[Z, dZdt, 1] E^T. Thus, we expect that.
         # E = [-K, -C, b]. 
@@ -429,7 +463,7 @@ class DampedSpring(LatentDynamics):
         # autonomous to solve using each IC simultaneously. Otherwise, we need to run the latent
         # dynamics one IC at a time. 
         if(Same_t_Grid == True):
-            D, V = RK4(f = f, y0 = D0, Dy0 = V0, t_Grid = t_Grid);
+            D, V = RK4(f = f, y0 = D0, Dy0 = V0, t_Grid = t_Grid);  # shape = (n_t, n_i, n_z)
         else:
             # Cycle through the ICs.
             D_list : list[torch.Tensor] | list[numpy.ndarray] = [];
@@ -442,11 +476,11 @@ class DampedSpring(LatentDynamics):
 
             # Stack the results.
             if(isinstance(coefs, numpy.ndarray)):
-                D = numpy.concatenate(D_list, axis = 1);  # shape = (n_t, n_i, n_z)
-                V = numpy.concatenate(V_list, axis = 1);  # shape = (n_t, n_i, n_z)
+                D = numpy.concatenate(D_list, axis = 1);    # shape = (n_t, n_i, n_z)
+                V = numpy.concatenate(V_list, axis = 1);    # shape = (n_t, n_i, n_z)
             elif(isinstance(coefs, torch.Tensor)):
-                D = torch.cat(D_list, axis = 1);  # shape = (n_t, n_i, n_z)
-                V = torch.cat(V_list, axis = 1);  # shape = (n_t, n_i, n_z)
+                D = torch.cat(D_list, axis = 1);            # shape = (n_t, n_i, n_z)
+                V = torch.cat(V_list, axis = 1);            # shape = (n_t, n_i, n_z)
         
         # All done!
         return [[D, V]];

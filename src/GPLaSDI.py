@@ -449,13 +449,13 @@ class BayesianGLaSDI:
                     Z_Rollout_Predict_i     : torch.Tensor          = Z_Rollout_i[-1, :, :];        # shape = (n_rollout_frames[i], n_z)
 
                     # Now fetch the corresponding targets.
-                    Z_Rollout_Targets_i     : list[torch.Tensor]    = Z_Rollout_Targets[i][0];      # shape = (n_rollout_frames[i], n_z)
+                    Z_Rollout_Targets_i     : torch.Tensor          = Z_Rollout_Targets[i][0];      # shape = (n_rollout_frames[i], n_z)
 
                     # Decode the latent predictions to get FOM predictions.
                     U_Rollout_Predict_i     : torch.Tensor          = model_device.Decode(Z_Rollout_Predict_i);
                 
                     # Get the corresponding FOM targets.
-                    U_Rollout_Target_i      : list[torch.Tensor]    = U_Rollout_Targets[i][0];      # shape = (n_rollout_frames[i], physics.Frame_Shape)
+                    U_Rollout_Target_i      : torch.Tensor          = U_Rollout_Targets[i][0];      # shape = (n_rollout_frames[i], physics.Frame_Shape)
                 
                     # Compute the losses for the i'th combination of parameter values!
                     loss_rollout_ROM  += self.MSE(Z_Rollout_Targets_i, Z_Rollout_Predict_i);
@@ -490,8 +490,8 @@ class BayesianGLaSDI:
                 loss_consistency_Z  : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
                 loss_consistency_U  : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
 
-                loss_chain_rule_U   : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
-                loss_chain_rule_Z   : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
+                #loss_chain_rule_U   : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
+                #loss_chain_rule_Z   : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
 
 
                 # Cycle through the combinations of parameter values.
@@ -521,8 +521,8 @@ class BayesianGLaSDI:
                     Latent_States.append(Z_i);
 
                     U_Pred_i    : list[torch.Tensor]    = list(model_device.Decode(*Z_i));
-                    D_Pred_i    : torch.Tensor          = U_Pred_i[0];
-                    V_Pred_i    : torch.Tensor          = U_Pred_i[1];
+                    D_Pred_i    : torch.Tensor          = U_Pred_i[0];  # shape = (n_t(i), physics.Frame_Shape)
+                    V_Pred_i    : torch.Tensor          = U_Pred_i[1];  # shape = (n_t(i), physics.Frame_Shape)
 
                     self.timer.end("Forward Pass");
 
@@ -564,7 +564,8 @@ class BayesianGLaSDI:
 
                     self.timer.end("Consistency Loss");
 
-            
+
+                    """
                     # ----------------------------------------------------------------------------
                     # Chain Rule Losses
 
@@ -597,7 +598,7 @@ class BayesianGLaSDI:
                     loss_chain_rule_Z += self.MSE(Z_V_i, d_dx_Z_D__V);
 
                     self.timer.end("Chain Rule Loss");
-
+                    """
 
                     # ----------------------------------------------------------------------------
                     # Setup Rollout losses.
@@ -682,9 +683,9 @@ class BayesianGLaSDI:
                     D_Rollout_Predict_i, V_Rollout_Predict_i = model_device.Decode(Z_D_Rollout_Predict_i, Z_V_Rollout_Predict_i);
                 
                     # Get the corresponding FOM targets.
-                    U_Rollout_Target_i      : list[torch.Tensor]    = U_Rollout_Targets[i];
-                    D_Rollout_Target_i      : torch.Tensor          = U_Rollout_Target_i[0];
-                    V_Rollout_Target_i      : torch.Tensor          = U_Rollout_Target_i[1];
+                    U_Rollout_Target_i      : list[torch.Tensor]    = U_Rollout_Targets[i];         # shape = (n_rollout_frames[i], physics.Frame_Shape)
+                    D_Rollout_Target_i      : torch.Tensor          = U_Rollout_Target_i[0];        # shape = (n_rollout_frames[i], physics.Frame_Shape)
+                    V_Rollout_Target_i      : torch.Tensor          = U_Rollout_Target_i[1];        # shape = (n_rollout_frames[i], physics.Frame_Shape)
                 
                     # Compute the losses for the i'th combination of parameter values!
                     loss_rollout_Z_D  += self.MSE(Z_D_Rollout_Target_i, Z_D_Rollout_Predict_i);
@@ -700,13 +701,13 @@ class BayesianGLaSDI:
 
                 loss_recon          : torch.Tensor  = loss_recon_D          + loss_recon_V;
                 loss_consistency    : torch.Tensor  = loss_consistency_Z    + loss_consistency_U;
-                loss_chain_rule     : torch.Tensor  = loss_chain_rule_U     + loss_chain_rule_Z;
+                #in_rule     : torch.Tensor  = loss_chain_rule_U     + loss_chain_rule_Z;
                 loss_rollout        : torch.Tensor  = loss_rollout_D        + loss_rollout_V + loss_rollout_Z_D + loss_rollout_Z_V;
 
                 # Compute the final loss.
                 loss = (self.loss_weights['recon']          * loss_recon + 
                         self.loss_weights['consistency']    * loss_consistency +
-                        self.loss_weights['chain_rule']     * loss_chain_rule + 
+                        #self.loss_weights['chain_rule']     * loss_chain_rule + 
                         self.loss_weights['rollout']        * loss_rollout +
                         self.loss_weights['LD']             * loss_LD + 
                         self.loss_weights['coef']           * loss_coef);
@@ -750,8 +751,8 @@ class BayesianGLaSDI:
                 LOGGER.info("Iter: %05d/%d, Total: %3.10f, Recon: %3.10f, Roll FOM: %3.10f, Roll ROM: %3.10f, LD: %3.10f, Coef: %3.10f, max|c|: %.3f, "
                             % (iter + 1, self.max_iter, loss.item(), loss_recon.item(), loss_rollout_FOM.item(), loss_rollout_ROM.item(), loss_LD.item(), loss_coef.item(), max_coef));
             elif(isinstance(model_device, Autoencoder_Pair)):
-                LOGGER.info("Iter: %05d/%d, Total: %3.6f, Recon D: %3.6f, Recon V: %3.6f, Consistency Z: %3.6f, Consistency U: %3.6f, CR U: %3.6f, CR Z: %3.6f, Roll D: %3.6f, Roll V: %3.6f, Roll ZD: %3.6f, Roll ZV: %3.6f, LD: %3.6f, Coef: %3.6f, max|c|: %.3f, "
-                            % (iter + 1, self.max_iter, loss.item(), loss_recon_D.item(), loss_recon_V.item(), loss_consistency_Z.item(), loss_consistency_U.item(), loss_chain_rule_U.item(), loss_chain_rule_Z.item(), loss_rollout_D.item(), loss_rollout_V.item(), loss_rollout_Z_D.item(), loss_rollout_Z_V.item(), loss_LD.item(), loss_coef.item(), max_coef)); 
+                LOGGER.info("Iter: %05d/%d, Total: %3.6f, Recon D: %3.6f, Recon V: %3.6f, Consistency Z: %3.6f, Consistency U: %3.6f, Roll D: %3.6f, Roll V: %3.6f, Roll ZD: %3.6f, Roll ZV: %3.6f, LD: %3.6f, Coef: %3.6f, max|c|: %.3f, "
+                            % (iter + 1, self.max_iter, loss.item(), loss_recon_D.item(), loss_recon_V.item(), loss_consistency_Z.item(), loss_consistency_U.item(), loss_rollout_D.item(), loss_rollout_V.item(), loss_rollout_Z_D.item(), loss_rollout_Z_V.item(), loss_LD.item(), loss_coef.item(), max_coef)); 
 
             # If there are fewer than 6 training examples, report the set of parameter combinations.
             if n_train < 6:
@@ -818,7 +819,8 @@ class BayesianGLaSDI:
 
                 # zero the biased second moment estimate
                 state['exp_avg_sq'].zero_();
-                # if you’re using amsgrad:
+                
+                # if you're using amsgrad:
                 if 'max_exp_avg_sq' in state:
                     state['max_exp_avg_sq'].zero_();
 
@@ -973,9 +975,8 @@ class BayesianGLaSDI:
             U_Rollout_Targets_i     : list[torch.Tensor]    = [];
             for j in range(n_IC):
                 # Interpolate the j'th component of U_Train_i.
-                U_Train_ij          : numpy.ndarray = U_Train_i[j].detach().numpy();        # shape = (n_t(i), ...)
+                U_Train_ij          : numpy.ndarray = U_Train_i[j].detach().numpy();        # shape = (n_t(i), Physics.Frame_Shape)
                 U_Train_ij_interp                   = interpolate.CubicSpline(x = t_Train_i, y = U_Train_ij);
-
 
                 # Evaluate the interpolation at the final rollout times for the i'th combination of
                 # parameter values.
