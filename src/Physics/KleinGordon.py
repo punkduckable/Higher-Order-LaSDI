@@ -13,7 +13,7 @@ import  numpy;
 import  torch;
 
 from    Physics                         import  Physics;
-from    klein_gordon                    import  Simulate;
+from    klein_gordon                    import  Simulate, Initial_Displacement, Initial_Velocity;
 
 
 LOGGER : logging.Logger = logging.getLogger(__name__);
@@ -94,28 +94,23 @@ class KleinGordon(Physics):
 
     def initial_condition(self, param : numpy.ndarray) -> list[numpy.ndarray]:
         """
-        Evaluate the initial condition of the advection equation at the positions stored in 
+        Evaluate the initial condition of the Klein-Gordon equation at the positions stored in 
         ``self.X_Positions``. For the default problem considered in the MFEM example, the initial 
-        state is defined by
+        conditions are 
              
-            u(0, (x, y))        = exp(-k*(x^2 + y^2)) * sin(pi*w*x) * sin(pi*w*y)
-            (du/dt)(0, (x, y))  = 0
+                    u(0, (x, y))    =  exp(-k*(x^2 + y^2)) * sin(pi*w*x) * sin(pi*w*y)
+            (d/dt)  u(0, (x, y))    =  0
 
-        Here, w = param[w_idx] and c = param[c_kdx], and k = 1.0. 
-        
-        Note 1: c is unused in the IC but defines the wave speed in wave equation, 
-        
-            d^2u/dt^2 = c^2 * d^2u/dx^2,
-       
-        Note 2: The initial condition is defined on a star-shaped domain.
-        
+        We initialize and call the Initial_Displacement and Initial_Velocity classes from the 
+        klein_gordon.py file in the PyMFEM sub-directory. Note that k is hardcoded in the IC.
+
 
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
 
         param : numpy.ndarray, shape = (self.n_p)
-            A two element array holding the values of the k and c parameters.
+            A two element array holding the values of the k and w parameters.
 
 
                 
@@ -135,14 +130,23 @@ class KleinGordon(Physics):
         assert(param.shape[0]   == self.n_p);
         assert(self.X_Positions is not None);
 
+        # Fetch the parameters.
+        w : float = param[self.w_idx];
+        m : float = param[self.m_idx];
+
+        # Set the global variables.
+        global freq;
+        freq  = w;
+
+        # Initialize the initial condition classes.
+        initial_displacement : Initial_Displacement = Initial_Displacement();
+        initial_velocity     : Initial_Velocity     = Initial_Velocity();
+
         # Evaluate the initial condition.
-        k       : float             = 1.0;
-        w       : float             = param[self.w_idx];
-        X       : numpy.ndarray     = self.X_Positions;     # (2, N_x)
-        norm2   : float             = numpy.sum(numpy.square(X), axis = 0);
-        u0      : numpy.ndarray     = numpy.multiply(numpy.exp(-k*numpy.sum(numpy.square(X), axis = 0)), numpy.sin(numpy.pi*w*X[0, :]) * numpy.sin(numpy.pi*w*X[1, :])).reshape(1, -1);
-        v0      : numpy.ndarray     = numpy.zeros_like(u0);
-     
+        u0 : numpy.ndarray = initial_displacement.EvalValue(self.X_Positions);
+        v0 : numpy.ndarray = initial_velocity.EvalValue(self.X_Positions);
+        
+        # Return the initial conditions.
         return [u0, v0];
 
 

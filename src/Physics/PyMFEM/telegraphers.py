@@ -264,18 +264,115 @@ class TelegraphersOperator(mfem.SecondOrderTimeDependentOperator):
         self.T = None
 
 
-class cInitialSolution(mfem.PyCoefficient):
-    def EvalValue(self, X : numpy.ndarray) -> float:    
+class Initial_Displacement(mfem.PyCoefficient):
+    def EvalValue(self, X : numpy.ndarray) -> numpy.ndarray | float:   
+        """
+        This function returns the initial displacement for the Telegrapher's equation:
+
+            u(0, (x, y)) = exp(-k*(x^2 + y^2)) * sin(pi*w*x) * sin(pi*w*y)
+
+        where k and w are global variables. See the docstring for the TelegraphersOperator class for more 
+        details.
+
+        
+
+        ---------------------------------------------------------------------------------------------
+        Arguments
+        ---------------------------------------------------------------------------------------------
+
+        X : numpy.ndarray, shape = (2, N) or (2)
+            An array holding the positions at which we want to evaluate the initial displacement. If 
+            X.shape = (2, N), then X[:, j] is the j'th position at which we want to evaluate the 
+            initial displacement. If X.shape = (2), then X's lone column holds the position at which 
+            we want to evaluate the initial displacement.
+
+
+            
+        ---------------------------------------------------------------------------------------------
+        Returns
+        ---------------------------------------------------------------------------------------------
+
+        u : float or numpy.ndarray, shape = (1, N)
+            The initial displacement at the positions in X. If X.shape = (2, N), then u[j] is the 
+            initial displacement at the j'th position. If X.shape = (2), then u is a scalar holding 
+            the initial displacement at the lone position in X.
+        """ 
+
+        # Run checks
+        assert(isinstance(X, numpy.ndarray));
+        assert(len(X.shape) == 2 or len(X.shape) == 1);
+        assert(X.shape[0] == 2);
+
+        # Determine how many positions we are evaluating the initial condition at.
+        if(len(X.shape) == 1):
+            X = X.reshape(2, 1);
+
+        # Determine how many positions we are evaluating the initial condition at.
+        N : int = X.shape[1];
+
+        # Evaluate the initial condition.
         global decay, freq;
-        norm2 : float = numpy.sum(numpy.square(X));
-        return numpy.exp(-decay*norm2) * numpy.sin(numpy.pi * freq * X[0]) * numpy.sin(numpy.pi * freq * X[1]);
+        norm2 : numpy.ndarray = numpy.sum(numpy.square(X), axis = 0);
+        u     : numpy.ndarray = numpy.exp(-decay*norm2) * numpy.sin(numpy.pi * freq * X[0, :]) * numpy.sin(numpy.pi * freq * X[1, :]);
+
+        # Return the initial condition.
+        if(N == 1):
+            return u[0];
+        else:
+            return u.reshape(1, N);
 
 
 
-class cInitialRate(mfem.PyCoefficient):
-    def EvalValue(self, x : numpy.ndarray) -> float:
-        return 0;
+class Initial_Velocity(mfem.PyCoefficient):
+    def EvalValue(self, X : numpy.ndarray) -> numpy.ndarray | float:
+        """
+        This function returns the initial velocity for the Telegrapher's equation:
 
+            (d/dt)u(0, (x, y)) = 0
+        
+
+        ---------------------------------------------------------------------------------------------
+        Arguments
+        ---------------------------------------------------------------------------------------------
+
+        X : numpy.ndarray, shape = (2, N) or (2)
+            An array holding the positions at which we want to evaluate the initial velocity. If 
+            X.shape = (2, N), then X[:, j] is the j'th position at which we want to evaluate the 
+            initial velocity. If X.shape = (2), then X's lone column holds the position at which we 
+            want to evaluate the initial velocity.
+
+
+            
+        ---------------------------------------------------------------------------------------------
+        Returns
+        ---------------------------------------------------------------------------------------------
+
+        u : float or numpy.ndarray, shape = (1, N)
+            The initial velocity at the positions in X. If X.shape = (2, N), then u[j] is the 
+            initial velocity at the j'th position. If X.shape = (2), then u is a scalar holding 
+            the initial velocity at the lone position in X.
+        """ 
+
+        # Run checks
+        assert(isinstance(X, numpy.ndarray));
+        assert(len(X.shape) == 2 or len(X.shape) == 1);
+        assert(X.shape[0] == 2);
+
+        # Determine how many positions we are evaluating the initial condition at.
+        if(len(X.shape) == 1):
+            X = X.reshape(2, 1);
+
+        # Determine how many positions we are evaluating the initial condition at.
+        N : int = X.shape[1];
+
+        # Evaluate the initial condition.
+        u : numpy.ndarray = numpy.zeros((1, N));
+
+        # Return the initial condition.
+        if(N == 1):
+            return u[0, 0];
+        else:
+            return u;
 
 
 
@@ -296,7 +393,7 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
              Positions          : numpy.ndarray = None,
              c                  : float         = 0.2,
              alpha              : float         = 0.2,
-             k                  : float         = 3.0,
+             k                  : float         = 1.0,
              w                  : float         = 2.0,
              dirichlet          : bool          = True,
              serialization_steps: int           = 1,
@@ -474,8 +571,8 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
     LOGGER.debug("Setting the initial conditions for U and U'(t).");
 
     # Set the initial conditions for u. All boundaries are considered natural.
-    u_0     : mfem.PyCoefficient = cInitialSolution();
-    dudt_0  : mfem.PyCoefficient = cInitialRate();
+    u_0     : mfem.PyCoefficient = Initial_Displacement();
+    dudt_0  : mfem.PyCoefficient = Initial_Velocity();
 
     # Project the initial conditions onto the finite element space.
     u_gf.ProjectCoefficient(u_0);

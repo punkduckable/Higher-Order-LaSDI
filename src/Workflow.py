@@ -207,9 +207,9 @@ def main():
         n_IC        : int                   = physics.n_IC;
         for i in range(n_IC):
             if(i == 0):
-                prefix : str = "%s_U" % config["physics"]["type"];
+                prefix : str = "%s_U_%d" % (config["physics"]["type"], i_random);
             else:
-                prefix : str = "%s_(Dt^%d)U" % (config["physics"]["type"], i);
+                prefix : str = "%s_(Dt^%d)U_%d" % (config["physics"]["type"], i, i_random);
 
             make_solution_movies(U_True         = U_True[i].detach().numpy(), 
                                  U_Pred         = U_Pred[i].detach().numpy(), 

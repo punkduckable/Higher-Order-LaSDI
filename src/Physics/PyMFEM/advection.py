@@ -107,11 +107,11 @@ class velocity_coeff(mfem.VectorPyCoefficient):
 
 
 
-class u0_coeff(mfem.PyCoefficient):
+class Initial_Displacement(mfem.PyCoefficient):
     def __init__(self, bb_min : numpy.ndarray, bb_max : numpy.ndarray):
         """
-        Initialize a u0_coeff object. This class is used to define the initial condition for the 
-        advection problem. The initial condition is defined by
+        Initialize a Initial_Displacement object. This class is used to define the initial 
+        condition for the advection problem. The initial condition is defined by
 
             u(0, (x, y)) = exp(-k*(x^2 + y^2)) * sin(pi*w*x~) * sin(pi*w*y~)
 
@@ -347,7 +347,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
                 time_step_size      : float         = 0.01,
                 Positions           : numpy.ndarray = None,
                 g                   : float         = numpy.pi/2,
-                k                   : float         = 2.0,
+                k                   : float         = 1.0,
                 w                   : float         = 1.0,
                 serialization_steps : int           = 2,
                 num_positions       : int           = 1000,
@@ -362,8 +362,8 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
         u(0, (x, y))        =  exp(-k*(x~^2 + y~^2)) * sin(pi*w*x~) * sin(pi*w*y~)
 
 
-    See the "u0_coeff" class for more details. We solve this PDE, then return the solution at 
-    each time step. 
+    See the "Initial_Displacement" class for more details. We solve this PDE, then return the 
+    solution at each time step. 
 
         
 
@@ -410,11 +410,11 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
 
     w : float
         specifies the frequency of peaks in the initial condition (this becomes the freq variable 
-        in the EvalValue method in the u0_coeff class).
+        in the EvalValue method in the Initial_Displacement class).
 
     k : float
         Specifies the rate of decay in the initial condition (this becomes the decay variable in 
-        the EvalValue method in the u0_coeff class).
+        the EvalValue method in the Initial_Displacement class).
 
     serialization_steps : int
         Specifies how frequently we serialize (save) and visualize the solution.
@@ -548,7 +548,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
     if(myid == 0): LOGGER.debug("Setting up the coefficient objects.");
     velocity    = velocity_coeff(dim, bb_min, bb_max);
     inflow      = inflow_coeff();
-    u0          = u0_coeff(bb_min, bb_max); 
+    u0          = Initial_Displacement(bb_min, bb_max); 
 
     # Project the initial condition onto the finite element space.
     u_gf.ProjectCoefficient(u0);

@@ -14,7 +14,7 @@ import  numpy;
 import  torch;
 
 from    Physics                         import  Physics;
-from    wave_equation                   import  Simulate;
+from    wave_equation                   import  Simulate, Initial_Displacement, Initial_Velocity;
 
 
 LOGGER : logging.Logger = logging.getLogger(__name__);
@@ -95,20 +95,16 @@ class WaveEquation(Physics):
 
     def initial_condition(self, param : numpy.ndarray) -> list[numpy.ndarray]:
         """
-        Evaluate the initial condition of the advection equation at the positions stored in 
+        Evaluate the initial condition of the wave equation at the positions stored in 
         ``self.X_Positions``. For the default problem considered in the MFEM example, the initial 
-        state is defined by
+        conditions are
              
-            u(0, (x, y)) = exp(-k*(x^2 + y^2))
+                    u(0, (x, y))    = exp(-k*(x^2 + y^2))
+            (d/dt)  u(0, (x, y))    = 0
 
-        Here, k = param[0] and c = param[1]. 
-        
-        Note 1: c is unused in the IC but defines the wave speed in wave equation, 
-        
-            d^2u/dt^2 = c^2 * d^2u/dx^2,
-       
-        Note 2: The initial condition is defined on a star-shaped domain.
-        
+        We initialie and call the Initial_Displacement and Initial_Velocity classes from the 
+        wave_equation.py file in the PyMFEM sub-directory.
+
 
         -------------------------------------------------------------------------------------------
         Arguments
@@ -135,11 +131,23 @@ class WaveEquation(Physics):
         assert(param.shape[0]   == self.n_p);
         assert(self.X_Positions is not None);
 
+        # Fetch the parameters.
+        k : float = param[self.k_idx];
+        c : float = param[self.c_idx];
+
+        # Set the global variables.
+        global decay;
+        decay  = k;
+
+        # Initialize the initial condition classes.
+        initial_displacement : Initial_Displacement = Initial_Displacement();
+        initial_velocity     : Initial_Velocity     = Initial_Velocity();
+
         # Evaluate the initial condition.
-        norm2 : float           = numpy.sum(numpy.square(self.X_Positions), axis = 0);
-        u0    : numpy.ndarray   = numpy.exp(-norm2*param[self.k_idx]).reshape(1, -1);
-        v0    : numpy.ndarray   = numpy.zeros_like(u0);
+        u0 : numpy.ndarray = initial_displacement.EvalValue(self.X_Positions);
+        v0 : numpy.ndarray = initial_velocity.EvalValue(self.X_Positions);
         
+        # Return the initial conditions.
         return [u0, v0];
 
 
