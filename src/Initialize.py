@@ -214,11 +214,21 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
     # Autoencoder, autoencoder pair case.
     if(model_type == "ae" or model_type == "pair" or model_type == "autoencoder" or model_type == "autoencoder_pair"):
 
-        # Next, fetch the hidden widths, latent dimension (n_z), and activation for the model. 
+        # Next, fetch the hidden widths and latent dimension (n_z). 
         model_config        : dict              = config['model'][model_type];
         hidden_widths       : list[int]         = model_config['hidden_widths'];
         n_z                 : int               = model_config['latent_dimension'];
-        activation          : str               = model_config['activation']  if 'activation' in model_config else 'tanh';
+
+        # Fetch the activations. This can either be a string or a list of strings. If it's 
+        # a string, then we use that activation for all layers.
+        n_hidden_layers     : int               = len(hidden_widths);
+        if(isinstance(model_config['activations'], str)):
+            activations         : list[str]     = [model_config['activations']] * n_hidden_layers;   # The final layer has no activation.
+        elif(isinstance(model_config['activations'], list)):
+            activations         : list[str]     = model_config['activations'];
+            assert(len(activations) == n_hidden_layers);
+        else:
+            raise ValueError("Activations must be a string or a list of strings.");
 
         # Now build the widths attribute + fetch Frame_Shape from physics.
         Frame_Shape         : list[int]         = physics.Frame_Shape;
@@ -228,7 +238,7 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
         # Now build the model!
         model           : torch.nn.Module       = model_dict[model_type](
                                                         widths          = widths, 
-                                                        activation      = activation, 
+                                                        activations     = activations, 
                                                         reshape_shape   = Frame_Shape);
 
         # All done!

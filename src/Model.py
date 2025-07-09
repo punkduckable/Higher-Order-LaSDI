@@ -22,29 +22,30 @@ LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
 
 # activation dict
-act_dict = {'ELU'           : torch.nn.ELU,
-            'hardshrink'    : torch.nn.Hardshrink,
-            'hardsigmoid'   : torch.nn.Hardsigmoid,
-            'hardtanh'      : torch.nn.Hardtanh,
-            'hardswish'     : torch.nn.Hardswish,
-            'leakyReLU'     : torch.nn.LeakyReLU,
-            'logsigmoid'    : torch.nn.LogSigmoid,
-            'PReLU'         : torch.nn.PReLU,
-            'ReLU'          : torch.nn.ReLU,
-            'ReLU6'         : torch.nn.ReLU6,
-            'RReLU'         : torch.nn.RReLU,
-            'SELU'          : torch.nn.SELU,
-            'CELU'          : torch.nn.CELU,
+act_dict = {'elu'           : torch.nn.functional.elu,
+            'hardshrink'    : torch.nn.functional.hardshrink,
+            'hardsigmoid'   : torch.nn.functional.hardsigmoid,
+            'hardtanh'      : torch.nn.functional.hardtanh,
+            'hardswish'     : torch.nn.functional.hardswish,
+            'leakyReLU'     : torch.nn.functional.leaky_relu,
+            'logsigmoid'    : torch.nn.functional.logsigmoid,
+            'prelu'         : torch.nn.functional.prelu,
+            'relu'          : torch.nn.functional.relu,
+            'relu6'         : torch.nn.functional.relu6,
+            'rrelu'         : torch.nn.functional.rrelu,
+            'selu'          : torch.nn.functional.selu,
+            'celu'          : torch.nn.functional.celu,
             'sin'           : torch.sin,
             'cos'           : torch.cos,
-            'GELU'          : torch.nn.GELU,
-            'sigmoid'       : torch.nn.Sigmoid,
-            'SiLU'          : torch.nn.SiLU,
-            'mish'          : torch.nn.Mish,
-            'softplus'      : torch.nn.Softplus,
-            'softshrink'    : torch.nn.Softshrink,
-            'tanh'          : torch.nn.Tanh,
-            'tanhshrink'    : torch.nn.Tanhshrink}
+            'gelu'          : torch.nn.functional.gelu,
+            'sigmoid'       : torch.nn.functional.sigmoid,
+            'silu'          : torch.nn.functional.silu,
+            'mish'          : torch.nn.functional.mish,
+            'softplus'      : torch.nn.functional.softplus,
+            'softshrink'    : torch.nn.functional.softshrink,
+            'tanh'          : torch.nn.functional.tanh,
+            'tanhshrink'    : torch.nn.functional.tanhshrink, 
+            'none'          : torch.nn.functional.identity};
 
 
 
@@ -56,7 +57,7 @@ act_dict = {'ELU'           : torch.nn.ELU,
 class MultiLayerPerceptron(torch.nn.Module):
     def __init__(   self, 
                     widths          : list[int],
-                    activation      : str           = 'SiLU',
+                    activations     : list[str],
                     reshape_index   : int           = None, 
                     reshape_shape   : list[int]     = None) -> None:
         r"""
@@ -75,9 +76,10 @@ class MultiLayerPerceptron(torch.nn.Module):
             the i'th element of this list represents the domain of the i'th layer AND the 
             co-domain of the i-1'th layer.
 
-        activation : str
-            A string specifying which activation function we want to use at the end of each 
-            layer (except the final one). We use the same activation for each layer. 
+        activations : list[str], len = len(widths) - 2
+            A list of strings whose i'th element specifies the activation function we want to use 
+            after the i'th layer's linear transformation. The final layer has no activation 
+            function. 
 
         reshape_index : int
             This argument specifies if we should reshape the network's input or output 
@@ -109,9 +111,12 @@ class MultiLayerPerceptron(torch.nn.Module):
             assert(isinstance(reshape_shape[i], int));
             assert(reshape_shape[i] > 0);
         assert(isinstance(widths, list));
+        assert(isinstance(activations, list));
+        assert(len(activations) == len(widths) - 2);
         for i in range(len(widths)):
             assert(isinstance(widths[i], int));
             assert(widths[i] > 0);
+            assert(activations[i] in act_dict.keys());
         assert((reshape_index is None) or (reshape_index in [0, -1]));
         assert((reshape_shape is None) or (numpy.prod(reshape_shape) == widths[reshape_index]));
 
@@ -123,6 +128,7 @@ class MultiLayerPerceptron(torch.nn.Module):
         # the number of layers is one less than the length of widths.
         self.n_layers       : int                   = len(widths) - 1;
         self.widths         : list[int]             = widths;
+        self.activations    : list[str]             = activations;
 
         # Set up the affine parts of the layers.
         self.layers            : list[torch.nn.Module] = [];
@@ -137,17 +143,14 @@ class MultiLayerPerceptron(torch.nn.Module):
         self.reshape_index : int        = reshape_index;
         self.reshape_shape : list[int]  = reshape_shape;
 
-        # Set up the activation function. 
-        self.activation     : str       = activation;
-        if(isinstance(act_dict[self.activation], torch.nn.Module)):
-            self.activation_fn  : torch.nn.Module   = act_dict[self.activation]();
-        elif(isinstance(act_dict[self.activation], Callable)):
-            self.activation_fn  : Callable          = act_dict[self.activation];
-        else:
-            raise ValueError("Invalid activation function: %s" % self.activation);
+        # Set up the activation functions
+        activation_fns : list[Callable] = [];
+        for i in range(self.n_layers - 2):
+            activation_fns.append(act_dict[activations[i]]);
+        self.activation_fns = torch.nn.ModuleList(activation_fns);
 
-        LOGGER.info("Initializing a MultiLayerPerceptron with widths %s, activation %s, reshape_shape = %s (index %d)" \
-                    % (str(self.widths), self.activation, str(self.reshape_shape), self.reshape_index));
+        LOGGER.info("Initializing a MultiLayerPerceptron with widths %s, activations %s, reshape_shape = %s (index %d)" \
+                    % (str(self.widths), str(self.activations), str(self.reshape_shape), self.reshape_index));
 
         # All done!
         return;
@@ -199,14 +202,11 @@ class MultiLayerPerceptron(torch.nn.Module):
             # torch.Tensor.reshape in order to avoid data copying.
             U = U.view(list(U.shape[:-len(self.reshape_shape)]) + [self.widths[self.reshape_index]]);
 
-        # Pass X through the network layers (except for the final one, which has no activation 
-        # function).
+        # Pass X through the network layers; note that the final layer has no activation function, 
+        # so we don't apply an activation function to it.
         for i in range(self.n_layers - 1):
-            U : torch.Tensor = self.layers[i](U);           # apply linear layer
-            U : torch.Tensor = self.activation_fn(U);       # apply activation
-
-        # Apply the final (output) layer.
-        U = self.layers[-1](U);
+            U : torch.Tensor = self.activation_fns[i](self.layers[i](U));   # apply linear layer
+        U : torch.Tensor = self.layers[-1](U);                              # apply final layer (no activation)
 
         # If the reshape_index is -1, then we need to reshape the output before returning. 
         if (self.reshape_index == -1):
@@ -245,7 +245,7 @@ class Autoencoder(torch.nn.Module):
     def __init__(   self,                     
                     reshape_shape   : list[int],
                     widths          : list[int], 
-                    activation      : str           = 'SiLU') -> None:
+                    activations     : list[str]) -> None:
         r"""
         Initializes an Autoencoder object. An Autoencoder consists of two networks, an encoder, 
         E : \mathbb{R}^F -> \mathbb{R}^L, and a decoder, D : \mathbb{R}^L -> \marthbb{R}^F. We 
@@ -275,9 +275,10 @@ class Autoencoder(torch.nn.Module):
             docstring for the MultiLayerPerceptron class for details on how Widths defines a 
             network.
 
-        activation : str
-            specifies which activation function we want to use at the end of each layer (except 
-            the final one) in the encoder and decoder. We use the same activation for each layer. 
+        activations : list[str], len = len(widths) - 2
+            i'th element specifies which activation function we want to use after the i'th layer 
+            in the encoder. The final layer has no activation function. We use the reversed list
+            for the decoder. 
 
 
 
@@ -297,6 +298,10 @@ class Autoencoder(torch.nn.Module):
         for i in range(len(widths)):
             assert(isinstance(widths[i], int));
             assert(widths[i] > 0);
+        assert(isinstance(activations, list));
+        assert(len(activations) == len(widths) - 2);
+        for i in range(len(activations)):
+            assert(activations[i] in act_dict.keys());
 
         # Run the superclass initializer.
         super().__init__();
@@ -305,7 +310,7 @@ class Autoencoder(torch.nn.Module):
         self.n_IC           : int       = 1;
         self.widths         : list[int] = widths;
         self.n_z            : int       = widths[-1];
-        self.activation     : str       = activation;
+        self.activations    : list[str] = activations;
         self.reshape_shape  : list[int] = reshape_shape;
         LOGGER.info("Initializing an Autoencoder with latent space dimension %d" % self.n_z);
 
@@ -313,15 +318,15 @@ class Autoencoder(torch.nn.Module):
         LOGGER.info("Initializing the encoder...");
         self.encoder = MultiLayerPerceptron(
                             widths              = widths, 
-                            activation          = activation,
+                            activations         = activations,
                             reshape_index       = 0,                    # We need to flatten the spatial dimensions of each FOM frame.
                             reshape_shape       = reshape_shape);
 
         LOGGER.info("Initializing the decoder...");
         self.decoder = MultiLayerPerceptron(
-                            widths              = widths[::-1],         # Reverses the order of the the list.
-                            activation          = activation,
-                            reshape_index       = -1,               
+                            widths              = widths[::-1],         # Reverses the order for the decoder.
+                            activations         = activations[::-1],    # Reverses the order for the decoder.
+                            reshape_index       = -1,                   # We need to reshape the network output to a FOM frame.
                             reshape_shape       = reshape_shape);       # We need to reshape the network output to a FOM frame.
 
 
@@ -547,11 +552,11 @@ def load_Autoencoder(dict_ : dict) -> Autoencoder:
     # First, extract the parameters we need to initialize an Autoencoder object with the same 
     # architecture as the one that created dict_.
     widths          : list[int] = dict_['widths'];
-    activation      : list[int] = dict_['activation'];
+    activations     : list[str] = dict_['activations'];
     reshape_shape   : list[int] = dict_['reshape_shape'];
 
     # Now... initialize an Autoencoder object.
-    AE = Autoencoder(widths = widths, activation = activation, reshape_shape = reshape_shape);
+    AE = Autoencoder(widths = widths, activations = activations, reshape_shape = reshape_shape);
 
     # Now, update the encoder/decoder parameters.
     AE.encoder.load_state_dict(dict_['encoder state']); 
@@ -576,7 +581,7 @@ class Autoencoder_Pair(torch.nn.Module):
     def __init__(   self,
                     reshape_shape       : list[int],
                     widths              : list[int],
-                    activation          : str       = "SiLU") -> None:
+                    activations         : list[str]) -> None:
         """
         The initializer for the Autoencoder_Pair class. We assume that each input is a tuple 
         of data, (D, V), representing the displacement and velocity of some system at some point 
@@ -594,10 +599,10 @@ class Autoencoder_Pair(torch.nn.Module):
         widths : list[int]
             specifies the widths of the layers in each encoder. See Autoencoder docstring.
 
-        activation : str
-            specifies which activation function we want to use at the end of each 
-            layer (except the final one) in each autoencoder. We use the same activation for each 
-            layer. 
+        activations : list[str], len = len(widths) - 2
+            i'th element specifies which activation function we want to use after the i'th layer 
+            in each encoder (decoder gets the reverse order). The final layer has no activation 
+            function. 
     
             
         -------------------------------------------------------------------------------------------
@@ -616,6 +621,10 @@ class Autoencoder_Pair(torch.nn.Module):
         for i in range(len(widths)):
             assert(isinstance(widths[i], int));
             assert(widths[i] > 0);
+        assert(isinstance(activations, list));
+        assert(len(activations) == len(widths) - 2);
+        for i in range(len(activations)):
+            assert(activations[i] in act_dict.keys());
 
         # Call the super class initializer.
         super().__init__();
@@ -637,17 +646,17 @@ class Autoencoder_Pair(torch.nn.Module):
         self.n_IC       : int           = 2;
 
         # Use the settings to set up the activation information for the encoder.
-        self.activation : str           =  activation;
+        self.activations : list[str]   =  activations;
 
         # Next, build the velocity and displacement auto-encoders.
         LOGGER.info("Initializing the Displacement Autoencoder...");
         self.Displacement_Autoencoder   = Autoencoder(  widths          = widths, 
-                                                        activation      = activation, 
+                                                        activations     = activations, 
                                                         reshape_shape   = self.reshape_shape);
 
         LOGGER.info("Initializing the Velocity Autoencoder...");
         self.Velocity_Autoencoder       = Autoencoder(  widths          = widths, 
-                                                        activation      = activation,
+                                                        activations     = activations,
                                                         reshape_shape   = self.reshape_shape);
 
 
