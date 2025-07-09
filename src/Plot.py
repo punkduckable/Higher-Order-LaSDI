@@ -444,12 +444,12 @@ def Plot_GP2d(  p1_mesh         : numpy.ndarray,
         number of distinct values for the first and second parameters in the training set, 
         respectively. 
 
-    gp_mean : numpy.ndarray, shape = (N(1), N(2), n_coef)
+    gp_mean : numpy.ndarray, shape = (N(1), N(2), n_coefs)
         i, j, k element of this model holds the mean of the posterior distribution for the k'th
         coefficient when the parameters consist of the i'th value of the first parameter and the 
-        j'th of the second. Here, n_coef denotes the number of coefficients in the latent model.
+        j'th of the second. Here, n_coefs denotes the number of coefficients in the latent model.
 
-    gp_std : numpy.ndarray, shape = (N(1), N(2), n_coef)
+    gp_std : numpy.ndarray, shape = (N(1), N(2), n_coefs)
         i, j, k element of this model holds the std of the posterior distribution for the k'th 
         coefficient when the parameters consist of the i'th value of the first parameter and
         the j'th of the second.
@@ -512,12 +512,12 @@ def Plot_GP2d(  p1_mesh         : numpy.ndarray,
     
 
     # First, determine how many coefficients there are.
-    n_coef : int = gp_mean.shape[-1];   
-    LOGGER.info("Producing GP plots with %d coefficients. The parameters are %s" % (n_coef, str(param_names)));
+    n_coefs : int = gp_mean.shape[-1];   
+    LOGGER.info("Producing GP plots with %d coefficients. The parameters are %s" % (n_coefs, str(param_names)));
 
     # Figure out how many rows/columns of subplots we should make.
-    subplot_shape = [n_coef // n_cols, n_cols];
-    if (n_coef % n_cols > 0):
+    subplot_shape = [n_coefs // n_cols, n_cols];
+    if (n_coefs % n_cols > 0):
         subplot_shape[0] += 1;
 
     # Set limits for the x/y axes.
@@ -541,10 +541,10 @@ def Plot_GP2d(  p1_mesh         : numpy.ndarray,
 
 
             # -------------------------------------------------------------------------------------
-            # There are only n_coef plots. If k > n_coef, then there is nothing to plot but we need 
+            # There are only n_coefs plots. If k > n_coefs, then there is nothing to plot but we need 
             # to plot something (to avoid pissing off matplotlib).
-            if (k >= n_coef):
-                LOGGER.debug("%d > %d (n_coef). Thus, we are making a default plot" % (k, n_coef));
+            if (k >= n_coefs):
+                LOGGER.debug("%d > %d (n_coefs). Thus, we are making a default plot" % (k, n_coefs));
                 axs_std[i, j].set_xlim(p1_range);
                 axs_std[i, j].set_ylim(p2_range);
                 axs_std[i, j].set_frame_on(False);
@@ -621,6 +621,189 @@ def Plot_GP2d(  p1_mesh         : numpy.ndarray,
     # All done!
     return;
 
+
+
+def Plot_Latent_Trajectories(physics         : Physics,
+                             model           : torch.nn.Module,
+                             latent_dynamics : LatentDynamics,
+                             gp_list         : list[GaussianProcessRegressor],
+                             param_grid      : numpy.ndarray,
+                             n_samples       : int,
+                             U_True          : list[list[torch.Tensor]],
+                             t_Grid          : list[torch.Tensor],
+                             file_prefix     : str,
+                             figsize         : tuple[int]    = (15, 13)) -> None:
+    """
+    This function plots the latent trajectories of the latent dynamics model for a combination of 
+    parameter values. Specifically, we fetch the FOM IC for the given parameter values, encode then, 
+    and then sample the GP posterior distribution to get samples of the latent dynamics, solve and 
+    plot each resulting dynamical solution, and then plot the encodings of 
+    the FOM trajectory. 
+
+
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+
+    physics : Physics
+        A Physics object which acts as a wrapper for the FOM. We use this to get the FOM IC.
+
+    model : torch.nn.Module
+        The model we use to encode the FOM IC and the FOM trajectories.
+
+    latent_dynamics : LatentDynamics
+        The LatentDynamics model we use to simulate the latent dynamics forward in time.
+
+    gp_list : list[GaussianProcessRegressor], len = n_coef
+        A list of GaussianProcessRegressor objects which hold the GP posterior distributions for 
+        each latent dynamics coefficient. We use these to sample from the GP posterior distribution
+        to get samples of the latent dynamics.
+
+    param_grid : numpy.ndarray, shape = (n_param, n_p)
+        A numpy array whose rows holds the parameter values whose latent dynamics we want to plot.
+        We assume that the i'th row hodls the i'th combination of parameter values.
+
+    n_samples : int
+        The number of samples we want to draw from the GP posterior distribution for each 
+        combination of parameter values.
+
+    U_True : list[list[torch.Tensor]], len = n_param
+        The i'th element is an n_IC element list whose j'th element is a torch.Tensor of shape 
+        (n_t_i,) + physics.Frame_Shape whose k'th row holds the j'th time derivative of the FOM 
+        solution for the i'th combination of prameter values at t_Grid[i][k].
+
+    t_Grid : list[torch.Tensor], len = n_param
+        The i'th element is a 1D torch.Tensor object which holds the time grid for the i'th 
+        combination of parameter values. We assume that this tensor has shape (n_t_i,).
+
+    file_prefix : str
+        The prefix of the file name we use to save the plots. Usually the name of the FOM model.
+
+    figsize : tuple[int], len = 2
+        A two element tuple specifying the size of the overall figure size. 
+
+
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    Nothing!
+    """ 
+
+    # Checks
+    assert(isinstance(physics, Physics));
+    assert(isinstance(model, torch.nn.Module));
+    assert(isinstance(latent_dynamics, LatentDynamics));
+    assert(isinstance(gp_list, list));
+    assert(len(gp_list)     == latent_dynamics.n_coefs);
+    for i in range(latent_dynamics.n_coefs):
+        assert(isinstance(gp_list[i], GaussianProcessRegressor));
+
+    assert(isinstance(param_grid, numpy.ndarray));
+    assert(param_grid.ndim     == 2);
+    assert(param_grid.shape[1] == physics.n_p);
+    n_param : int = param_grid.shape[0];
+
+    assert(isinstance(n_samples, int));
+    assert(isinstance(U_True, list));
+    assert(isinstance(t_Grid, list));
+    assert(len(t_Grid)      == n_param);
+    assert(len(U_True)      == n_param);
+    for i in range(n_param):
+        assert(isinstance(U_True[i], list));
+        assert(len(U_True[i])  == physics.n_IC);
+        assert(isinstance(t_Grid[i], torch.Tensor));
+        assert(t_Grid[i].ndim     == 1);
+        n_t_i : int = t_Grid[i].shape[0];   # number of time steps for the i'th combination of parameter values.
+        for j in range(physics.n_IC):
+            assert(isinstance(U_True[i][j], torch.Tensor));
+            assert(U_True[i][j].ndim >= 2);
+            assert(U_True[i][j].shape[0]    == n_t_i);
+
+    assert(isinstance(figsize, tuple));
+    assert(len(figsize)     == 2);
+
+
+    # ---------------------------------------------------------------------------------------------
+    # Generate the Latent Trajectories.
+
+    # First generate the latent trajectories. This is a an n_param element list whose i'th element
+    # is an n_IC element list whose j'th element is a 3d array of shape (n_t(i), n_samples, n_z). 
+    # Here, n_param is the number of combinations of parameter values.
+    LOGGER.info("Solving the latent dynamics using %d samples of the posterior distributions for %d combinations of parameter values" % (n_samples, n_param));
+    Predicted_Latent_Trajectories : list[list[numpy.ndarray]] = sample_roms( 
+                                                                    model           = model, 
+                                                                    physics         = physics, 
+                                                                    latent_dynamics = latent_dynamics, 
+                                                                    gp_list         = gp_list, 
+                                                                    param_grid      = param_grid,
+                                                                    t_Grid          = t_Grid,
+                                                                    n_samples       = n_samples);
+    
+    # Now encode the FOM trajectories. Store these in an n_param element list whose i'th element
+    # is an n_IC element list whose j'th element is a numpy array of shape (n_t(i), n_z) holding
+    # the encoding of the j'th FOM trajectory for the i'th combination of parameter values.
+    True_Latent_Trajectories : list[list[numpy.ndarray]] = [];          # len = n_param
+    for i in range(n_param):
+        ith_True_Latent_Trajectories : list[numpy.ndarray] = [];
+        ith_Encoding : torch.Tensor | tuple[torch.Tensor] = model.Encode(*U_True[i]);
+        if(isinstance(ith_Encoding, tuple)):
+            # If the encoding is a tuple, then we need to convert it to a list.
+            for j in range(len(ith_Encoding)):
+                ith_True_Latent_Trajectories.append(ith_Encoding[j].detach().numpy());
+        elif(isinstance(ith_Encoding, torch.Tensor)):
+            ith_True_Latent_Trajectories.append(ith_Encoding.detach().numpy());
+        else:
+            raise ValueError("ith_Encoding is not a tuple or a torch.Tensor");
+        
+        True_Latent_Trajectories.append(ith_True_Latent_Trajectories);
+        
+
+    # ---------------------------------------------------------------------------------------------
+    # Make the plots!
+
+    # Set up the subplots.
+    LOGGER.info("Making latent trajectory plots for %d combinations of parameter values" % n_param);
+    for i in range(n_param):
+        for j in range(physics.n_IC):
+            # Set up the plot for this combination of parameter values.
+            plt.figure(figsize = figsize);
+
+            # Plot the predicted latent trajectories
+            for s in range(n_samples):
+                for k in range(latent_dynamics.n_z):
+                    plt.plot(Predicted_Latent_Trajectories[i][j][:, s, k], 'C' + str(k), linewidth = 1, alpha = 0.3);
+
+            # Plot each component of the latent trajectories
+            for k in range(latent_dynamics.n_z):
+                plt.plot(True_Latent_Trajectories[i][j][:, k], 'C' + str(k), linewidth = 3, alpha = 0.75);
+            
+            # Determine the title and save file name.
+            if(j == 0):
+                title          : str = "Z(t), param = %s" % (str(param_grid[i, :]));
+                save_file_name : str = file_prefix + "_Z" + "_param" + str(param_grid[i, :]) + ".png";
+            elif(j == 1):
+                title          : str = "Dt Z(t), param = %s" % (str(param_grid[i, :]));
+                save_file_name : str = file_prefix + "_Dt_Z" + "_param" + str(param_grid[i, :]) + ".png";
+            else:
+                title          : str = "Dt^%d Z(t), param = %s" % (j, str(param_grid[i, :]));
+                save_file_name : str = file_prefix + ("_Dt^%d_Z" % (j)) + "_param" + str(param_grid[i, :]) + ".png";
+            
+            # Add plot labels and legend.
+            plt.xlabel(r'$t$');
+            plt.ylabel(r'$z$');
+            plt.title(title);
+
+            # Save the figure.
+            save_file_path : str = os.path.join(os.path.join(os.path.pardir, "Figures"), save_file_name);
+            plt.savefig(save_file_path);
+
+            # Show the plot for this IC and combination of parameter values.
+            plt.show();
+
+    # All done!
+    return;
+    
 
 
 def Plot_Heatmap2d( values          : numpy.ndarray, 
