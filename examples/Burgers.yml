@@ -50,11 +50,11 @@ model:
   pair:
     hidden_widths:          [250, 100, 100, 100]
     latent_dimension:       5
-    activations:            ["sin", "softplus", "softplus", "softplus"]
+    activations:            ["sin", "GELU", "GELU", "GELU"]
   autoencoder:
     hidden_widths:          [250, 100, 100, 100]
     latent_dimension:       5  
-    activations:            ["sin", "softplus", "softplus", "softplus"]
+    activations:            ["sin", "GELU", "GELU", "GELU"]
 
 latent_dynamics:
   type:                     spring

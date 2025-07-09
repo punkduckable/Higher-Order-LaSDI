@@ -44,8 +44,7 @@ act_dict = {'elu'           : torch.nn.functional.elu,
             'softplus'      : torch.nn.functional.softplus,
             'softshrink'    : torch.nn.functional.softshrink,
             'tanh'          : torch.nn.functional.tanh,
-            'tanhshrink'    : torch.nn.functional.tanhshrink, 
-            'none'          : torch.nn.functional.identity};
+            'tanhshrink'    : torch.nn.functional.tanhshrink};
 
 
 
@@ -113,10 +112,10 @@ class MultiLayerPerceptron(torch.nn.Module):
         assert(isinstance(widths, list));
         assert(isinstance(activations, list));
         assert(len(activations) == len(widths) - 2);
-        for i in range(len(widths)):
+        for i in range(len(widths) - 2):
             assert(isinstance(widths[i], int));
             assert(widths[i] > 0);
-            assert(activations[i] in act_dict.keys());
+            assert(activations[i].lower() in act_dict.keys());
         assert((reshape_index is None) or (reshape_index in [0, -1]));
         assert((reshape_shape is None) or (numpy.prod(reshape_shape) == widths[reshape_index]));
 
@@ -144,10 +143,9 @@ class MultiLayerPerceptron(torch.nn.Module):
         self.reshape_shape : list[int]  = reshape_shape;
 
         # Set up the activation functions
-        activation_fns : list[Callable] = [];
-        for i in range(self.n_layers - 2):
-            activation_fns.append(act_dict[activations[i]]);
-        self.activation_fns = torch.nn.ModuleList(activation_fns);
+        self.activation_fns : list[Callable] = [];
+        for i in range(self.n_layers - 1):
+            self.activation_fns.append(act_dict[self.activations[i].lower()]);
 
         LOGGER.info("Initializing a MultiLayerPerceptron with widths %s, activations %s, reshape_shape = %s (index %d)" \
                     % (str(self.widths), str(self.activations), str(self.reshape_shape), self.reshape_index));
@@ -301,7 +299,7 @@ class Autoencoder(torch.nn.Module):
         assert(isinstance(activations, list));
         assert(len(activations) == len(widths) - 2);
         for i in range(len(activations)):
-            assert(activations[i] in act_dict.keys());
+            assert(activations[i].lower() in act_dict.keys());
 
         # Run the superclass initializer.
         super().__init__();
@@ -624,7 +622,7 @@ class Autoencoder_Pair(torch.nn.Module):
         assert(isinstance(activations, list));
         assert(len(activations) == len(widths) - 2);
         for i in range(len(activations)):
-            assert(activations[i] in act_dict.keys());
+            assert(activations[i].lower() in act_dict.keys());
 
         # Call the super class initializer.
         super().__init__();

@@ -48,9 +48,9 @@ parameter_space:
 model:
   type:                     pair
   pair:
-    hidden_widths:          [200, 200, 200]
+    hidden_widths:          [250, 100, 100, 100]
     latent_dimension:       10
-    activations:            ["sin", "softplus", "softplus"]
+    activations:            ["sin", "GELU", "GELU", "GELU"]
 
 latent_dynamics:
   type:                     spring
