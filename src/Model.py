@@ -35,6 +35,8 @@ act_dict = {'ELU'           : torch.nn.ELU,
             'RReLU'         : torch.nn.RReLU,
             'SELU'          : torch.nn.SELU,
             'CELU'          : torch.nn.CELU,
+            'sin'           : torch.sin,
+            'cos'           : torch.cos,
             'GELU'          : torch.nn.GELU,
             'sigmoid'       : torch.nn.Sigmoid,
             'SiLU'          : torch.nn.SiLU,
@@ -54,7 +56,7 @@ act_dict = {'ELU'           : torch.nn.ELU,
 class MultiLayerPerceptron(torch.nn.Module):
     def __init__(   self, 
                     widths          : list[int],
-                    activation      : str           = 'sigmoid',
+                    activation      : str           = 'SiLU',
                     reshape_index   : int           = None, 
                     reshape_shape   : list[int]     = None) -> None:
         r"""
@@ -137,7 +139,13 @@ class MultiLayerPerceptron(torch.nn.Module):
 
         # Set up the activation function. 
         self.activation     : str       = activation;
-        self.activation_fn  : Callable  = act_dict[self.activation]();
+        if(isinstance(act_dict[self.activation], torch.nn.Module)):
+            self.activation_fn  : torch.nn.Module   = act_dict[self.activation]();
+        elif(isinstance(act_dict[self.activation], Callable)):
+            self.activation_fn  : Callable          = act_dict[self.activation];
+        else:
+            raise ValueError("Invalid activation function: %s" % self.activation);
+
         LOGGER.info("Initializing a MultiLayerPerceptron with widths %s, activation %s, reshape_shape = %s (index %d)" \
                     % (str(self.widths), self.activation, str(self.reshape_shape), self.reshape_index));
 
@@ -237,7 +245,7 @@ class Autoencoder(torch.nn.Module):
     def __init__(   self,                     
                     reshape_shape   : list[int],
                     widths          : list[int], 
-                    activation      : str           = 'tanh') -> None:
+                    activation      : str           = 'SiLU') -> None:
         r"""
         Initializes an Autoencoder object. An Autoencoder consists of two networks, an encoder, 
         E : \mathbb{R}^F -> \mathbb{R}^L, and a decoder, D : \mathbb{R}^L -> \marthbb{R}^F. We 
@@ -568,7 +576,7 @@ class Autoencoder_Pair(torch.nn.Module):
     def __init__(   self,
                     reshape_shape       : list[int],
                     widths              : list[int],
-                    activation          : str       = "tanh") -> None:
+                    activation          : str       = "SiLU") -> None:
         """
         The initializer for the Autoencoder_Pair class. We assume that each input is a tuple 
         of data, (D, V), representing the displacement and velocity of some system at some point 
