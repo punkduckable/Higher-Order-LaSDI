@@ -33,7 +33,7 @@ from    GaussianProcess             import  fit_gps, eval_gp;
 from    Initialize                  import  Initialize_Trainer;
 from    Sample                      import  Run_Samples, Update_Train_Space;
 from    Logging                     import  Initialize_Logger, Log_Dictionary;
-from    Plot                        import  Plot_Heatmap2d, Plot_GP2d;
+from    Plot                        import  Plot_Heatmap2d, Plot_Latent_Trajectories;
 from    Animate                     import  make_solution_movies;
 from    SolveROMs                   import  average_rom;
 
@@ -129,16 +129,34 @@ def main():
     # Plot!
     # ---------------------------------------------------------------------------------------------
 
+
+    # ---------------------------------------------------------------------------------------------
+    # Setup 
+
     # Set up gaussian processes. 
     model.cpu();
 
     # Get a GP for each coefficient in the latent dynamics.
     gp_list         : list[GaussianProcessRegressor]    = fit_gps(param_space.train_space, trainer.best_coefs);
 
-    gp_pred_mean, gp_pred_std = eval_gp(gp_list, param_space.test_space);
-    gp_pred_mean    = gp_pred_mean.reshape(param_space.test_grid_sizes + [-1]);
-    gp_pred_std     = gp_pred_std.reshape(param_space.test_grid_sizes + [-1]); 
+    # Plot the latent trajectories for this combination of parameter values.
+    i_random    : int   = random.randrange(0, param_space.n_test());
+    Plot_Latent_Trajectories(  physics         = physics,
+                               model           = model,
+                               latent_dynamics = latent_dynamics,
+                               gp_list         = gp_list,
+                               param_grid      = param_space.test_space[i_random, :].reshape(1, -1),
+                               n_samples       = trainer.n_samples,
+                               U_True          = [trainer.U_Test[i_random]],
+                               t_Grid          = [trainer.t_Test[i_random]],
+                               file_prefix     = config["physics"]["type"],
+                               figsize         = (15, 13));
 
+    gp_pred_mean, gp_pred_std   = eval_gp(gp_list, param_space.test_space);
+    gp_pred_mean                = gp_pred_mean.reshape(param_space.test_grid_sizes + [-1]);
+    gp_pred_std                 = gp_pred_std.reshape(param_space.test_grid_sizes + [-1]); 
+
+    skip_proportion : float = .05;
     Max_Rel_Error, Max_STD, Rel_Error, STD  = SolveROMs.Compute_Error_and_STD(
                                                 model           = model, 
                                                 physics         = physics,
@@ -148,10 +166,74 @@ def main():
                                                 t_Test          = trainer.t_Test,
                                                 U_Test          = trainer.U_Test,
                                                 n_samples       = trainer.n_samples,
-                                                skip_proportion = .05);
+                                                skip_proportion = skip_proportion);
 
+
+
+    # ---------------------------------------------------------------------------------------------
+    # For each combination of parameter values, compute the relative error between the FOM 
+    # solution and its reconstruction under the model.
+
+    # Setup
+    Rel_Error_Reconstruction        : list[list[numpy.ndarray]] = [];
+    Max_Rel_Error_Reconstruction    : numpy.ndarray             = numpy.zeros((param_space.n_test(), physics.n_IC));
+
+    # Cycle through the combinations of parameter values.
+    for i in range(param_space.n_test()):
+        # Reconstruct the FOM solution, store it in a list.
+        LOGGER.debug("Reconstructing the FOM solution for parameter combination %d" % i);
+        ith_Reconstruction : torch.Tensor | tuple[torch.Tensor, torch.Tensor] = model(*trainer.U_Test[i]);
+        if(isinstance(ith_Reconstruction, tuple)):
+            ith_Reconstruction = list(ith_Reconstruction);
+        elif(isinstance(ith_Reconstruction, torch.Tensor)):
+            ith_Reconstruction = [ith_Reconstruction];
+        else:
+            raise ValueError("ith_Encoding is not a tuple or a torch.Tensor");
+    
+        # Setup for the i'th combination of parameter values.
+        n_IC                                : int                   = physics.n_IC;
+        ith_Rel_Error_Reconstruction        : list[numpy.ndarray]   = [];
+        n_t_i                               : int                   = trainer.t_Test[i].shape[0];
+
+        # Cycle through the ICs.
+        for j in range(n_IC):
+            # Setup a tensor to hold the relative error for the j'th IC and the i'th combination of 
+            # parameter values.
+            ij_Rel_Error_Reconstruction : numpy.ndarray = numpy.zeros(n_t_i);
+
+            # Fetch the reconstruction and true solution.
+            ij_Reconstruction   : numpy.ndarray = ith_Reconstruction[j].detach().numpy();
+            ij_True             : numpy.ndarray = trainer.U_Test[i][j].detach().numpy();
+
+            # Compute the Absolute Error and norm of each frame.
+            ij_Abs_Error        : numpy.ndarray = numpy.linalg.norm((ij_Reconstruction - ij_True).reshape(n_t_i, -1), axis = 1);    # (n_t_i)
+            ij_Norms            : numpy.ndarray = numpy.linalg.norm(ij_True.reshape(n_t_i, -1), axis = 1);                          # (n_t_i)
+
+            # Cycle through the frames.
+            for k in range(n_t_i):
+                # If the time step is before the skip proportion, set the relative error to 0. 
+                # Otherwise, compute the relative error.
+                if(trainer.t_Test[i][k] < skip_proportion*trainer.t_Test[i][-1]):
+                    ij_Rel_Error_Reconstruction[k] = 0;
+                else:
+                    # Compute the relative error for the k'th frame.
+                    ij_Rel_Error_Reconstruction[k] = ij_Abs_Error[k]/ij_Norms[k];
+            
+            # Append the relative error for the j'th IC.
+            ith_Rel_Error_Reconstruction.append(ij_Rel_Error_Reconstruction);
+
+            # Compute the maximum relative error for the j'th time derivative of the solution for 
+            # the i'th combination of parameter values.
+            Max_Rel_Error_Reconstruction[i, j] = numpy.max(ij_Rel_Error_Reconstruction);
+        
+        # Append the relative error for the i'th combination of parameter values.
+        Rel_Error_Reconstruction.append(ith_Rel_Error_Reconstruction);
+    
+
+
+    # ---------------------------------------------------------------------------------------------
     # Plot Rel_Error for one combinations of parameters.
-    i_random    : int   = random.randrange(0, param_space.n_test());
+
     for i in range(physics.n_IC):
         plt.figure();
         plt.plot(trainer.t_Test[i_random], Rel_Error[i_random][i]);
@@ -175,6 +257,10 @@ def main():
         plt.savefig(os.path.join(os.path.join(os.path.pardir, "Figures"), save_file_name));
     plt.show();
 
+
+
+    # ---------------------------------------------------------------------------------------------
+    # Plot the mean predicted solution, true solution, and error for one combination of parameters.
 
     # If X_Positions has the form (2, N_Positions), then the solution must either be a 
     # scalar field or a 2d vector field. Let's plot the solution.
@@ -218,22 +304,32 @@ def main():
                                  fname_prefix   = prefix);
     
 
+    # ---------------------------------------------------------------------------------------------
+    # Plot the heatmaps
 
     if(param_space.n_p == 2):
         n_IC : int = latent_dynamics.n_IC;
-
-        """
-        # Plot the mean and STD of the posterior distribution for each coefficient evaluated at
-        # each combination of parameter values.
-        Plot_GP2d(  p1_mesh     = param_space.test_meshgrid[0], 
-                    p2_mesh     = param_space.test_meshgrid[1], 
-                    gp_mean     = gp_pred_mean, 
-                    gp_std      = gp_pred_std, 
-                    param_train = param_space.train_space, 
-                    param_names = param_space.param_names, 
-                    n_cols      = 5);
-        """
         
+        # Plot the maximum (across the frames) relative reconstruction error between each frame of each 
+        # derivative of the FOM solution for each combination of parameter values and their 
+        # corresponding reconstructions.
+        for d in range(n_IC):
+            if(d == 0):
+                title           : str   = r'$\text{max}_{t, i} \frac{\left| u_{\bar{\xi}}(t, x_i) - u_{\text{True}}(t, x_i) \right|} {\text{max}_{j} \left| u_{\text{True}}(t, x_j) \right|}$';
+                save_file_name  : str   = config["physics"]["type"] + "_U_Relative_Error_Reconstruction_Heatmap";
+            elif(d == 1):
+                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d}{dt}u_{\bar{\xi}}(t, x_i) - \frac{d}{dt}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d}{dt}u_{\text{True}}(t, x_j) \right|}$';
+                save_file_name  : str   = config["physics"]["type"] + "_Dt_U_Relative_Error_Reconstruction_Heatmap";
+            else:
+                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d^{%d}}{dt^{%d}}u_{\bar{\xi}}(t, x_i) - \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_j) \right|}$' % (d, d, d, d, d, d);
+                save_file_name  : str   = config["physics"]["type"] + "_Dt^%d_U_Relative_Error_Reconstruction_Heatmap" % d;
+
+            Plot_Heatmap2d(     values          = Max_Rel_Error_Reconstruction[:, d].reshape(param_space.test_grid_sizes) * 100, 
+                                param_space     = param_space,
+                                title           = title, 
+                                save_file_name  = save_file_name);
+        
+
         # Plot maximum (across the frames) relative reconstruction error between each frame of each 
         # derivative of the FOM solution for each combination of parameter values and their 
         # corresponding reconstructions.
