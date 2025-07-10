@@ -487,16 +487,64 @@ class BayesianGLaSDI:
 
 
                 # --------------------------------------------------------------------------------
+                # IC Rollout loss. This simulates forward from the FOM initial conditions.
+
+                self.timer.start("IC Rollout Loss");
+                loss_IC_rollout_ROM  : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_IC_rollout_FOM  : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
+
+                # Cycle through the training examples for IC rollout
+                for i in range(n_train):
+                    # Fetch the FOM initial conditions for this combination of parameters
+                    param_i           : numpy.ndarray             = self.param_space.train_space[i, :]; 
+                    FOM_IC_i          : list[numpy.ndarray]       = self.physics.initial_condition(param_i);    # len = 1
+                    
+                    # Convert to tensors and reshape for encoding
+                    U_IC_i            : torch.Tensor              = torch.tensor(FOM_IC_i[0], dtype=torch.float32, device=device).reshape((1,) + FOM_IC_i[0].shape);
+                    
+                    # Encode the FOM initial conditions
+                    Z_IC_i = model_device.Encode(U_IC_i);
+                    
+                    # Get the coefficients for this combination of parameters
+                    coef_i            : torch.Tensor              = coefs[i, :].reshape(1, -1);
+                    
+                    # Simulate the latent dynamics forward in time
+                    Z_IC_Rollout_i    : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(  coefs   = coef_i, 
+                                                                                                    IC      = [[Z_IC_i]], 
+                                                                                                    t_Grid  = [t_Grid_IC_rollout[i]]);
+                    
+                    # Extract the predicted trajectory, remove the singleton dimension
+                    Z_IC_Predict_i    : torch.Tensor              = Z_IC_Rollout_i[0][0].squeeze(1);    # shape = (n_t_IC_rollout[i], n_z)
+
+                    # Decode the predicted trajectory to get FOM predictions
+                    U_IC_Predict_i = model_device.Decode(Z_IC_Predict_i);
+                    
+                    # Get the corresponding FOM targets
+                    U_IC_Target_i     : list[torch.Tensor]        = U_IC_Rollout_Targets[i][0];  # shape = (n_t_IC_rollout[i], physics.Frame_Shape)
+
+                    # Encode the FOM targets for latent space comparison
+                    Z_IC_Target_i = model_device.Encode(U_IC_Target_i);
+
+                    # Compute the losses for the i'th combination of parameter values!
+                    loss_IC_rollout_ROM  += self.MSE(Z_IC_Target_i, Z_IC_Predict_i);
+                    loss_IC_rollout_FOM  += self.MSE(U_IC_Target_i, U_IC_Predict_i);
+
+                self.timer.end("IC Rollout Loss");
+
+
+                # --------------------------------------------------------------------------------
                 # Total loss
 
                 loss_rollout    : torch.Tensor  = loss_rollout_ROM + loss_rollout_FOM;
+                loss_IC_rollout : torch.Tensor  = loss_IC_rollout_ROM + loss_IC_rollout_FOM;
 
 
                 # Compute the final loss.
-                loss = (self.loss_weights['recon']  * loss_recon + 
-                        self.loss_weights['LD']     * loss_LD + 
-                        self.loss_weights['rollout']* loss_rollout + 
-                        self.loss_weights['coef']   * loss_coef);
+                loss = (self.loss_weights['recon']      * loss_recon + 
+                        self.loss_weights['LD']         * loss_LD + 
+                        self.loss_weights['rollout']    * loss_rollout + 
+                        self.loss_weights['IC_rollout'] * loss_IC_rollout + 
+                        self.loss_weights['coef']       * loss_coef);
 
 
             elif(isinstance(model_device, Autoencoder_Pair)):
@@ -831,8 +879,8 @@ class BayesianGLaSDI:
 
             # Report the current iteration number and losses
             if(isinstance(model_device, Autoencoder)):
-                LOGGER.info("Iter: %05d/%d, Total: %3.10f, Recon: %3.10f, Roll FOM: %3.10f, Roll ROM: %3.10f, LD: %3.10f, Coef: %3.10f, max|c|: %.3f, "
-                            % (iter + 1, self.max_iter, loss.item(), loss_recon.item(), loss_rollout_FOM.item(), loss_rollout_ROM.item(), loss_LD.item(), loss_coef.item(), max_coef));
+                LOGGER.info("Iter: %05d/%d, Total: %3.10f, Recon: %3.10f, Roll FOM: %3.10f, Roll ROM: %3.10f, IC Roll FOM: %3.10f, IC Roll ROM: %3.10f, LD: %3.10f, Coef: %3.10f, max|c|: %.3f, "
+                            % (iter + 1, self.max_iter, loss.item(), loss_recon.item(), loss_rollout_FOM.item(), loss_rollout_ROM.item(), loss_IC_rollout_FOM.item(), loss_IC_rollout_ROM.item(), loss_LD.item(), loss_coef.item(), max_coef));
             elif(isinstance(model_device, Autoencoder_Pair)):
                 LOGGER.info("Iter: %05d/%d, Total: %3.6f, Recon D: %3.6f, Recon V: %3.6f, Consistency Z: %3.6f, Consistency U: %3.6f, Roll D: %3.6f, Roll V: %3.6f, Roll ZD: %3.6f, Roll ZV: %3.6f, IC Roll D: %3.6f, IC Roll V: %3.6f, IC Roll ZD: %3.6f, IC Roll ZV: %3.6f, LD: %3.6f, Coef: %3.6f, max|c|: %.3f, "
                             % (iter + 1, self.max_iter, loss.item(), loss_recon_D.item(), loss_recon_V.item(), loss_consistency_Z.item(), loss_consistency_U.item(), loss_rollout_D.item(), loss_rollout_V.item(), loss_rollout_Z_D.item(), loss_rollout_Z_V.item(), loss_IC_rollout_D.item(), loss_IC_rollout_V.item(), loss_IC_rollout_Z_D.item(), loss_IC_rollout_Z_V.item(), loss_LD.item(), loss_coef.item(), max_coef)); 
