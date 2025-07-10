@@ -167,6 +167,9 @@ class BayesianGLaSDI:
         self.p_rollout_init         : float     = config['p_rollout_init'];         # The proportion of the simulated we simulate forward when computing the rollout loss.
         self.rollout_update_freq    : float     = config['rollout_update_freq'];    # We increase p_rollout after this many iterations.
         self.dp_per_update          : float     = config['dp_per_update'];          # We increase p_rollout by this much each time we increase it.
+        self.p_IC_rollout_init      : float     = config['p_IC_rollout_init'];      # The proportion of the simulation we simulate forward when computing the IC rollout loss.
+        self.IC_rollout_update_freq : float     = config['IC_rollout_update_freq']; # We increase p_IC_rollout after this many iterations.
+        self.IC_dp_per_update       : float     = config['IC_dp_per_update'];       # We increase p_IC_rollout by this much each time we increase it.
         self.n_iter                 : int       = config['n_iter'];                 # Number of iterations for one train and greedy sampling
         self.max_iter               : int       = config['max_iter'];               # We stop training if restart_iter goes above this number. 
         self.max_greedy_iter        : int       = config['max_greedy_iter'];        # We stop performing greedy sampling if restart_iter goes above this number.
@@ -253,6 +256,7 @@ class BayesianGLaSDI:
         n_train             : int               = self.param_space.n_train();
         n_IC                : int               = self.latent_dynamics.n_IC;
         p_rollout           : int               = min(0.75, self.p_rollout_init + self.dp_per_update*(self.restart_iter//self.rollout_update_freq));
+        p_IC_rollout        : float             = min(0.75, self.p_IC_rollout_init + self.IC_dp_per_update*(self.restart_iter//self.IC_rollout_update_freq));
         LD                  : LatentDynamics    = self.latent_dynamics;
         best_loss           : float             = numpy.inf;                    # Stores the lowest loss we get in this round of training.
 
@@ -282,6 +286,12 @@ class BayesianGLaSDI:
                                                                         p_rollout    = p_rollout);
         self.timer.end("Rollout Setup");
 
+        # IC rollout setup
+        self.timer.start("IC Rollout Setup");
+        t_Grid_IC_rollout, n_IC_rollout_frames, U_IC_Rollout_Targets = self._IC_rollout_setup(  t            = t_Train_device, 
+                                                                                                p_IC_rollout = p_IC_rollout);
+        self.timer.end("IC Rollout Setup"); 
+
         # If we are learning the latent dynamics coefficients, then we need to determine 
         # which combinations of parameters are in the training set. Specifically, each 
         # element of the train space should also be in the test space. We need to figure out 
@@ -310,7 +320,7 @@ class BayesianGLaSDI:
         for iter in range(self.restart_iter, next_iter):
             self.timer.start("train_step");
 
-            # Check if we need to update n_rollout_frames. If so, then we also need to update 
+            # Check if we need to update p_rollout. If so, then we also need to update 
             # t_Grid_rollout, n_rollout_frames, and U_rollout_targets
             if(iter > 0 and ((iter % self.rollout_update_freq) == 0)):
                 p_rollout  += self.dp_per_update;
@@ -325,6 +335,18 @@ class BayesianGLaSDI:
                                                                             p_rollout    = p_rollout);
                 self.timer.end("Rollout Setup");
 
+            # Check if we need to update IC rollout parameters
+            if(iter > 0 and ((iter % self.IC_rollout_update_freq) == 0)):
+                p_IC_rollout  += self.IC_dp_per_update;
+                p_IC_rollout   = min(1.0, p_IC_rollout);
+
+                LOGGER.info("p_IC_rollout is now %f (increased %f)" % (p_IC_rollout, self.IC_dp_per_update));
+
+                # Setup IC rollout time grids and targets
+                self.timer.start("IC Rollout Setup");
+                t_Grid_IC_rollout, n_IC_rollout_frames, U_IC_Rollout_Targets = self._IC_rollout_setup(  t            = t_Train_device, 
+                                                                                                        p_IC_rollout = p_IC_rollout);
+                self.timer.end("IC Rollout Setup"); 
 
             self.optimizer.zero_grad();
             
@@ -449,13 +471,13 @@ class BayesianGLaSDI:
                     Z_Rollout_Predict_i     : torch.Tensor          = Z_Rollout_i[-1, :, :];        # shape = (n_rollout_frames[i], n_z)
 
                     # Now fetch the corresponding targets.
-                    Z_Rollout_Targets_i     : torch.Tensor          = Z_Rollout_Targets[i][0];      # shape = (n_rollout_frames[i], n_z)
+                    Z_Rollout_Targets_i     : list[torch.Tensor]    = Z_Rollout_Targets[i][0];      # shape = (n_rollout_frames[i], n_z)
 
                     # Decode the latent predictions to get FOM predictions.
                     U_Rollout_Predict_i     : torch.Tensor          = model_device.Decode(Z_Rollout_Predict_i);
                 
                     # Get the corresponding FOM targets.
-                    U_Rollout_Target_i      : torch.Tensor          = U_Rollout_Targets[i][0];      # shape = (n_rollout_frames[i], physics.Frame_Shape)
+                    U_Rollout_Target_i      : list[torch.Tensor]    = U_Rollout_Targets[i][0];      # shape = (n_rollout_frames[i], physics.Frame_Shape)
                 
                     # Compute the losses for the i'th combination of parameter values!
                     loss_rollout_ROM  += self.MSE(Z_Rollout_Targets_i, Z_Rollout_Predict_i);
@@ -696,6 +718,65 @@ class BayesianGLaSDI:
                 self.timer.end("Rollout Loss");
 
 
+                # ---------------------------------------------------------------------------------
+                # IC Rollout loss. This simulates forward from the FOM initial conditions.
+
+                # Setup
+                self.timer.start("IC Rollout Loss");
+                loss_IC_rollout_Z_D    : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_IC_rollout_Z_V    : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_IC_rollout_D      : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_IC_rollout_V      : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
+
+                # Cycle through the training examples for IC rollout
+                for i in range(n_train):
+                    # Fetch the FOM initial conditions for this combination of parameters
+                    param_i           : numpy.ndarray             = self.param_space.train_space[i, :];
+                    FOM_IC_i          : list[numpy.ndarray]       = self.physics.initial_condition(param_i);
+                    
+                    # Convert to tensors and reshape for encoding
+                    D_IC_i            : torch.Tensor              = torch.tensor(FOM_IC_i[0], dtype=torch.float32, device=device).reshape((1,) + FOM_IC_i[0].shape);
+                    V_IC_i            : torch.Tensor              = torch.tensor(FOM_IC_i[1], dtype=torch.float32, device=device).reshape((1,) + FOM_IC_i[1].shape);
+                    
+                    # Encode the FOM initial conditions
+                    Z_D_IC_i, Z_V_IC_i = model_device.Encode(D_IC_i, V_IC_i);
+                    
+                    # Get the coefficients for this combination of parameters
+                    coef_i            : torch.Tensor              = coefs[i, :].reshape(1, -1);
+                    
+                    # Simulate the latent dynamics forward in time
+                    Z_IC_Rollout_i    : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(  coefs   = coef_i, 
+                                                                                                    IC      = [[Z_D_IC_i, Z_V_IC_i]], 
+                                                                                                    t_Grid  = [t_Grid_IC_rollout[i]]);
+                    
+                    # Extract the predicted trajectory
+                    Z_D_IC_Predict_i  : torch.Tensor              = Z_IC_Rollout_i[0][0];  # shape = (n_t_IC_rollout[i], 1, n_z)
+                    Z_V_IC_Predict_i  : torch.Tensor              = Z_IC_Rollout_i[0][1];  # shape = (n_t_IC_rollout[i], 1, n_z)
+                    
+                    # Remove the singleton dimension
+                    Z_D_IC_Predict_i  : torch.Tensor              = Z_D_IC_Predict_i.squeeze(1);  # shape = (n_t_IC_rollout[i], n_z)
+                    Z_V_IC_Predict_i  : torch.Tensor              = Z_V_IC_Predict_i.squeeze(1);  # shape = (n_t_IC_rollout[i], n_z)
+
+                    # Decode the predicted trajectory to get FOM predictions
+                    D_IC_Predict_i, V_IC_Predict_i = model_device.Decode(Z_D_IC_Predict_i, Z_V_IC_Predict_i);
+                    
+                    # Get the corresponding FOM targets
+                    U_IC_Target_i     : list[torch.Tensor]        = U_IC_Rollout_Targets[i];
+                    D_IC_Target_i     : torch.Tensor              = U_IC_Target_i[0];  # shape = (n_t_IC_rollout[i], physics.Frame_Shape)
+                    V_IC_Target_i     : torch.Tensor              = U_IC_Target_i[1];  # shape = (n_t_IC_rollout[i], physics.Frame_Shape)
+
+                    # Encode the FOM targets for latent space comparison
+                    Z_D_IC_Target_i, Z_V_IC_Target_i = model_device.Encode(D_IC_Target_i, V_IC_Target_i);
+
+                    # Compute the losses for the i'th combination of parameter values!
+                    loss_IC_rollout_Z_D  += self.MSE(Z_D_IC_Target_i, Z_D_IC_Predict_i);
+                    loss_IC_rollout_Z_V  += self.MSE(Z_V_IC_Target_i, Z_V_IC_Predict_i);
+                    loss_IC_rollout_D    += self.MSE(D_IC_Target_i, D_IC_Predict_i);
+                    loss_IC_rollout_V    += self.MSE(V_IC_Target_i, V_IC_Predict_i);
+
+                self.timer.end("IC Rollout Loss");
+
+
                 # --------------------------------------------------------------------------------
                 # Total loss
 
@@ -703,12 +784,14 @@ class BayesianGLaSDI:
                 loss_consistency    : torch.Tensor  = loss_consistency_Z    + loss_consistency_U;
                 #in_rule     : torch.Tensor  = loss_chain_rule_U     + loss_chain_rule_Z;
                 loss_rollout        : torch.Tensor  = loss_rollout_D        + loss_rollout_V + loss_rollout_Z_D + loss_rollout_Z_V;
+                loss_IC_rollout     : torch.Tensor  = loss_IC_rollout_D     + loss_IC_rollout_V + loss_IC_rollout_Z_D + loss_IC_rollout_Z_V;
 
                 # Compute the final loss.
                 loss = (self.loss_weights['recon']          * loss_recon + 
                         self.loss_weights['consistency']    * loss_consistency +
                         #self.loss_weights['chain_rule']     * loss_chain_rule + 
                         self.loss_weights['rollout']        * loss_rollout +
+                        self.loss_weights['IC_rollout']     * loss_IC_rollout +
                         self.loss_weights['LD']             * loss_LD + 
                         self.loss_weights['coef']           * loss_coef);
 
@@ -751,8 +834,8 @@ class BayesianGLaSDI:
                 LOGGER.info("Iter: %05d/%d, Total: %3.10f, Recon: %3.10f, Roll FOM: %3.10f, Roll ROM: %3.10f, LD: %3.10f, Coef: %3.10f, max|c|: %.3f, "
                             % (iter + 1, self.max_iter, loss.item(), loss_recon.item(), loss_rollout_FOM.item(), loss_rollout_ROM.item(), loss_LD.item(), loss_coef.item(), max_coef));
             elif(isinstance(model_device, Autoencoder_Pair)):
-                LOGGER.info("Iter: %05d/%d, Total: %3.6f, Recon D: %3.6f, Recon V: %3.6f, Consistency Z: %3.6f, Consistency U: %3.6f, Roll D: %3.6f, Roll V: %3.6f, Roll ZD: %3.6f, Roll ZV: %3.6f, LD: %3.6f, Coef: %3.6f, max|c|: %.3f, "
-                            % (iter + 1, self.max_iter, loss.item(), loss_recon_D.item(), loss_recon_V.item(), loss_consistency_Z.item(), loss_consistency_U.item(), loss_rollout_D.item(), loss_rollout_V.item(), loss_rollout_Z_D.item(), loss_rollout_Z_V.item(), loss_LD.item(), loss_coef.item(), max_coef)); 
+                LOGGER.info("Iter: %05d/%d, Total: %3.6f, Recon D: %3.6f, Recon V: %3.6f, Consistency Z: %3.6f, Consistency U: %3.6f, Roll D: %3.6f, Roll V: %3.6f, Roll ZD: %3.6f, Roll ZV: %3.6f, IC Roll D: %3.6f, IC Roll V: %3.6f, IC Roll ZD: %3.6f, IC Roll ZV: %3.6f, LD: %3.6f, Coef: %3.6f, max|c|: %.3f, "
+                            % (iter + 1, self.max_iter, loss.item(), loss_recon_D.item(), loss_recon_V.item(), loss_consistency_Z.item(), loss_consistency_U.item(), loss_rollout_D.item(), loss_rollout_V.item(), loss_rollout_Z_D.item(), loss_rollout_Z_V.item(), loss_IC_rollout_D.item(), loss_IC_rollout_V.item(), loss_IC_rollout_Z_D.item(), loss_IC_rollout_Z_V.item(), loss_LD.item(), loss_coef.item(), max_coef)); 
 
             # If there are fewer than 6 training examples, report the set of parameter combinations.
             if n_train < 6:
@@ -986,6 +1069,108 @@ class BayesianGLaSDI:
 
         # All done!
         return t_Grid_rollout, n_rollout_frames, U_Rollout_Targets;
+
+
+
+    def _IC_rollout_setup( self, 
+                           t            : list[torch.Tensor], 
+                           p_IC_rollout : float) -> tuple[list[torch.Tensor], list[int], list[list[torch.Tensor]]]:
+        """
+        An internal function that sets up the IC rollout loss. This is similar to _rollout_setup but
+        for simulating forward from the FOM initial conditions. The user should not call this 
+        function directly; only the train method should call this.
+
+        
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        t : list[torch.Tensor], len = n_param
+            i'th element is a 1d torch.Tensor of shape (n_t_i) whose j'th element specifies the 
+            time of the j'th frame in the FOM solution for the i'th combination of parameter 
+            values.
+
+        p_IC_rollout : float
+            A number between 0 and 1 specifying the ratio of the IC rollout time for a particular 
+            combination of parameter values to the length of the time interval for that combination 
+            of parameter values.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+        
+        t_Grid_IC_rollout, n_IC_rollout_frames, U_IC_Rollout_Targets
+
+        t_Grid_IC_rollout : list[torch.Tensor], len = n_param
+            i'th element is a 1d array whose j'th entry holds the j'th time at which we want to 
+            rollout the initial condition for the i'th combination of parameter values.
+
+        n_IC_rollout_frames : list[int], len = n_param
+            i'th element specifies how many time steps we simulate forward from the initial condition
+            for the i'th combination of parameter values.
+
+        U_IC_Rollout_Targets : list[list[torch.Tensor]], len = n_param
+            i'th element is an n_IC element list whose j'th element is a torch.Tensor of shape 
+            (n_IC_rollout_frames[i], physics.Frame_Shape) consisting of the first 
+            n_IC_rollout_frames[i] frames of the j'th time derivative of the FOM solution for the 
+            i'th combination of parameter values.
+        """
+
+        # Checks
+        assert(isinstance(p_IC_rollout, float));
+        assert(isinstance(t, list));
+        assert(p_IC_rollout >= 0.0 and p_IC_rollout <= 1.0);
+
+        n_param     : int   = len(t);
+
+        # Other setup.        
+        t_Grid_IC_rollout          : list[torch.Tensor]         = [];   # n_train element list whose i'th element is 1d array of times for IC rollout solve.
+        n_IC_rollout_frames        : list[int]                  = [];   # n_train element list whose i'th element specifies how many time steps we should simulate forward.
+        U_IC_Rollout_Targets       : list[list[torch.Tensor]]   = [];   # n_train element list whose i'th element is n_IC element list whose j'th element is a tensor of shape (n_IC_rollout_frames[i], ...) specifying FOM IC rollout targets
+
+
+        # -----------------------------------------------------------------------------------------
+        # Find t_Grid_IC_rollout and n_IC_rollout_frames.
+
+        for i in range(n_param):
+            # Determine the amount of time that passes in the FOM simulation corresponding to the 
+            # i'th combination of parameter values. 
+            t_i                 : torch.Tensor  = t[i];
+            n_t_i               : int           = t_i.shape[0];
+            t_0_i               : float         = t_i[0].item();
+            t_final_i           : float         = t_i[-1].item();
+
+            # The final IC rollout time for this combination of parameter values. Remember that 
+            # t_IC_rollout is the proportion of t_final_i - t_0_i over which we simulate.
+            t_IC_rollout_i      : float         = p_IC_rollout*(t_final_i - t_0_i);
+            t_IC_rollout_final_i: float         = t_IC_rollout_i + t_0_i;
+            LOGGER.info("We will rollout the initial condition for parameter combination #%d to t = %f" % (i, t_IC_rollout_final_i));
+
+            # Now figure out how many time steps occur before t_IC_rollout_final_i.
+            num_before_IC_rollout_final_i  : int           = 0;
+            for j in range(n_t_i):
+                if(t_i[j] > t_IC_rollout_final_i):
+                    break; 
+                
+                num_before_IC_rollout_final_i += 1;
+            LOGGER.info("We will rollout the initial condition for parameter combination #%d over %d time steps" % (i, num_before_IC_rollout_final_i));
+
+            # Now define the IC rollout time grid for the i'th combination of parameter values.
+            t_Grid_IC_rollout.append(torch.linspace(start = t_0_i, end = t_IC_rollout_final_i, steps = num_before_IC_rollout_final_i));
+
+            # The number of frames we simulate forward from the initial condition
+            n_IC_rollout_frames.append(num_before_IC_rollout_final_i);
+            LOGGER.info("We will simulate %d time steps from the initial condition for parameter combination #%d." % (num_before_IC_rollout_final_i, i));
+
+            # Fetch the first n_IC_rollout_frames[i] FOM frames.
+            U_IC_Rollout_Targets_i : list[torch.Tensor] = [];
+            for j in range(self.latent_dynamics.n_IC):
+                U_IC_Rollout_Targets_i.append(self.U_Train[i][j][:num_before_IC_rollout_final_i]);
+            U_IC_Rollout_Targets.append(U_IC_Rollout_Targets_i);
+
+        # All done!
+        return t_Grid_IC_rollout, n_IC_rollout_frames, U_IC_Rollout_Targets;
 
 
 
