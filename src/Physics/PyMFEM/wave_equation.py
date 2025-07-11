@@ -222,13 +222,40 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
 
 
 class Initial_Displacement(mfem.PyCoefficient):
-    def EvalValue(self, X : numpy.ndarray, k : float = None) -> numpy.ndarray | float:   
+    def __init__(self, k : float) -> None:
+        """
+        This class defines the initial displacement for the wave equation: 
+
+            u(0, (x, y)) = exp(-k*(x^2 + y^2))
+
+        ---------------------------------------------------------------------------------------------
+        Arguments
+        ---------------------------------------------------------------------------------------------
+
+        k : float
+            The decay parameter; see above.
+
+
+        ---------------------------------------------------------------------------------------------
+        Returns
+        ---------------------------------------------------------------------------------------------
+
+        Nothing!
+        """
+
+        # Set the parameter, k
+        self.k = k;
+    
+        # Now call the super class initializer.
+        mfem.PyCoefficient.__init__(self);
+
+
+
+    def EvalValue(self, X : numpy.ndarray) -> numpy.ndarray | float:   
         """
         This function returns the initial displacement for the wave equation:
 
             u(0, (x, y)) = exp(-k*(x^2 + y^2))
-
-        where k is a global variable. See the docstring for the WaveOperator class for more details.
 
         
 
@@ -241,9 +268,6 @@ class Initial_Displacement(mfem.PyCoefficient):
             X.shape = (2, N), then X[:, j] is the j'th position at which we want to evaluate the 
             initial displacement. If X.shape = (2), then X's lone column holds the position at which 
             we want to evaluate the initial displacement.
-
-        k : float
-            The decay parameter. If None, then the global variable k is used.
 
 
             
@@ -270,13 +294,8 @@ class Initial_Displacement(mfem.PyCoefficient):
         N : int = X.shape[1];
 
         # Evaluate the initial condition.
-        if(k is None):
-            global decay;
-            norm2 : numpy.ndarray = numpy.sum(numpy.square(X), axis = 0);
-            u     : numpy.ndarray = numpy.exp(-norm2*decay);
-        else:
-            norm2 : numpy.ndarray = numpy.sum(numpy.square(X), axis = 0);
-            u     : numpy.ndarray = numpy.exp(-norm2*k);
+        norm2 : numpy.ndarray = numpy.sum(numpy.square(X), axis = 0);
+        u     : numpy.ndarray = numpy.exp(-norm2*self.k);
 
         # Return the initial condition.
         if(N == 1):
@@ -287,7 +306,37 @@ class Initial_Displacement(mfem.PyCoefficient):
 
 
 class Initial_Velocity(mfem.PyCoefficient):
-    def EvalValue(self, X : numpy.ndarray, k : float = None) -> numpy.ndarray | float:
+    def __init__(self, k : float) -> None:
+        """
+        This class defines the initial velocity for the wave equation: 
+
+            (d/dt)u(0, (x, y)) = 0
+
+        ---------------------------------------------------------------------------------------------
+        Arguments
+        ---------------------------------------------------------------------------------------------
+
+        k : float
+            The decay parameter; It is unused in this class, but defines the initial displacement.
+            See the docstring for the Initial_Displacement class.
+
+
+        ---------------------------------------------------------------------------------------------
+        Returns
+        ---------------------------------------------------------------------------------------------
+
+        Nothing!
+        """
+
+        # Set the parameter, k
+        self.k = k;
+    
+        # Now call the super class initializer.
+        mfem.PyCoefficient.__init__(self);
+
+
+
+    def EvalValue(self, X : numpy.ndarray) -> numpy.ndarray | float:
         """
         This function returns the initial velocity for the wave equation:
 
@@ -303,10 +352,6 @@ class Initial_Velocity(mfem.PyCoefficient):
             X.shape = (2, N), then X[:, j] is the j'th position at which we want to evaluate the 
             initial velocity. If X.shape = (2), then X's lone column holds the position at which we 
             want to evaluate the initial velocity.
-
-        k : float
-            The decay parameter. If None, then the global variable k is used.
-
 
             
         ---------------------------------------------------------------------------------------------
@@ -462,10 +507,6 @@ def Simulate(mesh_file          : str           = "star.mesh",
     
     LOGGER.info("Setting up wave equation simulation with MFEM.");
     
-    # Set the global variable decay.
-    global decay;
-    decay = k;
-
     # Define the ODE solver used for time integration.
     LOGGER.debug("Defining the ODE solver.");
     if   ode_solver_type <= 10:
@@ -528,8 +569,8 @@ def Simulate(mesh_file          : str           = "star.mesh",
     LOGGER.debug("Setting the initial conditions for U and (d/dt)U.");
 
     # Set the initial conditions for u. All boundaries are considered natural.
-    u_0     : mfem.PyCoefficient = Initial_Displacement();
-    dudt_0  : mfem.PyCoefficient = Initial_Velocity();
+    u_0     : mfem.PyCoefficient = Initial_Displacement(k = k);
+    dudt_0  : mfem.PyCoefficient = Initial_Velocity(k = k);
 
     # Project the initial conditions onto the finite element space.
     u_gf.ProjectCoefficient(u_0);

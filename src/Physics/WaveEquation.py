@@ -133,15 +133,14 @@ class WaveEquation(Physics):
 
         # Fetch the parameters.
         k : float = param[self.k_idx];
-        c : float = param[self.c_idx];
 
         # Initialize the initial condition classes.
-        initial_displacement : Initial_Displacement = Initial_Displacement();
-        initial_velocity     : Initial_Velocity     = Initial_Velocity();
+        initial_displacement : Initial_Displacement = Initial_Displacement(k = k);
+        initial_velocity     : Initial_Velocity     = Initial_Velocity(k = k);
 
         # Evaluate the initial condition.
-        u0 : numpy.ndarray = initial_displacement.EvalValue(self.X_Positions,   k = k);     # shape = (1, N)
-        v0 : numpy.ndarray = initial_velocity.EvalValue(self.X_Positions,       k = k);     # shape = (1, N)
+        u0 : numpy.ndarray = initial_displacement.EvalValue(self.X_Positions);     # shape = (1, N)
+        v0 : numpy.ndarray = initial_velocity.EvalValue(self.X_Positions);         # shape = (1, N)
 
         # Return the initial conditions.
         return [u0, v0];
