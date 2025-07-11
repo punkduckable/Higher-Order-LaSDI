@@ -515,7 +515,7 @@ class Autoencoder(torch.nn.Module):
         dict_ = {   'encoder state'  : self.encoder.cpu().state_dict(),
                     'decoder state'  : self.decoder.cpu().state_dict(),
                     'widths'         : self.widths, 
-                    'activation'     : self.activation, 
+                    'activations'    : self.activations, 
                     'reshape_shape'  : self.reshape_shape};
         return dict_;
 
@@ -904,7 +904,7 @@ class Autoencoder_Pair(torch.nn.Module):
 
         dict_ = {   'reshape_shape'     : self.reshape_shape,
                     'widths'            : self.widths,
-                    'activation'        : self.activation,
+                    'activations'       : self.activations,
                     'Displacement dict' : self.cpu().Displacement_Autoencoder.export(),
                     'Velocity dict'     : self.cpu().Velocity_Autoencoder.export()};
         return dict_;
@@ -943,11 +943,11 @@ def load_Autoencoder_Pair(dict_ : dict) -> Autoencoder_Pair:
     # architecture as the one that created dict_.
     reshape_shape   : list[int] = dict_['reshape_shape'];
     widths          : list[int] = dict_['widths'];
-    activation      : str       = dict_['activation'];
+    activations     : list[str] = dict_['activations'];
 
     # Now initialize the Autoencoder_Pair.
     AEP                     = Autoencoder_Pair( widths          = widths, 
-                                                activation      = activation,
+                                                activations     = activations,
                                                 reshape_shape   = reshape_shape);
     
     # Now replace its auto-encoders.
