@@ -257,7 +257,7 @@ class BayesianGLaSDI:
         n_train             : int               = self.param_space.n_train();
         n_IC                : int               = self.latent_dynamics.n_IC;
         p_rollout           : int               = min(0.75, self.p_rollout_init + self.dp_per_update*(self.restart_iter//self.rollout_update_freq));
-        p_IC_rollout        : float             = min(0.75, self.p_IC_rollout_init + self.IC_dp_per_update*(self.restart_iter//self.IC_rollout_update_freq));
+        p_IC_rollout        : float             = min(1.0, self.p_IC_rollout_init + self.IC_dp_per_update*(self.restart_iter//self.IC_rollout_update_freq));
         LD                  : LatentDynamics    = self.latent_dynamics;
         best_loss           : float             = numpy.inf;                    # Stores the lowest loss we get in this round of training.
 
@@ -870,11 +870,11 @@ class BayesianGLaSDI:
             # Check if we hit a new minimum loss. If so, make a checkpoint, record the loss and 
             # the iteration number. 
             if loss.item() < best_loss:
-                LOGGER.info("Got a new lowest loss (%f) on epoch %d" % (loss.item(), iter));
+                LOGGER.info("Got a new lowest loss (%f) on epoch %d" % (loss.item(), iter + 1));
                 torch.save(model_device.cpu().state_dict(), self.path_checkpoint + '/' + 'checkpoint.pt');
                 
                 # Update the best set of parameters. 
-                self.best_coefs : numpy.ndarray = coefs.copy();             # Shape = (n_train, n_coefs).
+                self.best_coefs : numpy.ndarray = coefs.copy();       # Shape = (n_train, n_coefs).
                 self.best_epoch : int           = iter;
                 best_loss       : float         = loss.item();
 
@@ -1410,20 +1410,16 @@ class BayesianGLaSDI:
             self.
         """
 
-        dict_ = {'U_Train'          : self.U_Train, 
-                 'U_Test'           : self.U_Test, 
-                 't_Train'          : self.t_Train,
-                 't_Test'           : self.t_Test,
-                 'lr'               : self.lr, 
-                 'n_iter'           : self.n_iter,
-                 'n_samples'        : self.n_samples, 
-                 'best_coefs'       : self.best_coefs,                      # Shape = (n_train, n_coefs).
-                 'max_iter'         : self.max_iter,
-                 'max_iter'         : self.max_iter, 
-                 'weights'          : self.loss_weights, 
-                 'restart_iter'     : self.restart_iter, 
-                 'timer'            : self.timer.export(), 
-                 'optimizer'        : self.optimizer.state_dict()};
+        dict_ = {'U_Train'                  : self.U_Train, 
+                 'U_Test'                   : self.U_Test, 
+                 't_Train'                  : self.t_Train,
+                 't_Test'                   : self.t_Test,
+                 'best_coefs'               : self.best_coefs,                      # Shape = (n_train, n_coefs).
+                 'max_iter'                 : self.max_iter, 
+                 'restart_iter'             : self.restart_iter, 
+                 'timer'                    : self.timer.export(), 
+                 'test_coefs'               : self.test_coefs,
+                 'optimizer'                : self.optimizer.state_dict()};
         return dict_;
 
 
@@ -1455,11 +1451,16 @@ class BayesianGLaSDI:
         self.U_Train        : list[list[torch.Tensor]]  = dict_['U_Train'];
         self.U_Test         : list[list[torch.Tensor]]  = dict_['U_Test'];
 
-        self.t_Train        : list[numpy.ndarray]       = dict_['t_Train'];
-        self.t_Test         : list[numpy.ndarray]       = dict_['t_Test'];
+        self.t_Train        : list[torch.Tensor]        = dict_['t_Train'];
+        self.t_Test         : list[torch.Tensor]        = dict_['t_Test'];
 
         self.best_coefs     : numpy.ndarray             = dict_['best_coefs'];          # Shape = (n_train, n_coefs).
         self.restart_iter   : int                       = dict_['restart_iter'];
+
+        # Set the test coefs.
+        with torch.no_grad():
+            for i in range(len(self.test_coefs)):
+                self.test_coefs[i] = dict_['test_coefs'][i];
 
         # Load the timer / optimizer. 
         self.timer.load(dict_['timer']);

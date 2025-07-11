@@ -78,14 +78,14 @@ def main():
     Log_Dictionary(LOGGER = LOGGER, D = config, level = logging.DEBUG);
 
     # Check if we are loading from a restart or not. If so, load it.
-    use_restart : bool = config['workflow']['use_restart'];
-    restart_filename : str = None;
+    use_restart         : bool  = config['workflow']['use_restart'];
+    restart_filename    : str   = None;
     if (use_restart == True):
         restart_filename : str = config['workflow']['restart_file'];
-        LOGGER.debug("Loading from restart (%s)" % restart_filename);
+        LOGGER.info("Loading from restart (%s)" % restart_filename);
 
-        from pathlib import Path
-        Path(os.path.dirname(restart_filename)).mkdir(parents = True, exist_ok = True);
+        # Set up the restart path.
+        restart_path : str = os.path.join(os.path.join(os.path.pardir, "results"), restart_filename);
     
     LOGGER.info("Done! Took %fs" % (time.perf_counter() - timer));
 
@@ -98,9 +98,9 @@ def main():
     # Determine what the next step is. If we are loading from a restart, then the restart should
     # have logged then next step. Otherwise, we set the next step to "PickSample", which will 
     # prompt the code to set up the training set of parameters.
-    if ((use_restart == True) and (os.path.isfile(restart_filename))):
+    if ((use_restart == True) and (os.path.isfile(restart_path))):
         # TODO(kevin): in long term, we should switch to hdf5 format.
-        restart_dict    = numpy.load(restart_filename, allow_pickle = True).item();
+        restart_dict    = numpy.load(restart_path, allow_pickle = True).item();
         next_step       = restart_dict['next_step'];
         result          = restart_dict['result'];
     else:
@@ -122,7 +122,6 @@ def main():
         result = Result.Unexecuted;
     elif (result is Result.Complete):
         LOGGER.info("Workflow is finished.");
-
 
 
     # ---------------------------------------------------------------------------------------------
@@ -370,13 +369,13 @@ def main():
                             save_file_name  = save_file_name);
 
 
-
     # ---------------------------------------------------------------------------------------------
     # Save!
     # ---------------------------------------------------------------------------------------------
 
     # Save!
     Save(   param_space         = param_space,
+            config              = config,
             physics             = physics,
             model               = model, 
             latent_dynamics     = latent_dynamics,
@@ -495,10 +494,9 @@ def step(trainer        : BayesianGLaSDI,
     if ((result is Result.Fail) or (result is Result.Complete)):
         return result, next_step;
         
-    # Continue the workflow if not using restart.
+    # Continue the workflow.
     LOGGER.info("Next step is: %s" % next_step);
-    if (use_restart == False):
-        result, next_step = step(trainer, next_step, config);
+    result, next_step = step(trainer, next_step, config);
 
     # All done!
     return result, next_step;
@@ -506,6 +504,7 @@ def step(trainer        : BayesianGLaSDI,
 
 
 def Save(   param_space         : ParameterSpace, 
+            config              : dict,
             physics             : Physics, 
             model               : torch.nn.Module, 
             latent_dynamics     : LatentDynamics,
@@ -526,6 +525,10 @@ def Save(   param_space         : ParameterSpace,
     param_space : ParameterSpace 
         holds the training and testing parameter combinations.
     
+    config : dict
+        This should be a dictionary that we loaded from a .yml file. It should house all the 
+        settings we expect to use to generate the data and train the models.
+
     physics : Physics
         defines the FOM model. We can use it to fetch the initial conditions and FOM solution for
         a particular combination of parameter values. physics, latent_dynamics, and model should 
@@ -576,20 +579,18 @@ def Save(   param_space         : ParameterSpace,
     date_str    = date_str.format(month     = date.tm_mon, 
                                   day       = date.tm_mday, 
                                   year      = date.tm_year, 
-                                  hour      = date.tm_hour + 3, 
+                                  hour      = date.tm_hour, 
                                   minute    = date.tm_min);
     
+    # Set up the restart filename.
     if(restart_filename != None):
-        # rename old restart file if exists.
-        if (os.path.isfile(restart_filename) == True):
-            old_timestamp = restart_dict['timestamp'];
-            os.rename(restart_filename, restart_filename + '.' + old_timestamp);
-        restart_path : str = restart_filename;
+        # Append the new date to the restart filename.
+        restart_filename = restart_filename + '.' + date_str;
     else:
-        restart_path : str = 'lasdi_' + date_str + '.npy';
+        restart_filename : str = config["physics"]["type"] + '_' + date_str + '.npy';
     
-    # Make sure we place this in the results dictionary.
-    restart_path        = os.path.join(os.path.join(os.path.pardir, "results"), restart_path);
+    # Set up the restart path.
+    restart_path        = os.path.join(os.path.join(os.path.pardir, "results"), restart_filename);
 
     # Build the restart save dictionary and then save it.
     restart_dict = {'parameter_space'   : param_space.export(),

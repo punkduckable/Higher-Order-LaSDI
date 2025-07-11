@@ -182,8 +182,22 @@ class Physics:
 
         dict_ : dict = {'config'            : self.config, 
                         'param_names'       : self.param_names,
+                        'X_Positions'       : self.X_Positions,
+                        'Frame_Shape'       : self.Frame_Shape,
                         'Uniform_t_Grid'    : self.Uniform_t_Grid};
         return dict_;
+
+    def load(self, dict_ : dict) -> None:
+        """
+        Loads self's internal state from the dictionary dict_.
+        """
+
+        self.config         : dict          = dict_['config'];
+        self.param_names    : list[str]     = dict_['param_names'];
+        self.X_Positions    : numpy.ndarray = dict_['X_Positions'];
+        self.Frame_Shape    : list[int]     = dict_['Frame_Shape'];
+        self.Uniform_t_Grid : bool          = dict_['Uniform_t_Grid'];
+        return;
     
 
 

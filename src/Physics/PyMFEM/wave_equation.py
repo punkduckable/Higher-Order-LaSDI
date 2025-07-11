@@ -222,7 +222,7 @@ class WaveOperator(mfem.SecondOrderTimeDependentOperator):
 
 
 class Initial_Displacement(mfem.PyCoefficient):
-    def EvalValue(self, X : numpy.ndarray) -> numpy.ndarray | float:   
+    def EvalValue(self, X : numpy.ndarray, k : float = None) -> numpy.ndarray | float:   
         """
         This function returns the initial displacement for the wave equation:
 
@@ -241,6 +241,9 @@ class Initial_Displacement(mfem.PyCoefficient):
             X.shape = (2, N), then X[:, j] is the j'th position at which we want to evaluate the 
             initial displacement. If X.shape = (2), then X's lone column holds the position at which 
             we want to evaluate the initial displacement.
+
+        k : float
+            The decay parameter. If None, then the global variable k is used.
 
 
             
@@ -267,9 +270,13 @@ class Initial_Displacement(mfem.PyCoefficient):
         N : int = X.shape[1];
 
         # Evaluate the initial condition.
-        global decay;
-        norm2 : numpy.ndarray = numpy.sum(numpy.square(X), axis = 0);
-        u     : numpy.ndarray = numpy.exp(-norm2*decay);
+        if(k is None):
+            global decay;
+            norm2 : numpy.ndarray = numpy.sum(numpy.square(X), axis = 0);
+            u     : numpy.ndarray = numpy.exp(-norm2*decay);
+        else:
+            norm2 : numpy.ndarray = numpy.sum(numpy.square(X), axis = 0);
+            u     : numpy.ndarray = numpy.exp(-norm2*k);
 
         # Return the initial condition.
         if(N == 1):
@@ -280,7 +287,7 @@ class Initial_Displacement(mfem.PyCoefficient):
 
 
 class Initial_Velocity(mfem.PyCoefficient):
-    def EvalValue(self, X : numpy.ndarray) -> numpy.ndarray | float:
+    def EvalValue(self, X : numpy.ndarray, k : float = None) -> numpy.ndarray | float:
         """
         This function returns the initial velocity for the wave equation:
 
@@ -296,6 +303,9 @@ class Initial_Velocity(mfem.PyCoefficient):
             X.shape = (2, N), then X[:, j] is the j'th position at which we want to evaluate the 
             initial velocity. If X.shape = (2), then X's lone column holds the position at which we 
             want to evaluate the initial velocity.
+
+        k : float
+            The decay parameter. If None, then the global variable k is used.
 
 
             

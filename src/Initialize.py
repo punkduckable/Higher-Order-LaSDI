@@ -137,6 +137,8 @@ def Initialize_Trainer(config : dict, restart_dict : dict = None) -> tuple[Bayes
     
     # Get the "physics" object we use to generate the FOM dataset.
     physics : Physics   = Initialize_Physics(config, param_space.param_names);
+    if (restart_dict is not None):
+        physics.load(restart_dict['physics']);
 
     # Get the model (autoencoder). We try to learn dynamics that describe how the latent space of
     # this model evolve over time. If we are using a restart file, then load the saved model 

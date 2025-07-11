@@ -135,18 +135,14 @@ class WaveEquation(Physics):
         k : float = param[self.k_idx];
         c : float = param[self.c_idx];
 
-        # Set the global variables.
-        global decay;
-        decay  = k;
-
         # Initialize the initial condition classes.
         initial_displacement : Initial_Displacement = Initial_Displacement();
         initial_velocity     : Initial_Velocity     = Initial_Velocity();
 
         # Evaluate the initial condition.
-        u0 : numpy.ndarray = initial_displacement.EvalValue(self.X_Positions);
-        v0 : numpy.ndarray = initial_velocity.EvalValue(self.X_Positions);
-        
+        u0 : numpy.ndarray = initial_displacement.EvalValue(self.X_Positions,   k = k);     # shape = (1, N)
+        v0 : numpy.ndarray = initial_velocity.EvalValue(self.X_Positions,       k = k);     # shape = (1, N)
+
         # Return the initial conditions.
         return [u0, v0];
 
