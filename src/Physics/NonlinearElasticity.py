@@ -184,7 +184,7 @@ class NonlinearElasticity(Physics):
         assert(param.shape[0]   == self.n_p);
         
         # Solve the PDE!
-        D, V, _, T  = Simulate(theta = param[self.s_idx], shear_modulus = param[self.mu_idx], Positions = self.X_Positions);
+        D, V, _, T  = Simulate(s = param[self.s_idx], shear_modulus = param[self.mu_idx], Positions = self.X_Positions);
 
         # All done!
         X       : list[torch.Tensor]    = [torch.Tensor(D), torch.Tensor(V)];

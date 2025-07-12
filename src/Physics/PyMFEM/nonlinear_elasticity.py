@@ -25,61 +25,38 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # Nonlinear Elasticity Classes
 # -------------------------------------------------------------------------------------------------
 
-class Initial_Velocity(mfem.VectorPyCoefficient):
-    """
-    Defines the initial velocity field for the nonlinear elasticity problem. In this case, the 
-    initial velocity is 
-
-            v(0, (x, y)) = ( 0, -(s/80)*sin(s*x) )
-        
-    """
-    def EvalValue(self, x : numpy.ndarray) -> numpy.ndarray:
-        """
-        Implements the following initial velocity field:
-
-            v(0, (x, y)) = ( 0, -(s/80)*sin(s*x) )
-        
-        Here, s is a global variable (the theta variable in the Simulate function).
-
-
-        -------------------------------------------------------------------------------------------
-        Arguments
-        -------------------------------------------------------------------------------------------
-        
-        x : numpy.ndarray, shape = (2)
-            A 2-element vector holding the (x, y) coordinates of the point at which we want to 
-            evaluate the initial velocity. 
-
-            
-            
-        -------------------------------------------------------------------------------------------
-        Returns
-        -------------------------------------------------------------------------------------------
-
-        v : numpy.ndarray, shape = (2)
-            Initial velocity vector at position x. Has same dimension as x. Only the last component 
-            is non-zero, given by: -(s/80.0)*sin(s*x[0]) where s is a global parameter controlling 
-            the oscillation frequency.
-        """
-        
-        # Initialize velocity vector to zeros
-        v : numpy.ndarray = numpy.zeros_like(x);
-        
-        # Set only the last component to be non-zero
-        global s;
-        v[-1] = -(s/80.0) * numpy.sin(s * x[0]);
-        return v;
-
-
-
 class Initial_Deformation(mfem.VectorPyCoefficient):
-    """
-    Defines the initial deformation field for the nonlinear elasticity problem. In this case,t he 
-    initial deformation is 
+    def __init__(self, dim : int, s : float) -> None:
+        """
+        Defines the initial deformation field for the nonlinear elasticity problem. In this case, the 
+        initial deformation is 
 
-        D(0, (x, y)) = (x, y)
+            D(0, (x, y)) = (x, y)
 
-    """
+
+        -----------------------------------------------------------------------------------------------
+        Arguments
+        ----------------------------------------------------------------------------------------------- 
+
+        dim : int
+            The vector field dimension of the vector field. 
+
+        s : float
+            Unused in this class, but defines the initial velocity. See that class for more details.
+
+
+        -----------------------------------------------------------------------------------------------
+        Returns
+        -----------------------------------------------------------------------------------------------
+        
+        Nothing!
+        """
+
+        self.s = s;
+        mfem.VectorPyCoefficient.__init__(self, dim);
+
+
+
     def EvalValue(self, x: numpy.ndarray) -> numpy.ndarray:
         """
         Evaluates the initial deformation at position x.
@@ -90,8 +67,8 @@ class Initial_Deformation(mfem.VectorPyCoefficient):
         Arguments
         -------------------------------------------------------------------------------------------
         
-        x : numpy.ndarray, shape = (2)
-            A 2-element vector holding the (x, y) coordinates of the point at which we want to 
+        x : numpy.ndarray, shape = (self.dim)
+            A self.dim-element vector holding the coordinates of the point at which we want to 
             evaluate the initial deformation. 
             
         
@@ -99,13 +76,85 @@ class Initial_Deformation(mfem.VectorPyCoefficient):
         Returns
         -------------------------------------------------------------------------------------------
         
-        d : numpy.ndarray
-            A copy of x.
+        d : numpy.ndarray, shape = (self.dim)
+            A copy of x. 
         """
 
         from copy import deepcopy;
         d : numpy.ndarray = deepcopy(x);
         return d;
+
+
+
+class Initial_Velocity(mfem.VectorPyCoefficient):
+    def __init__(self, dim : int, s : float) -> None:
+        """
+        Defines the initial velocity field for the nonlinear elasticity problem. In this case, the 
+        initial velocity is 
+
+            v(0, (x, y)) = -(s/80)*sin(s*x)e_{-1}
+
+        where e_{-1} is the unit basis vector for the final dimension of the problem domain.
+        
+        -----------------------------------------------------------------------------------------------
+        Arguments
+        -----------------------------------------------------------------------------------------------
+        
+        dim : int
+            The vector field dimension of the vector field. 
+
+        s : float
+            Used to define the initial velocity. See above. 
+            
+            
+        -----------------------------------------------------------------------------------------------
+        Returns
+        -----------------------------------------------------------------------------------------------
+        
+        Nothing!
+        """
+
+        mfem.VectorPyCoefficient.__init__(self, dim);
+        self.s = s;
+
+
+
+    def EvalValue(self, x : numpy.ndarray) -> numpy.ndarray:
+        """
+        Implements the following initial velocity field:
+
+            v(0, (x, y)) = -(s/80)*sin(s*x)e_{-1}
+
+        where e_{-1} is the unit basis vector for the final dimension of the problem domain.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+        
+        x : numpy.ndarray, shape = (self.dim)
+            A self.dim-element vector holding the coordinates of the point at which we want to 
+            evaluate the initial velocity. 
+            
+            
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        v : numpy.ndarray, shape = (self.dim)
+            Initial velocity vector at position x. Has same dimension as x. Only the last component 
+            is non-zero, given by: -(s/80.0)*sin(s*x[0]) where s is the parameter in self. See the 
+            initializer for more details. 
+        """
+        
+        # Initialize velocity vector to zeros
+        v : numpy.ndarray = numpy.zeros_like(x);
+        
+        # Set only the last component to be non-zero
+        v[-1] = -(self.s/80.0) * numpy.sin(self.s * x[0]);
+        return v;
+
+
 
 
 
@@ -340,7 +389,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
                 shear_modulus   : float         = 0.25, 
                 bulk_modulus    : float         = 5.0,
                 num_positions   : int           = 1000,
-                theta           : float         = 1.0,
+                s               : float         = 1.0,
                 serialize_steps : int           = 5, 
                 VisIt           : bool          = True) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """
@@ -353,10 +402,10 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     with the following initial conditions:
         
         d((x, y), 0)         =  (x, y)
-        v((x, y), 0)         =  (-theta*x^2, theta*x^2 (8.0 - x))
+        v((x, y), 0)         =  (0, -(s/80)*sin(s*x))
     
-    where X[0] and X[-1] are the positions of the first and last nodes, respectively. Here, theta 
-    is a parameter that the user can change. 
+    where X[0] and X[-1] are the positions of the first and last nodes, respectively. Here, s is a 
+    parameter that the user can change. 
     
     See the c++ version of example 10 in the MFEM library for more detail.
 
@@ -413,8 +462,8 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     num_positions : int
         specifies the number of positions at which we will evaluate the solution.
 
-    theta : float
-        specifies the constant "theta" in the initial velocity.
+    s : float
+        specifies the constant "s" in the initial velocity.
 
     serialize_steps : int
         Specifies how frequently we serialize (save) and visualize the solution.
@@ -463,8 +512,6 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     visc        : float = viscosity;
     mu          : float = shear_modulus;
     K           : float = bulk_modulus;
-    global s;
-    s = theta;
 
     # Select the ODE solver.
     if(myid == 0): LOGGER.debug("Selecting the ODE solver");
@@ -563,8 +610,8 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
 
     # Set up objects to hold the ICs
     if(myid == 0): LOGGER.debug("Setting up objects to hold the initial conditions;");
-    velo        = Initial_Velocity(dim);
-    deform      = Initial_Deformation(dim);
+    velo        = Initial_Velocity(dim = dim, s = s);
+    deform      = Initial_Deformation(dim = dim, s = s);
     
     # Project the initial velocity and deformation onto the FEM space.
     V_gf.ProjectCoefficient(velo);

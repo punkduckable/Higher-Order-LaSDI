@@ -27,7 +27,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class velocity_coeff(mfem.VectorPyCoefficient):
-    def __init__(self, dim : int, bb_min : numpy.ndarray, bb_max : numpy.ndarray) -> None:
+    def __init__(self, dim : int, bb_min : numpy.ndarray, bb_max : numpy.ndarray, gamma : float) -> None:
         """
         Initialize a velocity_coeff object. This class is used to define the velocity field for the 
         advection problem. If dim = 2, the velocity field is defined by
@@ -35,8 +35,31 @@ class velocity_coeff(mfem.VectorPyCoefficient):
             v(x, y) = d(x, y)* gamma * (y, -x)
 
         where d(x, y) = max((x + 1)*(1 - x), 0.) * max((y + 1)*(1 - y), 0.) takes on non-zero 
-        values in [-1, 1] x [-1, 1] and is zero outside of this domain. Further, gamma is a 
-        global.
+        values in [-1, 1] x [-1, 1] and is zero outside of this domain. 
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+        
+        dim : int
+            The dimension of the velocity field.
+
+        bb_min : numpy.ndarray, shape = (dim,)
+            The minimum coordinates of the bounding box.
+
+        bb_max : numpy.ndarray, shape = (dim,)
+            The maximum coordinates of the bounding box.
+
+        gamma : float
+            The parameter in the velocity field. See above.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+        
+        Nothing!
         """
 
         # Run checks
@@ -54,6 +77,7 @@ class velocity_coeff(mfem.VectorPyCoefficient):
         self.dim        : int           = dim;
         self.bb_min     : numpy.ndarray = bb_min;
         self.bb_max     : numpy.ndarray = bb_max;
+        self.gamma      : float         = gamma;
 
 
 
@@ -91,24 +115,24 @@ class velocity_coeff(mfem.VectorPyCoefficient):
 
         # map to the reference [-1,1] domain
         X : numpy.ndarray = 2 * (x - center) / (bb_max - bb_min);
-        
-        # Clockwise twisting rotation in 2D around the origin
-        global gamma;
+
+        # Get the velocity field. (Clockwise twisting rotation in 2D around the origin
         d : float = max((X[0] + 1.)*(1. - X[0]), 0.) * max((X[1] + 1.)*(1. - X[1]), 0.);
         d : float = d ** 2;
-        if self.dim == 1:
-            v : list[float] = [1.0, ]
-        elif self.dim == 2:
-            v : list[float] = [d*gamma*X[1],  - d*gamma*X[0]]
-        elif self.dim == 3:
-            v : list[float] = [d*gamma*X[1],  - d*gamma*X[0],  0]
 
-        return v
+        if self.dim == 1:
+            v : list[float] = [1.0];
+        elif self.dim == 2:
+            v : list[float] = [d*self.gamma*X[1],  - d*self.gamma*X[0]];
+        elif self.dim == 3:
+            v : list[float] = [d*self.gamma*X[1],  - d*self.gamma*X[0],  0];
+
+        return v;
 
 
 
 class Initial_Displacement(mfem.PyCoefficient):
-    def __init__(self, bb_min : numpy.ndarray, bb_max : numpy.ndarray):
+    def __init__(self, bb_min : numpy.ndarray, bb_max : numpy.ndarray, k : float, w : float):
         """
         Initialize a Initial_Displacement object. This class is used to define the initial 
         condition for the advection problem. The initial condition is defined by
@@ -121,6 +145,30 @@ class Initial_Displacement(mfem.PyCoefficient):
             y~ = 2 * (y - center) / (bb_max - bb_min)
 
         where center = (bb_min + bb_max) / 2.0.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+        
+        bb_min : numpy.ndarray, shape = (2,)
+            The minimum coordinates of the bounding box.
+
+        bb_max : numpy.ndarray, shape = (2,)
+            The maximum coordinates of the bounding box.
+
+        k : float   
+            The decay parameter. See above.
+
+        w : float
+            The frequency parameter. See above. 
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+        
+        Nothing!
         """
 
         # Run checks
@@ -135,6 +183,8 @@ class Initial_Displacement(mfem.PyCoefficient):
         # Now set problem specific attributes.
         self.bb_min : numpy.ndarray = bb_min;
         self.bb_max : numpy.ndarray = bb_max;
+        self.k      : float         = k;
+        self.w      : float         = w;
 
 
 
@@ -149,12 +199,14 @@ class Initial_Displacement(mfem.PyCoefficient):
             x~ = 2 * (x - center) / (bb_max - bb_min)
             y~ = 2 * (y - center) / (bb_max - bb_min)
 
-        where center = (bb_min + bb_max) / 2.0.
+        where center = (bb_min + bb_max) / 2.0 and k, w are parameters in self. See the initializer 
+        for more details.
 
         
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
+        
         x : numpy.ndarray, shape = (2,)
             The position at which to evaluate the initial condition. The first element is the 
             x-coordinate, and the second element is the y-coordinate.
@@ -178,9 +230,8 @@ class Initial_Displacement(mfem.PyCoefficient):
         X : numpy.ndarray = 2 * (x - center) / (self.bb_max - self.bb_min);
         
         # Return the initial condition.
-        global freq, decay;
         norm2 : float = numpy.sum(numpy.square(X),);
-        return numpy.exp(-decay*norm2) * numpy.sin(numpy.pi * freq * X[0]) * numpy.sin(numpy.pi * freq * X[1])
+        return numpy.exp(-self.k*norm2) * numpy.sin(numpy.pi * self.w * X[0]) * numpy.sin(numpy.pi * self.w * X[1])
 
 
 
@@ -469,10 +520,6 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
 
     # Set variables.
     dt                  : float = time_step_size;
-    global gamma; global freq; global decay;
-    gamma   = g;
-    freq    = w;
-    decay   = k;
 
     # Define the ODE solver used for time integration. Several explicit Runge-Kutta methods are 
     # available.
@@ -546,9 +593,9 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
     # 4. Define the initial condition objects.
     
     if(myid == 0): LOGGER.debug("Setting up the coefficient objects.");
-    velocity    = velocity_coeff(dim, bb_min, bb_max);
+    velocity    = velocity_coeff(dim, bb_min, bb_max, g);
     inflow      = inflow_coeff();
-    u0          = Initial_Displacement(bb_min, bb_max); 
+    u0          = Initial_Displacement(bb_min, bb_max, k, w); 
 
     # Project the initial condition onto the finite element space.
     u_gf.ProjectCoefficient(u0);
