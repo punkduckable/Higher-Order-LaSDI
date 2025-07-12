@@ -766,10 +766,10 @@ class BayesianGLaSDI:
                         V_Rollout_Target_i      : torch.Tensor          = U_Rollout_Target_i[1];        # shape = (n_rollout_frames[i], physics.Frame_Shape)
                     
                         # Compute the losses for the i'th combination of parameter values!
-                        loss_rollout_Z_D  += self.MAE(Z_D_Rollout_Target_i, Z_D_Rollout_Predict_i);
-                        loss_rollout_Z_V  += self.MAE(Z_V_Rollout_Target_i, Z_V_Rollout_Predict_i);
-                        loss_rollout_D    += self.MAE(D_Rollout_Target_i,   D_Rollout_Predict_i);
-                        loss_rollout_V    += self.MAE(V_Rollout_Target_i,   V_Rollout_Predict_i);
+                        loss_rollout_Z_D  += self.MSE(Z_D_Rollout_Target_i, Z_D_Rollout_Predict_i);
+                        loss_rollout_Z_V  += self.MSE(Z_V_Rollout_Target_i, Z_V_Rollout_Predict_i);
+                        loss_rollout_D    += self.MSE(D_Rollout_Target_i,   D_Rollout_Predict_i);
+                        loss_rollout_V    += self.MSE(V_Rollout_Target_i,   V_Rollout_Predict_i);
 
                     self.timer.end("Rollout Loss");
 
@@ -826,10 +826,10 @@ class BayesianGLaSDI:
                         Z_D_IC_Target_i, Z_V_IC_Target_i = model_device.Encode(D_IC_Target_i, V_IC_Target_i);
 
                         # Compute the losses for the i'th combination of parameter values!
-                        loss_IC_rollout_Z_D  += self.MAE(Z_D_IC_Target_i, Z_D_IC_Predict_i);
-                        loss_IC_rollout_Z_V  += self.MAE(Z_V_IC_Target_i, Z_V_IC_Predict_i);
-                        loss_IC_rollout_D    += self.MAE(D_IC_Target_i, D_IC_Predict_i);
-                        loss_IC_rollout_V    += self.MAE(V_IC_Target_i, V_IC_Predict_i);
+                        loss_IC_rollout_Z_D  += self.MSE(Z_D_IC_Target_i, Z_D_IC_Predict_i);
+                        loss_IC_rollout_Z_V  += self.MSE(Z_V_IC_Target_i, Z_V_IC_Predict_i);
+                        loss_IC_rollout_D    += self.MSE(D_IC_Target_i, D_IC_Predict_i);
+                        loss_IC_rollout_V    += self.MSE(V_IC_Target_i, V_IC_Predict_i);
 
                     self.timer.end("IC Rollout Loss");
 
