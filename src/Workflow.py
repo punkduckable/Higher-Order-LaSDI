@@ -128,7 +128,6 @@ def main():
     # Plot!
     # ---------------------------------------------------------------------------------------------
 
-
     # ---------------------------------------------------------------------------------------------
     # Setup 
 
@@ -138,8 +137,20 @@ def main():
     # Get a GP for each coefficient in the latent dynamics.
     gp_list         : list[GaussianProcessRegressor]    = fit_gps(param_space.train_space, trainer.best_coefs);
 
-    # Plot the latent trajectories for this combination of parameter values.
+    # Figure out which elements of the test set are in the training set.
+    in_train_set : torch.Tensor = torch.zeros(param_space.n_test(), dtype = torch.bool);
+    for i in range(param_space.n_train()):
+        for j in range(param_space.n_test()):
+            if(numpy.all(param_space.train_space[i, :] == param_space.test_space[j, :])):
+                in_train_set[j] = True;
+                break;
+
+    # Now, randomly sample an element of the test set that isn't in the training set.
     i_random    : int   = random.randrange(0, param_space.n_test());
+    while(in_train_set[i_random] == True):
+        i_random    : int   = random.randrange(0, param_space.n_test());
+    
+    # Plot the latent trajectories for the i_random'th element of the test set.
     Plot_Latent_Trajectories(  physics         = physics,
                                model           = model,
                                latent_dynamics = latent_dynamics,
@@ -151,10 +162,7 @@ def main():
                                file_prefix     = config["physics"]["type"],
                                figsize         = (15, 13));
 
-    gp_pred_mean, gp_pred_std   = eval_gp(gp_list, param_space.test_space);
-    gp_pred_mean                = gp_pred_mean.reshape(param_space.test_grid_sizes + [-1]);
-    gp_pred_std                 = gp_pred_std.reshape(param_space.test_grid_sizes + [-1]); 
-
+    # Compute the relative error between the FOM solution and its reconstruction under the model.
     skip_proportion : float = .05;
     Max_Rel_Error, Max_STD, Rel_Error, STD  = SolveROMs.Compute_Error_and_STD(
                                                 model           = model, 
@@ -231,7 +239,7 @@ def main():
 
 
     # ---------------------------------------------------------------------------------------------
-    # Plot Rel_Error for one combinations of parameters.
+    # Plot Rel_Error for the i_random'th combination of parameters.
 
     for i in range(physics.n_IC):
         plt.figure();
@@ -259,7 +267,8 @@ def main():
 
 
     # ---------------------------------------------------------------------------------------------
-    # Plot the mean predicted solution, true solution, and error for one combination of parameters.
+    # Plot the mean predicted solution, true solution, and error for the i_random'th combination of 
+    # parameters.
 
     # If X_Positions has the form (2, N_Positions), then the solution must either be a 
     # scalar field or a 2d vector field. Let's plot the solution.
