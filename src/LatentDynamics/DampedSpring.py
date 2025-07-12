@@ -247,12 +247,12 @@ class DampedSpring(LatentDynamics):
 
         if(self.Uniform_t_Grid  == True):
             h : float = t_Grid[1] - t_Grid[0];
-            d2Z_dt2_from_Z_D    : torch.Tensor  = Derivative2_Order4(U = Z_D,   h = h);                     # shape = (n_t, n_z)
+            #d2Z_dt2_from_Z_D    : torch.Tensor  = Derivative2_Order4(U = Z_D,   h = h);                     # shape = (n_t, n_z)
             d2Z_dt2_from_Z_V    : torch.Tensor  = Derivative1_Order4(U = Z_V,   h = h);                     # shape = (n_t, n_z)
         else:
-            d2Z_dt2_from_Z_D    : torch.Tensor  = Derivative2_Order2_NonUniform(U = Z_D, t_Grid = t_Grid);  # shape = (n_t, n_z)
+            #d2Z_dt2_from_Z_D    : torch.Tensor  = Derivative2_Order2_NonUniform(U = Z_D, t_Grid = t_Grid);  # shape = (n_t, n_z)
             d2Z_dt2_from_Z_V    : torch.Tensor  = Derivative1_Order2_NonUniform(U = Z_V, t_Grid = t_Grid);  # shape = (n_t, n_z)
-        d2Z_dt2             : torch.Tensor  = 0.5*(d2Z_dt2_from_Z_D + d2Z_dt2_from_Z_V);  # shape = (n_t, n_z)
+        d2Z_dt2             : torch.Tensor  = d2Z_dt2_from_Z_V #0.5*(d2Z_dt2_from_Z_D + d2Z_dt2_from_Z_V);  # shape = (n_t, n_z)
 
 
         # -----------------------------------------------------------------------------------------
