@@ -133,14 +133,11 @@ class Telegraphers(Physics):
         # Fetch the parameters.
         alpha   : float = param[self.alpha_idx];
         w       : float = param[self.w_idx];
-
-        # Set the global variables.
-        global freq;
-        freq  = w;
+        k       : float = 1.0;
 
         # Initialize the initial condition classes.
-        initial_displacement : Initial_Displacement = Initial_Displacement();
-        initial_velocity     : Initial_Velocity     = Initial_Velocity();
+        initial_displacement : Initial_Displacement = Initial_Displacement(w = w, k = k);
+        initial_velocity     : Initial_Velocity     = Initial_Velocity(w = w, k = k);
 
         # Evaluate the initial condition.
         u0 : numpy.ndarray = initial_displacement.EvalValue(self.X_Positions);

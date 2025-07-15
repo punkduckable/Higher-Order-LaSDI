@@ -14,7 +14,7 @@ from    scipy.special                   import  erfc;
 import  torch;
 
 from    Physics                         import  Physics;
-from    advection                       import  Simulate;
+from    advection                       import  Simulate, Initial_Displacement;
 
 
 LOGGER : logging.Logger = logging.getLogger(__name__);
@@ -134,14 +134,16 @@ class Advection(Physics):
         assert(param.shape[0]   == self.n_p);
         assert(self.X_Positions is not None);
 
-        # Bounding box used to non-dimensionalize the coordinates.
-        center : numpy.ndarray = (self.bb_min + self.bb_max) / 2.0;
-        X      : numpy.ndarray = 2.0 * (self.X_Positions - center.reshape(-1, 1)) / (self.bb_max - self.bb_min).reshape(-1, 1);
+        # Fetch the parameters.
+        w : float = param[self.w_idx];
+        k : float = 1.0;
+
+        # Initialize the initial condition classes.
+        initial_displacement : Initial_Displacement = Initial_Displacement(bb_min = self.bb_min, bb_max = self.bb_max, k = k, w = w);
 
         # Evaluate the initial condition.
-        k       : float         = 1.0;
-        u0     : numpy.ndarray  = numpy.exp(-k*numpy.sum(numpy.square(X), axis = 0)) * numpy.sin(numpy.pi * param[self.w_idx] * X[0]) * numpy.sin(numpy.pi * param[self.w_idx] * X[1]);
-        return [u0.reshape(1, -1)];
+        u0     : numpy.ndarray  = initial_displacement.EvalValue(self.X_Positions); # shape = (1, N)
+        return [u0];
 
 
 

@@ -133,14 +133,12 @@ class KleinGordon(Physics):
         # Fetch the parameters.
         w : float = param[self.w_idx];
         m : float = param[self.m_idx];
+        k : float = 1.0;
 
-        # Set the global variables.
-        global freq;
-        freq  = w;
 
         # Initialize the initial condition classes.
-        initial_displacement : Initial_Displacement = Initial_Displacement();
-        initial_velocity     : Initial_Velocity     = Initial_Velocity();
+        initial_displacement : Initial_Displacement = Initial_Displacement(k = k, w = w);
+        initial_velocity     : Initial_Velocity     = Initial_Velocity(k = k, w = w);
 
         # Evaluate the initial condition.
         u0 : numpy.ndarray = initial_displacement.EvalValue(self.X_Positions);

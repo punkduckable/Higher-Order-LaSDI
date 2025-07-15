@@ -13,7 +13,7 @@ import  numpy;
 import  torch;
 
 from    Physics                         import  Physics;
-from    nonlinear_elasticity            import  Simulate;
+from    nonlinear_elasticity            import  Simulate, Initial_Displacement, Initial_Velocity;
 
 LOGGER : logging.Logger = logging.getLogger(__name__);
 
@@ -125,16 +125,16 @@ class NonlinearElasticity(Physics):
         assert(len(param.shape) == 1);
         assert(param.shape[0]   == self.n_p);
 
+        # Fetch s.
+        s   : float             = param[self.s_idx];
 
-        # Fetch s
-        s   : float             = param[0];
+        # Initialize the initial condition classes.
+        initial_displacement : Initial_Displacement = Initial_Displacement(dim = self.spatial_dim, s = s);
+        initial_velocity     : Initial_Velocity     = Initial_Velocity(dim = self.spatial_dim, s = s);
 
         # Compute the initial condition and return!
-        X   : numpy.ndarray     = numpy.copy(self.X_Positions);         # Shape = (2, N_Nodes)
-        u0  : numpy.ndarray     = X;
-        v0  : numpy.ndarray     = numpy.empty_like(u0);
-        v0[0, :]    = -s*numpy.multiply(X[0, :], X[0, :]);
-        v0[1, :]    = s*numpy.multiply(X[0, :], X[0, :])*(8.0*numpy.ones_like(X[0, :]) - X[0, :]);
+        u0 : numpy.ndarray = initial_displacement.EvalValue(self.X_Positions);
+        v0 : numpy.ndarray = initial_velocity.EvalValue(self.X_Positions);
 
         # All done!
         return [u0, v0];

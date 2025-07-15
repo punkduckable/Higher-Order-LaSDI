@@ -11,38 +11,38 @@ lasdi:
 
     p_IC_rollout_init:      0.01
     IC_rollout_update_freq: 100
-    IC_dp_per_update:       0.001
+    IC_dp_per_update:       0.01
 
-    max_iter:               5000
-    n_iter:                 1000
-    max_greedy_iter:        5000
+    max_iter:               21000
+    n_iter:                 3000
+    max_greedy_iter:        21000
 
     loss_weights:
       recon:                1.0
-      LD:                   0.5
-      rollout:              0.5
+      LD:                   1.0
+      rollout:              1.0
       IC_rollout:           1.0
-      coef:                 0.0001
+      coef:                 0.00001
 
     learnable_coefs:        true
 
 workflow:
-  use_restart:              false
-  restart_file:            
+  use_restart:              True
+  restart_file:             Advection_07_14_2025_15_10.npy
 
 parameter_space:
   parameters:
     - name:                 w
-      min:                  2.0
-      max:                  3.0
+      min:                  2.8
+      max:                  3.2
       test_space_type:      uniform
-      sample_size:          5
+      sample_size:          10
       log_scale:            false
     - name:                 g
-      min:                  1.0
-      max:                  2.0
+      min:                  1.5
+      max:                  1.7
       test_space_type:      uniform
-      sample_size:          5
+      sample_size:          10
       log_scale:            false
   test_space:
     type:                   grid

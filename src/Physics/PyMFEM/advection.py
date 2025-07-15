@@ -230,7 +230,7 @@ class Initial_Displacement(mfem.PyCoefficient):
         X : numpy.ndarray = 2 * (x - center) / (self.bb_max - self.bb_min);
         
         # Return the initial condition.
-        norm2 : float = numpy.sum(numpy.square(X),);
+        norm2 : float = numpy.sum(numpy.square(X), axis = 0);
         return numpy.exp(-self.k*norm2) * numpy.sin(numpy.pi * self.w * X[0]) * numpy.sin(numpy.pi * self.w * X[1])
 
 
@@ -398,8 +398,8 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
                 time_step_size      : float         = 0.01,
                 Positions           : numpy.ndarray = None,
                 g                   : float         = numpy.pi/2,
-                k                   : float         = 1.0,
-                w                   : float         = 1.0,
+                k                   : float         = 2.0,
+                w                   : float         = 2.0,
                 serialization_steps : int           = 2,
                 num_positions       : int           = 1000,
                 VisIt               : bool          = True) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]:
@@ -567,7 +567,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
     # Setup the parallel mesh and refine it.
     if(myid == 0): LOGGER.debug("Setting up the parallel mesh");
     pmesh = mfem.ParMesh(MPI.COMM_WORLD, mesh);
-    for k in range(par_ref_levels):
+    for i in range(par_ref_levels):
         pmesh.UniformRefinement();
 
 
