@@ -92,6 +92,9 @@ class Advection(Physics):
         self.spatial_dim    : int           = 2;
         self.n_IC           : int           = 1;
 
+        # Record the default value of k (for the initial condition).
+        self.k              : float         = 2.0;
+
         # Make sure the config dictionary is actually for the advection model.
         self.w_idx  : int   = self.param_names.index('w');
         self.g_idx  : int   = self.param_names.index('g');        
@@ -136,13 +139,12 @@ class Advection(Physics):
 
         # Fetch the parameters.
         w : float = param[self.w_idx];
-        k : float = 1.0;
 
         # Initialize the initial condition classes.
-        initial_displacement : Initial_Displacement = Initial_Displacement(bb_min = self.bb_min, bb_max = self.bb_max, k = k, w = w);
+        initial_displacement : Initial_Displacement = Initial_Displacement(bb_min = self.bb_min, bb_max = self.bb_max, k = self.k, w = w);
 
         # Evaluate the initial condition.
-        u0     : numpy.ndarray  = initial_displacement.EvalValue(self.X_Positions); # shape = (1, N)
+        u0     : numpy.ndarray  = initial_displacement.EvalValue(self.X_Positions); # shape = (2, N)
         return [u0];
 
 
@@ -180,7 +182,7 @@ class Advection(Physics):
         assert(param.shape[0]   == self.n_p);
 
         # Solve the PDE using the external MFEM script.
-        Sol, _, Times, _, _ = Simulate(w = param[self.w_idx], g = param[self.g_idx], Positions = self.X_Positions, VisIt = False);
+        Sol, _, Times, _, _ = Simulate(w = param[self.w_idx], k = self.k, g = param[self.g_idx], Positions = self.X_Positions, VisIt = False);
 
         X       : list[torch.Tensor] = [torch.Tensor(Sol)];
         t_Grid  : torch.Tensor       = torch.Tensor(Times);

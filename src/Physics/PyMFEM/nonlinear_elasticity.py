@@ -25,7 +25,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # Nonlinear Elasticity Classes
 # -------------------------------------------------------------------------------------------------
 
-class Initial_Deformation(mfem.VectorPyCoefficient):
+class Initial_Displacement(mfem.VectorPyCoefficient):
     def __init__(self, dim : int, s : float) -> None:
         """
         Defines the initial deformation field for the nonlinear elasticity problem. In this case, the 
@@ -611,7 +611,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     # Set up objects to hold the ICs
     if(myid == 0): LOGGER.debug("Setting up objects to hold the initial conditions;");
     velo        = Initial_Velocity(dim = dim, s = s);
-    deform      = Initial_Deformation(dim = dim, s = s);
+    deform      = Initial_Displacement(dim = dim, s = s);
     
     # Project the initial velocity and deformation onto the FEM space.
     V_gf.ProjectCoefficient(velo);

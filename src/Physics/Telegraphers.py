@@ -84,6 +84,9 @@ class Telegraphers(Physics):
         self.spatial_dim    : int           = 2;
         self.n_IC           : int           = 2;
 
+        # Record the default value of k (for the initial condition).
+        self.k              : float         = 1.0;
+
         # Determine which index corresponds to k (frequency of peaks in the IC) and alpha (controls 
         # the coefficient of the of the (d/dt)U term in the PDE).
         self.alpha_idx  : int   = self.param_names.index('alpha');
@@ -133,11 +136,10 @@ class Telegraphers(Physics):
         # Fetch the parameters.
         alpha   : float = param[self.alpha_idx];
         w       : float = param[self.w_idx];
-        k       : float = 1.0;
 
         # Initialize the initial condition classes.
-        initial_displacement : Initial_Displacement = Initial_Displacement(w = w, k = k);
-        initial_velocity     : Initial_Velocity     = Initial_Velocity(w = w, k = k);
+        initial_displacement : Initial_Displacement = Initial_Displacement(w = w, k = self.k);
+        initial_velocity     : Initial_Velocity     = Initial_Velocity(w = w, k = self.k);
 
         # Evaluate the initial condition.
         u0 : numpy.ndarray = initial_displacement.EvalValue(self.X_Positions);
@@ -182,7 +184,7 @@ class Telegraphers(Physics):
         assert(param.shape[0]   == self.n_p);
 
         # Solve the PDE using the external MFEM script.
-        U, DtU, _, Times = Simulate(w = param[self.w_idx], alpha = param[self.alpha_idx], Positions = self.X_Positions, VisIt = True);
+        U, DtU, _, Times = Simulate(w = param[self.w_idx], alpha = param[self.alpha_idx], k = self.k, Positions = self.X_Positions, VisIt = True);
 
         X       : list[torch.Tensor] = [torch.Tensor(U), torch.Tensor(DtU)];
         t_Grid  : torch.Tensor       = torch.Tensor(Times);

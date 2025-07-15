@@ -85,6 +85,9 @@ class KleinGordon(Physics):
         self.spatial_dim    : int           = 2;
         self.n_IC           : int           = 2;
 
+        # Record the default value of k (for the initial condition).
+        self.k              : float         = 1.0;
+
         # Determine which index corresponds to c (wave speed) and which to k (decay rate in the IC).
         self.w_idx  : int   = self.param_names.index('w');
         self.m_idx  : int   = self.param_names.index('m');        
@@ -133,12 +136,11 @@ class KleinGordon(Physics):
         # Fetch the parameters.
         w : float = param[self.w_idx];
         m : float = param[self.m_idx];
-        k : float = 1.0;
 
 
         # Initialize the initial condition classes.
-        initial_displacement : Initial_Displacement = Initial_Displacement(k = k, w = w);
-        initial_velocity     : Initial_Velocity     = Initial_Velocity(k = k, w = w);
+        initial_displacement : Initial_Displacement = Initial_Displacement(k = self.k, w = w);
+        initial_velocity     : Initial_Velocity     = Initial_Velocity(k = self.k, w = w);
 
         # Evaluate the initial condition.
         u0 : numpy.ndarray = initial_displacement.EvalValue(self.X_Positions);
@@ -183,7 +185,7 @@ class KleinGordon(Physics):
         assert(param.shape[0]   == self.n_p);
 
         # Solve the PDE using the external MFEM script.
-        U, DtU, _, Times = Simulate(w = param[self.w_idx], m = param[self.m_idx], Positions = self.X_Positions, VisIt = True);
+        U, DtU, _, Times = Simulate(w = param[self.w_idx], m = param[self.m_idx], k = self.k, Positions = self.X_Positions, VisIt = True);
 
         X       : list[torch.Tensor] = [torch.Tensor(U), torch.Tensor(DtU)];
         t_Grid  : torch.Tensor       = torch.Tensor(Times);

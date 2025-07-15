@@ -188,7 +188,7 @@ class Initial_Displacement(mfem.PyCoefficient):
 
 
 
-    def EvalValue(self, x : numpy.ndarray) -> float:
+    def EvalValue(self, x : numpy.ndarray) -> numpy.ndarray:
         """
         This function returns the initial condition for the advection problem:
 
@@ -207,31 +207,52 @@ class Initial_Displacement(mfem.PyCoefficient):
         Arguments
         -------------------------------------------------------------------------------------------
         
-        x : numpy.ndarray, shape = (2,)
+        x : numpy.ndarray, shape = (2, N) or (2)
             The position at which to evaluate the initial condition. The first element is the 
-            x-coordinate, and the second element is the y-coordinate.
+            x-coordinate, and the second element is the y-coordinate. If x.shape = (2, N), then 
+            x[:, j] is the j'th position at which to evaluate the initial condition. If x.shape = (2), 
+            then x is a scalar holding the position at which to evaluate the initial condition.
 
             
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
         
-        float
-            The value of the initial condition at the given position.
+        u : numpy.ndarray, shape = (1, N)
+            The value of the initial condition at the given position. If x.shape = (2, N), then 
+            u[:, j] is the value of the initial condition at the j'th position. If x.shape = (2), 
+            then u is a scalar holding the value of the initial condition at the lone position in x.
         """
 
         assert(isinstance(x, numpy.ndarray));
-        assert(x.shape == (2,));
+        assert(x.shape[0] == 2);
 
-        # Get the center of the bounding box.
-        center : float = (self.bb_min + self.bb_max)/2.0;
+        # Get the center and width of the bounding box.
+        center : numpy.ndarray = (self.bb_min + self.bb_max)/2.0;       # shape = (2,)
+        width  : numpy.ndarray = (self.bb_max - self.bb_min)/2.0;      # shape = (2,)
+
+        # Reshape center, width to have shape (2, 1)
+        center = center.reshape(2, 1);
+        width  = width.reshape(2, 1);
+
+        # Get the number of points.
+        if(len(x.shape) == 1):
+            x = x.reshape(2, 1);
+
+        # Get the number of points.
+        N : int = x.shape[1];
 
         # Map to the reference [-1,1] domain.
-        X : numpy.ndarray = 2 * (x - center) / (self.bb_max - self.bb_min);
+        X : numpy.ndarray = 2 * (x - center) / width; # shape = (2, N)
         
         # Return the initial condition.
-        norm2 : float = numpy.sum(numpy.square(X), axis = 0);
-        return numpy.exp(-self.k*norm2) * numpy.sin(numpy.pi * self.w * X[0]) * numpy.sin(numpy.pi * self.w * X[1])
+        norm2 : numpy.ndarray = numpy.sum(numpy.square(X), axis = 0); # shape = (N,)
+        u     : numpy.ndarray = numpy.exp(-self.k*norm2) * numpy.sin(numpy.pi * self.w * X[0]) * numpy.sin(numpy.pi * self.w * X[1]); # shape = (N)
+
+        if(N == 1):
+            return u[0];
+        else:
+            return u.reshape(1, N);
 
 
 
