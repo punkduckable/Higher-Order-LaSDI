@@ -98,7 +98,11 @@ def main():
     # Determine what the next step is. If we are loading from a restart, then the restart should
     # have logged then next step. Otherwise, we set the next step to "PickSample", which will 
     # prompt the code to set up the training set of parameters.
-    if ((use_restart == True) and (os.path.isfile(restart_path))):
+    if (use_restart == True):
+        if(os.path.isfile(restart_path) == False):
+            LOGGER.error("Restart file (%s) does not exist. Stopping the workflow." % restart_path);
+            exit();
+        
         # TODO(kevin): in long term, we should switch to hdf5 format.
         restart_dict    = numpy.load(restart_path, allow_pickle = True).item();
         next_step       = restart_dict['next_step'];
@@ -292,8 +296,16 @@ def main():
         Zi_mean     : list[torch.Tensor]    = [];
         for i in range(len(Zi_mean_np)):
             Zi_mean.append(torch.Tensor(Zi_mean_np[i]));
-        U_Pred      : list[torch.Tensor]    = model.Decode(*Zi_mean);
-    
+        U_Pred      : tuple[torch.Tensor] | torch.Tensor    = model.Decode(*Zi_mean);
+
+        # Convert U_Pred to a list
+        if(isinstance(U_Pred, tuple)):
+            U_Pred = list(U_Pred);
+        elif(isinstance(U_Pred, torch.Tensor)):
+            U_Pred = [U_Pred];
+        else:
+            raise ValueError("U_Pred is not a tuple or a torch.Tensor");
+
         # Fetch the positions.
         X           : numpy.ndarray         = physics.X_Positions;
 
@@ -304,7 +316,6 @@ def main():
                 prefix : str = "%s_U_%d" % (config["physics"]["type"], i_random);
             else:
                 prefix : str = "%s_(Dt^%d)U_%d" % (config["physics"]["type"], i, i_random);
-
             make_solution_movies(U_True         = U_True[i].detach().numpy(), 
                                  U_Pred         = U_Pred[i].detach().numpy(), 
                                  X              = X, 
