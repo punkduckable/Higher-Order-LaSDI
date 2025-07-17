@@ -415,7 +415,7 @@ class ParameterSpace:
 
         # For each parameter, we flatten its mesh_grid into a 1d array (of length (grid size)). We
         # horizontally stack these flattened grids to get the final param_grid array.
-        param_grid : numpy.ndarray = None;
+        param_grid : numpy.ndarray;
         for k, paramSpace in enumerate(mesh_grids):
             # Special treatment for the first parameter to initialize param_grid
             if (k == 0):

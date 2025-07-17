@@ -544,7 +544,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
     # Define the ODE solver used for time integration. Several explicit Runge-Kutta methods are 
     # available.
     LOGGER.debug("Selecting the ODE solver");
-    ode_solver = None;  
+    ode_solver : mfem.ODESolver; 
     if ode_solver_type == 1:
         ode_solver = mfem.ForwardEulerSolver();
     elif ode_solver_type == 2:

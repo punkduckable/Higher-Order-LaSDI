@@ -79,7 +79,7 @@ def main():
 
     # Check if we are loading from a restart or not. If so, load it.
     use_restart         : bool  = config['workflow']['use_restart'];
-    restart_filename    : str   = None;
+    restart_filename    : str   = "";
     if (use_restart == True):
         restart_filename : str = config['workflow']['restart_file'];
         LOGGER.info("Loading from restart (%s)" % restart_filename);
@@ -108,7 +108,7 @@ def main():
         next_step       = restart_dict['next_step'];
         result          = restart_dict['result'];
     else:
-        restart_dict    = None;
+        restart_dict    = {};
         next_step       = NextStep.RunSample;
         result          = Result.Unexecuted;
     
@@ -531,7 +531,7 @@ def Save(   param_space         : ParameterSpace,
             trainer             : BayesianGLaSDI, 
             next_step           : NextStep, 
             result              : Result,
-            restart_filename    : str               = None) -> None:
+            restart_filename    : str               = "") -> None:
     """
     This function saves a trained model, trainer, latent dynamics, etc. You should call this 
     function after running the LASDI algorithm.
@@ -576,7 +576,7 @@ def Save(   param_space         : ParameterSpace,
 
     restart_filename : str
         If we loaded from a restart, then this is the name of the restart we loaded.
-        Otherwise, if we did not load from a restart, this should be None.
+        Otherwise, if we did not load from a restart, this should be an empty string.
 
 
     
@@ -603,7 +603,7 @@ def Save(   param_space         : ParameterSpace,
                                   minute    = date.tm_min);
     
     # Set up the restart filename.
-    if(restart_filename != None):
+    if(len(restart_filename) > 0):
         # Append the new date to the restart filename.
         restart_filename = restart_filename + '.' + date_str;
     else:
