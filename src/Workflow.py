@@ -192,7 +192,7 @@ def main():
     # Cycle through the combinations of parameter values.
     for i in range(param_space.n_test()):
         # Reconstruct the FOM solution, store it in a list.
-        LOGGER.debug("Reconstructing the FOM solution for parameter combination %d" % i);
+        LOGGER.debug("Reconstructing the FOM solution for parameter combination %d (%s)" % (i, str(param_space.test_space[i])));
         ith_Reconstruction : torch.Tensor | tuple[torch.Tensor, torch.Tensor] = model(*trainer.U_Test[i]);
         if(isinstance(ith_Reconstruction, tuple)):
             ith_Reconstruction = list(ith_Reconstruction);
@@ -252,14 +252,14 @@ def main():
         plt.ylabel("Relative Error");
 
         if(i == 0):     
-            title_str       : str = "Relative Error of the reconstruction of U for parameter combination %d"        % i_random;
-            save_file_name  : str = config["physics"]["type"] + "_U_Relative_Error_%d"                              % i_random;   
+            title_str       : str = "Relative Error of the reconstruction of U for parameter combination %s"        % str(param_space.test_space[i_random]);
+            save_file_name  : str = config["physics"]["type"] + "_U_Relative_Error_%s"                              % str(param_space.test_space[i_random]);   
         elif(i == 1):   
-            title_str       : str = "Relative Error of the reconstruction of D_t U for parameter combination %d"    % i_random;
-            save_file_name  : str = config["physics"]["type"] + "_Dt_U_Relative_Error_%d"                           % i_random;
+            title_str       : str = "Relative Error of the reconstruction of D_t U for parameter combination %s"    % str(param_space.test_space[i_random]);
+            save_file_name  : str = config["physics"]["type"] + "_Dt_U_Relative_Error_%s"                           % str(param_space.test_space[i_random]);
         else:           
-            title_str       : str = "Relative Error of the reconstruction of D_t^%d U for parameter combination %d" % (i, i_random);
-            save_file_name  : str = config["physics"]["type"] + "_Dt^%d_U_Relative_Error_%d"                        % (i, i_random);
+            title_str       : str = "Relative Error of the reconstruction of D_t^%d U for parameter combination %s" % (i, str(param_space.test_space[i_random]));
+            save_file_name  : str = config["physics"]["type"] + "_Dt^%d_U_Relative_Error_%s"                        % (i, str(param_space.test_space[i_random]));
 
         # Plot the figure.
         plt.title(title_str);
@@ -271,8 +271,8 @@ def main():
 
 
     # ---------------------------------------------------------------------------------------------
-    # Plot the mean predicted solution, true solution, and error for the i_random'th combination of 
-    # parameters.
+    # Make movies for the mean predicted solution, true solution, and error for the i_random'th 
+    # combination of parameters.
 
     # If X_Positions has the form (2, N_Positions), then the solution must either be a 
     # scalar field or a 2d vector field. Let's plot the solution.
@@ -313,9 +313,9 @@ def main():
         n_IC        : int                   = physics.n_IC;
         for i in range(n_IC):
             if(i == 0):
-                prefix : str = "%s_U_%d" % (config["physics"]["type"], i_random);
+                prefix : str = "%s_U_%s" % (config["physics"]["type"], str(param_space.test_space[i_random]));
             else:
-                prefix : str = "%s_(Dt^%d)U_%d" % (config["physics"]["type"], i, i_random);
+                prefix : str = "%s_(Dt^%d)U_%s" % (config["physics"]["type"], i, str(param_space.test_space[i_random]));
             make_solution_movies(U_True         = U_True[i].detach().numpy(), 
                                  U_Pred         = U_Pred[i].detach().numpy(), 
                                  X              = X, 
