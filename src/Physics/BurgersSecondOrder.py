@@ -25,13 +25,7 @@ from    Burgers             import  solver;
 # -------------------------------------------------------------------------------------------------
 
 class Burgers(Physics):
-    # Class variables
-    a_idx = None; # parameter index for a
-    w_idx = None; # parameter index for w
-
-
-    
-    def __init__(self, config : dict, param_names : list[str] = None) -> None:
+    def __init__(self, config : dict, param_names : list[str]) -> None:
         """
         This is the initializer for the Burgers Physics class. This class essentially acts as a 
         wrapper around a 1D Burgers solver.
@@ -64,31 +58,27 @@ class Burgers(Physics):
         assert('a' in param_names);
         assert('w' in param_names);
 
-        # Call the super class initializer.
-        super().__init__(config         = config, 
-                         param_names    = param_names, 
-                         Uniform_t_Grid = True);
-
-        # Since there is only one spatial dimension in the 1D burgers example, dim is also 1.
-        self.spatial_dim    : int   = 1;
-        
         # Make sure the config dictionary is actually for Burgers' equation.
         assert('Burgers' in config);
 
         # Other setup
-        self.n_IC           : int       = 2;
         self.n_x            : int       = config['Burgers']['n_x'];
-        self.Frame_Shape    : list[int] = [self.n_x];                                   # number of grid points along each spatial axis
         self.x_min          : float     = config['Burgers']['x_min'];                   # Minimum value of the spatial variable in the problem domain
         self.x_max          : float     = config['Burgers']['x_max'];                   # Maximum value of the spatial variable in the problem domain
         self.dx             : float     = (self.x_max - self.x_min) / (self.n_x - 1);   # Spacing between grid points along the spatial axis.
         assert(self.dx > 0.);
 
-        # Set up X_Positions. For the Burgers class, X_Positions is 1D and has shape (n_x).
-        self.X_Positions : numpy.ndarray = numpy.linspace(self.x_min, self.x_max, self.n_x, dtype = numpy.float32);
+        # Call the super class initializer.
+        super().__init__(config         = config, 
+                         spatial_dim    = 1,            # Since there is only one spatial dimension in the 1D Burgers example, dim is also 1.
+                         X_Positions    = numpy.linspace(self.x_min, self.x_max, self.n_x, dtype = numpy.float32),
+                         Frame_Shape    = [self.n_x],
+                         param_names    = param_names, 
+                         Uniform_t_Grid = True,
+                         n_IC           = 2);
 
-        # ???
-        self.maxk                   : int   = config['Burgers']['maxk'];                  # TODO: ??? What is this ???
+        # Set up the maximum number of corrections and the convergence threshold.
+        self.maxk                   : int   = config['Burgers']['maxk'];
         self.convergence_threshold  : float = config['Burgers']['convergence_threshold'];
 
         # Determine which index corresponds to 'a' and 'w' (we pass an array of parameter values, 

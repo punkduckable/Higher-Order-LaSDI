@@ -14,7 +14,7 @@ from    Physics                         import  Physics;
 # -------------------------------------------------------------------------------------------------
 
 class Explicit(Physics):    
-    def __init__(self, config : dict, param_names : list[str] = None) -> None:
+    def __init__(self, config : dict, param_names : list[str]) -> None:
         """
         This is the initializer for the Explicit class. This class essentially acts as a wrapper
         around the following function of t and x:
@@ -47,27 +47,23 @@ class Explicit(Physics):
         assert('a' in param_names);
         assert('w' in param_names);
 
-        # Call the super class initializer.
-        super().__init__(config         = config, 
-                         param_names    = param_names, 
-                         Uniform_t_Grid = config['Explicit']['uniform_t_grid']);
-        
-        # Since there is only one spatial dimension, dim is also 1. 
-        self.spatial_dim    : int   = 1;
-
         # Make sure the config dictionary is actually for the Explicit physics model.
         assert('Explicit' in config);
 
         # Set up spatial variables
-        self.n_IC                   : int       = 2;
         self.n_x                    : int       = config['Explicit']['n_x'];    
         self.x_min                  : float     = config['Explicit']['x_min'];
         self.x_max                  : float     = config['Explicit']['x_max'];
         self.dx                     : float     = (self.x_max - self.x_min)/(self.n_x - 1);
-        self.Frame_Shape            : list[int] = [self.n_x];                       # number of grid points along each spatial axis
 
-        # Set up X_Positions. For the Explicit class, X_Positions is 1D and has shape (n_x).
-        self.X_Positions : numpy.ndarray = numpy.linspace(self.x_min, self.x_max, self.n_x, dtype = numpy.float32);
+        # Call the super class initializer.
+        super().__init__(config         = config, 
+                         spatial_dim    = 1,            # Since there is only one spatial dimension, spatial_dim is also 1.
+                         X_Positions    = numpy.linspace(self.x_min, self.x_max, self.n_x, dtype = numpy.float32),
+                         Frame_Shape    = [self.n_x],
+                         param_names    = param_names, 
+                         Uniform_t_Grid = config['Explicit']['uniform_t_grid'],
+                         n_IC           = 2);
      
         # Determine which index corresponds to 'a' and 'w' (we pass an array of parameter values, 
         # we need this information to figure out which element corresponds to which variable).

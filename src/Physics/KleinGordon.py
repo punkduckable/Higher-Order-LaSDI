@@ -25,7 +25,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class KleinGordon(Physics):
-    def __init__(self, config : dict, param_names : list[str] = None) -> None:
+    def __init__(self, config : dict, param_names : list[str]) -> None:
         """
         Initialize a KleinGordon object. This class acts as a wrapper around the MFEM-based solver 
         implemented in ``klein_gordon.py`` within the ``PyMFEM`` sub-directory. We solve the 
@@ -70,20 +70,17 @@ class KleinGordon(Physics):
         assert('m' in param_names);
         assert('KleinGordon' in config);
 
-        # Call the super class initializer.
-        super().__init__(config         = config,
-                         param_names    = param_names,
-                         Uniform_t_Grid = False);
-
         # Run a short simulation to determine the frame shape and positions.
-        U, DtU, X, T                        = Simulate(t_final = 0, VisIt = False);
-        self.Frame_Shape    : list[int]     = list(U.shape[1:]);
-        self.X_Positions    : numpy.ndarray = numpy.copy(X);            # shape = (2, N)    
-        LOGGER.debug("Frame shape: %s" % str(self.Frame_Shape));
+        U, DtU, X, T                        = Simulate(t_final = 0, VisIt = False);   
 
-        # Since there are two spatial dimensions, set spatial_dim accordingly.
-        self.spatial_dim    : int           = 2;
-        self.n_IC           : int           = 2;
+        # Call the super class initializer.
+        super().__init__(   config         = config,
+                            spatial_dim    = 2,            # Since there are two spatial dimensions, spatial_dim is also 2.
+                            X_Positions    = numpy.copy(X),
+                            Frame_Shape    = list(U.shape[1:]),
+                            param_names    = param_names,
+                            Uniform_t_Grid = False,
+                            n_IC           = 2);
 
         # Record the default value of k (for the initial condition).
         self.k              : float         = 1.0;

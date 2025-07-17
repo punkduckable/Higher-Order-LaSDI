@@ -25,7 +25,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class NonlinearElasticity(Physics):    
-    def __init__(self, config : dict, param_names : list[str] = []) -> None:
+    def __init__(self, config : dict, param_names : list[str]) -> None:
         """
         This is the initializer the NonlinearElasticity class. This class acts as a wrapper around
         an MFEM script that solves the following PDE from non-linear elasticity:
@@ -63,24 +63,21 @@ class NonlinearElasticity(Physics):
         assert('mu' in param_names);
         assert('NonlinearElasticity' in config);
 
-        # Call the super class initializer.
-        super().__init__(config         = config, 
-                         param_names    = param_names, 
-                         Uniform_t_Grid = False);
-
-        # Since there are 2 spatial dimensions, dim is 2. 
-        self.spatial_dim    : int           = 2;
-        self.n_IC           : int           = 2; 
-
         # Next, we need to setup X_Positions and Frame_Shape. Doing this is a bit tricky, because 
         # the solver actually picks both quantities. Specifically, in this case, Frame_Shape is 
         # [2, N_Nodes, 2] and X_Positions has shape [N_Nodes, 2]. The issue is that we have to run 
         # a simulation to get N_Nodes. We run a simulation with a final time of zero; this prompts
         # the code to generate the mesh and nodes, but not to solve for anything
         D, V, X, T                          = Simulate(t_final = 0, VisIt = False);     # D, V have shape (Nt, 2, N_Nodes)
-        self.Frame_Shape    : list[int]     = list(D.shape[1:]);
-        self.X_Positions    : numpy.ndarray = numpy.copy(X);
-        LOGGER.debug("Frame shape: %s" % str(self.Frame_Shape));
+
+        # Call the super class initializer.
+        super().__init__(config         = config, 
+                         spatial_dim    = 2,
+                         X_Positions    = numpy.copy(X),
+                         Frame_Shape    = list(D.shape[1:]),
+                         param_names    = param_names, 
+                         Uniform_t_Grid = False,
+                         n_IC           = 2);
 
         # Determine which index corresponds to s and which to mu (simulate accepts a two element
         # array holding s and mu. We need to know which element corresponds to mu and which to s).
