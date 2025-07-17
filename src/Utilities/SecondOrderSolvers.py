@@ -95,7 +95,7 @@ transform it into a method for solving 2nd order ODEs.
 def RK1(f       : Callable, 
         y0      : numpy.ndarray | torch.Tensor, 
         Dy0     : numpy.ndarray | torch.Tensor, 
-        t_Grid  : numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray] | tuple[torch.Tensor, torch.Tensor]:
+        t_Grid  : numpy.ndarray) -> tuple[numpy.ndarray | torch.Tensor, numpy.ndarray | torch.Tensor]:
     r"""
     This function implements a RK1 or Forward-Euler ODE solver for a second-order ODE of the 
     following form:
@@ -169,8 +169,8 @@ def RK1(f       : Callable,
     N : int = t_Grid.size;
 
     # Initialize lists to hold the results.
-    D_list : list[torch.Tensor] | list[numpy.ndarray] = [y0];
-    V_list : list[torch.Tensor] | list[numpy.ndarray] = [Dy0];
+    D_list : list[torch.Tensor | numpy.ndarray] = [y0];
+    V_list : list[torch.Tensor | numpy.ndarray] = [Dy0];
 
     # Now, run the time stepping!
     for n in range(N - 1):
@@ -196,8 +196,8 @@ def RK1(f       : Callable,
         D = numpy.stack(D_list, axis = 0);  # shape = (n_t, y0.shape)
         V = numpy.stack(V_list, axis = 0);  # shape = (n_t, Dy0.shape)
     elif(isinstance(y0, torch.Tensor)):
-        D = torch.stack(D_list, axis = 0);  # shape = (n_t, y0.shape)
-        V = torch.stack(V_list, axis = 0);  # shape = (n_t, Dy0.shape)
+        D = torch.stack(D_list, dim = 0);  # shape = (n_t, y0.shape)
+        V = torch.stack(V_list, dim = 0);  # shape = (n_t, Dy0.shape)
 
     # All done!
     return (D, V);
@@ -207,7 +207,7 @@ def RK1(f       : Callable,
 def RK2(f       : Callable, 
         y0      : numpy.ndarray | torch.Tensor, 
         Dy0     : numpy.ndarray | torch.Tensor, 
-        t_Grid  : numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray] | tuple[torch.Tensor, torch.Tensor]:
+        t_Grid  : numpy.ndarray) -> tuple[numpy.ndarray | torch.Tensor, numpy.ndarray | torch.Tensor]:
     r"""
     This function implements a RK2 based ODE solver for a second-order ODE of the following form:
 
@@ -290,8 +290,8 @@ def RK2(f       : Callable,
     N : int = t_Grid.size;
 
     # Initialize lists to hold the results.
-    D_list : list[torch.Tensor] | list[numpy.ndarray] = [y0];
-    V_list : list[torch.Tensor] | list[numpy.ndarray] = [Dy0];
+    D_list : list[torch.Tensor | numpy.ndarray] = [y0];
+    V_list : list[torch.Tensor | numpy.ndarray] = [Dy0];
 
     # Now, run the time stepping!
     for n in range(N - 1):
@@ -318,8 +318,8 @@ def RK2(f       : Callable,
         D = numpy.stack(D_list, axis = 0);  # shape = (n_t, y0.shape)
         V = numpy.stack(V_list, axis = 0);  # shape = (n_t, Dy0.shape)
     elif(isinstance(y0, torch.Tensor)):
-        D = torch.stack(D_list, axis = 0);  # shape = (n_t, y0.shape)
-        V = torch.stack(V_list, axis = 0);  # shape = (n_t, Dy0.shape)
+        D = torch.stack(D_list, dim = 0);  # shape = (n_t, y0.shape)
+        V = torch.stack(V_list, dim = 0);  # shape = (n_t, Dy0.shape)
 
     # All done!
     return (D, V);
@@ -329,7 +329,7 @@ def RK2(f       : Callable,
 def RK4(f       : Callable, 
         y0      : numpy.ndarray | torch.Tensor, 
         Dy0     : numpy.ndarray | torch.Tensor, 
-        t_Grid  : numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray] | tuple[torch.Tensor, torch.Tensor]:
+        t_Grid  : numpy.ndarray) -> tuple[numpy.ndarray | torch.Tensor, numpy.ndarray | torch.Tensor]:
     r"""
     This function implements a RK4 based ODE solver for a second-order ODE of the following form:
 
@@ -426,8 +426,8 @@ def RK4(f       : Callable,
     N : int = t_Grid.size;
 
     # Initialize lists to hold the results.
-    D_list : list[torch.Tensor] | list[numpy.ndarray] = [y0];
-    V_list : list[torch.Tensor] | list[numpy.ndarray] = [Dy0];
+    D_list : list[torch.Tensor | numpy.ndarray] = [y0];
+    V_list : list[torch.Tensor | numpy.ndarray] = [Dy0];
 
     # Now, run the time stepping!
     for n in range(N - 1):
@@ -456,8 +456,8 @@ def RK4(f       : Callable,
         D = numpy.stack(D_list, axis = 0);  # shape = (n_t, y0.shape)
         V = numpy.stack(V_list, axis = 0);  # shape = (n_t, Dy0.shape)
     elif(isinstance(y0, torch.Tensor)):
-        D = torch.stack(D_list, axis = 0);  # shape = (n_t, y0.shape)
-        V = torch.stack(V_list, axis = 0);  # shape = (n_t, Dy0.shape)
+        D = torch.stack(D_list, dim = 0);  # shape = (n_t, y0.shape)
+        V = torch.stack(V_list, dim = 0);  # shape = (n_t, Dy0.shape)
 
     # All done!
     return (D, V);

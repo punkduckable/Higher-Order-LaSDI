@@ -384,7 +384,8 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
                 order           : int           = 2,
                 ode_solver_type : int           = 14,
                 t_final         : float         = 100.0,
-                time_step_size  : float         = 0.02,
+                dt              : float         = 0.02,
+                Positions       : numpy.ndarray = numpy.empty(0),
                 viscosity       : float         = 1e-2,
                 shear_modulus   : float         = 0.25, 
                 bulk_modulus    : float         = 5.0,
@@ -447,8 +448,12 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
         specifies the final time. We simulate the dynamics from the start time to the final time. 
         The start time is 0.
 
-    time_step_size : float 
+    dt : float 
         specifies the time step size.
+    
+    Positions : numpy.ndarray, optional
+        specifies the positions at which we will evaluate the solution. If None, then we will 
+        evaluate the solution at a grid of positions.
 
     viscosity : float
         specifies the viscosity coefficient.
@@ -508,7 +513,6 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     if(myid == 0): LOGGER.info("Setting up non-linear elasticity simulation with MFEM.");
 
     # Set variable aliases.
-    dt          : float = time_step_size;
     visc        : float = viscosity;
     mu          : float = shear_modulus;
     K           : float = bulk_modulus;
@@ -537,7 +541,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
         ode_solver = mfem.SDIRK34Solver();
     else:
         print("Unknown ODE solver type: " + str(ode_solver_type));
-        exit;
+        exit();
     
 
     # ---------------------------------------------------------------------------------------------
@@ -661,7 +665,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     # ---------------------------------------------------------------------------------------------
     # 5. Extract the positions of the nodes.
 
-    if(Positions is None):
+    if(Positions.size == 0):
         if(myid == 0): LOGGER.info("Sampling %d positions in the mesh" % num_positions);
     else:
         if(myid == 0): LOGGER.info("Verifying the columns of Positions are in the problem domain");

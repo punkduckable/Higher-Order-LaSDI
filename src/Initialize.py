@@ -62,7 +62,7 @@ physics_dict    =  {'Burgers'               : Burgers.Burgers,
 # Initialization functions
 # -------------------------------------------------------------------------------------------------
 
-def Initialize_Trainer(config : dict, restart_dict : dict = None) -> tuple[BayesianGLaSDI, ParameterSpace, Physics, torch.nn.Module, LatentDynamics]:
+def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[BayesianGLaSDI, ParameterSpace, Physics, torch.nn.Module, LatentDynamics]:
     """
     Initialize a LaSDI object with a latent space model and physics object according to config 
     file. Currently only 'gplasdi' is available.
@@ -85,13 +85,10 @@ def Initialize_Trainer(config : dict, restart_dict : dict = None) -> tuple[Bayes
             - lasdi
                 - type
 
-    restart_dict : dict
-        The dictionary returned by numpy.load when we load from a restart. This should
-        contain the following keys:
-            - parameter_space
-            - model
-            - latent_dynamics
-            - trainer
+    restart_dict : dict, optional
+        If provided, then we will use the settings in this dictionary to initialize the trainer, 
+        parameter space, physics, model, and latent dynamics. If not provided, then we will 
+        initialize everything from scratch.
             
     
     -----------------------------------------------------------------------------------------------
@@ -132,18 +129,18 @@ def Initialize_Trainer(config : dict, restart_dict : dict = None) -> tuple[Bayes
     # values using the configuration file. If we are using a restart file, then load it's 
     # ParameterSpace object.
     param_space = ParameterSpace(config);
-    if (restart_dict is not None):
+    if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
         param_space.load(restart_dict['parameter_space']);
     
     # Get the "physics" object we use to generate the FOM dataset.
     physics : Physics   = Initialize_Physics(config, param_space.param_names);
-    if (restart_dict is not None):
+    if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
         physics.load(restart_dict['physics']);
 
     # Get the model (autoencoder). We try to learn dynamics that describe how the latent space of
     # this model evolve over time. If we are using a restart file, then load the saved model 
     # parameters from file.
-    if (restart_dict is not None):
+    if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
         model_type : str    = config['model']['type'];
         model               = model_load_dict[model_type](restart_dict['model']);
     else: 
@@ -157,13 +154,13 @@ def Initialize_Trainer(config : dict, restart_dict : dict = None) -> tuple[Bayes
     latent_dynamics         = ld_dict[ld_type]( n_z             = model.n_z, 
                                                 coef_norm_order = config['latent_dynamics']['coef_norm_order'],
                                                 Uniform_t_Grid  = physics.Uniform_t_Grid);
-    if (restart_dict is not None):
+    if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
         latent_dynamics.load(restart_dict['latent_dynamics']);
 
     # Initialize the trainer object. If we are using a restart file, then load the 
     # trainer from that file.
     trainer                 = trainer_dict[trainer_type](physics, model, latent_dynamics, param_space, config['lasdi'][trainer_type]);
-    if (restart_dict is not None):
+    if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
         trainer.load(restart_dict['trainer']);
 
     # All done!

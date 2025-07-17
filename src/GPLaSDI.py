@@ -211,9 +211,9 @@ class BayesianGLaSDI:
         Path(os.path.dirname(self.path_results)).mkdir(     parents = True, exist_ok = True);
 
         # Set up variables to aide checkpointing
-        self.best_coefs     : numpy.ndarray = None;             # Coefficients from the iteration with lowest testing loss. Shape = (n_train, n_coefs).
-        self.best_epoch     : int           = -1;
-        self.restart_iter   : int           = 0;                # Iteration number at the end of the last training period
+        self.best_coefs     = numpy.zeros((self.param_space.n_test(), self.latent_dynamics.n_coefs), dtype = numpy.float32);
+        self.best_epoch     = -1;
+        self.restart_iter   = 0;                # Iteration number at the end of the last training period
         
         # All done!
         return;
@@ -256,7 +256,7 @@ class BayesianGLaSDI:
         # Fetch parameters.
         n_train             : int               = self.param_space.n_train();
         n_IC                : int               = self.latent_dynamics.n_IC;
-        p_rollout           : int               = min(0.75, self.p_rollout_init + self.dp_per_update*(self.restart_iter//self.rollout_update_freq));
+        p_rollout           : float             = min(0.75, self.p_rollout_init + self.dp_per_update*(self.restart_iter//self.rollout_update_freq));
         p_IC_rollout        : float             = min(1.0, self.p_IC_rollout_init + self.IC_dp_per_update*(self.restart_iter//self.IC_rollout_update_freq));
         LD                  : LatentDynamics    = self.latent_dynamics;
         best_loss           : float             = numpy.inf;                    # Stores the lowest loss we get in this round of training.
@@ -297,7 +297,7 @@ class BayesianGLaSDI:
         # which combinations of parameters are in the training set. Specifically, each 
         # element of the train space should also be in the test space. We need to figure out 
         # the index of each train space element within the test space.
-        train_coefs_list = None;
+        train_coefs_list : list[torch.Tensor] = [];
         if(self.learnable_coefs == True):
             train_coefs_list : list[torch.Tensor] = [];
             for i in range(n_train):
@@ -503,7 +503,7 @@ class BayesianGLaSDI:
                         # Fetch the FOM initial conditions for this combination of parameters
                         param_i           : numpy.ndarray             = self.param_space.train_space[i, :]; 
                         FOM_IC_i          : list[numpy.ndarray]       = self.physics.initial_condition(param_i);    # len = 1
-                        
+
                         # Convert to tensors and reshape for encoding
                         U_IC_i            : torch.Tensor              = torch.tensor(FOM_IC_i[0], dtype=torch.float32, device=device).reshape((1,) + FOM_IC_i[0].shape);
                         
@@ -874,9 +874,9 @@ class BayesianGLaSDI:
                 torch.save(model_device.cpu().state_dict(), self.path_checkpoint + '/' + 'checkpoint.pt');
                 
                 # Update the best set of parameters. 
-                self.best_coefs : numpy.ndarray = coefs.copy();       # Shape = (n_train, n_coefs).
-                self.best_epoch : int           = iter;
-                best_loss       : float         = loss.item();
+                self.best_coefs     = coefs.copy();       # Shape = (n_train, n_coefs).
+                self.best_epoch     = iter;
+                best_loss           = loss.item();
 
             self.timer.end("Backwards Pass");
 

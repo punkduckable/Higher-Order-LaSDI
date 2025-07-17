@@ -25,7 +25,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class NonlinearElasticity(Physics):    
-    def __init__(self, config : dict, param_names : list[str] = None) -> None:
+    def __init__(self, config : dict, param_names : list[str] = []) -> None:
         """
         This is the initializer the NonlinearElasticity class. This class acts as a wrapper around
         an MFEM script that solves the following PDE from non-linear elasticity:

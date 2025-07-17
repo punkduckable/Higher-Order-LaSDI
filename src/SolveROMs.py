@@ -35,7 +35,7 @@ def average_rom(model           : torch.nn.Module,
                 latent_dynamics : LatentDynamics, 
                 gp_list         : list[GaussianProcessRegressor], 
                 param_grid      : numpy.ndarray,
-                t_Grid          : list[numpy.ndarray] | list[torch.Tensor]) -> list[numpy.ndarray]:
+                t_Grid          : list[numpy.ndarray | torch.Tensor]) -> list[numpy.ndarray]:
     """
     This function simulates the latent dynamics for a set of parameter values by using the mean of
     the posterior distribution for each coefficient's posterior distribution. Specifically, for 
@@ -147,7 +147,7 @@ def sample_roms(model           : torch.nn.Module,
                 latent_dynamics : LatentDynamics, 
                 gp_list         : list[GaussianProcessRegressor], 
                 param_grid      : numpy.ndarray, 
-                t_Grid          : list[numpy.ndarray] | list[torch.Tensor],
+                t_Grid          : list[numpy.ndarray | torch.Tensor],
                 n_samples       : int) ->           list[list[numpy.ndarray]]:
     """
     This function samples the latent coefficients, solves the corresponding latent dynamics, and 

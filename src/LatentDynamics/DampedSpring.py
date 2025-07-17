@@ -99,7 +99,7 @@ class DampedSpring(LatentDynamics):
     def calibrate(self, 
                   Latent_States : list[torch.Tensor],
                   t_Grid        : list[torch.Tensor],
-                  input_coefs   : list[torch.Tensor] = None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+                  input_coefs   : list[torch.Tensor] = []) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         r"""
         For each combination of parameter values, this function computes the optimal K, C, and b 
         coefficients in the sequence of latent states for that combination of parameter values.
@@ -133,10 +133,10 @@ class DampedSpring(LatentDynamics):
             value corresponding to the j'th frame when we use the i'th combination of parameter 
             values.
 
-        input_coefs : list[torch.Tensor], len = n_param, optional, default = None
+        input_coefs : list[torch.Tensor], len = n_param, optional
             The i'th element of this list is a 1d tensor of shape (n_coefs) holding the 
-            coefficients for the i'th combination of parameter values. If input_coefs is None, 
-            then we will learn the coefficients using Least Squares. If input_coefs is not None, 
+            coefficients for the i'th combination of parameter values. If input_coefs is empty, 
+            then we will learn the coefficients using Least Squares. If input_coefs is not empty, 
             then we will use the provided coefficients to compute the loss.
 
 
@@ -180,7 +180,8 @@ class DampedSpring(LatentDynamics):
                 assert(len(Latent_States[i][j].shape)   == 2);
                 assert(Latent_States[i][j].shape[-1]    == n_z);
     
-        if(input_coefs is not None):
+        assert(isinstance(input_coefs, list));
+        if(len(input_coefs) > 0):
             assert(isinstance(input_coefs, list));
             assert(len(input_coefs) == n_param);
             for i in range(n_param):
@@ -205,13 +206,13 @@ class DampedSpring(LatentDynamics):
             
             for i in range(n_param):
                 # Calibrate on the i'th combination of parameter values.
-                if(input_coefs is None):
-                    result : tuple[torch.Tensor] = self.calibrate(Latent_States = [Latent_States[i]], 
-                                                                  t_Grid        = [t_Grid[i]]);
+                if(len(input_coefs) == 0):
+                    result : tuple[torch.Tensor, torch.Tensor, torch.Tensor] = self.calibrate(  Latent_States = [Latent_States[i]], 
+                                                                                                t_Grid        = [t_Grid[i]]);
                 else:
-                    result : tuple[torch.Tensor] = self.calibrate(Latent_States = [Latent_States[i]], 
-                                                                  t_Grid        = [t_Grid[i]],
-                                                                  input_coefs   = [input_coefs[i]]);
+                    result                                                   = self.calibrate(  Latent_States = [Latent_States[i]], 
+                                                                                                t_Grid        = [t_Grid[i]],
+                                                                                                input_coefs   = [input_coefs[i]]);
 
                 # Package the results from this combination of parameter values.
                 output_coefs_list.append(result[0]);
@@ -231,7 +232,7 @@ class DampedSpring(LatentDynamics):
         # Concatenate the latent displacement and velocity.
 
         Z       : torch.Tensor  = Latent_States[0];         # len = n_IC, i'th element is a torch.Tensor of shape (n_t, n_z)
-        t_Grid  : torch.Tensor  = t_Grid[0];                # shape = (n_t)
+        t_Grid0 : torch.Tensor  = t_Grid[0];                # shape = (n_t)
 
         Z_D     : torch.Tensor  = Z[0];                     # shape = (n_t, n_z)
         Z_V     : torch.Tensor  = Z[1];                     # shape = (n_t, n_z)
@@ -246,19 +247,19 @@ class DampedSpring(LatentDynamics):
         # Compute the second time derivative of the latent state.
 
         if(self.Uniform_t_Grid  == True):
-            h : float = t_Grid[1] - t_Grid[0];
+            h : float = (t_Grid0[1] - t_Grid0[0]).item();
             #d2Z_dt2_from_Z_D    : torch.Tensor  = Derivative2_Order4(U = Z_D,   h = h);                     # shape = (n_t, n_z)
             d2Z_dt2_from_Z_V    : torch.Tensor  = Derivative1_Order4(U = Z_V,   h = h);                     # shape = (n_t, n_z)
         else:
-            #d2Z_dt2_from_Z_D    : torch.Tensor  = Derivative2_Order2_NonUniform(U = Z_D, t_Grid = t_Grid);  # shape = (n_t, n_z)
-            d2Z_dt2_from_Z_V    : torch.Tensor  = Derivative1_Order2_NonUniform(U = Z_V, t_Grid = t_Grid);  # shape = (n_t, n_z)
+            #d2Z_dt2_from_Z_D                    = Derivative2_Order2_NonUniform(U = Z_D, t_Grid = t_Grid0);  # shape = (n_t, n_z)
+            d2Z_dt2_from_Z_V                    = Derivative1_Order2_NonUniform(U = Z_V, t_Grid = t_Grid0);  # shape = (n_t, n_z)
         d2Z_dt2             : torch.Tensor  = d2Z_dt2_from_Z_V #0.5*(d2Z_dt2_from_Z_D + d2Z_dt2_from_Z_V);  # shape = (n_t, n_z)
 
 
         # -----------------------------------------------------------------------------------------
         # Set up coefs (either using Least Squares or using the provided coefficients).
 
-        if(input_coefs is None):
+        if(len(input_coefs) == 0):
             # For each j, solve the least squares problem 
             #   min{ || d2Z_dt2[:, j] - Z_1 E(j)|| : E(j) \in \mathbb{R}^(n_z*(2*n_z + 1)) }
             # We store the resulting solutions in a matrix, coefs, whose j'th column holds the 
@@ -267,11 +268,11 @@ class DampedSpring(LatentDynamics):
             coefs   : torch.Tensor  = torch.linalg.lstsq(ZD_ZV_1, d2Z_dt2).solution;                            # shape = (2*n_z + 1, n_z)
         
             # Now compute the loss.
-            LD_RHS  : torch.Tensor = torch.matmul(ZD_ZV_1, coefs);
+            LD_RHS  : torch.Tensor  = torch.matmul(ZD_ZV_1, coefs);
 
         else:
             # First, reshape input_coefs to have shape (2*n_z + 1, n_z).
-            coefs   : torch.Tensor  = input_coefs[0].reshape(2*self.n_z + 1, self.n_z);                     # shape = (2*n_z + 1, n_z)
+            coefs                   = input_coefs[0].reshape(2*self.n_z + 1, self.n_z);                     # shape = (2*n_z + 1, n_z)
 
             # Next, extract -K, -C, and b from coefs.
             E   : torch.Tensor  = coefs.T;
@@ -280,7 +281,7 @@ class DampedSpring(LatentDynamics):
             b   : torch.Tensor  = E[:, 2*self.n_z].reshape(1, -1);
         
             # Now compute the right hand side of the latent dynamics.
-            LD_RHS  : torch.Tensor = b - torch.matmul(Z_V, C.T) - torch.matmul(Z_D, K.T);
+            LD_RHS              = b - torch.matmul(Z_V, C.T) - torch.matmul(Z_D, K.T);
             
             """
             # Now compute the right hand side of the latent dynamics.
@@ -302,9 +303,9 @@ class DampedSpring(LatentDynamics):
 
     def simulate(   self,
                     coefs   : numpy.ndarray             | torch.Tensor, 
-                    IC      : list[list[numpy.ndarray]] | list[list[torch.Tensor]],
-                    t_Grid  : list[numpy.ndarray]       | list[torch.Tensor]) -> list[list[numpy.ndarray]]  | list[list[torch.Tensor]]:
-        """
+                    IC      : list[list[numpy.ndarray   | torch.Tensor]],
+                    t_Grid  : list[numpy.ndarray        | torch.Tensor]) -> list[list[numpy.ndarray | torch.Tensor]]:
+        r"""
         Time integrates the latent dynamics from multiple initial conditions for each combination
         of coefficients in coefs. 
  
@@ -381,20 +382,20 @@ class DampedSpring(LatentDynamics):
             LOGGER.debug("Simulating with %d parameter combinations" % n_param);
 
             # Cycle through the parameter combinations
-            Z   : list[list[numpy.ndarray]] | list[list[torch.Tensor]]  = [];
+            Z   : list[list[numpy.ndarray | torch.Tensor]]  = [];
             for i in range(n_param): 
                 # Fetch the i'th set of coefficients, the corresponding collection of initial
                 # conditions, and the set of time values.
-                ith_coefs   : numpy.ndarray             | torch.Tensor              = coefs[i, :].reshape(1, -1);
-                ith_IC      : list[list[numpy.ndarray]] | list[list[torch.Tensor]]  = [IC[i]];
-                ith_t_Grid  : list[numpy.ndarray]                                   = [t_Grid[i]];
+                ith_coefs   : numpy.ndarray             | torch.Tensor      = coefs[i, :].reshape(1, -1);
+                ith_IC      : list[list[numpy.ndarray   | torch.Tensor]]    = [IC[i]];
+                ith_t_Grid  : list[numpy.ndarray        | torch.Tensor]     = [t_Grid[i]];
 
                 # Call this function using them. This should return a 2 element holding the 
                 # displacement and velocity of the solution for the i'th combination of 
                 # parameter values.
-                ith_Results : list[numpy.ndarray]   | list[torch.Tensor]    = self.simulate(coefs   = ith_coefs, 
-                                                                                            IC      = ith_IC, 
-                                                                                            t_Grid  = ith_t_Grid)[0];
+                ith_Results : list[numpy.ndarray | torch.Tensor]    = self.simulate(coefs   = ith_coefs, 
+                                                                                    IC      = ith_IC, 
+                                                                                    t_Grid  = ith_t_Grid)[0];
 
                 # Add these results to Z.
                 Z.append(ith_Results);
@@ -408,14 +409,14 @@ class DampedSpring(LatentDynamics):
 
         # In this case, there is just one parameter. Extract t_Grid, which has shape 
         # (n(i), n_t(i)) or (n_t(i)).
-        t_Grid  : numpy.ndarray | torch.Tensor  = t_Grid[0];
-        if(isinstance(t_Grid, torch.Tensor)):
-            t_Grid = t_Grid.detach().numpy();
-        n_t_i   : int           = t_Grid.shape[-1];
-        if(len(t_Grid.shape) == 1):
-            Same_t_Grid : bool = True;
+        t_Grid0  : numpy.ndarray | torch.Tensor  = t_Grid[0];
+        if(isinstance(t_Grid0, torch.Tensor)):
+            t_Grid0 = t_Grid0.detach().numpy();
+        n_t_i   : int           = t_Grid0.shape[-1];
+        if(len(t_Grid0.shape) == 1):
+            Same_t_Grid : bool  = True;
         else:
-            Same_t_Grid : bool = False;
+            Same_t_Grid         = False;
         
         # coefs has shape (1, n_coefs). Each element of IC should have shape (n(i), n_z). 
         D0  : numpy.ndarray | torch.Tensor  = IC[0][0]; 
@@ -463,14 +464,14 @@ class DampedSpring(LatentDynamics):
         # autonomous to solve using each IC simultaneously. Otherwise, we need to run the latent
         # dynamics one IC at a time. 
         if(Same_t_Grid == True):
-            D, V = RK4(f = f, y0 = D0, Dy0 = V0, t_Grid = t_Grid);  # shape = (n_t, n_i, n_z)
+            D, V = RK4(f = f, y0 = D0, Dy0 = V0, t_Grid = t_Grid0);  # shape = (n_t, n_i, n_z)
         else:
             # Cycle through the ICs.
-            D_list : list[torch.Tensor] | list[numpy.ndarray] = [];
-            V_list : list[torch.Tensor] | list[numpy.ndarray] = []; 
+            D_list : list[torch.Tensor | numpy.ndarray] = [];
+            V_list : list[torch.Tensor | numpy.ndarray] = []; 
 
             for j in range(n_i):
-                D_j, V_j    = RK4(f = f, y0 = D0[j, :].reshape(1, -1), Dy0 = V0[j, :].reshape(1, -1), t_Grid = t_Grid[j, :]);
+                D_j, V_j    = RK4(f = f, y0 = D0[j, :].reshape(1, -1), Dy0 = V0[j, :].reshape(1, -1), t_Grid = t_Grid0[j, :]);
                 D_list.append(D_j);
                 V_list.append(V_j);
 
@@ -479,8 +480,8 @@ class DampedSpring(LatentDynamics):
                 D = numpy.concatenate(D_list, axis = 1);    # shape = (n_t, n_i, n_z)
                 V = numpy.concatenate(V_list, axis = 1);    # shape = (n_t, n_i, n_z)
             elif(isinstance(coefs, torch.Tensor)):
-                D = torch.cat(D_list, axis = 1);            # shape = (n_t, n_i, n_z)
-                V = torch.cat(V_list, axis = 1);            # shape = (n_t, n_i, n_z)
+                D = torch.cat(D_list, dim = 1);            # shape = (n_t, n_i, n_z)
+                V = torch.cat(V_list, dim = 1);            # shape = (n_t, n_i, n_z)
         
         # All done!
         return [[D, V]];

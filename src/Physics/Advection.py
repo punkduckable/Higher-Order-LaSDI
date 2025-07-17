@@ -27,8 +27,8 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class Advection(Physics):
-    def __init__(self, config : dict, param_names : list[str] = None) -> None:
-        """
+    def __init__(self, config : dict, param_names : list[str] = []) -> None:
+        r"""
         Initialize an Advection object. This class acts as a wrapper around the MFEM-based solver 
         implemented in ``advection.py`` within the ``PyMFEM`` sub-directory. The solver models 
         the transport of a scalar quantity on a two dimensional domain. Specifically, it solves 
@@ -93,7 +93,7 @@ class Advection(Physics):
         self.n_IC           : int           = 1;
 
         # Record the default value of k (for the initial condition).
-        self.k              : float         = 2.0;
+        self.k              : float         = 1.0;
 
         # Make sure the config dictionary is actually for the advection model.
         self.w_idx  : int   = self.param_names.index('w');

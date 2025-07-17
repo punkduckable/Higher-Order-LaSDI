@@ -138,13 +138,13 @@ getParam1DSpace : dict[str, Callable]    = {'list'       : get_1dspace_from_list
 class ParameterSpace:
     # Initialize class variables
     n_p             : int                   = 0;    # The number of parameters.
-    param_list      : list[dict]            = [];   # Length = n_p. I'th element holds the parameter dictionary for the i'th parameter
+    param_list      : list[dict];                   # Length = n_p. I'th element holds the parameter dictionary for the i'th parameter
     param_names     : list[str]             = [];   # Length = n_p. I'th element holds the name of the i'th parameter.
-    train_space     : numpy.ndarray         = None; # Shape = (n_train, n_p). i,j element is the j'th parameter value in the i'th combination of training parameters.
-    test_space      : numpy.ndarray         = None; # Shape = (n_test, n_p). i,j element is the j'th parameter value in the i'th combination of testing parameters.
+    train_space     : numpy.ndarray;                # Shape = (n_train, n_p). i,j element is the j'th parameter value in the i'th combination of training parameters.
+    test_space      : numpy.ndarray;                # Shape = (n_test, n_p). i,j element is the j'th parameter value in the i'th combination of testing parameters.
     n_init_train    : int                   = 0;    # The initial number of combinations of parameters in the training set.
     test_grid_sizes : list[int]             = [];   # Length = n_p. i'th element is the number of distinct values of the i'th parameter in the test instances.
-    test_meshgrid   : tuple[numpy.ndarray]  = None; # Length = n_p. I'th element is an ndarray holding the meshgrid of values for the i'th parameter.
+    test_meshgrid   : tuple[numpy.ndarray];         # Length = n_p. I'th element is an ndarray holding the meshgrid of values for the i'th parameter.
 
 
 
@@ -312,8 +312,8 @@ class ParameterSpace:
 
         # Set up arrays to hold the parameter values + number of parameter values for each 
         # parameter.
-        paramRanges : numpy.ndarray = [];
-        gridSizes   : list[int]     = [];
+        paramRanges : list[numpy.ndarray]   = [];
+        gridSizes   : list[int]             = [];
 
         # Cycle through the parameters        
         for i in range(len(self.param_list)):
@@ -372,16 +372,16 @@ class ParameterSpace:
         """
 
         # Fetch the ranges, add them to a tuple (this is what the meshgrid function needs).
-        args : tuple[numpy.ndarray] = ();
+        args : list[numpy.ndarray] = [];
         for paramRange in param_ranges:
-            args += (paramRange,);
+            args += [paramRange];
 
         # Use numpy's meshgrid function to generate the grids of parameter values. This produces
         # a set of n_p arrays, each of shape (N(1), N(2), ... N(n_p)), where N(k) = 
         # len(param_ranges[k]) denotes the number of parameter values for the k'th parameter. 
         # The i(1), ... , i(n_p) element of the k'th array holds param_ranges[k][i(k)], the i(k)'th
         # value of the k'th parameter. 
-        paramSpaces : tuple[numpy.ndarray] = numpy.meshgrid(*args, indexing = 'ij');
+        paramSpaces : list[numpy.ndarray] = numpy.meshgrid(*args, indexing = 'ij');
 
         # All done!
         return paramSpaces;
@@ -560,7 +560,7 @@ class ParameterSpace:
 
         # Extract information from the dictionary.
         self.n_p                : int                   = dict_['n_p'];         
-        self.param_list         : list                  = dict_['param_list'];      # length = n_p. I'th element holds dictionary for i'th parameter
+        self.param_list         : list[dict]            = dict_['param_list'];      # length = n_p. I'th element holds dictionary for i'th parameter
         self.param_names        : list[str]             = dict_['param_names'];     # length = n_p. I'th element holds the name of the i'th parameter. 
         self.train_space        : numpy.ndarray         = dict_['train_space'];     #
         self.test_space         : numpy.ndarray         = dict_['test_space'];      #

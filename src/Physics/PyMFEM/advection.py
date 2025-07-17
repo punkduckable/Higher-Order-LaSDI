@@ -370,9 +370,9 @@ class AdvectionOperator(mfem.PyTimeDependentOperator):
         b.Assemble();                                                                       # Computes b(\phi_i) = \int_{Bd(\Omega)} g(v(X) \cdot \phi_i(X)) using the basis functions in fespace.
 
         # Build matrices to hold M, K, and b in the expression above
-        self.Mmat : mfem._par.hypre.HypreParMatrix = M.ParallelAssemble();
-        self.Kmat : mfem._par.hypre.HypreParMatrix = K.ParallelAssemble();
-        self.bvec : mfem._par.hypre.HypreParVector = b.ParallelAssemble();
+        self.Mmat : mfem.HypreParMatrix = M.ParallelAssemble();
+        self.Kmat : mfem.HypreParMatrix = K.ParallelAssemble();
+        self.bvec : mfem.HypreParVector = b.ParallelAssemble();
 
         # Initialize the solver and preconditioner for Mult (see below).
         self.M_prec     : mfem.HypreSmoother    = mfem.HypreSmoother();
@@ -419,8 +419,8 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
                 time_step_size      : float         = 0.01,
                 Positions           : numpy.ndarray = None,
                 g                   : float         = numpy.pi/2,
-                k                   : float         = 2.0,
-                w                   : float         = 2.0,
+                k                   : float         = 1.0,
+                w                   : float         = 1.0,
                 serialization_steps : int           = 2,
                 num_positions       : int           = 1000,
                 VisIt               : bool          = True) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]:
@@ -460,7 +460,6 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
         specifies which ODE solver we should use
             1   - Backward Euler
             2   - RK2
-            3   - RK3
             4   - RK4
             6   - RK6
     
@@ -550,8 +549,6 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
         ode_solver = mfem.ForwardEulerSolver();
     elif ode_solver_type == 2:
         ode_solver = mfem.RK2Solver(1.0);
-    elif ode_solver_type == 3:
-        ode_solver = mfem.RK3SSolver();
     elif ode_solver_type == 4:
         ode_solver = mfem.RK4Solver();
     elif ode_solver_type == 6:
@@ -620,7 +617,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
 
     # Project the initial condition onto the finite element space.
     u_gf.ProjectCoefficient(u0);
-    U       : mfem._par.hypre.HypreParVector        = u_gf.GetTrueDofs();
+    U       : mfem.HypreParVector        = u_gf.GetTrueDofs();
 
 
 
