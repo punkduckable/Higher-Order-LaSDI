@@ -19,6 +19,8 @@ lasdi:
       rollout:              0.5
       coef:                 0.0001
 
+    learnable_coefs:        true
+
 workflow:
   use_restart:              false
   restart_file:            
@@ -45,6 +47,7 @@ model:
   autoencoder:
     hidden_widths:          [250, 100, 100, 100]
     latent_dimension:       5  
+    activations:            ["sin", "GELU", "GELU", "GELU"]
 
 latent_dynamics:
   type:                     sindy

@@ -21,6 +21,8 @@ lasdi:
       coef:                 0.0001
       consistency:          1.0
 
+    learnable_coefs:        true
+
 workflow:
   use_restart:              false
   restart_file:          
@@ -47,6 +49,7 @@ model:
   pair:
     hidden_widths:          [250, 100, 100, 100]
     latent_dimension:       5  
+    activations:            ["sin", "GELU", "GELU", "GELU"]
 
 latent_dynamics:
   type:                     spring

@@ -13,7 +13,7 @@ import  numpy;
 import  torch;
 
 from    Physics                         import  Physics;
-from    telegraphers                    import  Simulate;
+from    telegraphers                    import  Simulate, Initial_Displacement, Initial_Velocity;
 
 
 LOGGER : logging.Logger = logging.getLogger(__name__);
@@ -66,7 +66,7 @@ class Telegraphers(Physics):
         assert(isinstance(param_names, list));
         assert(len(param_names) == 2);
         assert('alpha'          in param_names);
-        assert('k'              in param_names);
+        assert('w'              in param_names);
         assert('Telegraphers'   in config);
 
         # Call the super class initializer.
@@ -87,27 +87,30 @@ class Telegraphers(Physics):
         # Determine which index corresponds to k (frequency of peaks in the IC) and alpha (controls 
         # the coefficient of the of the (d/dt)U term in the PDE).
         self.alpha_idx  : int   = self.param_names.index('alpha');
-        self.k_idx      : int   = self.param_names.index('k');        
+        self.w_idx      : int   = self.param_names.index('w');        
         return;
 
 
 
     def initial_condition(self, param : numpy.ndarray) -> list[numpy.ndarray]:
         """
-        Evaluate the initial condition of the advection equation at the positions stored in 
+        Evaluate the initial condition of the Telegrapher's equation at the positions stored in 
         ``self.X_Positions``. For the default problem considered in the MFEM example, the initial 
-        state is defined by
+        conditions are 
              
-            u(0, (x, y))        =  exp(-(x^2 + y^2)*k)
-            (d/dt)u(0, (x, y))  = 0
-        
+                    u(0, (x, y))    =  exp(-(x^2 + y^2)*k) * sin(pi*w*x) * sin(pi*w*y)
+            (d/dt)  u(0, (x, y))    =  0
+
+        We initialize and call the Initial_Displacement and Initial_Velocity classes from the 
+        telegraphers.py file in the PyMFEM sub-directory. Note that k is hardcoded in the IC.
+
 
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
 
         param : numpy.ndarray, shape = (self.n_p)
-            A two element array holding the values of the k and c parameters.
+            A two element array holding the values of the k and alpha parameters.
 
 
                 
@@ -127,16 +130,23 @@ class Telegraphers(Physics):
         assert(param.shape[0]   == self.n_p);
         assert(self.X_Positions is not None);
 
-        # Extract the k and alpha parameters.
-        k     : float = param[self.k_idx];
-        alpha : float = param[self.alpha_idx];
-        w     : float = 2.0;                        # Hardcoded in the 
+        # Fetch the parameters.
+        alpha   : float = param[self.alpha_idx];
+        w       : float = param[self.w_idx];
+
+        # Set the global variables.
+        global freq;
+        freq  = w;
+
+        # Initialize the initial condition classes.
+        initial_displacement : Initial_Displacement = Initial_Displacement();
+        initial_velocity     : Initial_Velocity     = Initial_Velocity();
 
         # Evaluate the initial condition.
-        norm2 : float           = numpy.sum(numpy.square(self.X_Positions), axis = 0);
-        u0    : numpy.ndarray   = numpy.multiply(numpy.exp(-norm2*param[self.k_idx]), numpy.sin(numpy.pi*w*self.X_Positions[0, :]) * numpy.sin(numpy.pi*w*self.X_Positions[1, :])).reshape(1, -1);
-        v0    : numpy.ndarray   = numpy.zeros_like(u0);
+        u0 : numpy.ndarray = initial_displacement.EvalValue(self.X_Positions);
+        v0 : numpy.ndarray = initial_velocity.EvalValue(self.X_Positions);
         
+        # Return the initial conditions.
         return [u0, v0];
 
 
@@ -175,7 +185,7 @@ class Telegraphers(Physics):
         assert(param.shape[0]   == self.n_p);
 
         # Solve the PDE using the external MFEM script.
-        U, DtU, _, Times = Simulate(k = param[self.k_idx], alpha = param[self.alpha_idx], Positions = self.X_Positions, VisIt = True);
+        U, DtU, _, Times = Simulate(w = param[self.w_idx], alpha = param[self.alpha_idx], Positions = self.X_Positions, VisIt = True);
 
         X       : list[torch.Tensor] = [torch.Tensor(U), torch.Tensor(DtU)];
         t_Grid  : torch.Tensor       = torch.Tensor(Times);

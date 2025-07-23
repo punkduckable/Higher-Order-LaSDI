@@ -89,19 +89,14 @@ def RK1(f       : Callable,
     # Next, fetch N.
     N : int = t_Grid.size;
 
-    # Initialize Y
-    if(isinstance(y0, numpy.ndarray)):
-        Y : numpy.ndarray = numpy.empty((N,) + y0.shape, dtype = numpy.float32);
-    elif(isinstance(y0, torch.Tensor)):
-        Y : torch.Tensor = torch.empty((N,) + y0.shape, dtype = torch.float32);
-
-    Y[0, ...] = y0;
+    # Initialize list to hold the results.
+    Y_list : list[torch.Tensor] | list[numpy.ndarray] = [y0];
 
     # Now, run the time stepping!
     for n in range(N - 1):
         # Fetch the current time, displacement, velocity.
         tn  : float                         = t_Grid[n];
-        yn  : numpy.ndarray | torch.Tensor  = Y[n, ...];
+        yn  : numpy.ndarray | torch.Tensor  = Y_list[n];
         hn  : float                         = t_Grid[n + 1] - t_Grid[n];
 
         # Compute k_1.
@@ -111,7 +106,13 @@ def RK1(f       : Callable,
         yn1     : numpy.ndarray | torch.Tensor  = yn  + hn*k1;
 
         # All done with this step!
-        Y[n + 1, ...] = yn1;
+        Y_list.append(yn1);
+
+    # Stack the results.
+    if(isinstance(y0, numpy.ndarray)):
+        Y = numpy.stack(Y_list, axis = 0);  # shape = (n_t, y0.shape)
+    elif(isinstance(y0, torch.Tensor)):
+        Y = torch.stack(Y_list, axis = 0);  # shape = (n_t, y0.shape)
 
     # All done!
     return Y;
@@ -182,19 +183,14 @@ def RK2(f       : Callable,
     # Next, fetch N.
     N : int = t_Grid.size;
 
-    # Initialize Y
-    if(isinstance(y0, numpy.ndarray)):
-        Y : numpy.ndarray = numpy.empty((N,) + y0.shape, dtype = numpy.float32);
-    elif(isinstance(y0, torch.Tensor)):
-        Y : torch.Tensor = torch.empty((N,) + y0.shape, dtype = torch.float32);
-
-    Y[0, ...] = y0;
+    # Initialize list to hold the results.
+    Y_list : list[torch.Tensor] | list[numpy.ndarray] = [y0];
 
     # Now, run the time stepping!
     for n in range(N - 1):
         # Fetch the current time, displacement, velocity.
         tn  : float                         = t_Grid[n];
-        yn  : numpy.ndarray | torch.Tensor  = Y[n, :];
+        yn  : numpy.ndarray | torch.Tensor  = Y_list[n];
         hn  : float                         = t_Grid[n + 1] - t_Grid[n];
 
         # Compute k_1, k_2.
@@ -205,7 +201,13 @@ def RK2(f       : Callable,
         yn1     : numpy.ndarray | torch.Tensor  = yn + (hn/2)*(k_1 + k_2);
 
         # All done with this step!
-        Y[n + 1, :] = yn1;
+        Y_list.append(yn1); 
+    
+    # Stack the results.
+    if(isinstance(y0, numpy.ndarray)):
+        Y = numpy.stack(Y_list, axis = 0);  # shape = (n_t, y0.shape)
+    elif(isinstance(y0, torch.Tensor)):
+        Y = torch.stack(Y_list, axis = 0);  # shape = (n_t, y0.shape)
 
     # All done!
     return Y;
@@ -285,19 +287,14 @@ def RK4(f       : Callable,
     # Next, fetch N.
     N : int = t_Grid.size;
 
-    # Initialize Y
-    if(isinstance(y0, numpy.ndarray)):
-        Y : numpy.ndarray = numpy.empty((N,) + y0.shape, dtype = numpy.float32);
-    elif(isinstance(y0, torch.Tensor)):
-        Y : torch.Tensor = torch.empty((N,) + y0.shape, dtype = torch.float32);
-
-    Y[0, ...] = y0;
+    # Initialize list to hold the results.
+    Y_list : list[torch.Tensor] | list[numpy.ndarray] = [y0];
 
     # Now, run the time stepping!
     for n in range(N - 1):
         # Fetch the current time, displacement, velocity.
         tn  : float                         = t_Grid[n];
-        yn  : numpy.ndarray | torch.Tensor  = Y[n, :];
+        yn  : numpy.ndarray | torch.Tensor  = Y_list[n];
         hn  : float                         = t_Grid[n + 1] - t_Grid[n];
 
         # Compute k_1, k_1, k_1, k_1.
@@ -310,8 +307,14 @@ def RK4(f       : Callable,
         yn1     : numpy.ndarray | torch.Tensor  = yn + (hn/6)*(k_1 + 2*k_2 + 2*k_3 + k_4)
 
         # All done with this step!
-        Y[n + 1, ...] = yn1;
+        Y_list.append(yn1);
     
+    # Stack the results.
+    if(isinstance(y0, numpy.ndarray)):
+        Y = numpy.stack(Y_list, axis = 0);  # shape = (n_t, y0.shape)
+    elif(isinstance(y0, torch.Tensor)):
+        Y = torch.stack(Y_list, axis = 0);  # shape = (n_t, y0.shape)
+
     # All done!
     return Y;
     
