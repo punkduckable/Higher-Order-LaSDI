@@ -163,6 +163,12 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Bayesia
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
         trainer.load(restart_dict['trainer']);
 
+    # If we are loading from a restart file, then make a checkpoint using the current model 
+    # parameters. This enables us to run get_new_sample_point, which loads from a checkpoint.       
+    if (bool(restart_dict) == True): 
+        torch.save(model.cpu().state_dict(), trainer.path_checkpoint + '/' + 'checkpoint.pt');
+
+
     # All done!
     return trainer, param_space, physics, model, latent_dynamics;
 
@@ -212,7 +218,6 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
 
     # Autoencoder, autoencoder pair case.
     if(model_type == "ae" or model_type == "pair" or model_type == "autoencoder" or model_type == "autoencoder_pair"):
-
         # Next, fetch the hidden widths and latent dimension (n_z). 
         model_config        : dict              = config['model'][model_type];
         hidden_widths       : list[int]         = model_config['hidden_widths'];

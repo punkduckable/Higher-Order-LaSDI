@@ -778,13 +778,14 @@ class BayesianGLaSDI:
                 # IC Rollout loss. This simulates forward from the FOM initial conditions.
 
                 # Setup
-                self.timer.start("IC Rollout Loss");
                 loss_IC_rollout_Z_D    : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
                 loss_IC_rollout_Z_V    : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
                 loss_IC_rollout_D      : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
                 loss_IC_rollout_V      : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
 
                 if(self.loss_weights['IC_rollout'] > 0):
+                    self.timer.start("IC Rollout Loss");
+
                     # Cycle through the training examples for IC rollout
                     for i in range(n_train):
                         # Fetch the FOM initial conditions for this combination of parameters
@@ -1455,6 +1456,7 @@ class BayesianGLaSDI:
         self.t_Test         : list[torch.Tensor]        = dict_['t_Test'];
 
         self.best_coefs     : numpy.ndarray             = dict_['best_coefs'];          # Shape = (n_train, n_coefs).
+        self.best_epoch     : int                       = dict_['restart_iter'];        # The current model has the best loss so far.
         self.restart_iter   : int                       = dict_['restart_iter'];
 
         # Set the test coefs.
