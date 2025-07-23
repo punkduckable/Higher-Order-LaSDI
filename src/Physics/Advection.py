@@ -75,22 +75,20 @@ class Advection(Physics):
         assert('g' in param_names);
         assert('Advection' in config);
 
-        # Call the super class initializer.
-        super().__init__(config         = config,
-                         param_names    = param_names,
-                         Uniform_t_Grid = False);
 
         # Run a short simulation to determine the frame shape and positions.
         Sol, X, T, bb_min, bb_max           = Simulate(t_final = 0, VisIt = False);
-        self.Frame_Shape    : list[int]     = list(Sol.shape[1:]);
-        self.X_Positions    : numpy.ndarray = numpy.copy(X);            # shape = (2, N)
         self.bb_min         : numpy.ndarray = numpy.copy(bb_min);
         self.bb_max         : numpy.ndarray = numpy.copy(bb_max);
-        LOGGER.debug("Frame shape: %s" % str(self.Frame_Shape));
 
-        # Since there are two spatial dimensions, set spatial_dim accordingly.
-        self.spatial_dim    : int           = 2;
-        self.n_IC           : int           = 1;
+        # Call the super class initializer.
+        super().__init__(spatial_dim    = 2,
+                         Frame_Shape    = list(Sol.shape[1:]),
+                         X_Positions    = numpy.copy(X),
+                         config         = config,
+                         param_names    = param_names,
+                         Uniform_t_Grid = False,
+                         n_IC           = 1);
 
         # Record the default value of k (for the initial condition).
         self.k              : float         = 1.0;
