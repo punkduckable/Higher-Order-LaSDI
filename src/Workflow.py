@@ -146,6 +146,7 @@ def main():
             restart_filename    = restart_filename);
 
 
+
     # ---------------------------------------------------------------------------------------------
     # Plot Setup
     # ---------------------------------------------------------------------------------------------
@@ -310,6 +311,9 @@ def main():
 
 
     # ---------------------------------------------------------------------------------------------
+    # Make animations of the solution, its reconstruction, and the error between the two.
+    # ---------------------------------------------------------------------------------------------
+
     # Make movies for the mean predicted solution, true solution, and error for the i_random'th 
     # combination of parameters.
 
@@ -352,9 +356,13 @@ def main():
         n_IC        : int                   = physics.n_IC;
         for i in range(n_IC):
             if(i == 0):
-                prefix : str = "%s_U_%s" % (config["physics"]["type"], str(param_space.test_space[i_random]));
+                prefix : str = "%s_U_%s"        % (config["physics"]["type"], str(param_space.test_space[i_random]));
+            elif(i == 1):
+                prefix : str = "%s_Dt_U_%s"     % (config["physics"]["type"], str(param_space.test_space[i_random]));
             else:
-                prefix : str = "%s_(Dt^%d)U_%s" % (config["physics"]["type"], i, str(param_space.test_space[i_random]));
+                prefix : str = "%s_Dt^%d_U_%s"  % (config["physics"]["type"], i, str(param_space.test_space[i_random]));
+
+            # Make the movie.
             make_solution_movies(U_True         = U_True[i].detach().numpy(), 
                                  U_Pred         = U_Pred[i].detach().numpy(), 
                                  X              = X, 
@@ -362,8 +370,10 @@ def main():
                                  fname_prefix   = prefix);
     
 
+
     # ---------------------------------------------------------------------------------------------
     # Plot the heatmaps
+    # ---------------------------------------------------------------------------------------------
 
     if(param_space.n_p == 2):
         n_IC : int = latent_dynamics.n_IC;
@@ -373,13 +383,13 @@ def main():
         # of the FOM solution.
         for d in range(n_IC):
             if(d == 0):
-                title           : str   = r'$\text{max}_{t, i} \frac{\left| u_{\bar{\xi}}(t, x_i) - u_{\text{True}}(t, x_i) \right|} {\text{max}_{j} \left| u_{\text{True}}(t, x_j) \right|}$';
+                title           : str   = r'$\text{max}_{t, i} \frac{\left| u_{\text{Pred}}(t, x_i) - u_{\text{True}}(t, x_i) \right|} {\text{max}_{j} \left| u_{\text{True}}(t, x_j) \right|}$';
                 save_file_name  : str   = config["physics"]["type"] + "_U_Reconstruction_Relative_Error_Heatmap.png";
             elif(d == 1):
-                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d}{dt}u_{\bar{\xi}}(t, x_i) - \frac{d}{dt}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d}{dt}u_{\text{True}}(t, x_j) \right|}$';
+                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d}{dt}u_{\text{Pred}}(t, x_i) - \frac{d}{dt}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d}{dt}u_{\text{True}}(t, x_j) \right|}$';
                 save_file_name  : str   = config["physics"]["type"] + "_Dt_U_Reconstruction_Relative_Error_Heatmap.png";
             else:
-                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d^{%d}}{dt^{%d}}u_{\bar{\xi}}(t, x_i) - \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_j) \right|}$' % (d, d, d, d, d, d);
+                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d^{%d}}{dt^{%d}}u_{\text{Pred}}(t, x_i) - \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_j) \right|}$' % (d, d, d, d, d, d);
                 save_file_name  : str   = config["physics"]["type"] + "_Dt^%d_U_Reconstruction_Relative_Error_Heatmap.png" % d;
 
             Plot_Heatmap2d(     values          = Max_Recon_Rel_Error[:, d].reshape(param_space.test_grid_sizes) * 100, 
@@ -394,13 +404,13 @@ def main():
         # solution.
         for d in range(n_IC):
             if(d == 0):
-                title           : str   = r'$\text{max}_{t, i} \frac{\left| u_{\bar{\xi}}(t, x_i) - u_{\text{True}}(t, x_i) \right|} {\text{max}_{j} \left| u_{\text{True}}(t, x_j) \right|}$';
+                title           : str   = r'$\text{max}_{t, i} \frac{\left| u_{\text{Rollout}}(t, x_i) - u_{\text{True}}(t, x_i) \right|} {\text{max}_{j} \left| u_{\text{True}}(t, x_j) \right|}$';
                 save_file_name  : str   = config["physics"]["type"] + "_U_Rollout_Rel_Error_Heatmap.png";
             elif(d == 1):
-                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d}{dt}u_{\bar{\xi}}(t, x_i) - \frac{d}{dt}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d}{dt}u_{\text{True}}(t, x_j) \right|}$';
+                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d}{dt}u_{\text{Rollout}}(t, x_i) - \frac{d}{dt}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d}{dt}u_{\text{True}}(t, x_j) \right|}$';
                 save_file_name  : str   = config["physics"]["type"] + "_Dt_U_Rollout_Rel_Error_Heatmap.png";
             else:
-                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d^{%d}}{dt^{%d}}u_{\bar{\xi}}(t, x_i) - \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_j) \right|}$' % (d, d, d, d, d, d);
+                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d^{%d}}{dt^{%d}}u_{\text{Rollout}}(t, x_i) - \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_j) \right|}$' % (d, d, d, d, d, d);
                 save_file_name  : str   = config["physics"]["type"] + "_Dt^%d_U_Rollout_Rel_Error_Heatmap.png" % d;
 
             Plot_Heatmap2d(     values          = Max_Rollout_Rel_Error[:, d].reshape(param_space.test_grid_sizes) * 100, 
@@ -630,8 +640,11 @@ def Save(   param_space         : ParameterSpace,
     
     # Set up the restart filename.
     if(len(restart_filename) > 0):
-        # Append the new date to the restart filename.
-        restart_filename = restart_filename + '.' + date_str;
+        # Extract the non-extension portion of the restart filename.
+        restart_filename_no_ext : str = restart_filename.split('.')[0];
+
+        # now append the new date to the restart filename.
+        restart_filename = restart_filename_no_ext + '__' + date_str + '.npy';
     else:
         restart_filename : str = config["physics"]["type"] + '_' + date_str + '.npy';
     
