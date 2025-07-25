@@ -198,9 +198,8 @@ class MultiLayerPerceptron(torch.nn.Module):
             # them into 1 dimension (so that we can pass the squeezed tensor through the first 
             # layer). To do this, we reshape X by keeping all but the last k dimensions of X, and 
             # replacing the last k with a single dimension whose size matches the dimensionality of
-            # the domain of the first layer. Note that we use torch.Tensor.view instead of 
-            # torch.Tensor.reshape in order to avoid data copying.
-            U = U.view(list(U.shape[:-len(self.reshape_shape)]) + [self.widths[self.reshape_index]]);
+            # the domain of the first layer. 
+            U = U.reshape(list(U.shape[:-len(self.reshape_shape)]) + [self.widths[self.reshape_index]]);
 
         # Pass X through the network layers; note that the final layer has no activation function, 
         # so we don't apply an activation function to it.

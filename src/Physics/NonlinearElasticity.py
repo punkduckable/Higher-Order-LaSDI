@@ -65,10 +65,11 @@ class NonlinearElasticity(Physics):
 
         # Next, we need to setup X_Positions and Frame_Shape. Doing this is a bit tricky, because 
         # the solver actually picks both quantities. Specifically, in this case, Frame_Shape is 
-        # [2, N_Nodes, 2] and X_Positions has shape [N_Nodes, 2]. The issue is that we have to run 
-        # a simulation to get N_Nodes. We run a simulation with a final time of zero; this prompts
-        # the code to generate the mesh and nodes, but not to solve for anything
-        D, V, X, T                          = Simulate(t_final = 0, VisIt = False);     # D, V have shape (Nt, 2, N_Nodes)
+        # [2, num_positions] and X_Positions has shape [2, num_positions]. The issue is that we have 
+        # to run a simulation to get num_positions. We run a simulation with a final time of zero; 
+        # this prompts the code to generate the mesh and nodes, but not to solve for anything
+        D, V, X, T                          = Simulate(t_final = 0, VisIt = False);     # D, V have shape (Nt, 2, num_positions)
+
 
         # Call the super class initializer.
         super().__init__(config         = config, 
@@ -78,6 +79,7 @@ class NonlinearElasticity(Physics):
                          param_names    = param_names, 
                          Uniform_t_Grid = False,
                          n_IC           = 2);
+
 
         # Determine which index corresponds to s and which to mu (simulate accepts a two element
         # array holding s and mu. We need to know which element corresponds to mu and which to s).
@@ -111,9 +113,9 @@ class NonlinearElasticity(Physics):
         -------------------------------------------------------------------------------------------
 
         X0 : list[numpy.ndarray], len = self.n_IC
-            i'th element has shape (2, N_Nodes) (where N_Nodes = X.shape[0]) and holds the i'th 
-            derivative of the initial state when we use param to define the FOM.
-        
+            i'th element has shape (2, num_positions), where num_positions = self.X_Positions.shape[1]. 
+            This array holds the i'th derivative of the initial state when we use param to define 
+            the FOM.
         """
 
         # Checks.
