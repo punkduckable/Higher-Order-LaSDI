@@ -383,7 +383,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
                 par_ref_levels  : int           = 0,
                 order           : int           = 2,
                 ode_solver_type : int           = 14,
-                t_final         : float         = 100.0,
+                t_final         : float         = 50.0,
                 dt              : float         = 0.02,
                 Positions       : numpy.ndarray = numpy.empty(0),
                 viscosity       : float         = 1e-2,
@@ -452,8 +452,9 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
         specifies the time step size.
     
     Positions : numpy.ndarray, optional
-        specifies the positions at which we will evaluate the solution. If None, then we will 
-        evaluate the solution at a grid of positions.
+        An optional argument. If empty, we generate new positions from scratch. If it is not empty, 
+        then Positions should be a 2D array whose i'th row holds the position of the i'th position 
+        at which we evaluate the solution.
 
     viscosity : float
         specifies the viscosity coefficient.
@@ -671,7 +672,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
         if(myid == 0): LOGGER.info("Verifying the columns of Positions are in the problem domain");
 
     # Figure out the maximum/minimum x and y coordinates of the mesh.
-    bb_min, bb_max = mesh.GetBoundingBox();
+    bb_min, bb_max = pmesh.GetBoundingBox();
     if(myid == 0): LOGGER.debug("The bounding box for the mesh is given by bb_min = %s, bb_max = %s" % (str(bb_min), str(bb_max)));
     x_min   : float = bb_min[0];
     x_max   : float = bb_max[0];
@@ -690,7 +691,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     num_valid_positions  : int = 0;
     
     while(num_valid_positions < num_positions):
-        if(Positions is None):
+        if(Positions.size == 0):
             if(myid == 0): LOGGER.debug("Sampling %d positions" % num_positions);
 
             # Sample random x,y coordinates
@@ -720,7 +721,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
 
         # If we have not enough valid positions, sample again.
         if(num_valid_positions < num_positions):
-            if(Positions is not None):
+            if(Positions.size > 0):
                 if(myid == 0): LOGGER.error("%d/%d elements of Positions are invalid. Aborting" % (num_valid_positions, num_positions));
                 raise ValueError("Invalid Positions");
             else:
@@ -767,7 +768,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
 
         # Create the VisIt data collection.
         visit_dc_path   : str                       = os.path.join(os.path.join(os.path.dirname(__file__), "VisIt"), "NonLinElast-fom");
-        visit_dc        : mfem.VisItDataCollection  = mfem.VisItDataCollection(visit_dc_path, mesh);
+        visit_dc        : mfem.VisItDataCollection  = mfem.VisItDataCollection(visit_dc_path, pmesh);
         visit_dc.SetPrecision(8);
 
         # Register U and its time derivative.

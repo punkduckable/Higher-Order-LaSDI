@@ -417,7 +417,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
                 ode_solver_type     : int           = 4,
                 t_final             : float         = 5.0,
                 time_step_size      : float         = 0.01,
-                Positions           : numpy.ndarray = None,
+                Positions           : numpy.ndarray = numpy.empty(0),
                 g                   : float         = numpy.pi/2,
                 k                   : float         = 1.0,
                 w                   : float         = 1.0,
@@ -471,7 +471,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
         specifies the time step size.
 
     Positions : numpy.ndarray, shape = (2, num_positions)
-        An optional argument. If None, we generate new positions from scratch. If it is not None, 
+        An optional argument. If empty, we generate new positions from scratch. If it is not empty, 
         then Positions should be a 2D array whose i'th row holds the position of the i'th position 
         at which we evaluate the solution.
 
@@ -521,7 +521,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
         The maximum coordinates of the bounding box.
     """
 
-    if(Positions is not None):
+    if(Positions.size > 0):
         assert(isinstance(Positions, numpy.ndarray));
         assert(len(Positions.shape)     == 2);
         assert(Positions.shape[0]       == 2);
@@ -624,7 +624,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
     # ---------------------------------------------------------------------------------------------
     # 5. Set up positions at which we will evaluate the solution.
 
-    if(Positions is None):
+    if(Positions.size == 0):
         if(myid == 0): LOGGER.info("Sampling %d positions in the mesh" % num_positions);
     else:
         if(myid == 0): LOGGER.info("Verifying the columns of Positions are in the problem domain");
@@ -649,7 +649,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
     num_valid_positions  : int = 0;
     
     while(num_valid_positions < num_positions):
-        if(Positions is None):
+        if(Positions.size == 0):
             if(myid == 0): LOGGER.debug("Sampling %d positions" % num_positions);
 
             # Sample random x,y coordinates
@@ -679,7 +679,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
 
         # If we have not enough valid positions, sample again.
         if(num_valid_positions < num_positions):
-            if(Positions is not None):
+            if(Positions.size > 0):
                 if(myid == 0): LOGGER.error("%d/%d elements of Positions are invalid. Aborting" % (num_valid_positions, num_positions));
                 raise ValueError("Invalid Positions");
             else:

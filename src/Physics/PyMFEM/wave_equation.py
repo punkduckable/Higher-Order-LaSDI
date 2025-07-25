@@ -397,7 +397,7 @@ def Simulate(mesh_file          : str           = "star.mesh",
              ode_solver_type    : int           = 10,
              t_final            : float         = 5.0,
              dt                 : float         = .01,
-             Positions          : numpy.ndarray = None,
+             Positions          : numpy.ndarray = numpy.empty(0),
              c                  : float         = 0.5,
              k                  : float         = 1.0,
              dirichlet          : bool          = True,
@@ -448,7 +448,7 @@ def Simulate(mesh_file          : str           = "star.mesh",
         The time step. We solve the wave equation using a time-stepping scheme with time step dt.
 
     Positions : numpy.ndarray, shape = (2, num_positions)
-        An optional argument. If None, we generate new positions from scratch. If it is not None, 
+        An optional argument. If empty, we generate new positions from scratch. If it is not empty, 
         then Positions should be a 2D array whose i'th row holds the position of the i'th position 
         at which we evaluate the solution.
 
@@ -496,7 +496,7 @@ def Simulate(mesh_file          : str           = "star.mesh",
         i'th element holds the j'th time at which we evaluate the solution.
     """
     
-    if(Positions is not None):
+    if(Positions.size > 0):
         assert(isinstance(Positions, numpy.ndarray));
         assert(len(Positions.shape)     == 2);
         assert(Positions.shape[0]       == 2);
@@ -611,7 +611,7 @@ def Simulate(mesh_file          : str           = "star.mesh",
     # ---------------------------------------------------------------------------------------------
     # 6. Set up positions at which we will evaluate the solution.
 
-    if(Positions is None):
+    if(Positions.size == 0):
         LOGGER.info("Sampling %d positions in the mesh" % num_positions);
     else:
         LOGGER.info("Verifying the columns of Positions are in the problem domain");
@@ -636,7 +636,7 @@ def Simulate(mesh_file          : str           = "star.mesh",
     num_valid_positions  : int = 0;
     
     while(num_valid_positions < num_positions):
-        if(Positions is None):
+        if(Positions.size == 0):
             LOGGER.debug("Sampling %d positions" % num_positions);
 
             # Sample random x,y coordinates
@@ -666,7 +666,7 @@ def Simulate(mesh_file          : str           = "star.mesh",
 
         # If we have not enough valid positions, sample again.
         if(num_valid_positions < num_positions):
-            if(Positions is not None):
+            if(Positions.size > 0):
                 LOGGER.error("%d/%d elements of Positions are invalid. Aborting" % (num_valid_positions, num_positions));
                 raise ValueError("Invalid Positions");
             else:
