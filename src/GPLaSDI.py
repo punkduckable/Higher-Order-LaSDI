@@ -403,7 +403,7 @@ class BayesianGLaSDI:
 
                     if(self.loss_weights['recon'] > 0):
                         self.timer.start("Reconstruction Loss");
-                        loss_recon += self.MSE(U_i, U_Pred_i) / self.std_Train[i][0];   # Scale the loss by the std of the FOM solution.
+                        loss_recon += self.MSE(U_i, U_Pred_i) / (self.std_Train[i][0]**2);   # Scale the loss by the std of the FOM solution.
                         self.timer.end("Reconstruction Loss");
 
 
@@ -617,8 +617,8 @@ class BayesianGLaSDI:
                         self.timer.start("Reconstruction Loss");
 
                         # Compute the reconstruction loss. 
-                        loss_recon_D  += self.MSE(D_i, D_Pred_i)/self.std_Train[i][0];    # Scale the loss by the std of the FOM solution.
-                        loss_recon_V  += self.MSE(V_i, V_Pred_i)/self.std_Train[i][1];    # Scale the loss by the std of the FOM solution.
+                        loss_recon_D  += self.MSE(D_i, D_Pred_i)/(self.std_Train[i][0]**2);    # Scale the loss by the std of the FOM solution.
+                        loss_recon_V  += self.MSE(V_i, V_Pred_i)/(self.std_Train[i][1]**2);    # Scale the loss by the std of the FOM solution.
 
                         self.timer.end("Reconstruction Loss");
 
