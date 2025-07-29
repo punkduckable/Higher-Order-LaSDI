@@ -483,8 +483,7 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
                             gp_list         : list[GaussianProcessRegressor],
                             t_Test          : list[torch.Tensor],
                             U_Test          : list[list[torch.Tensor]],
-                            n_samples       : int,
-                            skip_proportion : float) -> tuple[numpy.ndarray, numpy.ndarray, list[list[numpy.ndarray]], list[list[numpy.ndarray]]]:
+                            n_samples       : int) -> tuple[numpy.ndarray, numpy.ndarray, list[list[numpy.ndarray]], list[list[numpy.ndarray]]]:
     """
     This function computes the relative error and STD between the FOM solution and its 
     prediction when we rollout the FOM solution using the the ICs and mean of the posterior 
@@ -550,12 +549,7 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
         a set of coefficients which we can use to define the latent dynamics that we then solve 
         forward in time. 
 
-    skip_proportion : float
-        The proportion of the time steps we don't compute the relative error or STD for. 
-        Specifically, if this number is p, then for each combination parameters, for each time
-        step, t, which has t/t_max_i < p (where t_max_i is the maximum time value for that 
-        parameter combination), we set the relative error/std to zero.
-    
+
     
     -----------------------------------------------------------------------------------------------
     Returns
@@ -572,9 +566,8 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
     Rel_Error : list[list[numpy.ndarray]], len = n_Test
         i'th element is an n_IC element list whose j'th element is an numpy.ndarray of shape 
         n_t_i, where n_t_i is the number of time steps in the time series for the i'th combination
-        of testing parameters. The k'th element of this array holds the relative error between
-        k'th frame of the mean prediction and for the j'th derivative of the FOM solution 
-        for the i'th combination of parameter values and U_Test[i][j][k, ...]. 
+        of testing parameters. The k'th element of this array holds
+            mean(u_Rollout[i][j][k, ...] - u_True[i][j][k, ...]) / std(u_True[i][j])
     
     STD : list[list[numpy.ndarray]], len = n_Test
         i'th element is an n_IC element list whose j'th element is an numpy.ndarray whose shape
@@ -663,29 +656,19 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
             # Relative Error
 
             # Decode the mean latent trajectories for each combination of parameter values.
-            U_Pred_Mean_i   : numpy.ndarray = model.Decode(torch.Tensor(Zis_mean[i][0])).detach().numpy();
+            U_Pred_Mean_i       : numpy.ndarray = model.Decode(torch.Tensor(Zis_mean[i][0])).detach().numpy();
 
             # Fetch the corresponding test predictions.
-            U_Test_i        : numpy.ndarray = U_Test[i][0].detach().numpy();        # (n_t_i, ...)
+            U_Test_i            : numpy.ndarray = U_Test[i][0].detach().numpy();                # (n_t_i, physics.Frame_Shape)
 
-            # Compute the Absolute Error.
-            Abs_Error_i     : numpy.ndarray = numpy.linalg.norm((U_Pred_Mean_i - U_Test_i).reshape(n_t_i, -1), axis = 1);  # (n_t_i)
+            # Compute the std of the components of the FOM solution.
+            U_Test_i_std   : float = numpy.std(U_Test_i);
 
-            # Compute the norm of each frame.
-            Norms_i         : numpy.ndarray = numpy.linalg.norm(U_Test_i.reshape(n_t_i, -1), axis = 1);  # (n_t_i)
-
-            # Compute the relative error for the i'th combination of parameter values.
+            # For each frame, compute the relative error between the true and predicted FOM solutions.
+            # We normalize the error by the std of the true solution.
+            n_t_i : int = U_Test_i.shape[0];
             for k in range(n_t_i):
-                # Replace all zero frames with a norm of 1 to prevent division by 0.
-                if(Norms_i[k] == 0): 
-                    LOGGER.warning("Frame %d of the true solution for U for testing parameter combination %d is all zero" % (k, i));
-                    Norms_i[k] = 1;
-
-                # Set the relative to 0 if the time step is before the skip proportion.
-                if(t_Test[i][k] < skip_proportion*t_Test[i][-1]):
-                    Rel_Error[i][0][k] = 0.0;
-                else:
-                    Rel_Error[i][0][k] = Abs_Error_i[k]/Norms_i[k];
+                Rel_Error[i][0][k] = numpy.mean(numpy.abs(U_Pred_Mean_i[k, ...] - U_Test_i[k, ...]))/U_Test_i_std;
             
             # Now compute the corresponding element of max_Rel_Error
             max_Rel_Error[i, 0] = Rel_Error[i][0].max();
@@ -707,46 +690,32 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
             STD[i][0]       = numpy.std(U_Pred_i, axis = 1);
             max_STD[i, 0]   = STD[i][0].max();
         
+    
+
     elif(isinstance(model, Autoencoder_Pair)):
         for i in range(n_Test):
             # -------------------------------------------------------------------------------------
             # Relative Error
 
             # Decode the mean latent trajectories for each combination of parameter values.
-            U_Pred_Mean_i   : list[torch.Tensor]    = model.Decode(torch.Tensor(Zis_mean[i][0]), torch.Tensor(Zis_mean[i][1]));
-            D_Pred_Mean_i   : numpy.ndarray         = U_Pred_Mean_i[0].detach().numpy();                # (n_t_i, ...)
-            V_Pred_Mean_i   : numpy.ndarray         = U_Pred_Mean_i[1].detach().numpy();                # (n_t_i, ...)
+            U_Pred_Mean_i       : list[torch.Tensor]    = model.Decode(torch.Tensor(Zis_mean[i][0]), torch.Tensor(Zis_mean[i][1]));
+            D_Pred_Mean_i       : numpy.ndarray         = U_Pred_Mean_i[0].detach().numpy();            # (n_t_i, physics.Frame_Shape)
+            V_Pred_Mean_i       : numpy.ndarray         = U_Pred_Mean_i[1].detach().numpy();            # (n_t_i, physics.Frame_Shape)
 
             # Fetch the corresponding test predictions.
-            D_Test_i        : numpy.ndarray = U_Test[i][0].detach().numpy();                            # (n_t_i, ...)
-            V_Test_i        : numpy.ndarray = U_Test[i][1].detach().numpy();                            # (n_t_i, ...)
+            D_Test_i            : numpy.ndarray         = U_Test[i][0].detach().numpy();                # (n_t_i, physics.Frame_Shape)
+            V_Test_i            : numpy.ndarray         = U_Test[i][1].detach().numpy();                # (n_t_i, physics.Frame_Shape)
+            
+            # Compute the std of the components of the FOM solution.
+            D_Test_i_std        : float                 = numpy.std(D_Test_i);
+            V_Test_i_std        : float                 = numpy.std(V_Test_i);
 
-            # Compute the Absolute Error.
-            n_t_i           : int           = t_Test[i].shape[0];
-            D_Abs_Error_i   : numpy.ndarray = numpy.linalg.norm((D_Pred_Mean_i - D_Test_i).reshape(n_t_i, -1), axis = 1);   # (n_t_i)
-            V_Abs_Error_i   : numpy.ndarray = numpy.linalg.norm((V_Pred_Mean_i - V_Test_i).reshape(n_t_i, -1), axis = 1);   # (n_t_i)
-
-            # Compute the norm of each frame.
-            D_Norms_i       : numpy.ndarray = numpy.linalg.norm(D_Test_i.reshape(n_t_i, -1), axis = 1); # (n_t_i)
-            V_Norms_i       : numpy.ndarray = numpy.linalg.norm(V_Test_i.reshape(n_t_i, -1), axis = 1); # (n_t_i)
-
-            # Compute the relative error for the i'th combination of parameter values.
+            # For each frame, compute the relative error between the true and predicted FOM solutions.
+            # We normalize the error by the std of the true solution.
+            n_t_i : int = D_Test_i.shape[0];
             for k in range(n_t_i):
-                # Replace all zero frames with a norm of 1 to prevent division by 0.
-                if(D_Norms_i[k] == 0):
-                    LOGGER.warning("Frame %d of the true solution for U for testing parameter combination %d is all zero" % (k, i));
-                    D_Norms_i[k] = 1;
-                elif(V_Norms_i[k] == 0):
-                    LOGGER.warning("Frame %d of the true solution for D_t U for testing parameter combination %d is all zero" % (k, i));
-                    V_Norms_i[k] = 1;
-
-                # Set the relative to 0 if the time step is before the skip proportion.
-                if(t_Test[i][k] < skip_proportion*t_Test[i][-1]):
-                    Rel_Error[i][0][k] = 0.0;
-                    Rel_Error[i][1][k] = 0.0;
-                else:
-                    Rel_Error[i][0][k] = D_Abs_Error_i[k]/D_Norms_i[k];
-                    Rel_Error[i][1][k] = V_Abs_Error_i[k]/V_Norms_i[k];
+                Rel_Error[i][0][k] = numpy.mean(numpy.abs(D_Pred_Mean_i[k, ...] - D_Test_i[k, ...]))/D_Test_i_std;
+                Rel_Error[i][1][k] = numpy.mean(numpy.abs(V_Pred_Mean_i[k, ...] - V_Test_i[k, ...]))/V_Test_i_std;
 
             # Now compute the corresponding element of max_Rel_Error
             max_Rel_Error[i, 0] = Rel_Error[i][0].max();

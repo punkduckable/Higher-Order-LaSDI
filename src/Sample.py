@@ -205,8 +205,8 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
         # compute the std of the FOM solution for the i'th combination of training parameters.
         jth_std_Train : list[float] = [];
         for k in range(trainer.n_IC):
-            jth_std_Train.append(numpy.std(trainer.U_Test[j][k]));
-        new_std_Train.append(jth_std_Train);
+            jth_std_Train.append(torch.std(new_U_Train[-1][k]).item());
+        new_std_Train.append(jth_std_Train); 
     
     # Now append the new training, points to U_Train.
     if(len(trainer.U_Train) == 0):

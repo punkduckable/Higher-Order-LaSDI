@@ -184,7 +184,6 @@ def main():
 
     # Compute the relative error between the FOM solution and its prediction when we rollout the 
     # IC using the model.
-    skip_proportion : float = .05;
     Max_Rollout_Rel_Error, Max_STD, Rollout_Rel_Error, STD  = SolveROMs.Rollout_Error_and_STD(
                                                                 model           = model, 
                                                                 physics         = physics,
@@ -193,8 +192,7 @@ def main():
                                                                 gp_list         = gp_list,
                                                                 t_Test          = trainer.t_Test,
                                                                 U_Test          = trainer.U_Test,
-                                                                n_samples       = trainer.n_samples,
-                                                                skip_proportion = skip_proportion);
+                                                                n_samples       = trainer.n_samples);
 
 
 
@@ -228,26 +226,19 @@ def main():
             # Setup a tensor to hold the relative error for the j'th IC and the i'th combination of 
             # parameter values.
             ij_Recon_Rel_Error      : numpy.ndarray = numpy.zeros(n_t_i);
-            ij_Rollout_Rel_Error    : numpy.ndarray = numpy.zeros(n_t_i);
 
             # Fetch the reconstruction and true solution.
-            ij_Reconstruction   : numpy.ndarray = ith_Reconstruction[j].detach().numpy();
-            ij_True             : numpy.ndarray = trainer.U_Test[i][j].detach().numpy();
+            ij_Reconstruction   : numpy.ndarray = ith_Reconstruction[j].detach().numpy();   # shape = (n_t_i, physics.Frame_Shape)
+            ij_True             : numpy.ndarray = trainer.U_Test[i][j].detach().numpy();    # shape = (n_t_i, physics.Frame_Shape)
 
-            # Compute the Absolute Error and norm of each frame.
-            ij_Abs_Error        : numpy.ndarray = numpy.linalg.norm((ij_Reconstruction - ij_True).reshape(n_t_i, -1), axis = 1);    # (n_t_i)
-            ij_Norms            : numpy.ndarray = numpy.linalg.norm(ij_True.reshape(n_t_i, -1), axis = 1);                          # (n_t_i)
+            # Compute the std of each component of the true solution.
+            ij_True_std         : float          = numpy.std(ij_True);
 
-            # Cycle through the frames.
+            # For each frame, compute the relative error between the true and predicted FOM solutions.
+            # We normalize the error by the std of the true solution.
             for k in range(n_t_i):
-                # If the time step is before the skip proportion, set the relative error to 0. 
-                # Otherwise, compute the relative error.
-                if(trainer.t_Test[i][k] < skip_proportion*trainer.t_Test[i][-1]):
-                    ij_Recon_Rel_Error[k] = 0;
-                else:
-                    # Compute the relative error for the k'th frame.
-                    ij_Recon_Rel_Error[k] = ij_Abs_Error[k]/ij_Norms[k];
-            
+                ij_Recon_Rel_Error[k] = numpy.mean(numpy.abs(ij_Reconstruction[k, ...] - ij_True[k, ...]))/ij_True_std;
+
             # Append the relative error for the j'th IC.
             ith_Recon_Rel_Error.append(ij_Recon_Rel_Error);
 
@@ -267,13 +258,13 @@ def main():
         plt.ylabel("Relative Error");
 
         if(i == 0):     
-            title_str       : str = "Relative Error of the rollout of U for parameter combination %s"           % str(param_space.test_space[i_random]);
+            title_str       : str = "Relative Error of the rollout of U for %s"           % str(param_space.test_space[i_random]);
             save_file_name  : str = config["physics"]["type"] + "_U_Rollout_Rel_Error_%s.png"                   % str(param_space.test_space[i_random]);   
         elif(i == 1):   
-            title_str       : str = "Relative Error of the rollout of D_t U for parameter combination %s"       % str(param_space.test_space[i_random]);
+            title_str       : str = "Relative Error of the rollout of D_t U for %s"       % str(param_space.test_space[i_random]);
             save_file_name  : str = config["physics"]["type"] + "_Dt_U_Rollout_Rel_Error_%s.png"                % str(param_space.test_space[i_random]);
         else:           
-            title_str       : str = "Relative Error of the rollout of D_t^%d U for parameter combination %s"    % (i, str(param_space.test_space[i_random]));
+            title_str       : str = "Relative Error of the rollout of D_t^%d U for %s"    % (i, str(param_space.test_space[i_random]));
             save_file_name  : str = config["physics"]["type"] + "_Dt^%d_U_Rollout_Rel_Error_%s.png"             % (i, str(param_space.test_space[i_random]));
 
         # Plot the figure.
@@ -291,13 +282,13 @@ def main():
         plt.ylabel("Relative Error");
         
         if(i == 0):     
-            title_str       : str = "Relative Error of the reconstruction of U for parameter combination %s"        % str(param_space.test_space[i_random]);
+            title_str       : str = "Relative Error of the reconstruction of U for %s"        % str(param_space.test_space[i_random]);
             save_file_name  : str = config["physics"]["type"] + "_U_Recon_Rel_Error_%s.png"                         % str(param_space.test_space[i_random]);   
         elif(i == 1):   
-            title_str       : str = "Relative Error of the reconstruction of D_t U for parameter combination %s"    % str(param_space.test_space[i_random]);
+            title_str       : str = "Relative Error of the reconstruction of D_t U for %s"    % str(param_space.test_space[i_random]);
             save_file_name  : str = config["physics"]["type"] + "_Dt_U_Recon_Rel_Error_%s.png"                      % str(param_space.test_space[i_random]);
         else:           
-            title_str       : str = "Relative Error of the reconstruction of D_t^%d U for parameter combination %s" % (i, str(param_space.test_space[i_random]));
+            title_str       : str = "Relative Error of the reconstruction of D_t^%d U for %s" % (i, str(param_space.test_space[i_random]));
             save_file_name  : str = config["physics"]["type"] + "_Dt^%d_U_Recon_Rel_Error_%s.png"                   % (i, str(param_space.test_space[i_random]));
 
         # Plot the figure.
@@ -383,13 +374,13 @@ def main():
         # of the FOM solution.
         for d in range(n_IC):
             if(d == 0):
-                title           : str   = r'$\text{max}_{t, i} \frac{\left| u_{\text{Pred}}(t, x_i) - u_{\text{True}}(t, x_i) \right|} {\text{max}_{j} \left| u_{\text{True}}(t, x_j) \right|}$';
+                title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| u_{\text{Pred}}(t_k, x_j) - u_{\text{True}}(t_k, x_j) \right|} {\text{std}_{i, j} u_{\text{True}}(t_i, x_j) }$';
                 save_file_name  : str   = config["physics"]["type"] + "_U_Reconstruction_Relative_Error_Heatmap.png";
             elif(d == 1):
-                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d}{dt}u_{\text{Pred}}(t, x_i) - \frac{d}{dt}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d}{dt}u_{\text{True}}(t, x_j) \right|}$';
+                title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| \frac{d}{dt}u_{\text{Pred}}(t_k, x_j) - \frac{d}{dt}u_{\text{True}}(t_k, x_j) \right|} {\text{std}_{i, j} \frac{d}{dt}u_{\text{True}}(t_i, x_j) }$';
                 save_file_name  : str   = config["physics"]["type"] + "_Dt_U_Reconstruction_Relative_Error_Heatmap.png";
             else:
-                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d^{%d}}{dt^{%d}}u_{\text{Pred}}(t, x_i) - \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_j) \right|}$' % (d, d, d, d, d, d);
+                title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| \frac{d^{%d}}{dt^{%d}}u_{\text{Pred}}(t_k, x_j) - \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t_k, x_j) \right|} {\text{std}_{i, j} \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t_i, x_j) }$' % (d, d, d, d, d, d);
                 save_file_name  : str   = config["physics"]["type"] + "_Dt^%d_U_Reconstruction_Relative_Error_Heatmap.png" % d;
 
             Plot_Heatmap2d(     values          = Max_Recon_Rel_Error[:, d].reshape(param_space.test_grid_sizes) * 100, 
@@ -404,13 +395,13 @@ def main():
         # solution.
         for d in range(n_IC):
             if(d == 0):
-                title           : str   = r'$\text{max}_{t, i} \frac{\left| u_{\text{Rollout}}(t, x_i) - u_{\text{True}}(t, x_i) \right|} {\text{max}_{j} \left| u_{\text{True}}(t, x_j) \right|}$';
+                title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| u_{\text{Rollout}}(t_k, x_j) - u_{\text{True}}(t_k, x_j) \right|} {\text{std}_{i, j} u_{\text{True}}(t_k, x_j) }$';
                 save_file_name  : str   = config["physics"]["type"] + "_U_Rollout_Rel_Error_Heatmap.png";
             elif(d == 1):
-                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d}{dt}u_{\text{Rollout}}(t, x_i) - \frac{d}{dt}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d}{dt}u_{\text{True}}(t, x_j) \right|}$';
+                title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| \frac{d}{dt}u_{\text{Rollout}}(t_k, x_j) - \frac{d}{dt}u_{\text{True}}(t_k, x_j) \right|} {\text{std}_{i, j} \frac{d}{dt}u_{\text{True}}(t_k, x_j) }$';
                 save_file_name  : str   = config["physics"]["type"] + "_Dt_U_Rollout_Rel_Error_Heatmap.png";
             else:
-                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d^{%d}}{dt^{%d}}u_{\text{Rollout}}(t, x_i) - \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_j) \right|}$' % (d, d, d, d, d, d);
+                title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| \frac{d^{%d}}{dt^{%d}}u_{\text{Rollout}}(t_k, x_j) - \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t_k, x_j) \right|} {\text{std}_{i, j} \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t_k, x_j) }$' % (d, d, d, d, d, d);
                 save_file_name  : str   = config["physics"]["type"] + "_Dt^%d_U_Rollout_Rel_Error_Heatmap.png" % d;
 
             Plot_Heatmap2d(     values          = Max_Rollout_Rel_Error[:, d].reshape(param_space.test_grid_sizes) * 100, 
@@ -423,13 +414,13 @@ def main():
         # parameter values and derivative of the FOM solution.
         for d in range(n_IC):
             if(d == 0):
-                title           : str   = r'$\text{max}_{(t, i)} \sigma_{j \in \{1, \ldots, %d\}} \left[ u_{\xi(j)}(t, x_i) \right]$' % trainer.n_samples;
+                title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{1, \ldots, %d\}} \left[ u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % trainer.n_samples;
                 save_file_name  : str   = config["physics"]["type"] + "_U_STD_Heatmap.png";
             elif(d == 1):
-                title           : str   = r'$\text{max}_{(t, i)} \sigma_{j \in \{ 1, \ldots, %d\}} \left[\frac{d}{dt}u_{\xi(j)}(t, x_i) \right]$' % (trainer.n_samples);
+                title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{ 1, \ldots, %d\}} \left[\frac{d}{dt}u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % (trainer.n_samples);
                 save_file_name  : str   = config["physics"]["type"] + "_Dt_U_STD_Heatmap.png";      
             else:
-                title           : str   = r'$\text{max}_{(t, i)} \sigma_{j \in \{ 1, \ldots, %d\}} \left[\frac{d^{%d}}{dt^{%d}}u_{\xi(j)}(t, x_i) \right]$' % (trainer.n_samples, d, d);
+                title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{ 1, \ldots, %d\}} \left[\frac{d^{%d}}{dt^{%d}}u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % (trainer.n_samples, d, d);
                 save_file_name  : str   = config["physics"]["type"] + "_Dt^%d_U_STD_Heatmap.png" % d;
 
 
