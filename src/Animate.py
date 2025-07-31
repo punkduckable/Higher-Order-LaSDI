@@ -24,7 +24,7 @@ def _scalar_anim(   data        : numpy.ndarray,
                     X           : numpy.ndarray,
                     T           : numpy.ndarray,
                     save_dir    : Path          = Path("."),
-                    fps         : int           = 20,
+                    fps         : int           = 30,
                     dpi         : int           = 150,
                     cmap        : str           = "viridis") -> Path:  # data shape (N_t, N_x)
     """
@@ -56,7 +56,7 @@ def _scalar_anim(   data        : numpy.ndarray,
     save_dir : pathlib.Path, default ``Path('.')``
         Directory in which the movie is written.
     
-    fps : int, default 20
+    fps : int, default 30
         Frames per second.
     
     dpi : int, default 150
@@ -113,7 +113,7 @@ def _scalar_anim(   data        : numpy.ndarray,
                         cmap        = cmap,     # what colormap we use
                         vmin        = vmin,     # lower bounds for color scaling
                         vmax        = vmax,     # upper bounds for color scaling
-                        s           = 15);      # number of distinct colors used for plotting.
+                        s           = 60);      # Area of the markers.
 
     # Force the x and y axes to have equal scaling (so a unit in x equals a unit in y)
     ax.set_aspect("equal");
@@ -178,7 +178,7 @@ def _vector_anim(   data        : numpy.ndarray,
                     X           : numpy.ndarray,
                     T           : numpy.ndarray,
                     save_dir    : Path          = Path("."),
-                    fps         : int           = 20,
+                    fps         : int           = 30,
                     dpi         : int           = 150,
                     cmap        : str           = "viridis") -> Path:
     """
@@ -209,7 +209,7 @@ def _vector_anim(   data        : numpy.ndarray,
     save_dir : pathlib.Path, default ``Path('.')``
         Directory in which the movie is written.
     
-    fps : int, default 20
+    fps : int, default 30
         Frames per second.
     
     dpi : int, default 150
