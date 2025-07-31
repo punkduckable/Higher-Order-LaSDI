@@ -19,7 +19,8 @@ class Explicit(Physics):
         This is the initializer for the Explicit class. This class essentially acts as a wrapper
         around the following function of t and x:
             
-            u(t, x) = [sin(2x-t) + 0.1 sin(w t) cos( 40x + 2t)] exp(-a x^2)
+                  u(t, x)   =  A [ sin(2x - t) + 0.2 cos( (10x + t)sin(w t) ) ]                                 exp(-0.3*x^2)
+            (d/dt)u(t, x)   = -A [ cos(2x - t) + 0.2 sin( (10x + t)sin(w t) )[ sin(w t) + w(10x + t)cos(w t)] ] exp(-0.3*x^2)
 
         
         -------------------------------------------------------------------------------------------
@@ -44,7 +45,7 @@ class Explicit(Physics):
         # Checks.
         assert(isinstance(param_names, list));
         assert(len(param_names) == 2);
-        assert('a' in param_names);
+        assert('A' in param_names);
         assert('w' in param_names);
 
         # Make sure the config dictionary is actually for the Explicit physics model.
@@ -67,7 +68,7 @@ class Explicit(Physics):
      
         # Determine which index corresponds to 'a' and 'w' (we pass an array of parameter values, 
         # we need this information to figure out which element corresponds to which variable).
-        self.a_idx = self.param_names.index('a');
+        self.A_idx = self.param_names.index('A');
         self.w_idx = self.param_names.index('w');
         
         # All done!
@@ -79,17 +80,17 @@ class Explicit(Physics):
         """
         Evaluates the initial condition at the points in self.X_Positions. In this case,
         
-            u(t, x) = [sin(2x-t) + 0.1 sin(w t) cos( 40x + 2t)] exp(-a x^2)
+            u(t, x) =  A [ sin(2x - t) + 0.2 cos( (10x + t)sin(w t) ) ] exp(-0.3*x^2)
         
         Thus,
             
             v(t, x) = (d/dt)u(t, x)
-                    = [-cos(2x - t) + 0.1 w cos(w t) cos( 40 x + 2t) - 0.2 sin(w t)sin( 40x + 2t) ] exp(-a x^2)
+                    = -A [ cos(2x - t) + 0.2 sin( (10x + t)sin(w t) )[ sin(w t) + w(10x + t)cos(w t)] ] exp(-0.3*x^2)
         
         Which means that
         
-            u(0, x) = [sin(2x)]exp(-a x^2)
-            v(0, x) = [-cos(2x) + 0.1 w cos( 40 x) ]exp(-a x^2)
+            u(0, x) =  A [sin(2x) + 0.2]exp(-0.3*x^2)
+            v(0, x) = -A [cos(2x)]exp(-0.3*x^2)
 
 
         -------------------------------------------------------------------------------------------
@@ -117,20 +118,20 @@ class Explicit(Physics):
         assert(param.shape[0]   == self.n_p);
 
         # Fetch the parameter values.
-        a   : float             = param[self.a_idx];
+        A   : float             = param[self.A_idx];
         w   : float             = param[self.w_idx];  
 
         # Compute the initial condition and return!
         X   : numpy.ndarray     = self.X_Positions;
-        u0  : numpy.ndarray     = numpy.multiply(numpy.sin(2*X), numpy.exp(-a*numpy.multiply(X, X)));
-        v0  : numpy.ndarray     = numpy.multiply(-1*numpy.cos(2*X) + 0.1*w*numpy.cos(40*X), numpy.exp(-a*numpy.multiply(X, X)));
+        u0  : numpy.ndarray     =  A*numpy.multiply(numpy.sin(2*X) + 0.2*numpy.ones_like(X),    numpy.exp(-0.3*numpy.multiply(X, X)));
+        v0  : numpy.ndarray     = -A*numpy.multiply(numpy.cos(2*X),                             numpy.exp(-0.3*numpy.multiply(X, X)));
         return [u0, v0];
     
 
 
     def solve(self, param : numpy.ndarray) -> tuple[list[torch.Tensor], torch.Tensor]:
         """
-        Evaluates the function u(t, x) (see __init__ docstring) on the t, x grids using the 
+        Evaluates u(t, x) and v(t, x) (see __init__ docstring) on the t, x grids using the 
         parameters in param.
 
 
@@ -147,12 +148,13 @@ class Explicit(Physics):
         Returns 
         -------------------------------------------------------------------------------------------
         
-        X, t_Grid.
+        U, t_Grid.
 
-        X : list[torch.Tensor]
-            Holds the displacement and velocity of the FOM solution when we use param to define
-            the FOM. Each element is a torch.Tensor object of shape (n_t, self.Frame_Shape), where 
-            n_t is the number of time steps when we solve the FOM using param.
+        U : list[torch.Tensor], len = 2
+            Holds the displacement (first element) and velocity (second element) of the FOM 
+            solution when we use param to define the FOM. Each element is a torch.Tensor object of 
+            shape (n_t, self.Frame_Shape), where n_t is the number of time steps when we solve the 
+            FOM using param.
 
         t_Grid : torch.Tensor, shape = (n_t)
             i'th element holds the i'th time value at which we have an approximation to the FOM 
@@ -165,7 +167,7 @@ class Explicit(Physics):
         assert(param.shape[0]   == self.n_p);
 
         # Fetch the parameter values.
-        a   : float             = param[self.a_idx];
+        A   : float             = param[self.A_idx];
         w   : float             = param[self.w_idx]; 
 
         # Make the t_grid. If we are not using uniform t spacing, then add a random perturbation to 
@@ -184,63 +186,19 @@ class Explicit(Physics):
         x_mesh                  = torch.tensor(x_mesh);         # shape (n_t, n_x)
 
         # We know that
-        #   u(t, x) = [sin(2x-t) + 0.1 sin(w t) cos(40x + 2t)] exp(-a x^2)
+        #   u(t, x) =  A [ sin(2x - t) + 0.2 cos( (10x + t)sin(w t) ) ] exp(-0.3*x^2)
         # Thus,
         #   v(t, x) = (d/dt)u(t, x)
-        #            = [-cos(2x - t) + 0.1 w cos(w t) cos(40x + 2t) - 0.2 sin(w t)sin(40x + 2t) ] exp(-a x^2)
-        U   : torch.Tensor  = torch.multiply(torch.sin(2.*x_mesh - t_mesh) +                                                    # [ sin(2x - t)
-                                             0.1*torch.multiply(torch.sin(w*t_mesh), torch.cos(40*x_mesh + 2*t_mesh)),          #   0.1*sin(w t)cos(40x + 2t) ]*
-                                             torch.exp(-a*torch.multiply(x_mesh, x_mesh)));                                     # exp(-a x*2)
+        #           = -A [ cos(2x - t) + 0.2 sin( (10x + t)sin(w t) )[ sin(w t) + w(10x + t)cos(w t)] ] exp(-0.3*x^2)
+        U   : torch.Tensor  = A*torch.multiply( torch.sin(2.*x_mesh - t_mesh) +                                                             #  A*[ sin(2x - t)
+                                                0.2*torch.cos(torch.multiply(10*x_mesh + t_mesh, torch.sin(w*t_mesh))),                     #      0.2*cos( (10x + t)sin(w t) ) ]*
+                                                torch.exp(-0.3*torch.multiply(x_mesh, x_mesh)));                                            # exp(-0.3*x^2)
         
-        V   : torch.Tensor  = torch.multiply(-torch.cos(2.*x_mesh - t_mesh) +                                                # [ - cos(2x - t) + 
-                                             (0.1*w)*torch.multiply(torch.cos(w*t_mesh), torch.cos(40*x_mesh + 2*t_mesh)) -     #   0.1*w*cos(w t)cos(40x + 2t) - 
-                                             0.2*torch.multiply(torch.sin(w*t_mesh), torch.sin(40*x_mesh + 2*t_mesh)),          #   0.2*sin(w t)sin(40x + 2t) ] *
-                                             torch.exp(-a*torch.multiply(x_mesh, x_mesh)));                                     # exp(-a x^2)
+        V   : torch.Tensor  = -A*torch.multiply(torch.cos(2.*x_mesh - t_mesh) +                                                             # -A*[ cos(2x - t) + 
+                                                0.2*torch.multiply( torch.sin(torch.multiply(10*x_mesh + t_mesh, torch.sin(w*t_mesh))),     #      0.2*sin( (10x + t)sin(w t) )*
+                                                                    torch.sin(w*t_mesh) + w*(10*x_mesh + t_mesh)*torch.cos(w*t_mesh)),      #      [ sin(w t) + w(10x + t)cos(w t)] ] *
+                                                torch.exp(-0.3*torch.multiply(x_mesh, x_mesh)));                                            # exp(-0.3*x^2)
 
         # All done!
         return [U, V], torch.Tensor(t_Grid);
         
-
-    
-    def residual(self, U_hist : list[numpy.ndarray]) -> tuple[numpy.ndarray, float]:
-        """
-        Because there is no governing PDE for this Physics model, "residual" doesn't make a 
-        whole lot of sense for this class. Thus, we return an array of zeros whose shape matches
-        that of U_hist.
-        
-
-        -------------------------------------------------------------------------------------------
-        Arguments
-        -------------------------------------------------------------------------------------------
-
-        U_hist: list[numpy.ndarray], len = n_IC
-            d'th element is a 2d numpy.ndarray object of shape (n_t, n_x), where n_t is the number of 
-            points along the temporal axis (this is specified by the configuration file) and n_x is the 
-            number of points along the spatial axis. The i,j element of the d'th array should have the 
-            j'th component of the d'th derivative of the FOM solution at the i'th time step.
-
-        
-        -------------------------------------------------------------------------------------------
-        Returns
-        -------------------------------------------------------------------------------------------
-
-        r, e
-        
-        r : numpy.ndarray, shape = (n_t - 2, n_x - 2)
-            i, j element holds the residual at the i + 1'th temporal grid point and the j + 1'th 
-            spatial grid point. 
-        
-        e : float
-            the norm of r.
-        """
-
-        # Run checks.
-        assert(len(U_hist[0].shape)     == 2);
-        assert(U_hist[0].shape[1]       == self.n_x);
-
-        # compute the residual + the norm of the residual.
-        r   : numpy.ndarray = numpy.zeros_like(U_hist[0]);
-        e   : float         = numpy.linalg.norm(r);
-
-        # All done!
-        return r, e;
