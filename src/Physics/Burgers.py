@@ -7,6 +7,7 @@ import  scipy;
 from    scipy.sparse.linalg import  spsolve;
 from    scipy.sparse        import  spdiags;
 import  torch;
+import  matplotlib.pyplot   as      plt;
 
 from    Physics             import  Physics;
 
@@ -20,7 +21,15 @@ class Burgers(Physics):
     def __init__(self, config : dict, param_names : list[str]) -> None:
         """
         This is the initializer for the Burgers Physics class. This class essentially acts as a 
-        wrapper around a 1D Burgers solver.
+        wrapper around a 1D Burgers solver. The Burgers equation is given by
+        
+            du/dt + u * du/dx = 0
+        
+        where u is the velocity field. We use the following initial condition:
+        
+            u(0, x) = cos(pi*w*x) * exp(- a x^2 )
+        
+        where a and w are the corresponding parameter values.
 
         
         -------------------------------------------------------------------------------------------
@@ -88,7 +97,7 @@ class Burgers(Physics):
         """
         Evaluates the initial condition at the points in self.X_Positions. In this case,
 
-            u(0, x) = a*exp(-x^2 / (2*w^2))
+            u(0, x) = cos(pi*w*x) * exp(- a x^2 )
 
         where a and w are the corresponding parameter values.
 
@@ -122,7 +131,7 @@ class Burgers(Physics):
         w   : float     = param[self.w_idx].item();  
 
         # Get the initial displacement.
-        u0  : numpy.ndarray     = a * numpy.exp( -((self.X_Positions) ** 2) / 2 / w / w);
+        u0  : numpy.ndarray     = numpy.cos(numpy.pi * w * self.X_Positions) * numpy.exp( -a * (self.X_Positions) ** 2);
 
         return [u0];
 
@@ -146,16 +155,16 @@ class Burgers(Physics):
         Returns 
         -------------------------------------------------------------------------------------------
         
-        X, t_Grid
+        U, t_Grid
 
-        X: list[torch.Tensor], len = 1
+        U: list[torch.Tensor], len = 1
             Lone element has shape = (n_t, self.Frame_Shape), holds the FOM solution when we use
             param to define the FOM. Specifically, the [i, ...] sub-array of the returned array 
             holds the FOM solution at t_Grid[i].
 
         t_Grid: torch.Tensor, shape = (n_t)
             i'th element holds the i'th time value at which we have an approximation to the FOM 
-            solution (the time value associated with X[i, ...]).
+            solution (the time value associated with U[i, ...]).
         """
 
         assert(isinstance(param, numpy.ndarray));
@@ -176,16 +185,15 @@ class Burgers(Physics):
             t_Grid[1:-1]            = t_Grid[1:-1] + t_adjustments;
 
         # Solve the PDE!
-        new_X   : list[torch.Tensor]  = [torch.Tensor(solver(   u0                       = u0, 
+        new_U   : list[torch.Tensor]  = [torch.Tensor(solver(   u0                       = u0, 
                                                                 t_Grid                   = t_Grid.detach().numpy(), 
                                                                 Dx                       = self.dx, 
                                                                 maxk                     = self.maxk, 
                                                                 convergence_threshold    = self.convergence_threshold))];        
 
             # All done!
-        return new_X, t_Grid;
+        return new_U, t_Grid;
     
-
 
 
 # -------------------------------------------------------------------------------------------------
@@ -311,7 +319,7 @@ def jacobian(   u       : numpy.ndarray,
     # Diagonal: dr_i / du_i = 1 + c*(2*u_i - u_{i + 1})
     diag_comp           = 1.0 + c * (2 * u - u[idx_m1]);
 
-    # Sub-diagonal (i,i-1): ∂r_i / ∂u_{i-1} = -c * u_i (for interior points)
+    # Sub-diagonal (i,i-1): dr_i / du_{i-1} = -c * u_i (for interior points)
     subdiag_comp        = numpy.ones(n_x - 1);
     subdiag_comp[:-1]   = -c * u[1:];
 
@@ -420,3 +428,146 @@ def solver(u0                       : numpy.ndarray,
             u[n + 1, -1]  = un1_guess[0];
 
     return u;
+
+
+
+# -------------------------------------------------------------------------------------------------
+# Plot solution
+# ------------------------------------------------------------------------------------------------
+
+def Plot_Solution(  U          : list[torch.Tensor], 
+                    x          : numpy.ndarray, 
+                    t          : numpy.ndarray,
+                    figsize    : tuple[int, int]   = (12, 8),
+                    cmap       : str               = 'viridis',
+                    title      : str               = 'Burgers Equation Solution') -> None:
+    """
+    Creates a 2D plot of the Burgers equation solution showing the evolution of the solution
+    over time and space.
+    
+    This function takes the solution data and creates a heatmap-style plot where:
+    - The x-axis represents the spatial domain
+    - The y-axis represents the temporal domain  
+    - The color intensity represents the solution value at each (t, x) point
+    
+
+
+    -------------------------------------------------------------------------------------------
+    Arguments
+    -------------------------------------------------------------------------------------------
+    
+    U: list[torch.Tensor]
+        List of torch.Tensor objects, each of shape (n_t, n_x). The i'th element should be a 
+        tensor whose j, k element holds the i'th derivative of the solution at t = t[j] and 
+        x = x[k]. For the main solution, use U[0].
+    
+    x: numpy.ndarray, shape = (n_x)
+        Spatial grid points where the solution is evaluated.
+    
+    t: numpy.ndarray, shape = (n_t) 
+        Temporal grid points where the solution is evaluated.
+    
+    figsize: tuple[int, int], default = (12, 8)
+        Figure size as (width, height) in inches.
+    
+    cmap: str, default = 'viridis'
+        Colormap for the heatmap visualization.
+    
+    title: str, default = 'Burgers Equation Solution'
+        Title for the plot.
+    
+
+
+    -------------------------------------------------------------------------------------------
+    Returns
+    -------------------------------------------------------------------------------------------
+    
+    None
+        The function creates and displays a matplotlib figure.
+    """
+    
+    
+    # -------------------------------------------------------------------------------------------
+    # Checks
+
+    # Input validation checks
+    assert isinstance(U, list), "U must be a list of torch.Tensor objects";
+    assert len(U) > 0, "U cannot be empty";
+    assert all(isinstance(u, torch.Tensor) for u in U), "All elements of U must be torch.Tensor objects";
+    
+    assert isinstance(x, numpy.ndarray), "x must be a numpy.ndarray";
+    assert isinstance(t, numpy.ndarray), "t must be a numpy.ndarray";
+    
+    assert len(x.shape) == 1, "x must be 1-dimensional";
+    assert len(t.shape) == 1, "t must be 1-dimensional";
+    
+    # Get dimensions
+    n_x = x.shape[0];
+    n_t = t.shape[0];
+    
+    # Check that all tensors in U have the correct shape (n_t, n_x)
+    for i, u in enumerate(U):
+        assert u.shape == (n_t, n_x), f"U[{i}] must have shape ({n_t}, {n_x}), got {u.shape}";
+    
+
+    # -------------------------------------------------------------------------------------------
+    # Make the plots!
+
+    for i in range(len(U)):
+
+        # Create the figure and axis
+        fig, ax = plt.subplots(figsize = figsize);
+        
+        # Convert the first (main) solution tensor to numpy for plotting
+        # We transpose it so that time is on the y-axis and space is on the x-axis
+        solution_data = U[i].detach().numpy();  # Shape: (n_t, n_x)
+
+
+        # Create the heatmap using pcolormesh
+        # We need to create meshgrids for the coordinates
+        x_mesh, t_mesh = numpy.meshgrid(x, t);
+        
+        # Plot the heatmap and colorbar
+        im = ax.pcolormesh(t_mesh, x_mesh, solution_data, cmap = cmap, shading = 'auto');
+        cbar = plt.colorbar(im, ax = ax);
+        
+        # Add labels, a title, grid, and adjust layout.
+        ax.set_xlabel('Spatial Domain (x)', fontsize = 15);
+        ax.set_ylabel('Time (t)', fontsize = 15, rotation = 0, labelpad = 30);
+        ax.set_title(title + ": Derivative %d" % i, fontsize = 25);
+        ax.grid(True, alpha = 0.3);
+        plt.tight_layout();
+        
+    # Show the plots and return!
+    plt.show();
+    return;
+
+
+
+if __name__ == "__main__":
+    # Pick a set of parameter values
+    a : float = 0.45;
+    w : float = 0.3;
+
+    # Create the parameter array
+    param : numpy.ndarray = numpy.array([a, w]);
+
+    # Make a configuration dictionary to initialize the Burgers object.
+    config : dict = {'Burgers': {   'n_x'                   : 1001,
+                                    'x_min'                 : -3.0,
+                                    'x_max'                 : 3.0,
+                                    'n_t'                   : 501,
+                                    't_max'                 : 1.0,
+                                    'maxk'                  : 10,
+                                    'convergence_threshold' : 1e-8,
+                                    'uniform_t_grid'        : False } };
+
+    # Initialize the physics object.
+    physics : Burgers = Burgers(config = config, param_names = ['a', 'w']);
+
+    # Solve the Burgers equation.
+    U, t_Grid = physics.solve(param = param);
+
+    # Plot the solution.
+    Plot_Solution(U = U, x = physics.X_Positions, t = t_Grid.detach().numpy());
+    
