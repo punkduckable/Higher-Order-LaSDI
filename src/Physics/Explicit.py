@@ -19,8 +19,8 @@ class Explicit(Physics):
         This is the initializer for the Explicit class. This class essentially acts as a wrapper
         around the following function of t and x:
             
-                  u(t, x)   =  A [ sin(2x - t) + 0.2 cos( (10x + t)sin(w t) ) ]                                 exp(-0.3*x^2)
-            (d/dt)u(t, x)   = -A [ cos(2x - t) + 0.2 sin( (10x + t)sin(w t) )[ sin(w t) + w(10x + t)cos(w t)] ] exp(-0.3*x^2)
+                  u(t, x)   =  A [ sin(2x - t) + 0.2 cos( (10x + t)cos(w t) ) ]                                 exp(-0.3*x^2)
+            (d/dt)u(t, x)   = -A [ cos(2x - t) + 0.2 sin( (10x + t)cos(w t) )[ sin(w t) + w(10x + t)cos(w t)] ] exp(-0.3*x^2)
 
         
         -------------------------------------------------------------------------------------------
@@ -80,17 +80,17 @@ class Explicit(Physics):
         """
         Evaluates the initial condition at the points in self.X_Positions. In this case,
         
-            u(t, x) =  A [ sin(2x - t) + 0.2 cos( (10x + t)sin(w t) ) ] exp(-0.3*x^2)
+            u(t, x) =  A [ sin(2x - t) + 0.2 cos( (10x + t)cos(w t) ) ] exp(-0.3*x^2)
         
         Thus,
             
             v(t, x) = (d/dt)u(t, x)
-                    = -A [ cos(2x - t) + 0.2 sin( (10x + t)sin(w t) )[ sin(w t) + w(10x + t)cos(w t)] ] exp(-0.3*x^2)
+                    = -A [ cos(2x - t) + 0.2 sin( (10x + t)cos(w t) )[ cos(w t) - w(10x + t)sin(w t)] ] exp(-0.3*x^2)
         
         Which means that
         
-            u(0, x) =  A [sin(2x) + 0.2]exp(-0.3*x^2)
-            v(0, x) = -A [cos(2x)]exp(-0.3*x^2)
+            u(0, x) =  A [sin(2x) + 0.2*cos(10x)]exp(-0.3*x^2)
+            v(0, x) = -A [cos(2x) - 0.2*sin(10x)]exp(-0.3*x^2)
 
 
         -------------------------------------------------------------------------------------------
@@ -123,8 +123,8 @@ class Explicit(Physics):
 
         # Compute the initial condition and return!
         X   : numpy.ndarray     = self.X_Positions;
-        u0  : numpy.ndarray     =  A*numpy.multiply(numpy.sin(2*X) + 0.2*numpy.ones_like(X),    numpy.exp(-0.3*numpy.multiply(X, X)));
-        v0  : numpy.ndarray     = -A*numpy.multiply(numpy.cos(2*X),                             numpy.exp(-0.3*numpy.multiply(X, X)));
+        u0  : numpy.ndarray     =  A*numpy.multiply(numpy.sin(2*X) + 0.2*numpy.cos(10*X), numpy.exp(-0.3*numpy.multiply(X, X)));
+        v0  : numpy.ndarray     = -A*numpy.multiply(numpy.cos(2*X) - 0.2*numpy.sin(10*X), numpy.exp(-0.3*numpy.multiply(X, X)));
         return [u0, v0];
     
 
@@ -189,14 +189,14 @@ class Explicit(Physics):
         #   u(t, x) =  A [ sin(2x - t) + 0.2 cos( (10x + t)sin(w t) ) ] exp(-0.3*x^2)
         # Thus,
         #   v(t, x) = (d/dt)u(t, x)
-        #           = -A [ cos(2x - t) + 0.2 sin( (10x + t)sin(w t) )[ sin(w t) + w(10x + t)cos(w t)] ] exp(-0.3*x^2)
+        #           = -A [ cos(2x - t) + 0.2 sin( (10x + t)cos(w t) )[ cos(w t) - w(10x + t)sin(w t)] ] exp(-0.3*x^2)
         U   : torch.Tensor  = A*torch.multiply( torch.sin(2.*x_mesh - t_mesh) +                                                             #  A*[ sin(2x - t)
-                                                0.2*torch.cos(torch.multiply(10*x_mesh + t_mesh, torch.sin(w*t_mesh))),                     #      0.2*cos( (10x + t)sin(w t) ) ]*
+                                                0.2*torch.cos(torch.multiply(10*x_mesh + t_mesh, torch.cos(w*t_mesh))),                     #      0.2*cos( (10x + t)cos(w t) ) ]*
                                                 torch.exp(-0.3*torch.multiply(x_mesh, x_mesh)));                                            # exp(-0.3*x^2)
         
         V   : torch.Tensor  = -A*torch.multiply(torch.cos(2.*x_mesh - t_mesh) +                                                             # -A*[ cos(2x - t) + 
-                                                0.2*torch.multiply( torch.sin(torch.multiply(10*x_mesh + t_mesh, torch.sin(w*t_mesh))),     #      0.2*sin( (10x + t)sin(w t) )*
-                                                                    torch.sin(w*t_mesh) + w*(10*x_mesh + t_mesh)*torch.cos(w*t_mesh)),      #      [ sin(w t) + w(10x + t)cos(w t)] ] *
+                                                0.2*torch.multiply( torch.sin(torch.multiply(10*x_mesh + t_mesh, torch.cos(w*t_mesh))),     #      0.2*sin( (10x + t)cos(w t) )*
+                                                                    torch.cos(w*t_mesh) - w*(10*x_mesh + t_mesh)*torch.sin(w*t_mesh)),      #      [ cos(w t) - w(10x + t)sin(w t)] ] *
                                                 torch.exp(-0.3*torch.multiply(x_mesh, x_mesh)));                                            # exp(-0.3*x^2)
 
         # All done!
