@@ -262,7 +262,7 @@ class BayesianGLaSDI:
         # -------------------------------------------------------------------------------------
         # Setup. 
 
-        # Fetch parameters.
+        # Fetch parameters. Note that p_rollout and p_IC_rollout can be negative.
         n_train             : int               = self.param_space.n_train();
         p_rollout           : float             = min(0.75, self.p_rollout_init + self.dp_per_update*(self.restart_iter//self.rollout_update_freq));
         p_IC_rollout        : float             = min(1.0, self.p_IC_rollout_init + self.IC_dp_per_update*(self.restart_iter//self.IC_rollout_update_freq));
@@ -289,16 +289,18 @@ class BayesianGLaSDI:
 
         # Rollout setup
         self.timer.start("Rollout Setup");
-        t_Grid_rollout, n_rollout_frames, U_Rollout_Targets = self._rollout_setup(
-                                                                        t            = t_Train_device, 
-                                                                        U            = U_Train_device, 
-                                                                        p_rollout    = p_rollout);
+        if(p_rollout > 0):
+            t_Grid_rollout, n_rollout_frames, U_Rollout_Targets = self._rollout_setup(
+                                                                            t            = t_Train_device, 
+                                                                            U            = U_Train_device, 
+                                                                            p_rollout    = p_rollout);
         self.timer.end("Rollout Setup");
 
         # IC rollout setup
         self.timer.start("IC Rollout Setup");
-        t_Grid_IC_rollout, n_IC_rollout_frames, U_IC_Rollout_Targets = self._IC_rollout_setup(  t            = t_Train_device, 
-                                                                                                p_IC_rollout = p_IC_rollout);
+        if(p_IC_rollout > 0):
+            t_Grid_IC_rollout, n_IC_rollout_frames, U_IC_Rollout_Targets = self._IC_rollout_setup(  t            = t_Train_device, 
+                                                                                                    p_IC_rollout = p_IC_rollout);
         self.timer.end("IC Rollout Setup"); 
 
         # If we are learning the latent dynamics coefficients, then we need to determine 
@@ -338,10 +340,11 @@ class BayesianGLaSDI:
                 LOGGER.info("p_rollout is now %f (increased %f)" % (p_rollout, self.dp_per_update));
 
                 self.timer.start("Rollout Setup");
-                t_Grid_rollout, n_rollout_frames, U_Rollout_Targets = self._rollout_setup(
-                                                                            t            = t_Train_device, 
-                                                                            U            = U_Train_device, 
-                                                                            p_rollout    = p_rollout);
+                if(p_rollout > 0):
+                    t_Grid_rollout, n_rollout_frames, U_Rollout_Targets = self._rollout_setup(
+                                                                                t            = t_Train_device, 
+                                                                                U            = U_Train_device, 
+                                                                                p_rollout    = p_rollout);
                 self.timer.end("Rollout Setup");
 
             # Check if we need to update IC rollout parameters
@@ -353,12 +356,13 @@ class BayesianGLaSDI:
 
                 # Setup IC rollout time grids and targets
                 self.timer.start("IC Rollout Setup");
-                t_Grid_IC_rollout, n_IC_rollout_frames, U_IC_Rollout_Targets = self._IC_rollout_setup(  t            = t_Train_device, 
-                                                                                                        p_IC_rollout = p_IC_rollout);
+                if(p_IC_rollout > 0):
+                    t_Grid_IC_rollout, n_IC_rollout_frames, U_IC_Rollout_Targets = self._IC_rollout_setup(  t            = t_Train_device, 
+                                                                                                            p_IC_rollout = p_IC_rollout);
                 self.timer.end("IC Rollout Setup"); 
 
             self.optimizer.zero_grad();
-            
+
 
             # -------------------------------------------------------------------------------------
             # Compute losses
@@ -410,7 +414,7 @@ class BayesianGLaSDI:
                     # ----------------------------------------------------------------------------
                     # Setup Rollout losses.
 
-                    if(self.loss_weights['rollout'] > 0):
+                    if(self.loss_weights['rollout'] > 0 and p_rollout > 0):
                         self.timer.start("Rollout Setup");
 
                         # Select the latent states we want to use as initial conditions for the i'th 
@@ -453,7 +457,7 @@ class BayesianGLaSDI:
                 loss_rollout_FOM    : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
                 loss_rollout_ROM    : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
                 
-                if(self.loss_weights['rollout'] > 0):
+                if(self.loss_weights['rollout'] > 0 and p_rollout > 0):
                     self.timer.start("Rollout Loss");
 
                     # Simulate the frames forward in time. This should return an n_param element list
@@ -503,7 +507,7 @@ class BayesianGLaSDI:
                 loss_IC_rollout_FOM  : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
 
                 # Cycle through the training examples for IC rollout
-                if(self.loss_weights['IC_rollout'] > 0):
+                if(self.loss_weights['IC_rollout'] > 0 and p_IC_rollout > 0):
                     self.timer.start("IC Rollout Loss");
 
                     for i in range(n_train):
@@ -689,19 +693,20 @@ class BayesianGLaSDI:
 
                     self.timer.start("Rollout Setup");
 
-                    # Select the latent states we want to use as initial conditions for the i'th 
-                    # combination of parameter values. This should be the first 
-                    # n_rollout_frames[i] frames (n_rollout_frames[i] is computed such that if we 
-                    # simulate the first n_rollout_frames[i] frames, the final times are less than 
-                    # the final time for this combination of parameter values. Each element of 
-                    # Z_Rollout_IC is a 2 element list of torch.Tensor objects of shape 
-                    # (n_rollout_frames[i], n_z).
-                    Z_Rollout_IC.append([Z_D_i[:n_rollout_frames[i], :], Z_V_i[:n_rollout_frames[i], :]]);
+                    if(self.loss_weights['rollout'] > 0 and p_rollout > 0):
+                        # Select the latent states we want to use as initial conditions for the i'th 
+                        # combination of parameter values. This should be the first 
+                        # n_rollout_frames[i] frames (n_rollout_frames[i] is computed such that if we 
+                        # simulate the first n_rollout_frames[i] frames, the final times are less than 
+                        # the final time for this combination of parameter values. Each element of 
+                        # Z_Rollout_IC is a 2 element list of torch.Tensor objects of shape 
+                        # (n_rollout_frames[i], n_z).
+                        Z_Rollout_IC.append([Z_D_i[:n_rollout_frames[i], :], Z_V_i[:n_rollout_frames[i], :]]);
 
-                    # Fetch the corresponding target by encoding the FOM targets using the 
-                    # current encoder.
-                    Z_Rollout_Targets.append(model_device.Encode(*U_Rollout_Targets[i]));
-                
+                        # Fetch the corresponding target by encoding the FOM targets using the 
+                        # current encoder.
+                        Z_Rollout_Targets.append(model_device.Encode(*U_Rollout_Targets[i]));
+                    
                     self.timer.end("Rollout Setup");
 
 
@@ -731,7 +736,7 @@ class BayesianGLaSDI:
                 loss_rollout_D      : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
                 loss_rollout_V      : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
 
-                if(self.loss_weights['rollout'] > 0):
+                if(self.loss_weights['rollout'] > 0 and p_rollout > 0):
                     self.timer.start("Rollout Loss");
 
                     # Simulate the frames forward in time. This should return an n_param element list
@@ -791,7 +796,7 @@ class BayesianGLaSDI:
                 loss_IC_rollout_D      : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
                 loss_IC_rollout_V      : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
 
-                if(self.loss_weights['IC_rollout'] > 0):
+                if(self.loss_weights['IC_rollout'] > 0 and p_IC_rollout > 0):
                     self.timer.start("IC Rollout Loss");
 
                     # Cycle through the training examples for IC rollout
