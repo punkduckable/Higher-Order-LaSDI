@@ -1475,9 +1475,9 @@ class BayesianGLaSDI:
         for i in range(len(self.U_Train)):
             self.std_Train.append([]);
             for j in range(len(self.U_Train[i])):
-                self.std_Train[i].append(numpy.std(self.U_Train[i][j]));
+                self.std_Train[i].append(torch.std(self.U_Train[i][j]));
 
-        # Next, compute n_IC.
+        # Next, compute n_IC.           
         self.n_IC = len(self.U_Test[0]);
 
         # Set the test coefs.
