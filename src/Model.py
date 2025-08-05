@@ -57,8 +57,8 @@ class MultiLayerPerceptron(torch.nn.Module):
     def __init__(   self, 
                     widths          : list[int],
                     activations     : list[str],
-                    reshape_index   : int           = None, 
-                    reshape_shape   : list[int]     = None) -> None:
+                    reshape_index   : int           = 1, 
+                    reshape_shape   : list[int]     = []) -> None:
         r"""
         This class defines a standard multi-layer network network.
 
@@ -80,7 +80,7 @@ class MultiLayerPerceptron(torch.nn.Module):
             after the i'th layer's linear transformation. The final layer has no activation 
             function. 
 
-        reshape_index : int
+        reshape_index : int, optional
             This argument specifies if we should reshape the network's input or output 
             (or neither). If the user specifies reshape_index, then it must be either 0 or -1. 
             Further, in this case, they must also specify reshape_shape (you need to specify both 
@@ -89,7 +89,7 @@ class MultiLayerPerceptron(torch.nn.Module):
             then reshape_shape specifies how we reshape the network output before returning it 
             (the output to the last layer). 
 
-        reshape_shape : list[int] 
+        reshape_shape : list[int], optional
             This is a list of k integers specifying the final k dimensions of the shape of the 
             input to the first layer (if reshape_index == 0) or the output of the last layer 
             (if reshape_index == -1). You must specify this argument if and only if you specify 
@@ -116,8 +116,10 @@ class MultiLayerPerceptron(torch.nn.Module):
             assert(isinstance(widths[i], int));
             assert(widths[i] > 0);
             assert(activations[i].lower() in act_dict.keys());
-        assert((reshape_index is None) or (reshape_index in [0, -1]));
-        assert((reshape_shape is None) or (numpy.prod(reshape_shape) == widths[reshape_index]));
+        assert(isinstance(reshape_shape, list));
+        assert(isinstance(reshape_index, int));
+        assert((len(reshape_shape) == 0) or (reshape_index in [0, -1]));
+        assert((len(reshape_shape) == 0) or (numpy.prod(reshape_shape) == widths[reshape_index]));
 
         super().__init__();
 
@@ -130,7 +132,7 @@ class MultiLayerPerceptron(torch.nn.Module):
         self.activations    : list[str]             = activations;
 
         # Set up the affine parts of the layers.
-        self.layers            : list[torch.nn.Module] = [];
+        self.layers = [];
         for k in range(self.n_layers):
             self.layers += [torch.nn.Linear(widths[k], widths[k + 1])];
         self.layers = torch.nn.ModuleList(self.layers);
@@ -182,7 +184,7 @@ class MultiLayerPerceptron(torch.nn.Module):
 
         # If the reshape_index is 0, we need to reshape X before passing it through the first 
         # layer.
-        if (self.reshape_index == 0):
+        if ((len(self.reshape_shape) > 0) and (self.reshape_index == 0)):
             # Make sure the input has a proper shape. There is a lot going on in this line; let's
             # break it down. If reshape_index == 0, then we need to reshape the input, X, before
             # passing it through the layers. Let's assume that reshape_shape has k elements. Then,
@@ -203,11 +205,11 @@ class MultiLayerPerceptron(torch.nn.Module):
         # Pass X through the network layers; note that the final layer has no activation function, 
         # so we don't apply an activation function to it.
         for i in range(self.n_layers - 1):
-            U : torch.Tensor = self.activation_fns[i](self.layers[i](U));   # apply linear layer
-        U : torch.Tensor = self.layers[-1](U);                              # apply final layer (no activation)
+            U = self.activation_fns[i](self.layers[i](U));   # apply linear layer
+        U = self.layers[-1](U);                              # apply final layer (no activation)
 
         # If the reshape_index is -1, then we need to reshape the output before returning. 
-        if (self.reshape_index == -1):
+        if ((len(self.reshape_shape) > 0) and (self.reshape_index == -1)):
             # In this case, we need to split the last dimension of X, the output of the final
             # layer, to match the reshape_shape. This is precisely what the line below does. Note
             # that we use torch.Tensor.view instead of torch.Tensor.reshape in order to avoid data 
@@ -474,18 +476,18 @@ class Autoencoder(torch.nn.Module):
         assert(physics.n_IC     == self.n_IC);
 
         # Figure out how many combinations of parameter values there are.
-        n_param     : int                   = param_grid.shape[0];
-        Z0          : list[numpy.ndarray]   = [];
+        n_param     : int                       = param_grid.shape[0];
+        Z0          : list[list[numpy.ndarray]] = [];
         LOGGER.debug("Encoding initial conditions for %d parameter values" % n_param);
 
         # Cycle through the parameters.
         for i in range(n_param):
             # Fetch the IC for the i'th set of parameters. Then map it to a tensor.
-            u0 : numpy.ndarray  = physics.initial_condition(param_grid[i])[0];
-            u0                  = torch.Tensor(u0).reshape((1,) + u0.shape);
+            u0_np   : numpy.ndarray = physics.initial_condition(param_grid[i])[0];
+            u0      : torch.Tensor  = torch.Tensor(u0_np).reshape((1,) + u0_np.shape);
 
             # Encode the IC, then map the encoding to a numpy array.
-            z0 : torch.Tensor   = self.Encode(u0).detach().numpy();
+            z0      : numpy.ndarray = self.Encode(u0).detach().numpy();
 
             # Append the new IC to the list of latent ICs
             Z0.append([z0]);
@@ -515,7 +517,7 @@ class Autoencoder(torch.nn.Module):
         dict_ = {   'encoder state'  : self.encoder.cpu().state_dict(),
                     'decoder state'  : self.decoder.cpu().state_dict(),
                     'widths'         : self.widths, 
-                    'activation'     : self.activation, 
+                    'activations'    : self.activations, 
                     'reshape_shape'  : self.reshape_shape};
         return dict_;
 
@@ -859,26 +861,26 @@ class Autoencoder_Pair(torch.nn.Module):
         assert(self.n_IC        == physics.n_IC);
 
         # Figure out how many combinations of parameter values there are.
-        n_param     : int                   = param_grid.shape[0];
-        Z0          : list[numpy.ndarray]   = [];
+        n_param     : int                           = param_grid.shape[0];
+        Z0          : list[list[numpy.ndarray]]     = [];
         LOGGER.debug("Encoding initial conditions for %d combinations of parameter values" % n_param);
 
         # Cycle through the parameters.
         for i in range(n_param):
             # Get the ICs for the i'th combination of parameter values.
             ICs     : list[numpy.ndarray]   = physics.initial_condition(param_grid[i]);
-            u0      : numpy.ndarray         = ICs[0];
-            v0      : numpy.ndarray         = ICs[1];
+            u0_np      : numpy.ndarray         = ICs[0];
+            v0_np      : numpy.ndarray         = ICs[1];
             
             # Map the ICs to a tensor.
-            u0      = torch.Tensor(u0).reshape((1,) + u0.shape);
-            v0      = torch.Tensor(v0).reshape((1,) + v0.shape);
+            u0      : torch.Tensor          = torch.Tensor(u0_np).reshape((1,) + u0_np.shape);
+            v0      : torch.Tensor          = torch.Tensor(v0_np).reshape((1,) + v0_np.shape);
 
             # Encode the IC, then map the encoding to a numpy array.
-            z0, Dz0 = self.Encode(  Displacement_Frames = u0, 
+            z0_t, Dz0_t = self.Encode(  Displacement_Frames = u0, 
                                     Velocity_Frames     = v0);
-            z0      : numpy.ndarray = z0.detach().numpy();
-            Dz0     : numpy.ndarray = Dz0.detach().numpy();
+            z0      : numpy.ndarray = z0_t.detach().numpy();
+            Dz0     : numpy.ndarray = Dz0_t.detach().numpy();
 
             # Concatenate the IC's and append them to the list.
             Z0.append([z0, Dz0]);
@@ -904,7 +906,7 @@ class Autoencoder_Pair(torch.nn.Module):
 
         dict_ = {   'reshape_shape'     : self.reshape_shape,
                     'widths'            : self.widths,
-                    'activation'        : self.activation,
+                    'activations'       : self.activations,
                     'Displacement dict' : self.cpu().Displacement_Autoencoder.export(),
                     'Velocity dict'     : self.cpu().Velocity_Autoencoder.export()};
         return dict_;
@@ -943,11 +945,11 @@ def load_Autoencoder_Pair(dict_ : dict) -> Autoencoder_Pair:
     # architecture as the one that created dict_.
     reshape_shape   : list[int] = dict_['reshape_shape'];
     widths          : list[int] = dict_['widths'];
-    activation      : str       = dict_['activation'];
+    activations     : list[str] = dict_['activations'];
 
     # Now initialize the Autoencoder_Pair.
     AEP                     = Autoencoder_Pair( widths          = widths, 
-                                                activation      = activation,
+                                                activations     = activations,
                                                 reshape_shape   = reshape_shape);
     
     # Now replace its auto-encoders.

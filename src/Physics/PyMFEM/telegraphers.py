@@ -265,14 +265,42 @@ class TelegraphersOperator(mfem.SecondOrderTimeDependentOperator):
 
 
 class Initial_Displacement(mfem.PyCoefficient):
+    def __init__(self, k : float, w : float) -> None:
+        """
+        This class defines the initial displacement for the Telegrapher's equation:
+
+            u(0, (x, y)) = exp(-k*(x^2 + y^2)) * sin(pi*w*x) * sin(pi*w*y)
+
+        ---------------------------------------------------------------------------------------------
+        Arguments
+        ---------------------------------------------------------------------------------------------
+
+        k : float
+            The decay parameter. See above.
+
+        w : float
+            The frequency parameter. See above. 
+
+
+        ---------------------------------------------------------------------------------------------
+        Returns
+        ---------------------------------------------------------------------------------------------
+
+        Nothing!
+        """
+        mfem.PyCoefficient.__init__(self);
+        self.k = k;
+        self.w = w;
+
+
+
     def EvalValue(self, X : numpy.ndarray) -> numpy.ndarray | float:   
         """
         This function returns the initial displacement for the Telegrapher's equation:
 
             u(0, (x, y)) = exp(-k*(x^2 + y^2)) * sin(pi*w*x) * sin(pi*w*y)
 
-        where k and w are global variables. See the docstring for the TelegraphersOperator class for more 
-        details.
+        where w and k are variables in self. See the initializer for more details.
 
         
 
@@ -311,9 +339,8 @@ class Initial_Displacement(mfem.PyCoefficient):
         N : int = X.shape[1];
 
         # Evaluate the initial condition.
-        global decay, freq;
         norm2 : numpy.ndarray = numpy.sum(numpy.square(X), axis = 0);
-        u     : numpy.ndarray = numpy.exp(-decay*norm2) * numpy.sin(numpy.pi * freq * X[0, :]) * numpy.sin(numpy.pi * freq * X[1, :]);
+        u     : numpy.ndarray = numpy.exp(-self.k*norm2) * numpy.sin(numpy.pi * self.w * X[0, :]) * numpy.sin(numpy.pi * self.w * X[1, :]);
 
         # Return the initial condition.
         if(N == 1):
@@ -324,6 +351,38 @@ class Initial_Displacement(mfem.PyCoefficient):
 
 
 class Initial_Velocity(mfem.PyCoefficient):
+    def __init__(self, k : float, w : float) -> None:
+        """
+        This class defines the initial velocity for the Telegrapher's equation:
+
+            (d/dt)u(0, (x, y)) = 0
+
+        ---------------------------------------------------------------------------------------------
+        Arguments
+        ---------------------------------------------------------------------------------------------
+
+        k : float
+            The decay parameter. Unused in this class, but defines the initial displacement. See that 
+            class for more details.
+
+        w : float
+            The frequency parameter. Unused in this class, but defines the initial displacement. See that 
+            class for more details.
+
+
+        ---------------------------------------------------------------------------------------------
+        Returns
+        ---------------------------------------------------------------------------------------------
+
+        Nothing!
+        """
+
+        mfem.PyCoefficient.__init__(self);
+        self.k = k;
+        self.w = w;
+
+
+
     def EvalValue(self, X : numpy.ndarray) -> numpy.ndarray | float:
         """
         This function returns the initial velocity for the Telegrapher's equation:
@@ -390,7 +449,7 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
              ode_solver_type    : int           = 10,
              t_final            : float         = 5.0,
              dt                 : float         = .01,
-             Positions          : numpy.ndarray = None,
+             Positions          : numpy.ndarray = numpy.empty(0),
              c                  : float         = 0.2,
              alpha              : float         = 0.2,
              k                  : float         = 1.0,
@@ -441,7 +500,7 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
         The time step. We solve the Telegrapher's equation using a time-stepping scheme with time step dt.
     
     Positions : numpy.ndarray, shape = (2, num_positions)
-        An optional argument. If None, we generate new positions from scratch. If it is not None, 
+        An optional argument. If empty, we generate new positions from scratch. If it is not empty, 
         then Positions should be a 2D array whose i'th row holds the position of the i'th position 
         at which we evaluate the solution.
 
@@ -494,7 +553,7 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
         i'th element holds the j'th time at which we evaluate the solution.
     """
 
-    if(Positions is not None):
+    if(Positions.size > 0):
         assert(isinstance(Positions, numpy.ndarray));
         assert(len(Positions.shape)     == 2);
         assert(Positions.shape[0]       == 2);
@@ -506,11 +565,6 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
     
     LOGGER.info("Setting up Telegrapher's equation simulation with MFEM.");
     
-    # Set the global variable decay.
-    global decay, freq;
-    decay   = k;
-    freq    = w;
-
     # Define the ODE solver used for time integration.
     LOGGER.debug("Defining the ODE solver.");
     if   ode_solver_type <= 10:
@@ -571,8 +625,8 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
     LOGGER.debug("Setting the initial conditions for U and U'(t).");
 
     # Set the initial conditions for u. All boundaries are considered natural.
-    u_0     : mfem.PyCoefficient = Initial_Displacement();
-    dudt_0  : mfem.PyCoefficient = Initial_Velocity();
+    u_0     : mfem.PyCoefficient = Initial_Displacement(k = k, w = w);
+    dudt_0  : mfem.PyCoefficient = Initial_Velocity(k = k, w = w);
 
     # Project the initial conditions onto the finite element space.
     u_gf.ProjectCoefficient(u_0);
@@ -613,7 +667,7 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
     # ---------------------------------------------------------------------------------------------
     # 6. Set up positions at which we will evaluate the solution.
 
-    if(Positions is None):
+    if(Positions.size == 0):
         LOGGER.info("Sampling %d positions in the mesh" % num_positions);
     else:
         LOGGER.info("Verifying the columns of Positions are in the problem domain");
@@ -638,7 +692,7 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
     num_valid_positions  : int = 0;
     
     while(num_valid_positions < num_positions):
-        if(Positions is None):
+        if(Positions.size == 0):
             LOGGER.debug("Sampling %d positions" % num_positions);
 
             # Sample random x,y coordinates
@@ -668,7 +722,7 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
 
         # If we have not enough valid positions, sample again.
         if(num_valid_positions < num_positions):
-            if(Positions is not None):
+            if(Positions.size > 0):
                 LOGGER.error("%d/%d elements of Positions are invalid. Aborting" % (num_valid_positions, num_positions));
                 raise ValueError("Invalid Positions");
             else:

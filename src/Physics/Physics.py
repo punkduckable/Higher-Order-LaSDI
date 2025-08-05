@@ -2,7 +2,8 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-import  logging;
+import  logging
+from typing import Dict;
 
 import  numpy;
 import  torch;
@@ -18,7 +19,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 
 class Physics:
     # spatial dimension of the problem domain.
-    spatial_dim :    int            = -1;
+    spatial_dim :    int;
     
     # The shape of each frame of a FOM solution to this equation. This is the shape of the objects
     # we will put into our autoencoder. If there is no structure to the spatial positions of the 
@@ -27,37 +28,44 @@ class Physics:
     # could be a k-element list whose i'th element specifies the size of the i'th axis. If the 
     # solution is vector-valued, the dimensionality of the solution vectors should be the leading 
     # element of Frame_Shape.
-    Frame_Shape     : list[int]     = None;
+    Frame_Shape     : list[int];
 
     # At each frame, we evaluate the solution at a fixed number of positions in the spatial portion
     # of the problem domain. This array should hold the coordinates of those positions. It may be 
     # organized as a grid of coordinates, list of coordinates, or something else. Different 
     # sub-classes will format this differently. We only use this for plotting purposes, so the 
     # exact shape doesn't really matter. 
-    X_Positions     : numpy.ndarray = None;
+    X_Positions     : numpy.ndarray;
 
     # A dictionary housing the configuration parameters for the Physics object.
-    config          : dict          = None;
+    config          : Dict;
     
     # list of parameter names to parse parameters.
-    param_names     : list[str]     = None;
+    param_names     : list[str];
 
     # The number of parameters. i.e., the length of param_names.
-    n_p             : int           = -1;
+    n_p             : int;
 
     # If true, then we can assume that for each parameter value, the t_Grid for that parameter 
     # value has uniformly sized time steps (t_Grid[i + 1] - t_Grid[i] = dt is the same for each i).
     # This allows us to use higher order finite difference schemes, for instance. 
-    Uniform_t_Grid  : bool          = False;
+    Uniform_t_Grid  : bool;
 
     # How many derivatives of the initial state do we need to fully specify the initial condition
     # of the Physics?
-    n_IC            : int           = -1;
+    n_IC            : int;
 
 
 
 
-    def __init__(self, config : dict, param_names : list[str] = None, Uniform_t_Grid : bool = False) -> None:
+    def __init__(   self, 
+                    spatial_dim     : int,
+                    Frame_Shape     : list[int],
+                    X_Positions     : numpy.ndarray,
+                    config          : dict, 
+                    param_names     : list[str], 
+                    Uniform_t_Grid  : bool,
+                    n_IC            : int) -> None:
         """
         A Physics object acts as a wrapper around a solver for a particular equation. The initial 
         condition in that function can have named parameters. Each physics object should have a 
@@ -69,6 +77,24 @@ class Physics:
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
+
+        spatial_dim: int
+            The number of spatial dimensions in the problem domain.
+
+        Frame_Shape: list[int]
+            The shape of each frame of a FOM solution to this equation. This is the shape of the 
+            objects we will put into our autoencoder. If there is no structure to the spatial 
+            positions of the nodes in each solution frame, then this may be a single element list 
+            specifying the number of nodes. On the other hand, if the nodes are organized into a 
+            grid with k axes, then this could be a k-element list whose i'th element specifies the 
+            size of the i'th axis. If the solution is vector-valued, the dimensionality of the 
+            solution vectors should be the leading element of Frame_Shape.
+        
+        X_Positions: numpy.ndarray
+            A representation of the spatial positions at which we evaluate the solution. This can
+            be a grid of coordinates, list of coordinates, or something else. Different sub-classes
+            will format this differently. We only use this for plotting purposes, so the exact 
+            shape doesn't really matter. 
 
         config: dict 
             A dictionary housing the settings for the Explicit object. This should be the "physics" 
@@ -85,6 +111,9 @@ class Physics:
             specific parameter value). The value of this setting determines which finite difference 
             method we use to compute time derivatives. 
 
+        n_IC: int
+            The number of initial conditions needed to specify the initial condition of the Physics.
+
 
         -------------------------------------------------------------------------------------------
         Returns
@@ -94,19 +123,34 @@ class Physics:
         """
 
         # Checks
+        assert(isinstance(spatial_dim, int));
+        assert(isinstance(Frame_Shape, list));
+        assert(len(Frame_Shape) > 0);
+        assert(isinstance(X_Positions, numpy.ndarray));
         assert(isinstance(config, dict));
         assert(isinstance(param_names, list));
         assert(isinstance(Uniform_t_Grid, bool));
-
+        assert(isinstance(n_IC, int));
         self.n_p            : int   = len(param_names);
         for i in range(self.n_p):
             assert(isinstance(param_names[i], str));
     
+        # Report some information for debugging purposes.
+        LOGGER.debug("Spatial dimension: %d" % spatial_dim);
+        LOGGER.debug("Frame shape: %s" % str(Frame_Shape));
+        LOGGER.debug("X positions: %s" % str(X_Positions));
+        LOGGER.debug("Uniform t grid: %s" % str(Uniform_t_Grid));
+        LOGGER.debug("Param names: %s" % str(param_names));
+        LOGGER.debug("n_IC: %d" % n_IC);
 
         # Setup.
-        self.config         : dict      = config;
-        self.param_names    : list[str] = param_names;
-        self.Uniform_t_Grid : bool      = Uniform_t_Grid;
+        self.spatial_dim    : int           = spatial_dim;
+        self.Frame_Shape    : list[int]     = Frame_Shape;
+        self.X_Positions    : numpy.ndarray = X_Positions;
+        self.config         : dict          = config;
+        self.param_names    : list[str]     = param_names;
+        self.Uniform_t_Grid : bool          = Uniform_t_Grid;
+        self.n_IC           : int           = n_IC;
         return;
     
 
@@ -182,8 +226,22 @@ class Physics:
 
         dict_ : dict = {'config'            : self.config, 
                         'param_names'       : self.param_names,
+                        'X_Positions'       : self.X_Positions,
+                        'Frame_Shape'       : self.Frame_Shape,
                         'Uniform_t_Grid'    : self.Uniform_t_Grid};
         return dict_;
+
+    def load(self, dict_ : dict) -> None:
+        """
+        Loads self's internal state from the dictionary dict_.
+        """
+
+        self.config         : dict          = dict_['config'];
+        self.param_names    : list[str]     = dict_['param_names'];
+        self.X_Positions    : numpy.ndarray = dict_['X_Positions'];
+        self.Frame_Shape    : list[int]     = dict_['Frame_Shape'];
+        self.Uniform_t_Grid : bool          = dict_['Uniform_t_Grid'];
+        return;
     
 
 

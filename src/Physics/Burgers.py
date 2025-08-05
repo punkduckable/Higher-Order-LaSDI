@@ -17,13 +17,7 @@ from    Physics             import  Physics;
 # -------------------------------------------------------------------------------------------------
 
 class Burgers(Physics):
-    # Class variables
-    a_idx = None; # parameter index for a
-    w_idx = None; # parameter index for w
-
-
-    
-    def __init__(self, config : dict, param_names : list[str] = None) -> None:
+    def __init__(self, config : dict, param_names : list[str]) -> None:
         """
         This is the initializer for the Burgers Physics class. This class essentially acts as a 
         wrapper around a 1D Burgers solver.
@@ -53,31 +47,28 @@ class Burgers(Physics):
         # Checks
         assert(isinstance(param_names, list));
         assert(len(param_names) == 2);
+        assert(isinstance(config, dict));
         assert('a' in param_names);
         assert('w' in param_names);
-
-        # Call the super class initializer.
-        super().__init__(config         = config, 
-                         param_names    = param_names, 
-                         Uniform_t_Grid = True);
-
-        # Since there is only one spatial dimension in the 1D Burgers example, dim is also 1.
-        self.spatial_dim    : int   = 1;
         
         # Make sure the config dictionary is actually for Burgers' equation.
         assert('Burgers' in config);
 
         # Other setup
-        self.n_IC           : int       = 1;
         self.n_x            : int       = config['Burgers']['n_x'];
-        self.Frame_Shape    : list[int] = [self.n_x];                                   # number of grid points along each spatial axis
         self.x_min          : float     = config['Burgers']['x_min'];                   # Minimum value of the spatial variable in the problem domain
         self.x_max          : float     = config['Burgers']['x_max'];                   # Maximum value of the spatial variable in the problem domain
         self.dx             : float     = (self.x_max - self.x_min) / (self.n_x - 1);   # Spacing between grid points along the spatial axis.
         assert(self.dx > 0.);
 
-        # Set up X_Positions. For the Burgers class, X_Positions is 1D and has shape (n_x).
-        self.X_Positions : numpy.ndarray = numpy.linspace(self.x_min, self.x_max, self.n_x, dtype = numpy.float32);
+        # Call the super class initializer.
+        super().__init__(config         = config, 
+                         spatial_dim    = 1,            # Since there is only one spatial dimension in the 1D Burgers example, dim is also 1.
+                         X_Positions    = numpy.linspace(self.x_min, self.x_max, self.n_x, dtype = numpy.float32),
+                         Frame_Shape    = [self.n_x],
+                         param_names    = param_names, 
+                         Uniform_t_Grid = True,
+                         n_IC           = 1);
 
         # Set up the maximum number of corrections and the convergence threshold.
         self.maxk                   : int   = config['Burgers']['maxk'];
@@ -127,8 +118,8 @@ class Burgers(Physics):
 
 
         # Fetch the parameter values.
-        a   : float     = param[self.a_idx];
-        w   : float     = param[self.w_idx];  
+        a   : float     = param[self.a_idx].item();
+        w   : float     = param[self.w_idx].item();  
 
         # Get the initial displacement.
         u0  : numpy.ndarray     = a * numpy.exp( -((self.X_Positions) ** 2) / 2 / w / w);
@@ -180,18 +171,18 @@ class Burgers(Physics):
         t_max   : float         = self.config['Burgers']['t_max']; 
         t_Grid  : torch.Tensor  = torch.linspace(0, t_max, n_t, dtype = torch.float32);
         if(self.Uniform_t_Grid == False):
-            r               : float = 0.2*(t_Grid[1] - t_Grid[0]);
+            r               : float = 0.2*(t_Grid[1] - t_Grid[0]).item();
             t_adjustments           = numpy.random.uniform(low = -r, high = r, size = (n_t - 2));
             t_Grid[1:-1]            = t_Grid[1:-1] + t_adjustments;
 
         # Solve the PDE!
-        new_X   : torch.Tensor  = [torch.Tensor(solver(u0                       = u0, 
-                                                       t_Grid                   = t_Grid, 
-                                                       Dx                       = self.dx, 
-                                                       maxk                     = self.maxk, 
-                                                       convergence_threshold    = self.convergence_threshold))];        
+        new_X   : list[torch.Tensor]  = [torch.Tensor(solver(   u0                       = u0, 
+                                                                t_Grid                   = t_Grid.detach().numpy(), 
+                                                                Dx                       = self.dx, 
+                                                                maxk                     = self.maxk, 
+                                                                convergence_threshold    = self.convergence_threshold))];        
 
-        # All done!
+            # All done!
         return new_X, t_Grid;
     
 
@@ -229,11 +220,13 @@ class Burgers(Physics):
         """
 
         # Run checks.
-        assert(len(U_hist.shape)     == 2);
-        assert(U_hist.shape[1]       == self.n_x);
+        assert(isinstance(U_hist, list));
+        assert(len(U_hist) == 1);
+        assert(len(U_hist[0].shape)     == 2);
+        assert(U_hist[0].shape[1]       == self.n_x);
 
         # Extract only the position data.
-        U_hist = U_hist[0];
+        U_hist0 : numpy.ndarray = U_hist[0];
 
         # Compute dt. 
         n_t     : int           = self.config['Burgers']['n_t'];
@@ -242,18 +235,18 @@ class Burgers(Physics):
 
         # First, approximate the spatial and temporal derivatives.
         # first axis is time index, and second index is spatial index.
-        dUdx    : numpy.ndarray = numpy.empty_like(U_hist);
-        dUdt    : numpy.ndarray = numpy.empty_like(U_hist);
+        dUdx    : numpy.ndarray = numpy.empty_like(U_hist0);
+        dUdt    : numpy.ndarray = numpy.empty_like(U_hist0);
 
-        dUdx[:, :-1]    = (U_hist[:, 1:] - U_hist[:, :-1]) / self.dx;   # Use forward difference for all but the last time value.
+        dUdx[:, :-1]    = (U_hist0[:, 1:] - U_hist0[:, :-1]) / self.dx;   # Use forward difference for all but the last time value.
         dUdx[:, -1]     = dUdx[:, -2];                                  # Use backwards difference for the last time value
         
-        dUdt[:-1, :]    = (U_hist[1:, :] - U_hist[:-1, :]) / dt;        # Use forward difference for all but the last position
+        dUdt[:-1, :]    = (U_hist0[1:, :] - U_hist0[:-1, :]) / dt;        # Use forward difference for all but the last position
         dUdt[-1, :]     = dUdt[-2, :];                                  # Use backwards difference for the last time value.
 
         # compute the residual + the norm of the residual.
-        r   : numpy.ndarray = dUdt - U_hist * dUdx;
-        e   : float         = numpy.linalg.norm(r);
+        r   : numpy.ndarray = dUdt - U_hist0 * dUdx;
+        e   : float         = numpy.linalg.norm(r).item();
 
         # All done!
         return r, e;
@@ -470,16 +463,16 @@ def solver(u0                       : numpy.ndarray,
             J       : numpy.ndarray = jacobian(u = un1_guess, c = c_n, idx_m1 = idx_m1, n_x = n_x);
 
             # Solve Newton correction J * dun1 = -r
-            dun1    : numpy.ndarray = spsolve(J, -r);
+            dun1    : numpy.ndarray = numpy.array(spsolve(J, -r));
 
             # Update guess
             un1_guess = un1_guess + dun1;
 
             # Recompute residual
-            r : numpy.ndarray = residual_burgers(un = u[n, :-1], un1_guess = un1_guess, c = c_n, idx_m1 = idx_m1);
+            r = residual_burgers(un = u[n, :-1], un1_guess = un1_guess, c = c_n, idx_m1 = idx_m1);
 
             # Check convergence: relative residual drop
-            rel_residual : numpy.ndarray = numpy.linalg.norm(r) / numpy.linalg.norm(u[n, :-1]);
+            rel_residual : float = numpy.linalg.norm(r).item() / numpy.linalg.norm(u[n, :-1]).item();
             if rel_residual < convergence_threshold:
                 # Accept update and enforce periodic BC
                 u[n + 1, :-1] = un1_guess;

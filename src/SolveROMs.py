@@ -35,7 +35,7 @@ def average_rom(model           : torch.nn.Module,
                 latent_dynamics : LatentDynamics, 
                 gp_list         : list[GaussianProcessRegressor], 
                 param_grid      : numpy.ndarray,
-                t_Grid          : list[numpy.ndarray] | list[torch.Tensor]) -> list[numpy.ndarray]:
+                t_Grid          : list[numpy.ndarray | torch.Tensor]) -> list[numpy.ndarray]:
     """
     This function simulates the latent dynamics for a set of parameter values by using the mean of
     the posterior distribution for each coefficient's posterior distribution. Specifically, for 
@@ -147,7 +147,7 @@ def sample_roms(model           : torch.nn.Module,
                 latent_dynamics : LatentDynamics, 
                 gp_list         : list[GaussianProcessRegressor], 
                 param_grid      : numpy.ndarray, 
-                t_Grid          : list[numpy.ndarray] | list[torch.Tensor],
+                t_Grid          : list[numpy.ndarray | torch.Tensor],
                 n_samples       : int) ->           list[list[numpy.ndarray]]:
     """
     This function samples the latent coefficients, solves the corresponding latent dynamics, and 
@@ -476,7 +476,7 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
 
 
 
-def Compute_Error_and_STD(  model           : torch.nn.Module,
+def Rollout_Error_and_STD(  model           : torch.nn.Module,
                             physics         : Physics,
                             param_space     : ParameterSpace,
                             latent_dynamics : LatentDynamics,
@@ -486,12 +486,21 @@ def Compute_Error_and_STD(  model           : torch.nn.Module,
                             n_samples       : int,
                             skip_proportion : float) -> tuple[numpy.ndarray, numpy.ndarray, list[list[numpy.ndarray]], list[list[numpy.ndarray]]]:
     """
-    This function compute the STD of each frame of each derivative of the FOM solution for
-    each combination of the parameter values. Likewise, we compute the relative error between the
-    mean predicted solution and the true solution for each frame of each derivative of the 
-    FOM solution for each combination of parameter values. We then find the maximum STD and 
-    relative error (across the frames and components) for each derivative for each combination
-    of parameter values.
+    This function computes the relative error and STD between the FOM solution and its 
+    prediction when we rollout the FOM solution using the the ICs and mean of the posterior 
+    distribution of the coefficients for each combination of parameter values.
+    
+    To do this, we first sample the posterior distribution of the coefficients for each combination 
+    of parameter values and solve the latent dynamics forward in time using each sample (as well as
+    the mean of the posterior distribution). We then decode the latent trajectories to get a set of 
+    FOM solutions. We then compute the relative error between the mean predicted solution and the 
+    true solution for each frame of each derivative of the FOM solution for each combination of 
+    parameter values. We then find the maximum relative error (across the frames and components) 
+    for each derivative for each combination of parameter values. 
+    
+    We also compute the STD (across the samples) of each frame of each derivative of the FOM 
+    solution for each combination of the parameter values. We then find the maximum STD (across 
+    the frames and components) for each derivative for each combination of parameter values.
 
     Note: If X_1, ... , X_M \in \mathbb{R}^N are vectors then the STD of this collection is the 
     vector whose i'th component holds the (sample) STD of {X_1[i], ... , X_M[i]}.

@@ -90,7 +90,7 @@ def RK1(f       : Callable,
     N : int = t_Grid.size;
 
     # Initialize list to hold the results.
-    Y_list : list[torch.Tensor] | list[numpy.ndarray] = [y0];
+    Y_list : list[torch.Tensor | numpy.ndarray] = [y0];
 
     # Now, run the time stepping!
     for n in range(N - 1):
@@ -112,7 +112,7 @@ def RK1(f       : Callable,
     if(isinstance(y0, numpy.ndarray)):
         Y = numpy.stack(Y_list, axis = 0);  # shape = (n_t, y0.shape)
     elif(isinstance(y0, torch.Tensor)):
-        Y = torch.stack(Y_list, axis = 0);  # shape = (n_t, y0.shape)
+        Y = torch.stack(Y_list, dim = 0);  # shape = (n_t, y0.shape)
 
     # All done!
     return Y;
@@ -184,7 +184,7 @@ def RK2(f       : Callable,
     N : int = t_Grid.size;
 
     # Initialize list to hold the results.
-    Y_list : list[torch.Tensor] | list[numpy.ndarray] = [y0];
+    Y_list : list[torch.Tensor | numpy.ndarray] = [y0];
 
     # Now, run the time stepping!
     for n in range(N - 1):
@@ -207,7 +207,7 @@ def RK2(f       : Callable,
     if(isinstance(y0, numpy.ndarray)):
         Y = numpy.stack(Y_list, axis = 0);  # shape = (n_t, y0.shape)
     elif(isinstance(y0, torch.Tensor)):
-        Y = torch.stack(Y_list, axis = 0);  # shape = (n_t, y0.shape)
+        Y = torch.stack(Y_list, dim = 0);  # shape = (n_t, y0.shape)
 
     # All done!
     return Y;
@@ -288,7 +288,7 @@ def RK4(f       : Callable,
     N : int = t_Grid.size;
 
     # Initialize list to hold the results.
-    Y_list : list[torch.Tensor] | list[numpy.ndarray] = [y0];
+    Y_list : list[torch.Tensor | numpy.ndarray] = [y0];
 
     # Now, run the time stepping!
     for n in range(N - 1):
@@ -313,8 +313,7 @@ def RK4(f       : Callable,
     if(isinstance(y0, numpy.ndarray)):
         Y = numpy.stack(Y_list, axis = 0);  # shape = (n_t, y0.shape)
     elif(isinstance(y0, torch.Tensor)):
-        Y = torch.stack(Y_list, axis = 0);  # shape = (n_t, y0.shape)
+        Y = torch.stack(Y_list, dim = 0);  # shape = (n_t, y0.shape)
 
     # All done!
     return Y;
-    

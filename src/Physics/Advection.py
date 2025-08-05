@@ -14,7 +14,7 @@ from    scipy.special                   import  erfc;
 import  torch;
 
 from    Physics                         import  Physics;
-from    advection                       import  Simulate;
+from    advection                       import  Simulate, Initial_Displacement;
 
 
 LOGGER : logging.Logger = logging.getLogger(__name__);
@@ -27,8 +27,8 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class Advection(Physics):
-    def __init__(self, config : dict, param_names : list[str] = None) -> None:
-        """
+    def __init__(self, config : dict, param_names : list[str] = []) -> None:
+        r"""
         Initialize an Advection object. This class acts as a wrapper around the MFEM-based solver 
         implemented in ``advection.py`` within the ``PyMFEM`` sub-directory. The solver models 
         the transport of a scalar quantity on a two dimensional domain. Specifically, it solves 
@@ -75,22 +75,23 @@ class Advection(Physics):
         assert('g' in param_names);
         assert('Advection' in config);
 
-        # Call the super class initializer.
-        super().__init__(config         = config,
-                         param_names    = param_names,
-                         Uniform_t_Grid = False);
 
         # Run a short simulation to determine the frame shape and positions.
         Sol, X, T, bb_min, bb_max           = Simulate(t_final = 0, VisIt = False);
-        self.Frame_Shape    : list[int]     = list(Sol.shape[1:]);
-        self.X_Positions    : numpy.ndarray = numpy.copy(X);            # shape = (2, N)
         self.bb_min         : numpy.ndarray = numpy.copy(bb_min);
         self.bb_max         : numpy.ndarray = numpy.copy(bb_max);
-        LOGGER.debug("Frame shape: %s" % str(self.Frame_Shape));
 
-        # Since there are two spatial dimensions, set spatial_dim accordingly.
-        self.spatial_dim    : int           = 2;
-        self.n_IC           : int           = 1;
+        # Call the super class initializer.
+        super().__init__(spatial_dim    = 2,
+                         Frame_Shape    = list(Sol.shape[1:]),
+                         X_Positions    = numpy.copy(X),
+                         config         = config,
+                         param_names    = param_names,
+                         Uniform_t_Grid = False,
+                         n_IC           = 1);
+
+        # Record the default value of k (for the initial condition).
+        self.k              : float         = 1.0;
 
         # Make sure the config dictionary is actually for the advection model.
         self.w_idx  : int   = self.param_names.index('w');
@@ -134,14 +135,15 @@ class Advection(Physics):
         assert(param.shape[0]   == self.n_p);
         assert(self.X_Positions is not None);
 
-        # Bounding box used to non-dimensionalize the coordinates.
-        center : numpy.ndarray = (self.bb_min + self.bb_max) / 2.0;
-        X      : numpy.ndarray = 2.0 * (self.X_Positions - center.reshape(-1, 1)) / (self.bb_max - self.bb_min).reshape(-1, 1);
+        # Fetch the parameters.
+        w : float = param[self.w_idx];
+
+        # Initialize the initial condition classes.
+        initial_displacement : Initial_Displacement = Initial_Displacement(bb_min = self.bb_min, bb_max = self.bb_max, k = self.k, w = w);
 
         # Evaluate the initial condition.
-        k       : float         = 1.0;
-        u0     : numpy.ndarray  = numpy.exp(-k*numpy.sum(numpy.square(X), axis = 0)) * numpy.sin(numpy.pi * param[self.w_idx] * X[0]) * numpy.sin(numpy.pi * param[self.w_idx] * X[1]);
-        return [u0.reshape(1, -1)];
+        u0     : numpy.ndarray  = initial_displacement.EvalValue(self.X_Positions); # shape = (2, N)
+        return [u0];
 
 
 
@@ -178,7 +180,7 @@ class Advection(Physics):
         assert(param.shape[0]   == self.n_p);
 
         # Solve the PDE using the external MFEM script.
-        Sol, _, Times, _, _ = Simulate(w = param[self.w_idx], g = param[self.g_idx], Positions = self.X_Positions, VisIt = False);
+        Sol, _, Times, _, _ = Simulate(w = param[self.w_idx], k = self.k, g = param[self.g_idx], Positions = self.X_Positions, VisIt = False);
 
         X       : list[torch.Tensor] = [torch.Tensor(Sol)];
         t_Grid  : torch.Tensor       = torch.Tensor(Times);

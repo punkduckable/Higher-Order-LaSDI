@@ -27,7 +27,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class velocity_coeff(mfem.VectorPyCoefficient):
-    def __init__(self, dim : int, bb_min : numpy.ndarray, bb_max : numpy.ndarray) -> None:
+    def __init__(self, dim : int, bb_min : numpy.ndarray, bb_max : numpy.ndarray, gamma : float) -> None:
         """
         Initialize a velocity_coeff object. This class is used to define the velocity field for the 
         advection problem. If dim = 2, the velocity field is defined by
@@ -35,8 +35,31 @@ class velocity_coeff(mfem.VectorPyCoefficient):
             v(x, y) = d(x, y)* gamma * (y, -x)
 
         where d(x, y) = max((x + 1)*(1 - x), 0.) * max((y + 1)*(1 - y), 0.) takes on non-zero 
-        values in [-1, 1] x [-1, 1] and is zero outside of this domain. Further, gamma is a 
-        global.
+        values in [-1, 1] x [-1, 1] and is zero outside of this domain. 
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+        
+        dim : int
+            The dimension of the velocity field.
+
+        bb_min : numpy.ndarray, shape = (dim,)
+            The minimum coordinates of the bounding box.
+
+        bb_max : numpy.ndarray, shape = (dim,)
+            The maximum coordinates of the bounding box.
+
+        gamma : float
+            The parameter in the velocity field. See above.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+        
+        Nothing!
         """
 
         # Run checks
@@ -54,6 +77,7 @@ class velocity_coeff(mfem.VectorPyCoefficient):
         self.dim        : int           = dim;
         self.bb_min     : numpy.ndarray = bb_min;
         self.bb_max     : numpy.ndarray = bb_max;
+        self.gamma      : float         = gamma;
 
 
 
@@ -91,24 +115,24 @@ class velocity_coeff(mfem.VectorPyCoefficient):
 
         # map to the reference [-1,1] domain
         X : numpy.ndarray = 2 * (x - center) / (bb_max - bb_min);
-        
-        # Clockwise twisting rotation in 2D around the origin
-        global gamma;
+
+        # Get the velocity field. (Clockwise twisting rotation in 2D around the origin
         d : float = max((X[0] + 1.)*(1. - X[0]), 0.) * max((X[1] + 1.)*(1. - X[1]), 0.);
         d : float = d ** 2;
-        if self.dim == 1:
-            v : list[float] = [1.0, ]
-        elif self.dim == 2:
-            v : list[float] = [d*gamma*X[1],  - d*gamma*X[0]]
-        elif self.dim == 3:
-            v : list[float] = [d*gamma*X[1],  - d*gamma*X[0],  0]
 
-        return v
+        if self.dim == 1:
+            v : list[float] = [1.0];
+        elif self.dim == 2:
+            v : list[float] = [d*self.gamma*X[1],  - d*self.gamma*X[0]];
+        elif self.dim == 3:
+            v : list[float] = [d*self.gamma*X[1],  - d*self.gamma*X[0],  0];
+
+        return v;
 
 
 
 class Initial_Displacement(mfem.PyCoefficient):
-    def __init__(self, bb_min : numpy.ndarray, bb_max : numpy.ndarray):
+    def __init__(self, bb_min : numpy.ndarray, bb_max : numpy.ndarray, k : float, w : float):
         """
         Initialize a Initial_Displacement object. This class is used to define the initial 
         condition for the advection problem. The initial condition is defined by
@@ -121,6 +145,30 @@ class Initial_Displacement(mfem.PyCoefficient):
             y~ = 2 * (y - center) / (bb_max - bb_min)
 
         where center = (bb_min + bb_max) / 2.0.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+        
+        bb_min : numpy.ndarray, shape = (2,)
+            The minimum coordinates of the bounding box.
+
+        bb_max : numpy.ndarray, shape = (2,)
+            The maximum coordinates of the bounding box.
+
+        k : float   
+            The decay parameter. See above.
+
+        w : float
+            The frequency parameter. See above. 
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+        
+        Nothing!
         """
 
         # Run checks
@@ -135,10 +183,12 @@ class Initial_Displacement(mfem.PyCoefficient):
         # Now set problem specific attributes.
         self.bb_min : numpy.ndarray = bb_min;
         self.bb_max : numpy.ndarray = bb_max;
+        self.k      : float         = k;
+        self.w      : float         = w;
 
 
 
-    def EvalValue(self, x : numpy.ndarray) -> float:
+    def EvalValue(self, x : numpy.ndarray) -> numpy.ndarray:
         """
         This function returns the initial condition for the advection problem:
 
@@ -149,38 +199,60 @@ class Initial_Displacement(mfem.PyCoefficient):
             x~ = 2 * (x - center) / (bb_max - bb_min)
             y~ = 2 * (y - center) / (bb_max - bb_min)
 
-        where center = (bb_min + bb_max) / 2.0.
+        where center = (bb_min + bb_max) / 2.0 and k, w are parameters in self. See the initializer 
+        for more details.
 
         
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
-        x : numpy.ndarray, shape = (2,)
+        
+        x : numpy.ndarray, shape = (2, N) or (2)
             The position at which to evaluate the initial condition. The first element is the 
-            x-coordinate, and the second element is the y-coordinate.
+            x-coordinate, and the second element is the y-coordinate. If x.shape = (2, N), then 
+            x[:, j] is the j'th position at which to evaluate the initial condition. If x.shape = (2), 
+            then x is a scalar holding the position at which to evaluate the initial condition.
 
             
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
         
-        float
-            The value of the initial condition at the given position.
+        u : numpy.ndarray, shape = (1, N)
+            The value of the initial condition at the given position. If x.shape = (2, N), then 
+            u[:, j] is the value of the initial condition at the j'th position. If x.shape = (2), 
+            then u is a scalar holding the value of the initial condition at the lone position in x.
         """
 
         assert(isinstance(x, numpy.ndarray));
-        assert(x.shape == (2,));
+        assert(x.shape[0] == 2);
 
-        # Get the center of the bounding box.
-        center : float = (self.bb_min + self.bb_max)/2.0;
+        # Get the center and width of the bounding box.
+        center : numpy.ndarray = (self.bb_min + self.bb_max)/2.0;       # shape = (2,)
+        width  : numpy.ndarray = (self.bb_max - self.bb_min)/2.0;      # shape = (2,)
+
+        # Reshape center, width to have shape (2, 1)
+        center = center.reshape(2, 1);
+        width  = width.reshape(2, 1);
+
+        # Get the number of points.
+        if(len(x.shape) == 1):
+            x = x.reshape(2, 1);
+
+        # Get the number of points.
+        N : int = x.shape[1];
 
         # Map to the reference [-1,1] domain.
-        X : numpy.ndarray = 2 * (x - center) / (self.bb_max - self.bb_min);
+        X : numpy.ndarray = 2 * (x - center) / width; # shape = (2, N)
         
         # Return the initial condition.
-        global freq, decay;
-        norm2 : float = numpy.sum(numpy.square(X),);
-        return numpy.exp(-decay*norm2) * numpy.sin(numpy.pi * freq * X[0]) * numpy.sin(numpy.pi * freq * X[1])
+        norm2 : numpy.ndarray = numpy.sum(numpy.square(X), axis = 0); # shape = (N,)
+        u     : numpy.ndarray = numpy.exp(-self.k*norm2) * numpy.sin(numpy.pi * self.w * X[0]) * numpy.sin(numpy.pi * self.w * X[1]); # shape = (N)
+
+        if(N == 1):
+            return u[0];
+        else:
+            return u.reshape(1, N);
 
 
 
@@ -298,9 +370,9 @@ class AdvectionOperator(mfem.PyTimeDependentOperator):
         b.Assemble();                                                                       # Computes b(\phi_i) = \int_{Bd(\Omega)} g(v(X) \cdot \phi_i(X)) using the basis functions in fespace.
 
         # Build matrices to hold M, K, and b in the expression above
-        self.Mmat : mfem._par.hypre.HypreParMatrix = M.ParallelAssemble();
-        self.Kmat : mfem._par.hypre.HypreParMatrix = K.ParallelAssemble();
-        self.bvec : mfem._par.hypre.HypreParVector = b.ParallelAssemble();
+        self.Mmat : mfem.HypreParMatrix = M.ParallelAssemble();
+        self.Kmat : mfem.HypreParMatrix = K.ParallelAssemble();
+        self.bvec : mfem.HypreParVector = b.ParallelAssemble();
 
         # Initialize the solver and preconditioner for Mult (see below).
         self.M_prec     : mfem.HypreSmoother    = mfem.HypreSmoother();
@@ -345,7 +417,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
                 ode_solver_type     : int           = 4,
                 t_final             : float         = 5.0,
                 time_step_size      : float         = 0.01,
-                Positions           : numpy.ndarray = None,
+                Positions           : numpy.ndarray = numpy.empty(0),
                 g                   : float         = numpy.pi/2,
                 k                   : float         = 1.0,
                 w                   : float         = 1.0,
@@ -388,7 +460,6 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
         specifies which ODE solver we should use
             1   - Backward Euler
             2   - RK2
-            3   - RK3
             4   - RK4
             6   - RK6
     
@@ -400,7 +471,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
         specifies the time step size.
 
     Positions : numpy.ndarray, shape = (2, num_positions)
-        An optional argument. If None, we generate new positions from scratch. If it is not None, 
+        An optional argument. If empty, we generate new positions from scratch. If it is not empty, 
         then Positions should be a 2D array whose i'th row holds the position of the i'th position 
         at which we evaluate the solution.
 
@@ -450,7 +521,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
         The maximum coordinates of the bounding box.
     """
 
-    if(Positions is not None):
+    if(Positions.size > 0):
         assert(isinstance(Positions, numpy.ndarray));
         assert(len(Positions.shape)     == 2);
         assert(Positions.shape[0]       == 2);
@@ -469,21 +540,15 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
 
     # Set variables.
     dt                  : float = time_step_size;
-    global gamma; global freq; global decay;
-    gamma   = g;
-    freq    = w;
-    decay   = k;
 
     # Define the ODE solver used for time integration. Several explicit Runge-Kutta methods are 
     # available.
     LOGGER.debug("Selecting the ODE solver");
-    ode_solver = None;  
+    ode_solver : mfem.ODESolver; 
     if ode_solver_type == 1:
         ode_solver = mfem.ForwardEulerSolver();
     elif ode_solver_type == 2:
         ode_solver = mfem.RK2Solver(1.0);
-    elif ode_solver_type == 3:
-        ode_solver = mfem.RK3SSolver();
     elif ode_solver_type == 4:
         ode_solver = mfem.RK4Solver();
     elif ode_solver_type == 6:
@@ -520,7 +585,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
     # Setup the parallel mesh and refine it.
     if(myid == 0): LOGGER.debug("Setting up the parallel mesh");
     pmesh = mfem.ParMesh(MPI.COMM_WORLD, mesh);
-    for k in range(par_ref_levels):
+    for i in range(par_ref_levels):
         pmesh.UniformRefinement();
 
 
@@ -546,20 +611,20 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
     # 4. Define the initial condition objects.
     
     if(myid == 0): LOGGER.debug("Setting up the coefficient objects.");
-    velocity    = velocity_coeff(dim, bb_min, bb_max);
+    velocity    = velocity_coeff(dim, bb_min, bb_max, g);
     inflow      = inflow_coeff();
-    u0          = Initial_Displacement(bb_min, bb_max); 
+    u0          = Initial_Displacement(bb_min, bb_max, k, w); 
 
     # Project the initial condition onto the finite element space.
     u_gf.ProjectCoefficient(u0);
-    U       : mfem._par.hypre.HypreParVector        = u_gf.GetTrueDofs();
+    U       : mfem.HypreParVector        = u_gf.GetTrueDofs();
 
 
 
     # ---------------------------------------------------------------------------------------------
     # 5. Set up positions at which we will evaluate the solution.
 
-    if(Positions is None):
+    if(Positions.size == 0):
         if(myid == 0): LOGGER.info("Sampling %d positions in the mesh" % num_positions);
     else:
         if(myid == 0): LOGGER.info("Verifying the columns of Positions are in the problem domain");
@@ -584,7 +649,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
     num_valid_positions  : int = 0;
     
     while(num_valid_positions < num_positions):
-        if(Positions is None):
+        if(Positions.size == 0):
             if(myid == 0): LOGGER.debug("Sampling %d positions" % num_positions);
 
             # Sample random x,y coordinates
@@ -614,7 +679,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
 
         # If we have not enough valid positions, sample again.
         if(num_valid_positions < num_positions):
-            if(Positions is not None):
+            if(Positions.size > 0):
                 if(myid == 0): LOGGER.error("%d/%d elements of Positions are invalid. Aborting" % (num_valid_positions, num_positions));
                 raise ValueError("Invalid Positions");
             else:

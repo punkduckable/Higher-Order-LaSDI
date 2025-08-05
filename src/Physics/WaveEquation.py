@@ -27,7 +27,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class WaveEquation(Physics):
-    def __init__(self, config : dict, param_names : list[str] = None) -> None:
+    def __init__(self, config : dict, param_names : list[str]) -> None:
         """
         Initialize a WaveEquation object. This class acts as a wrapper around the MFEM-based solver 
         implemented in ``wave_equation.py`` within the ``PyMFEM`` sub-directory. The solver models 
@@ -71,20 +71,17 @@ class WaveEquation(Physics):
         assert('k' in param_names);
         assert('WaveEquation' in config);
 
-        # Call the super class initializer.
-        super().__init__(config         = config,
-                         param_names    = param_names,
-                         Uniform_t_Grid = False);
-
         # Run a short simulation to determine the frame shape and positions.
         U, DtU, X, T                        = Simulate(t_final = 0, VisIt = False);
-        self.Frame_Shape    : list[int]     = list(U.shape[1:]);
-        self.X_Positions    : numpy.ndarray = numpy.copy(X);            # shape = (2, N)    
-        LOGGER.debug("Frame shape: %s" % str(self.Frame_Shape));
 
-        # Since there are two spatial dimensions, set spatial_dim accordingly.
-        self.spatial_dim    : int           = 2;
-        self.n_IC           : int           = 2;
+        # Call the super class initializer.
+        super().__init__(config         = config,
+                         spatial_dim    = 2,
+                         X_Positions    = numpy.copy(X),
+                         Frame_Shape    = list(U.shape[1:]),
+                         param_names    = param_names,
+                         Uniform_t_Grid = False,
+                         n_IC           = 2);
 
         # Determine which index corresponds to c (wave speed) and which to k (decay rate in the IC).
         self.c_idx  : int   = self.param_names.index('c');
@@ -133,20 +130,15 @@ class WaveEquation(Physics):
 
         # Fetch the parameters.
         k : float = param[self.k_idx];
-        c : float = param[self.c_idx];
-
-        # Set the global variables.
-        global decay;
-        decay  = k;
 
         # Initialize the initial condition classes.
-        initial_displacement : Initial_Displacement = Initial_Displacement();
-        initial_velocity     : Initial_Velocity     = Initial_Velocity();
+        initial_displacement : Initial_Displacement = Initial_Displacement(k = k);
+        initial_velocity     : Initial_Velocity     = Initial_Velocity(k = k);
 
         # Evaluate the initial condition.
-        u0 : numpy.ndarray = initial_displacement.EvalValue(self.X_Positions);
-        v0 : numpy.ndarray = initial_velocity.EvalValue(self.X_Positions);
-        
+        u0 : numpy.ndarray = initial_displacement.EvalValue(self.X_Positions);     # shape = (1, N)
+        v0 : numpy.ndarray = initial_velocity.EvalValue(self.X_Positions);         # shape = (1, N)
+
         # Return the initial conditions.
         return [u0, v0];
 

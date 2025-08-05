@@ -25,7 +25,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class Telegraphers(Physics):
-    def __init__(self, config : dict, param_names : list[str] = None) -> None:
+    def __init__(self, config : dict, param_names : list[str]) -> None:
         """
         Initialize a Telegraphers object. This class acts as a wrapper around the MFEM-based solver 
         implemented in ``Telegraphers.py`` within the ``PyMFEM`` sub-directory. We solve the 
@@ -69,20 +69,21 @@ class Telegraphers(Physics):
         assert('w'              in param_names);
         assert('Telegraphers'   in config);
 
-        # Call the super class initializer.
-        super().__init__(config         = config,
-                         param_names    = param_names,
-                         Uniform_t_Grid = False);
 
         # Run a short simulation to determine the frame shape and positions.
         U, DtU, X, T                        = Simulate(t_final = 0, VisIt = False);
-        self.Frame_Shape    : list[int]     = list(U.shape[1:]);
-        self.X_Positions    : numpy.ndarray = numpy.copy(X);            # shape = (2, N)    
-        LOGGER.debug("Frame shape: %s" % str(self.Frame_Shape));
 
-        # Since there are two spatial dimensions, set spatial_dim accordingly.
-        self.spatial_dim    : int           = 2;
-        self.n_IC           : int           = 2;
+        # Call the super class initializer.
+        super().__init__(config         = config,
+                         spatial_dim    = 2,
+                         X_Positions    = numpy.copy(X),
+                         Frame_Shape    = list(U.shape[1:]),
+                         param_names    = param_names,
+                         Uniform_t_Grid = False,
+                         n_IC           = 2);
+
+        # Record the default value of k (for the initial condition).
+        self.k              : float         = 1.0;
 
         # Determine which index corresponds to k (frequency of peaks in the IC) and alpha (controls 
         # the coefficient of the of the (d/dt)U term in the PDE).
@@ -134,13 +135,9 @@ class Telegraphers(Physics):
         alpha   : float = param[self.alpha_idx];
         w       : float = param[self.w_idx];
 
-        # Set the global variables.
-        global freq;
-        freq  = w;
-
         # Initialize the initial condition classes.
-        initial_displacement : Initial_Displacement = Initial_Displacement();
-        initial_velocity     : Initial_Velocity     = Initial_Velocity();
+        initial_displacement : Initial_Displacement = Initial_Displacement(w = w, k = self.k);
+        initial_velocity     : Initial_Velocity     = Initial_Velocity(w = w, k = self.k);
 
         # Evaluate the initial condition.
         u0 : numpy.ndarray = initial_displacement.EvalValue(self.X_Positions);
@@ -185,7 +182,7 @@ class Telegraphers(Physics):
         assert(param.shape[0]   == self.n_p);
 
         # Solve the PDE using the external MFEM script.
-        U, DtU, _, Times = Simulate(w = param[self.w_idx], alpha = param[self.alpha_idx], Positions = self.X_Positions, VisIt = True);
+        U, DtU, _, Times = Simulate(w = param[self.w_idx], alpha = param[self.alpha_idx], k = self.k, Positions = self.X_Positions, VisIt = True);
 
         X       : list[torch.Tensor] = [torch.Tensor(U), torch.Tensor(DtU)];
         t_Grid  : torch.Tensor       = torch.Tensor(Times);

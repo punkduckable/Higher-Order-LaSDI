@@ -72,9 +72,9 @@ class LatentDynamics:
         """
 
         # Set class variables.
-        self.n_z                : int           = n_z;
-        self.coef_norm_order    : str | float   = coef_norm_order; 
-        self.Uniform_t_Grid     : bool          = Uniform_t_Grid;
+        self.n_z             = n_z;
+        self.coef_norm_order = coef_norm_order; 
+        self.Uniform_t_Grid  = Uniform_t_Grid;
 
         # There must be at least one latent dimension and there must be at least 1 time step.
         assert(self.n_z > 0);
@@ -87,7 +87,7 @@ class LatentDynamics:
     def calibrate(  self, 
                     Latent_States   : list[list[torch.Tensor]], 
                     t_Grid          : list[torch.Tensor], 
-                    input_coefs     : list[torch.Tensor] = None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+                    input_coefs     : list[torch.Tensor] = []) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         The user must implement this class on any latent dynamics sub-class. Each latent dynamics 
         object should implement a parameterized model for the dynamics in the latent space. A 
@@ -119,9 +119,9 @@ class LatentDynamics:
 
         input_coefs : list[torch.Tensor], len = n_param, optional
             The i'th element of this list is a 1d tensor of shape (n_coefs) holding the 
-            coefficients for the i'th combination of parameter values. If input_coefs is None, 
-            input_coefs is None, then we will learn the coefficients using Least Squares. If 
-            input_coefs is not None, then we will use the provided coefficients to compute the 
+            coefficients for the i'th combination of parameter values. If input_coefs is empty, 
+            input_coefs is empty, then we will learn the coefficients using Least Squares. If 
+            input_coefs is not empty, then we will use the provided coefficients to compute the 
             loss.
 
         
@@ -152,8 +152,8 @@ class LatentDynamics:
 
     def simulate(   self,
                     coefs   : numpy.ndarray             | torch.Tensor, 
-                    IC      : list[list[numpy.ndarray]] | list[list[torch.Tensor]],
-                    t_Grid  : list[numpy.ndarray]       | list[torch.Tensor]) -> list[list[numpy.ndarray]]  | list[list[torch.Tensor]]:
+                    IC      : list[list[numpy.ndarray   | torch.Tensor]],
+                    t_Grid  : list[numpy.ndarray        | torch.Tensor]) -> list[list[numpy.ndarray | torch.Tensor]]:
         """
         Time integrates the latent dynamics from multiple initial conditions for each combination
         of coefficients in coefs. 

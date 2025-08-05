@@ -78,14 +78,14 @@ def main():
     Log_Dictionary(LOGGER = LOGGER, D = config, level = logging.DEBUG);
 
     # Check if we are loading from a restart or not. If so, load it.
-    use_restart : bool = config['workflow']['use_restart'];
-    restart_filename : str = None;
+    use_restart         : bool  = config['workflow']['use_restart'];
+    restart_filename    : str   = "";
     if (use_restart == True):
         restart_filename : str = config['workflow']['restart_file'];
-        LOGGER.debug("Loading from restart (%s)" % restart_filename);
+        LOGGER.info("Loading from restart (%s)" % restart_filename);
 
-        from pathlib import Path
-        Path(os.path.dirname(restart_filename)).mkdir(parents = True, exist_ok = True);
+        # Set up the restart path.
+        restart_path : str = os.path.join(os.path.join(os.path.pardir, "results"), restart_filename);
     
     LOGGER.info("Done! Took %fs" % (time.perf_counter() - timer));
 
@@ -98,13 +98,17 @@ def main():
     # Determine what the next step is. If we are loading from a restart, then the restart should
     # have logged then next step. Otherwise, we set the next step to "PickSample", which will 
     # prompt the code to set up the training set of parameters.
-    if ((use_restart == True) and (os.path.isfile(restart_filename))):
+    if (use_restart == True):
+        if(os.path.isfile(restart_path) == False):
+            LOGGER.error("Restart file (%s) does not exist. Stopping the workflow." % restart_path);
+            exit();
+        
         # TODO(kevin): in long term, we should switch to hdf5 format.
-        restart_dict    = numpy.load(restart_filename, allow_pickle = True).item();
+        restart_dict    = numpy.load(restart_path, allow_pickle = True).item();
         next_step       = restart_dict['next_step'];
         result          = restart_dict['result'];
     else:
-        restart_dict    = None;
+        restart_dict    = {};
         next_step       = NextStep.RunSample;
         result          = Result.Unexecuted;
     
@@ -126,12 +130,26 @@ def main():
 
 
     # ---------------------------------------------------------------------------------------------
-    # Plot!
+    # Save!
     # ---------------------------------------------------------------------------------------------
 
+    # Save!
+    LOGGER.info("Saving results to %s" % restart_filename);
+    Save(   param_space         = param_space,
+            config              = config,
+            physics             = physics,
+            model               = model, 
+            latent_dynamics     = latent_dynamics,
+            trainer             = trainer,
+            next_step           = next_step,
+            result              = result,
+            restart_filename    = restart_filename);
+
+
 
     # ---------------------------------------------------------------------------------------------
-    # Setup 
+    # Plot Setup
+    # ---------------------------------------------------------------------------------------------
 
     # Set up gaussian processes. 
     model.cpu();
@@ -139,8 +157,20 @@ def main():
     # Get a GP for each coefficient in the latent dynamics.
     gp_list         : list[GaussianProcessRegressor]    = fit_gps(param_space.train_space, trainer.best_coefs);
 
-    # Plot the latent trajectories for this combination of parameter values.
+    # Figure out which elements of the test set are in the training set.
+    in_train_set : torch.Tensor = torch.zeros(param_space.n_test(), dtype = torch.bool);
+    for i in range(param_space.n_train()):
+        for j in range(param_space.n_test()):
+            if(numpy.all(param_space.train_space[i, :] == param_space.test_space[j, :])):
+                in_train_set[j] = True;
+                break;
+
+    # Now, randomly sample an element of the test set that isn't in the training set.
     i_random    : int   = random.randrange(0, param_space.n_test());
+    while(in_train_set[i_random] == True):
+        i_random    : int   = random.randrange(0, param_space.n_test());
+    
+    # Plot the latent trajectories for the i_random'th element of the test set.
     Plot_Latent_Trajectories(  physics         = physics,
                                model           = model,
                                latent_dynamics = latent_dynamics,
@@ -152,36 +182,34 @@ def main():
                                file_prefix     = config["physics"]["type"],
                                figsize         = (15, 13));
 
-    gp_pred_mean, gp_pred_std   = eval_gp(gp_list, param_space.test_space);
-    gp_pred_mean                = gp_pred_mean.reshape(param_space.test_grid_sizes + [-1]);
-    gp_pred_std                 = gp_pred_std.reshape(param_space.test_grid_sizes + [-1]); 
-
+    # Compute the relative error between the FOM solution and its prediction when we rollout the 
+    # IC using the model.
     skip_proportion : float = .05;
-    Max_Rel_Error, Max_STD, Rel_Error, STD  = SolveROMs.Compute_Error_and_STD(
-                                                model           = model, 
-                                                physics         = physics,
-                                                param_space     = param_space,
-                                                latent_dynamics = latent_dynamics,
-                                                gp_list         = gp_list,
-                                                t_Test          = trainer.t_Test,
-                                                U_Test          = trainer.U_Test,
-                                                n_samples       = trainer.n_samples,
-                                                skip_proportion = skip_proportion);
+    Max_Rollout_Rel_Error, Max_STD, Rollout_Rel_Error, STD  = SolveROMs.Rollout_Error_and_STD(
+                                                                model           = model, 
+                                                                physics         = physics,
+                                                                param_space     = param_space,
+                                                                latent_dynamics = latent_dynamics,
+                                                                gp_list         = gp_list,
+                                                                t_Test          = trainer.t_Test,
+                                                                U_Test          = trainer.U_Test,
+                                                                n_samples       = trainer.n_samples,
+                                                                skip_proportion = skip_proportion);
 
 
 
     # ---------------------------------------------------------------------------------------------
-    # For each combination of parameter values, compute the relative error between the FOM 
-    # solution and its reconstruction under the model.
+    # Plot relative error trajectories
+    # ---------------------------------------------------------------------------------------------
 
     # Setup
-    Rel_Error_Reconstruction        : list[list[numpy.ndarray]] = [];
-    Max_Rel_Error_Reconstruction    : numpy.ndarray             = numpy.zeros((param_space.n_test(), physics.n_IC));
+    Recon_Rel_Error         : list[list[numpy.ndarray]] = [];
+    Max_Recon_Rel_Error     : numpy.ndarray             = numpy.zeros((param_space.n_test(), physics.n_IC));
 
     # Cycle through the combinations of parameter values.
     for i in range(param_space.n_test()):
         # Reconstruct the FOM solution, store it in a list.
-        LOGGER.debug("Reconstructing the FOM solution for parameter combination %d" % i);
+        LOGGER.debug("Reconstructing the FOM solution for parameter combination %d (%s)" % (i, str(param_space.test_space[i])));
         ith_Reconstruction : torch.Tensor | tuple[torch.Tensor, torch.Tensor] = model(*trainer.U_Test[i]);
         if(isinstance(ith_Reconstruction, tuple)):
             ith_Reconstruction = list(ith_Reconstruction);
@@ -191,15 +219,16 @@ def main():
             raise ValueError("ith_Encoding is not a tuple or a torch.Tensor");
     
         # Setup for the i'th combination of parameter values.
-        n_IC                                : int                   = physics.n_IC;
-        ith_Rel_Error_Reconstruction        : list[numpy.ndarray]   = [];
-        n_t_i                               : int                   = trainer.t_Test[i].shape[0];
+        n_IC                    : int                   = physics.n_IC;
+        ith_Recon_Rel_Error     : list[numpy.ndarray]   = [];
+        n_t_i                   : int                   = trainer.t_Test[i].shape[0];
 
         # Cycle through the ICs.
         for j in range(n_IC):
             # Setup a tensor to hold the relative error for the j'th IC and the i'th combination of 
             # parameter values.
-            ij_Rel_Error_Reconstruction : numpy.ndarray = numpy.zeros(n_t_i);
+            ij_Recon_Rel_Error      : numpy.ndarray = numpy.zeros(n_t_i);
+            ij_Rollout_Rel_Error    : numpy.ndarray = numpy.zeros(n_t_i);
 
             # Fetch the reconstruction and true solution.
             ij_Reconstruction   : numpy.ndarray = ith_Reconstruction[j].detach().numpy();
@@ -214,53 +243,79 @@ def main():
                 # If the time step is before the skip proportion, set the relative error to 0. 
                 # Otherwise, compute the relative error.
                 if(trainer.t_Test[i][k] < skip_proportion*trainer.t_Test[i][-1]):
-                    ij_Rel_Error_Reconstruction[k] = 0;
+                    ij_Recon_Rel_Error[k] = 0;
                 else:
                     # Compute the relative error for the k'th frame.
-                    ij_Rel_Error_Reconstruction[k] = ij_Abs_Error[k]/ij_Norms[k];
+                    ij_Recon_Rel_Error[k] = ij_Abs_Error[k]/ij_Norms[k];
             
             # Append the relative error for the j'th IC.
-            ith_Rel_Error_Reconstruction.append(ij_Rel_Error_Reconstruction);
+            ith_Recon_Rel_Error.append(ij_Recon_Rel_Error);
 
             # Compute the maximum relative error for the j'th time derivative of the solution for 
             # the i'th combination of parameter values.
-            Max_Rel_Error_Reconstruction[i, j] = numpy.max(ij_Rel_Error_Reconstruction);
+            Max_Recon_Rel_Error[i, j] = numpy.max(ij_Recon_Rel_Error);
         
         # Append the relative error for the i'th combination of parameter values.
-        Rel_Error_Reconstruction.append(ith_Rel_Error_Reconstruction);
+        Recon_Rel_Error.append(ith_Recon_Rel_Error);
     
 
-
-    # ---------------------------------------------------------------------------------------------
-    # Plot Rel_Error for one combinations of parameters.
-
+    # First, plot the rollout relative error.
     for i in range(physics.n_IC):
         plt.figure();
-        plt.plot(trainer.t_Test[i_random], Rel_Error[i_random][i]);
+        plt.plot(trainer.t_Test[i_random], Rollout_Rel_Error[i_random][i]);
         plt.xlabel("time (s)");
         plt.ylabel("Relative Error");
 
         if(i == 0):     
-            title_str       : str = "Relative Error of the reconstruction of U for parameter combination %d"        % i_random;
-            save_file_name  : str = config["physics"]["type"] + "_U_Relative_Error_%d"                              % i_random;   
+            title_str       : str = "Relative Error of the rollout of U for parameter combination %s"           % str(param_space.test_space[i_random]);
+            save_file_name  : str = config["physics"]["type"] + "_U_Rollout_Rel_Error_%s.png"                   % str(param_space.test_space[i_random]);   
         elif(i == 1):   
-            title_str       : str = "Relative Error of the reconstruction of D_t U for parameter combination %d"    % i_random;
-            save_file_name  : str = config["physics"]["type"] + "_Dt_U_Relative_Error_%d"                           % i_random;
+            title_str       : str = "Relative Error of the rollout of D_t U for parameter combination %s"       % str(param_space.test_space[i_random]);
+            save_file_name  : str = config["physics"]["type"] + "_Dt_U_Rollout_Rel_Error_%s.png"                % str(param_space.test_space[i_random]);
         else:           
-            title_str       : str = "Relative Error of the reconstruction of D_t^%d U for parameter combination %d" % (i, i_random);
-            save_file_name  : str = config["physics"]["type"] + "_Dt^%d_U_Relative_Error_%d"                        % (i, i_random);
+            title_str       : str = "Relative Error of the rollout of D_t^%d U for parameter combination %s"    % (i, str(param_space.test_space[i_random]));
+            save_file_name  : str = config["physics"]["type"] + "_Dt^%d_U_Rollout_Rel_Error_%s.png"             % (i, str(param_space.test_space[i_random]));
 
         # Plot the figure.
         plt.title(title_str);
     
         # Now save the figure.
         plt.savefig(os.path.join(os.path.join(os.path.pardir, "Figures"), save_file_name));
+
+
+    # Next, plot the reconstruction relative error.
+    for i in range(physics.n_IC):
+        plt.figure();
+        plt.plot(trainer.t_Test[i_random], Recon_Rel_Error[i_random][i]);
+        plt.xlabel("time (s)");
+        plt.ylabel("Relative Error");
+        
+        if(i == 0):     
+            title_str       : str = "Relative Error of the reconstruction of U for parameter combination %s"        % str(param_space.test_space[i_random]);
+            save_file_name  : str = config["physics"]["type"] + "_U_Recon_Rel_Error_%s.png"                         % str(param_space.test_space[i_random]);   
+        elif(i == 1):   
+            title_str       : str = "Relative Error of the reconstruction of D_t U for parameter combination %s"    % str(param_space.test_space[i_random]);
+            save_file_name  : str = config["physics"]["type"] + "_Dt_U_Recon_Rel_Error_%s.png"                      % str(param_space.test_space[i_random]);
+        else:           
+            title_str       : str = "Relative Error of the reconstruction of D_t^%d U for parameter combination %s" % (i, str(param_space.test_space[i_random]));
+            save_file_name  : str = config["physics"]["type"] + "_Dt^%d_U_Recon_Rel_Error_%s.png"                   % (i, str(param_space.test_space[i_random]));
+
+        # Plot the figure.
+        plt.title(title_str);
+    
+        # Now save the figure.
+        plt.savefig(os.path.join(os.path.join(os.path.pardir, "Figures"), save_file_name));
+    
     plt.show();
 
 
 
     # ---------------------------------------------------------------------------------------------
-    # Plot the mean predicted solution, true solution, and error for one combination of parameters.
+    # Make animations of the solution, its reconstruction, and the error between the two.
+    # ---------------------------------------------------------------------------------------------
+
+    # Make movies for the mean predicted solution, true solution, and error for the i_random'th 
+    # combination of parameters.
 
     # If X_Positions has the form (2, N_Positions), then the solution must either be a 
     # scalar field or a 2d vector field. Let's plot the solution.
@@ -284,8 +339,16 @@ def main():
         Zi_mean     : list[torch.Tensor]    = [];
         for i in range(len(Zi_mean_np)):
             Zi_mean.append(torch.Tensor(Zi_mean_np[i]));
-        U_Pred      : list[torch.Tensor]    = model.Decode(*Zi_mean);
-    
+        U_Pred      : tuple[torch.Tensor] | torch.Tensor    = model.Decode(*Zi_mean);
+
+        # Convert U_Pred to a list
+        if(isinstance(U_Pred, tuple)):
+            U_Pred = list(U_Pred);
+        elif(isinstance(U_Pred, torch.Tensor)):
+            U_Pred = [U_Pred];
+        else:
+            raise ValueError("U_Pred is not a tuple or a torch.Tensor");
+
         # Fetch the positions.
         X           : numpy.ndarray         = physics.X_Positions;
 
@@ -293,10 +356,13 @@ def main():
         n_IC        : int                   = physics.n_IC;
         for i in range(n_IC):
             if(i == 0):
-                prefix : str = "%s_U_%d" % (config["physics"]["type"], i_random);
+                prefix : str = "%s_U_%s"        % (config["physics"]["type"], str(param_space.test_space[i_random]));
+            elif(i == 1):
+                prefix : str = "%s_Dt_U_%s"     % (config["physics"]["type"], str(param_space.test_space[i_random]));
             else:
-                prefix : str = "%s_(Dt^%d)U_%d" % (config["physics"]["type"], i, i_random);
+                prefix : str = "%s_Dt^%d_U_%s"  % (config["physics"]["type"], i, str(param_space.test_space[i_random]));
 
+            # Make the movie.
             make_solution_movies(U_True         = U_True[i].detach().numpy(), 
                                  U_Pred         = U_Pred[i].detach().numpy(), 
                                  X              = X, 
@@ -304,47 +370,50 @@ def main():
                                  fname_prefix   = prefix);
     
 
+
     # ---------------------------------------------------------------------------------------------
     # Plot the heatmaps
+    # ---------------------------------------------------------------------------------------------
 
     if(param_space.n_p == 2):
         n_IC : int = latent_dynamics.n_IC;
         
-        # Plot the maximum (across the frames) relative reconstruction error between each frame of each 
-        # derivative of the FOM solution for each combination of parameter values and their 
-        # corresponding reconstructions.
+        # Plot maximum (across the frames) relative error between a frame and its reconstruction 
+        # under the autoencoder. Do this for each combination of parameter values and derivative 
+        # of the FOM solution.
         for d in range(n_IC):
             if(d == 0):
-                title           : str   = r'$\text{max}_{t, i} \frac{\left| u_{\bar{\xi}}(t, x_i) - u_{\text{True}}(t, x_i) \right|} {\text{max}_{j} \left| u_{\text{True}}(t, x_j) \right|}$';
-                save_file_name  : str   = config["physics"]["type"] + "_U_Relative_Error_Reconstruction_Heatmap";
+                title           : str   = r'$\text{max}_{t, i} \frac{\left| u_{\text{Pred}}(t, x_i) - u_{\text{True}}(t, x_i) \right|} {\text{max}_{j} \left| u_{\text{True}}(t, x_j) \right|}$';
+                save_file_name  : str   = config["physics"]["type"] + "_U_Reconstruction_Relative_Error_Heatmap.png";
             elif(d == 1):
-                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d}{dt}u_{\bar{\xi}}(t, x_i) - \frac{d}{dt}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d}{dt}u_{\text{True}}(t, x_j) \right|}$';
-                save_file_name  : str   = config["physics"]["type"] + "_Dt_U_Relative_Error_Reconstruction_Heatmap";
+                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d}{dt}u_{\text{Pred}}(t, x_i) - \frac{d}{dt}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d}{dt}u_{\text{True}}(t, x_j) \right|}$';
+                save_file_name  : str   = config["physics"]["type"] + "_Dt_U_Reconstruction_Relative_Error_Heatmap.png";
             else:
-                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d^{%d}}{dt^{%d}}u_{\bar{\xi}}(t, x_i) - \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_j) \right|}$' % (d, d, d, d, d, d);
-                save_file_name  : str   = config["physics"]["type"] + "_Dt^%d_U_Relative_Error_Reconstruction_Heatmap" % d;
+                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d^{%d}}{dt^{%d}}u_{\text{Pred}}(t, x_i) - \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_j) \right|}$' % (d, d, d, d, d, d);
+                save_file_name  : str   = config["physics"]["type"] + "_Dt^%d_U_Reconstruction_Relative_Error_Heatmap.png" % d;
 
-            Plot_Heatmap2d(     values          = Max_Rel_Error_Reconstruction[:, d].reshape(param_space.test_grid_sizes) * 100, 
+            Plot_Heatmap2d(     values          = Max_Recon_Rel_Error[:, d].reshape(param_space.test_grid_sizes) * 100, 
                                 param_space     = param_space,
                                 title           = title, 
                                 save_file_name  = save_file_name);
         
 
-        # Plot maximum (across the frames) relative reconstruction error between each frame of each 
-        # derivative of the FOM solution for each combination of parameter values and their 
-        # corresponding reconstructions.
+        # Plot maximum (across the frames) relative error between a frame and the frame that the 
+        # model predicts when we rollout the IC for the corresponding combination of parameter 
+        # values. Do this for each combination of parameter values and derivative of the FOM 
+        # solution.
         for d in range(n_IC):
             if(d == 0):
-                title           : str   = r'$\text{max}_{t, i} \frac{\left| u_{\bar{\xi}}(t, x_i) - u_{\text{True}}(t, x_i) \right|} {\text{max}_{j} \left| u_{\text{True}}(t, x_j) \right|}$';
-                save_file_name  : str   = config["physics"]["type"] + "_U_Relative_Error_Heatmap";
+                title           : str   = r'$\text{max}_{t, i} \frac{\left| u_{\text{Rollout}}(t, x_i) - u_{\text{True}}(t, x_i) \right|} {\text{max}_{j} \left| u_{\text{True}}(t, x_j) \right|}$';
+                save_file_name  : str   = config["physics"]["type"] + "_U_Rollout_Rel_Error_Heatmap.png";
             elif(d == 1):
-                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d}{dt}u_{\bar{\xi}}(t, x_i) - \frac{d}{dt}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d}{dt}u_{\text{True}}(t, x_j) \right|}$';
-                save_file_name  : str   = config["physics"]["type"] + "_Dt_U_Relative_Error_Heatmap";
+                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d}{dt}u_{\text{Rollout}}(t, x_i) - \frac{d}{dt}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d}{dt}u_{\text{True}}(t, x_j) \right|}$';
+                save_file_name  : str   = config["physics"]["type"] + "_Dt_U_Rollout_Rel_Error_Heatmap.png";
             else:
-                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d^{%d}}{dt^{%d}}u_{\bar{\xi}}(t, x_i) - \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_j) \right|}$' % (d, d, d, d, d, d);
-                save_file_name  : str   = config["physics"]["type"] + "_Dt^%d_U_Relative_Error_Heatmap" % d;
+                title           : str   = r'$\text{max}_{t, i} \frac{\left| \frac{d^{%d}}{dt^{%d}}u_{\text{Rollout}}(t, x_i) - \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_i) \right|}{\text{max}_{j} \left| \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t, x_j) \right|}$' % (d, d, d, d, d, d);
+                save_file_name  : str   = config["physics"]["type"] + "_Dt^%d_U_Rollout_Rel_Error_Heatmap.png" % d;
 
-            Plot_Heatmap2d(     values          = Max_Rel_Error[:, d].reshape(param_space.test_grid_sizes) * 100, 
+            Plot_Heatmap2d(     values          = Max_Rollout_Rel_Error[:, d].reshape(param_space.test_grid_sizes) * 100, 
                                 param_space     = param_space,
                                 title           = title, 
                                 save_file_name  = save_file_name);
@@ -355,13 +424,13 @@ def main():
         for d in range(n_IC):
             if(d == 0):
                 title           : str   = r'$\text{max}_{(t, i)} \sigma_{j \in \{1, \ldots, %d\}} \left[ u_{\xi(j)}(t, x_i) \right]$' % trainer.n_samples;
-                save_file_name  : str   = config["physics"]["type"] + "_U_STD_Heatmap";
+                save_file_name  : str   = config["physics"]["type"] + "_U_STD_Heatmap.png";
             elif(d == 1):
                 title           : str   = r'$\text{max}_{(t, i)} \sigma_{j \in \{ 1, \ldots, %d\}} \left[\frac{d}{dt}u_{\xi(j)}(t, x_i) \right]$' % (trainer.n_samples);
-                save_file_name  : str   = config["physics"]["type"] + "_Dt_U_STD_Heatmap";      
+                save_file_name  : str   = config["physics"]["type"] + "_Dt_U_STD_Heatmap.png";      
             else:
                 title           : str   = r'$\text{max}_{(t, i)} \sigma_{j \in \{ 1, \ldots, %d\}} \left[\frac{d^{%d}}{dt^{%d}}u_{\xi(j)}(t, x_i) \right]$' % (trainer.n_samples, d, d);
-                save_file_name  : str   = config["physics"]["type"] + "_Dt^%d_U_STD_Heatmap" % d;
+                save_file_name  : str   = config["physics"]["type"] + "_Dt^%d_U_STD_Heatmap.png" % d;
 
 
             Plot_Heatmap2d( values          = Max_STD[:, d].reshape(param_space.test_grid_sizes) * 100,
@@ -370,22 +439,8 @@ def main():
                             save_file_name  = save_file_name);
 
 
-
-    # ---------------------------------------------------------------------------------------------
-    # Save!
-    # ---------------------------------------------------------------------------------------------
-
-    # Save!
-    Save(   param_space         = param_space,
-            physics             = physics,
-            model               = model, 
-            latent_dynamics     = latent_dynamics,
-            trainer             = trainer,
-            next_step           = next_step,
-            result              = result,
-            restart_filename    = restart_filename);
-
     # All done!
+    LOGGER.info("All done!");
     return;
 
 
@@ -495,10 +550,9 @@ def step(trainer        : BayesianGLaSDI,
     if ((result is Result.Fail) or (result is Result.Complete)):
         return result, next_step;
         
-    # Continue the workflow if not using restart.
+    # Continue the workflow.
     LOGGER.info("Next step is: %s" % next_step);
-    if (use_restart == False):
-        result, next_step = step(trainer, next_step, config);
+    result, next_step = step(trainer, next_step, config);
 
     # All done!
     return result, next_step;
@@ -506,13 +560,14 @@ def step(trainer        : BayesianGLaSDI,
 
 
 def Save(   param_space         : ParameterSpace, 
+            config              : dict,
             physics             : Physics, 
             model               : torch.nn.Module, 
             latent_dynamics     : LatentDynamics,
             trainer             : BayesianGLaSDI, 
             next_step           : NextStep, 
             result              : Result,
-            restart_filename    : str               = None) -> None:
+            restart_filename    : str               = "") -> None:
     """
     This function saves a trained model, trainer, latent dynamics, etc. You should call this 
     function after running the LASDI algorithm.
@@ -526,6 +581,10 @@ def Save(   param_space         : ParameterSpace,
     param_space : ParameterSpace 
         holds the training and testing parameter combinations.
     
+    config : dict
+        This should be a dictionary that we loaded from a .yml file. It should house all the 
+        settings we expect to use to generate the data and train the models.
+
     physics : Physics
         defines the FOM model. We can use it to fetch the initial conditions and FOM solution for
         a particular combination of parameter values. physics, latent_dynamics, and model should 
@@ -553,7 +612,7 @@ def Save(   param_space         : ParameterSpace,
 
     restart_filename : str
         If we loaded from a restart, then this is the name of the restart we loaded.
-        Otherwise, if we did not load from a restart, this should be None.
+        Otherwise, if we did not load from a restart, this should be an empty string.
 
 
     
@@ -576,20 +635,21 @@ def Save(   param_space         : ParameterSpace,
     date_str    = date_str.format(month     = date.tm_mon, 
                                   day       = date.tm_mday, 
                                   year      = date.tm_year, 
-                                  hour      = date.tm_hour + 3, 
+                                  hour      = date.tm_hour, 
                                   minute    = date.tm_min);
     
-    if(restart_filename != None):
-        # rename old restart file if exists.
-        if (os.path.isfile(restart_filename) == True):
-            old_timestamp = restart_dict['timestamp'];
-            os.rename(restart_filename, restart_filename + '.' + old_timestamp);
-        restart_path : str = restart_filename;
+    # Set up the restart filename.
+    if(len(restart_filename) > 0):
+        # Extract the non-extension portion of the restart filename.
+        restart_filename_no_ext : str = restart_filename.split('.')[0];
+
+        # now append the new date to the restart filename.
+        restart_filename = restart_filename_no_ext + '__' + date_str + '.npy';
     else:
-        restart_path : str = 'lasdi_' + date_str + '.npy';
+        restart_filename : str = config["physics"]["type"] + '_' + date_str + '.npy';
     
-    # Make sure we place this in the results dictionary.
-    restart_path        = os.path.join(os.path.join(os.path.pardir, "results"), restart_path);
+    # Set up the restart path.
+    restart_path        = os.path.join(os.path.join(os.path.pardir, "results"), restart_filename);
 
     # Build the restart save dictionary and then save it.
     restart_dict = {'parameter_space'   : param_space.export(),
