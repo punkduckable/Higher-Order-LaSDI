@@ -317,31 +317,28 @@ def main():
 
         # Generate the solution trajectory using the mean for the posterior distribution.
         param_random    : numpy.ndarray         = param_space.test_space[i_random, :].reshape(1, -1);
-        t_random        : numpy.ndarray         = trainer.t_Test[i_random];
-        U_True          : list[torch.Tensor]    = trainer.U_Test[i_random];
+        t_random        : numpy.ndarray         = trainer.t_Test[i_random];                         # shape = (n_t)
+        U_True_random   : list[torch.Tensor]    = trainer.U_Test[i_random];                         # length = n_IC        
         Zi_mean_np      : list[numpy.ndarray]   = average_rom(  model           = model,            # n_IC element list whose j'th element has shape (n_t(i), n_z)
                                                                 physics         = physics, 
                                                                 latent_dynamics = latent_dynamics, 
                                                                 gp_list         = gp_list, 
                                                                 param_grid      = param_random, 
-                                                                t_Grid          = [t_random])[0];  
+                                                                t_Grid          = [t_random])[0];   # shape = (n_t, n_IC, n_z)
 
         # Map Zi_mean_np to a tensor and then decode.
         Zi_mean     : list[torch.Tensor]    = [];
         for i in range(len(Zi_mean_np)):
             Zi_mean.append(torch.Tensor(Zi_mean_np[i]));
-        U_Pred      : tuple[torch.Tensor] | torch.Tensor    = model.Decode(*Zi_mean);
+        U_Pred_random : tuple[torch.Tensor] | torch.Tensor    = model.Decode(*Zi_mean);             # length = n_IC
 
         # Convert U_Pred to a list
-        if(isinstance(U_Pred, tuple)):
-            U_Pred = list(U_Pred);
-        elif(isinstance(U_Pred, torch.Tensor)):
-            U_Pred = [U_Pred];
+        if(isinstance(U_Pred_random, tuple)):
+            U_Pred_random = list(U_Pred_random);
+        elif(isinstance(U_Pred_random, torch.Tensor)):
+            U_Pred_random = [U_Pred_random];
         else:
             raise ValueError("U_Pred is not a tuple or a torch.Tensor");
-
-        # Fetch the positions.
-        X           : numpy.ndarray         = physics.X_Positions;
 
         # Make a movie for each derivative of the solution.
         n_IC        : int                   = physics.n_IC;
@@ -354,9 +351,9 @@ def main():
                 prefix : str = "%s_Dt^%d_U_%s"  % (config["physics"]["type"], i, str(param_space.test_space[i_random]));
 
             # Make the movie.
-            make_solution_movies(U_True         = U_True[i].detach().numpy(), 
-                                 U_Pred         = U_Pred[i].detach().numpy(), 
-                                 X              = X, 
+            make_solution_movies(U_True         = U_True_random[i].detach().numpy(), 
+                                 U_Pred         = U_Pred_random[i].detach().numpy(), 
+                                 X              = physics.X_Positions, 
                                  T              = t_random,
                                  fname_prefix   = prefix);
     
