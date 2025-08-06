@@ -11,40 +11,40 @@ lasdi:
 
     p_IC_rollout_init:      0.01
     IC_rollout_update_freq: 100
-    IC_dp_per_update:       0.001
+    IC_dp_per_update:       0.01
 
-    max_iter:               1000
-    n_iter:                 300
-    max_greedy_iter:        1000
+    max_iter:               17500
+    n_iter:                 2500
+    max_greedy_iter:        17500
 
     loss_weights:
       recon:                1.0
       chain_rule:           1.0
-      LD:                   0.5
-      rollout:              0.5
-      IC_rollout:           1.0
+      LD:                   1.0
+      rollout:              0.2
+      IC_rollout:           0.2
       coef:                 0.0001
       consistency:          1.0
 
     learnable_coefs:        true
 
 workflow:
-  use_restart:              false
-  restart_file:          
+  use_restart:              False
+  restart_file:             
 
 parameter_space:
   parameters:
     - name:                 s
-      min:                  0.5
-      max:                  1.5
+      min:                  0.9
+      max:                  1.1
       test_space_type:      uniform
-      sample_size:          5
+      sample_size:          10
       log_scale:            false
     - name:                 mu
-      min:                  .2
-      max:                  .6
+      min:                  0.23
+      max:                  0.27
       test_space_type:      uniform
-      sample_size:          3
+      sample_size:          10
       log_scale:            false
   test_space:
     type:                   grid
@@ -53,8 +53,8 @@ model:
   type:                     pair
   pair:
     hidden_widths:          [250, 100, 100, 100]
-    latent_dimension:       5  
-    activations:            ["sin", "GELU", "GELU", "GELU"]
+    latent_dimension:       10
+    activations:            ["sin", "sin", "sin", "sin"]
 
 latent_dynamics:
   type:                     spring
