@@ -415,8 +415,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
                 par_ref_levels      : int           = 1,
                 order               : int           = 3,
                 ode_solver_type     : int           = 4,
-                t_final             : float         = 5.0,
-                time_step_size      : float         = 0.01,
+                t_Grid              : numpy.ndarray = numpy.linspace(0, 5.0, 501),
                 Positions           : numpy.ndarray = numpy.empty(0),
                 g                   : float         = numpy.pi/2,
                 k                   : float         = 1.0,
@@ -462,13 +461,10 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
             2   - RK2
             4   - RK4
             6   - RK6
-    
-    t_final : float
-        specifies the final time. We simulate the dynamics from the start time to the final time. 
-        The start time is 0.
 
-    time_step_size : float 
-        specifies the time step size.
+    t_Grid : numpy.ndarray, shape = (Nt)
+        specifies the time grid. We simulate the dynamics from t_Grid[0] to t_Grid[-1]; we assume 
+        that the elements of t_Grid form an increasing sequence.
 
     Positions : numpy.ndarray, shape = (2, num_positions)
         An optional argument. If empty, we generate new positions from scratch. If it is not empty, 
@@ -512,7 +508,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
         i'th row holds the position of the i'th position at which we evaluate the solution.
     
     T : numpy.ndarray, shape = (Nt)
-        i'th element holds the j'th time at which we evaluate the solution.
+        i'th element holds the i'th time at which we evaluate the solution.
 
     bb_min : numpy.ndarray, shape = (2,)
         The minimum coordinates of the bounding box.
@@ -537,9 +533,6 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
     comm                        = MPI.COMM_WORLD;
     myid                : int   = comm.Get_rank();
     num_procs           : int   = comm.Get_size();
-
-    # Set variables.
-    dt                  : float = time_step_size;
 
     # Define the ODE solver used for time integration. Several explicit Runge-Kutta methods are 
     # available.
@@ -699,7 +692,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
     if(myid == 0): LOGGER.debug("Setting up lists to store the time, solution at each time step.");
 
     # Setup for time stepping.
-    times_list          : list[float]           = [];    
+    t_list              : list[float]           = [];
     u_list              : list[numpy.ndarray]   = [];
 
     # Evaluate the initial solution at the positions.
@@ -708,7 +701,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
         u_Positions_0[0, i]     = u_gf.GetValue(Elements[i], RefCoords[i], dim);
 
     # Append the initial solution and time to their corresponding lists.
-    times_list.append(0);
+    t_list.append(t_Grid[0]);
     u_list.append(  u_Positions_0);
 
 
@@ -738,7 +731,7 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
     # --------------------------------------------------------------------------------------------- 
     # 8.  Perform time-integration.
 
-    if(myid == 0): LOGGER.info("Running time stepping from t = 0 to t = %f with dt %f" % (t_final, dt));
+    if(myid == 0): LOGGER.info("Running time stepping from t = %f to t = %f with %d time steps" % (t_Grid[0], t_Grid[-1], len(t_Grid)));
 
     # Setup the ODE solver.
     adv = AdvectionOperator(fespace = fespace, velocity = velocity, g = inflow);
@@ -747,23 +740,15 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
     ode_solver.Init(adv);
 
     # Run the time stepping loop.
-    t           : float = 0.0;
-    ti          : int   = 0;
-    last_step   : bool  = False;
-    
-    while not last_step:
-        # Check if we should stop time stepping (if this time step is within dt/2 of t_final).
-        if t + dt >= t_final - dt/2:
-            last_step = True;
-        
+    for t_idx in range(1, len(t_Grid)):
         # Step the ODE solver.
-        t, dt = ode_solver.Step(U, t, dt);
+        t, dt = ode_solver.Step(U, t_Grid[t_idx - 1], t_Grid[t_idx] - t_Grid[t_idx - 1]);
         u_gf.Assign(U);
-        ti += 1;
 
         # Should we serialize?
-        if last_step or (ti % serialization_steps == 0):
-            if(myid == 0): LOGGER.debug("time step: " + str(ti) + ", time: " + str(numpy.round(t, 3)));
+        Last_Step : bool = (t_idx == len(t_Grid) - 1);
+        if (Last_Step or (t_idx % serialization_steps == 0)):
+            if(myid == 0): LOGGER.debug("time step: " + str(t_idx) + ", time: " + str(numpy.round(t, 3)) + ", dt: " + str(numpy.round(dt, 3)));
 
             # Update the solution to the grid functions
             u_gf.Assign(U);
@@ -774,13 +759,13 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
                 u_Positions_t[0, i]     = u_gf.GetValue(Elements[i], RefCoords[i], dim);
 
             # Append the current solution and time to their corresponding lists.
-            times_list.append(t);
             u_list.append(  u_Positions_t);
+            t_list.append(t);
 
             # If visualizing, Save the solution to the VisIt object.
             if(VisIt):
                 # Save the mesh, solution, and time.
-                visit_dc.SetCycle(ti);
+                visit_dc.SetCycle(t_idx);
                 visit_dc.SetTime(t);
                 visit_dc.Save();
 
@@ -790,9 +775,8 @@ def Simulate(   meshfile_name       : str           = "periodic-hexagon.mesh",
     # 9. Package everything up for returning.
 
     # Turn times, displacements, velocities lists into arrays.
-    Times       : numpy.ndarray = numpy.array(times_list,           dtype = numpy.float32);
     Trajectory  : numpy.ndarray = numpy.array(u_list,               dtype = numpy.float32);
-
+    Times       : numpy.ndarray = numpy.array(t_list,               dtype = numpy.float32);
 
     return Trajectory, Positions, Times, bb_min, bb_max;
 

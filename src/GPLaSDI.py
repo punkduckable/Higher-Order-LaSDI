@@ -92,7 +92,7 @@ class BayesianGLaSDI:
     # An n_Train element list whose i'th element is an n_IC element list whose j'th element is a
     # float holding the std of the j'th derivative of the FOM solution when we use the i'th 
     # combination of training parameters.
-    std_Train : list[list[float]] = [];
+    std_Train : list[list[float]]       = [];
 
     # Same as U_Test, but used for the test set.
     U_Test  : list[list[torch.Tensor]]  = [];  
@@ -373,7 +373,7 @@ class BayesianGLaSDI:
 
                 loss_recon          : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
     
-                Z_Rollout_IC        : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_rollout_frames[i], n_z) arrays.
+                Z_Rollout_ICs       : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_rollout_frames[i], n_z) arrays.
                 Z_Rollout_Targets   : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_rollout_frames[i], n_z) arrays.
 
                 # Cycle through the combinations of parameter values
@@ -424,7 +424,7 @@ class BayesianGLaSDI:
                         # the final time for this combination of parameter values. Each element of 
                         # Z_Rollout_IC is a 1 element list of torch.Tensor objects of shape 
                         # (n_rollout_frames[i], n_z).
-                        Z_Rollout_IC.append([Z_i[:n_rollout_frames[i], :]]);
+                        Z_Rollout_ICs.append([Z_i[:n_rollout_frames[i], :]]);
 
                         # Fetch the corresponding target by encoding the FOM targets using the 
                         # current encoder.
@@ -470,11 +470,11 @@ class BayesianGLaSDI:
                     # Note that the latent dynamics are autonomous. Further, because we are simulating 
                     # each IC for the same amount of time, the specific values of the time are
                     # irreverent. The simulate function exploits this by solving one big IVP for each 
-                    # combination of parameter values, rather than n(i) smaller ones. 
+                    # combination of parameter values, rather than n(i) smaller ones.                         
                     Z_Rollout           : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(coefs   = coefs, 
-                                                                                                    IC      = Z_Rollout_IC, 
+                                                                                                    IC      = Z_Rollout_ICs, 
                                                                                                     t_Grid  = t_Grid_rollout);            
-                    
+
                     # Now cycle through the training examples.
                     for i in range(n_train):
                         # Fetch the latent displacement/velocity for the i'th combination of parameter
@@ -494,8 +494,8 @@ class BayesianGLaSDI:
                         U_Rollout_Target_i      : list[torch.Tensor]    = U_Rollout_Targets[i][0];      # shape = (n_rollout_frames[i], physics.Frame_Shape)
                     
                         # Compute the losses for the i'th combination of parameter values!
-                        loss_rollout_ROM  += self.MSE(Z_Rollout_Targets_i, Z_Rollout_Predict_i);   
-                        loss_rollout_FOM  += self.MSE(U_Rollout_Predict_i, U_Rollout_Target_i)/self.std_Train[i][0];     # Scale the loss by the std of the FOM solution.
+                        loss_rollout_ROM  += self.MAE(Z_Rollout_Targets_i, Z_Rollout_Predict_i);   
+                        loss_rollout_FOM  += self.MAE(U_Rollout_Predict_i, U_Rollout_Target_i)/self.std_Train[i][0];     # Scale the loss by the std of the FOM solution.
 
                     self.timer.end("Rollout Loss");
 
@@ -542,8 +542,8 @@ class BayesianGLaSDI:
                         Z_IC_Target_i = model_device.Encode(U_IC_Target_i);
 
                         # Compute the losses for the i'th combination of parameter values!
-                        loss_IC_rollout_ROM  += self.MSE(Z_IC_Target_i, Z_IC_Predict_i);
-                        loss_IC_rollout_FOM  += self.MSE(U_IC_Target_i, U_IC_Predict_i)/self.std_Train[i][0];    # Scale the loss by the std of the FOM solution.
+                        loss_IC_rollout_ROM  += self.MAE(Z_IC_Target_i, Z_IC_Predict_i);
+                        loss_IC_rollout_FOM  += self.MAE(U_IC_Target_i, U_IC_Predict_i)/self.std_Train[i][0];    # Scale the loss by the std of the FOM solution.
 
                     self.timer.end("IC Rollout Loss");
 
@@ -568,7 +568,7 @@ class BayesianGLaSDI:
                 # Setup. 
                 Latent_States       : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 2 element list of (n_t_i, n_z) arrays.
                 
-                Z_Rollout_IC        : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 2 element list of (n_rollout_frames[i], n_z) arrays.
+                Z_Rollout_ICs       : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 2 element list of (n_rollout_frames[i], n_z) arrays.
                 Z_Rollout_Targets   : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 2 element list of (n_rollout_frames[i], n_z) arrays.
 
                 loss_recon_D        : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
@@ -699,9 +699,9 @@ class BayesianGLaSDI:
                         # n_rollout_frames[i] frames (n_rollout_frames[i] is computed such that if we 
                         # simulate the first n_rollout_frames[i] frames, the final times are less than 
                         # the final time for this combination of parameter values. Each element of 
-                        # Z_Rollout_IC is a 2 element list of torch.Tensor objects of shape 
+                        # Z_Rollout_ICs is a 2 element list of torch.Tensor objects of shape 
                         # (n_rollout_frames[i], n_z).
-                        Z_Rollout_IC.append([Z_D_i[:n_rollout_frames[i], :], Z_V_i[:n_rollout_frames[i], :]]);
+                        Z_Rollout_ICs.append([Z_D_i[:n_rollout_frames[i], :], Z_V_i[:n_rollout_frames[i], :]]);
 
                         # Fetch the corresponding target by encoding the FOM targets using the 
                         # current encoder.
@@ -750,7 +750,7 @@ class BayesianGLaSDI:
                     # irreverent. The simulate function exploits this by solving one big IVP for each 
                     # combination of parameter values, rather than n(i) smaller ones. 
                     Z_Rollout           : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(coefs   = coefs, 
-                                                                                                    IC      = Z_Rollout_IC, 
+                                                                                                    IC      = Z_Rollout_ICs, 
                                                                                                     t_Grid  = t_Grid_rollout);            
 
                     # Now cycle through the training examples.
