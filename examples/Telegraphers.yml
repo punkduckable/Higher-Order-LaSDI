@@ -65,5 +65,8 @@ latent_dynamics:
 physics:
   type:                     Telegraphers
   Telegraphers:
+    n_t:                    501
+    t_max:                  5.0
+    uniform_t_grid:         false
 
 

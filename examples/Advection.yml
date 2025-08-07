@@ -13,36 +13,36 @@ lasdi:
     IC_rollout_update_freq: 100
     IC_dp_per_update:       0.01
 
-    max_iter:               21000
-    n_iter:                 3000
-    max_greedy_iter:        21000
+    max_iter:               28000
+    n_iter:                 4000
+    max_greedy_iter:        28000
 
     loss_weights:
       recon:                1.0
       LD:                   1.0
-      rollout:              1.0
-      IC_rollout:           1.0
-      coef:                 0.00001
+      rollout:              0.0
+      IC_rollout:           0.2
+      coef:                 0.0001
 
     learnable_coefs:        true
 
 workflow:
-  use_restart:              True
-  restart_file:             Advection_07_14_2025_15_10.npy
+  use_restart:              False
+  restart_file:            
 
 parameter_space:
   parameters:
     - name:                 w
-      min:                  2.8
-      max:                  3.2
+      min:                  0.9
+      max:                  1.1
       test_space_type:      uniform
-      sample_size:          10
+      sample_size:          11
       log_scale:            false
     - name:                 g
       min:                  1.5
       max:                  1.7
       test_space_type:      uniform
-      sample_size:          10
+      sample_size:          11
       log_scale:            false
   test_space:
     type:                   grid
@@ -51,8 +51,8 @@ model:
   type:                     autoencoder
   autoencoder:
     hidden_widths:          [250, 100, 100, 100]
-    latent_dimension:       5  
-    activations:            ["sin", "GELU", "GELU", "GELU"]
+    latent_dimension:       10  
+    activations:            ["sin", "sin", "sin", "sin"]
 
 latent_dynamics:
   type:                     sindy
@@ -62,5 +62,8 @@ latent_dynamics:
 physics:
   type:                     Advection
   Advection:
+    n_t:                    501
+    t_max:                  5.0
+    uniform_t_grid:         false
 
 

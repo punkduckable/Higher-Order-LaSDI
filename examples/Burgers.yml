@@ -13,15 +13,15 @@ lasdi:
     IC_rollout_update_freq: 100
     IC_dp_per_update:       0.01
 
-    max_iter:               17500
+    max_iter:               20000
     n_iter:                 2500
-    max_greedy_iter:        17500
+    max_greedy_iter:        20000
 
     loss_weights:
       recon:                1.0
       chain_rule:           1.0
       LD:                   1.0
-      rollout:              0.2
+      rollout:              0.0
       IC_rollout:           0.2
       coef:                 0.0001
       consistency:          1.0
@@ -47,25 +47,25 @@ parameter_space:
     type:                   grid
 
 model:
-  type:                     pair
-  pair:
-    hidden_widths:          [250, 100, 100, 100]
-    latent_dimension:       5
-    activations:            ["sin", "sin", "sin", "sin"]
+  type:                     autoencoder
   autoencoder:
     hidden_widths:          [250, 100, 100, 100]
     latent_dimension:       5  
     activations:            ["sin", "sin", "sin", "sin"]
+  pair:
+    hidden_widths:          [250, 100, 100, 100]
+    latent_dimension:       5
+    activations:            ["sin", "sin", "sin", "sin"]
 
 latent_dynamics:
-  type:                     spring
+  type:                     sindy
   coef_norm_order:          fro
   spring:
 
   sindy:
 
 physics:
-  type:                     BurgersSecondOrder
+  type:                     Burgers
 
   Burgers:
     n_t:                    501

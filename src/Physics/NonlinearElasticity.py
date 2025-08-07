@@ -5,7 +5,9 @@
 # Add the main directory to the search path.
 import  os;
 import  sys;
-import  logging;
+import  logging
+
+from torch._library.fake_class_registry import FakeScriptMethod;
 PyMFEM_Path     : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "PyMFEM"));
 sys.path.append(PyMFEM_Path);
 
@@ -68,7 +70,7 @@ class NonlinearElasticity(Physics):
         # [2, num_positions] and X_Positions has shape [2, num_positions]. The issue is that we have 
         # to run a simulation to get num_positions. We run a simulation with a final time of zero; 
         # this prompts the code to generate the mesh and nodes, but not to solve for anything
-        D, V, X, T                          = Simulate(t_final = 0, VisIt = False);     # D, V have shape (Nt, 2, num_positions)
+        D, V, X, T                          = Simulate(t_Grid = numpy.linspace(0, 0, 2), VisIt = False);     # D, V have shape (Nt, 2, num_positions)
 
 
         # Call the super class initializer.
@@ -182,8 +184,22 @@ class NonlinearElasticity(Physics):
         assert(len(param.shape) == 1);
         assert(param.shape[0]   == self.n_p);
         
+        # Set up the t_Grid.
+        n_t     : int           = self.config['NonlinearElasticity']['n_t'];
+        t_max   : float         = self.config['NonlinearElasticity']['t_max']; 
+        t_Grid  : numpy.ndarray = numpy.linspace(0, t_max, n_t, dtype = numpy.float32);
+        if(self.Uniform_t_Grid == False):
+            r               : float = 0.2*(t_Grid[1] - t_Grid[0]);
+            t_adjustments           = numpy.random.uniform(low = -r, high = r, size = (n_t - 2));
+            t_Grid[1:-1]            = t_Grid[1:-1] + t_adjustments;
+
         # Solve the PDE!
-        D, dD_ds, _, S  = Simulate(s = param[self.s_idx], shear_modulus = param[self.mu_idx], Positions = self.X_Positions);
+        D, dD_ds, _, S  = Simulate( s               = param[self.s_idx], 
+                                    shear_modulus   = param[self.mu_idx], 
+                                    Positions       = self.X_Positions, 
+                                    t_Grid          = t_Grid, 
+                                    VisIt           = False, 
+                                    serialize_steps = 1);
 
         # The simulation runs too slowly, so we rescale the time grid by a factor of 10.
         # Doing this requires us to rescale the velocity by a factor of 10. To see why, 

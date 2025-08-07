@@ -64,5 +64,8 @@ latent_dynamics:
 physics:
   type:                     NonlinearElasticity
   NonlinearElasticity:
+    n_t:                    2501
+    t_max:                  50.0
+    uniform_t_grid:         false
 
 

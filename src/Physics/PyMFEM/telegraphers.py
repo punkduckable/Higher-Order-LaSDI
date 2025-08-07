@@ -447,8 +447,7 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
              ref_levels         : int           = 3,
              order              : int           = 2,
              ode_solver_type    : int           = 10,
-             t_final            : float         = 5.0,
-             dt                 : float         = .01,
+             t_Grid             : numpy.ndarray = numpy.linspace(0, 5.0, 501),
              Positions          : numpy.ndarray = numpy.empty(0),
              c                  : float         = 0.2,
              alpha              : float         = 0.2,
@@ -493,11 +492,9 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
         - 13: CentralDifferenceSolver
         - 14: FoxGoodwinSolver
 
-    t_final : float
-        The final time. We solve the Telegrapher's equation from t = 0 to t = t_final.
-
-    dt : float
-        The time step. We solve the Telegrapher's equation using a time-stepping scheme with time step dt.
+    t_Grid : numpy.ndarray, shape = (Nt)
+        specifies the time grid. We simulate the dynamics from t_Grid[0] to t_Grid[-1]; we assume 
+        that the elements of t_Grid form an increasing sequence.
     
     Positions : numpy.ndarray, shape = (2, num_positions)
         An optional argument. If empty, we generate new positions from scratch. If it is not empty, 
@@ -785,28 +782,24 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 9. Perform time-integration (looping over the time iterations, ti, with a time-step dt).
+    # 9. Perform time-integration (looping over the time grid).
 
-    LOGGER.info("Performing time-integration (dt = %g, t_final = %g)" % (dt, t_final));
+    LOGGER.info("Running time stepping from t = %f to t = %f with %d time steps" % (t_Grid[0], t_Grid[-1], len(t_Grid)));
     
     # Time step!!!!!
     ode_solver.Init(oper);
-    t           : float = 0.0;
-    ti          : int   = 0;
-    last_step   : bool  = False;
 
-    while not last_step:
-        # Check if we should stop time stepping (if this time step is within dt/2 of t_final).
-        if t + dt >= t_final - dt/2:
-            last_step = True
-
+    # Loop over the time grid
+    for t_idx in range(1, len(t_Grid)):
+        # Compute the time step
+        dt = t_Grid[t_idx] - t_Grid[t_idx - 1];
+        
         # Step the ODE solver.
-        t, dt = ode_solver.Step(u, dudt, t, dt);
-        ti += 1;
-
+        t, dt = ode_solver.Step(u, dudt, t_Grid[t_idx - 1], dt);
+        
         # Should we serialize?
-        if last_step or (ti % serialization_steps == 0):
-            LOGGER.debug("time step: " + str(ti) + ", time: " + str(numpy.round(t, 3)));
+        if (t_idx % serialization_steps == 0) or (t_idx == len(t_Grid) - 1):
+            LOGGER.debug("time step: " + str(t_idx) + ", time: " + str(numpy.round(t, 3)) + ", dt: " + str(numpy.round(dt, 3)));
 
             # Update the solution to the grid functions
             u_gf.Assign(u);
@@ -827,7 +820,7 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
     
             # If visualizing, Save the solution to the VisIt object.
             if VisIt:
-                visit_dc.SetCycle(ti);
+                visit_dc.SetCycle(t_idx);
                 visit_dc.SetTime(t);
                 visit_dc.Save();
 

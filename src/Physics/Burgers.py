@@ -76,7 +76,7 @@ class Burgers(Physics):
                          X_Positions    = numpy.linspace(self.x_min, self.x_max, self.n_x, dtype = numpy.float32),
                          Frame_Shape    = [self.n_x],
                          param_names    = param_names, 
-                         Uniform_t_Grid = True,
+                         Uniform_t_Grid = config['Burgers']['uniform_t_grid'],
                          n_IC           = 1);
 
         # Set up the maximum number of corrections and the convergence threshold.

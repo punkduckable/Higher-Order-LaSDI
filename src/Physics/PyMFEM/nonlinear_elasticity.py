@@ -383,8 +383,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
                 par_ref_levels  : int           = 0,
                 order           : int           = 2,
                 ode_solver_type : int           = 14,
-                t_final         : float         = 50.0,
-                dt              : float         = 0.02,
+                t_Grid          : numpy.ndarray = numpy.linspace(0, 50.0, 2501),
                 Positions       : numpy.ndarray = numpy.empty(0),
                 viscosity       : float         = 1e-2,
                 shear_modulus   : float         = 0.25, 
@@ -444,12 +443,9 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
             23  - SDIRK23Solver
             24  - SDIRK34Solver
     
-    t_final : float
-        specifies the final time. We simulate the dynamics from the start time to the final time. 
-        The start time is 0.
-
-    dt : float 
-        specifies the time step size.
+    t_Grid : numpy.ndarray, shape = (Nt)
+        specifies the time grid. We simulate the dynamics from t_Grid[0] to t_Grid[-1]; we assume 
+        that the elements of t_Grid form an increasing sequence.
     
     Positions : numpy.ndarray, optional
         An optional argument. If empty, we generate new positions from scratch. If it is not empty, 
@@ -784,33 +780,28 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 8. Perform time-integration (looping over the time iterations, ti, with a time-step dt).
+    # 8. Perform time-integration (looping over the time grid).
     
-    if(myid == 0): LOGGER.info("Running time stepping from t = 0 to t = %f with dt %f" % (t_final, dt));
+    if(myid == 0): LOGGER.info("Running time stepping from t = %f to t = %f with %d time steps" % (t_Grid[0], t_Grid[-1], len(t_Grid)));
 
     # Time step!!!!!
     ode_solver.Init(oper);
-    t           : float = 0.0;
-    ti          : int   = 1;        # counter to keep track of when we should serialize solution.
-    last_step   : bool  = False;
 
-    while not last_step:
-        # Check if we should stop time stepping (if this time step is within dt/2 of t_final.
-        if (t + dt >= t_final - dt/2):
-            last_step = True;
-
-        t, dt = ode_solver.Step(VD, t, dt)
-        ti = ti + 1;
+    # Loop over the time grid
+    for t_idx in range(1, len(t_Grid)):
+        # Compute the time step
+        dt = t_Grid[t_idx] - t_Grid[t_idx - 1];
+        t, dt = ode_solver.Step(VD, t_Grid[t_idx - 1], dt)
 
         # Should we serialize?
-        if (last_step or (ti % serialize_steps) == 0):
+        if ((t_idx % serialize_steps) == 0) or (t_idx == len(t_Grid) - 1):
             # Find energy.
             ee = oper.ElasticEnergy(D_gf);
             ke = oper.KineticEnergy(V_gf);
 
             # Print the energy.
             if(myid == 0):
-                text : str  = ( "step " + str(ti) + ", t = " + str(t) + ", EE = " +
+                text : str  = ( "step " + str(t_idx) + ", t = " + str(t) + ", dt = " + str(numpy.round(dt, 3)) + ", EE = " +
                                 str(ee) + ", KE = " + str(ke) +
                                 ", dTE = " + str((ee + ke) - (ee0 + ke0)));
                 LOGGER.debug(text);
@@ -836,7 +827,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
                 # Set the mesh to the current displacement
                 pmesh.SwapNodes(D_gf, 0);
 
-                visit_dc.SetCycle(ti);
+                visit_dc.SetCycle(t_idx);
                 visit_dc.SetTime(t);
                 visit_dc.Save();  
                 
