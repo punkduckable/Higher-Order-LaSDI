@@ -13,16 +13,22 @@ lasdi:
     IC_rollout_update_freq: 100
     IC_dp_per_update:       0.01
 
-    max_iter:               28000
+    max_iter:               36000
     n_iter:                 4000
-    max_greedy_iter:        28000
+    max_greedy_iter:        36000
 
     loss_weights:
       recon:                1.0
       LD:                   1.0
-      rollout:              0.0
-      IC_rollout:           0.2
+      rollout:              1.0
+      IC_rollout:           0.0
       coef:                 0.0001
+
+    loss_types:
+      recon:                "MSE"
+      LD:                   "MSE"
+      rollout:              "MSE"
+      IC_rollout:           "MSE"
 
     learnable_coefs:        true
 
@@ -64,6 +70,6 @@ physics:
   Advection:
     n_t:                    501
     t_max:                  5.0
-    uniform_t_grid:         false
+    uniform_t_grid:         true
 
 

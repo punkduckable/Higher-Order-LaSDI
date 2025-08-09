@@ -183,10 +183,8 @@ class BayesianGLaSDI:
         self.max_iter               : int       = config['max_iter'];               # We stop training if restart_iter goes above this number. 
         self.max_greedy_iter        : int       = config['max_greedy_iter'];        # We stop performing greedy sampling if restart_iter goes above this number.
         self.loss_weights           : dict      = config['loss_weights'];           # A dictionary housing the weights of the various parts of the loss function.
+        self.loss_types             : dict      = config['loss_types'];             # A dictionary housing the type of loss function (MSE or MAE) for each part of the loss function.
         self.learnable_coefs        : bool      = config['learnable_coefs'];        # If True, the latent dynamics coefficients are learnable parameters. If false, we compute them using Least Squares.
-
-        LOGGER.debug("  - n_samples = %d, lr = %f, n_iter = %d, LD_weight = %f, coef_weight = %f" \
-                     % (self.n_samples, self.lr, self.n_iter, self.loss_weights['LD'], self.loss_weights['coef']));
 
         # Set the device to train on. We default to cpu.
         device = config['device'] if 'device' in config else 'cpu';
@@ -207,8 +205,8 @@ class BayesianGLaSDI:
         # Set up the optimizer and loss function.
         LOGGER.info("Setting up the optimizer with a learning rate of %f" % (self.lr));
         self.optimizer          : Optimizer = torch.optim.Adam(list(model.parameters()) + [self.test_coefs], lr = self.lr);
-        self.MSE                            = torch.nn.MSELoss();
-        self.MAE                            = torch.nn.L1Loss();
+        self.MSE                            = torch.nn.MSELoss(reduction = 'mean');
+        self.MAE                            = torch.nn.L1Loss(reduction = 'mean');
 
         # Set paths for checkpointing. 
         self.path_checkpoint    : str       = os.path.join(os.path.pardir, "checkpoint");
@@ -407,7 +405,12 @@ class BayesianGLaSDI:
 
                     if(self.loss_weights['recon'] > 0):
                         self.timer.start("Reconstruction Loss");
-                        loss_recon += self.MSE(U_i, U_Pred_i) / (self.std_Train[i][0]**2);   # Scale the loss by the std of the FOM solution.
+
+                        if(self.loss_types['recon'] == "MSE"):
+                            loss_recon += self.MSE(U_i, U_Pred_i) / (self.std_Train[i][0]**2);
+                        elif(self.loss_types['recon'] == "MAE"):
+                            loss_recon += self.MAE(U_i, U_Pred_i) / self.std_Train[i][0];
+                        
                         self.timer.end("Reconstruction Loss");
 
 
@@ -445,7 +448,8 @@ class BayesianGLaSDI:
                 # latent dynamics model. 
                 coefs, loss_LD, loss_coef       = LD.calibrate(Latent_States    = Latent_States, 
                                                                t_Grid           = t_Train_device,
-                                                               input_coefs      = train_coefs_list);
+                                                               input_coefs      = train_coefs_list,
+                                                               loss_type        = self.loss_types['LD']);
 
                 self.timer.end("Calibration");
 
@@ -494,9 +498,13 @@ class BayesianGLaSDI:
                         U_Rollout_Target_i      : list[torch.Tensor]    = U_Rollout_Targets[i][0];      # shape = (n_rollout_frames[i], physics.Frame_Shape)
                     
                         # Compute the losses for the i'th combination of parameter values!
-                        loss_rollout_ROM  += self.MAE(Z_Rollout_Targets_i, Z_Rollout_Predict_i);   
-                        loss_rollout_FOM  += self.MAE(U_Rollout_Predict_i, U_Rollout_Target_i)/self.std_Train[i][0];     # Scale the loss by the std of the FOM solution.
-
+                        if(self.loss_types['rollout'] == "MSE"):
+                            loss_rollout_ROM  += self.MSE(Z_Rollout_Targets_i, Z_Rollout_Predict_i);   
+                            loss_rollout_FOM  += self.MSE(U_Rollout_Predict_i, U_Rollout_Target_i)/(self.std_Train[i][0]**2);
+                        elif(self.loss_types['rollout'] == "MAE"):
+                            loss_rollout_ROM  += self.MAE(Z_Rollout_Targets_i, Z_Rollout_Predict_i);   
+                            loss_rollout_FOM  += self.MAE(U_Rollout_Predict_i, U_Rollout_Target_i)/self.std_Train[i][0];
+                        
                     self.timer.end("Rollout Loss");
 
 
@@ -542,8 +550,12 @@ class BayesianGLaSDI:
                         Z_IC_Target_i = model_device.Encode(U_IC_Target_i);
 
                         # Compute the losses for the i'th combination of parameter values!
-                        loss_IC_rollout_ROM  += self.MAE(Z_IC_Target_i, Z_IC_Predict_i);
-                        loss_IC_rollout_FOM  += self.MAE(U_IC_Target_i, U_IC_Predict_i)/self.std_Train[i][0];    # Scale the loss by the std of the FOM solution.
+                        if(self.loss_types['IC_rollout'] == "MSE"):
+                            loss_IC_rollout_ROM  += self.MSE(Z_IC_Target_i, Z_IC_Predict_i);
+                            loss_IC_rollout_FOM  += self.MSE(U_IC_Target_i, U_IC_Predict_i)/(self.std_Train[i][0]**2);
+                        elif(self.loss_types['IC_rollout'] == "MAE"):
+                            loss_IC_rollout_ROM  += self.MAE(Z_IC_Target_i, Z_IC_Predict_i);
+                            loss_IC_rollout_FOM  += self.MAE(U_IC_Target_i, U_IC_Predict_i)/self.std_Train[i][0];
 
                     self.timer.end("IC Rollout Loss");
 
@@ -621,8 +633,12 @@ class BayesianGLaSDI:
                         self.timer.start("Reconstruction Loss");
 
                         # Compute the reconstruction loss. 
-                        loss_recon_D  += self.MSE(D_i, D_Pred_i)/(self.std_Train[i][0]**2);    # Scale the loss by the std of the FOM solution.
-                        loss_recon_V  += self.MSE(V_i, V_Pred_i)/(self.std_Train[i][1]**2);    # Scale the loss by the std of the FOM solution.
+                        if(self.loss_types['recon'] == "MSE"):
+                            loss_recon_D  += self.MSE(D_i, D_Pred_i)/(self.std_Train[i][0]**2);
+                            loss_recon_V  += self.MSE(V_i, V_Pred_i)/(self.std_Train[i][1]**2);
+                        elif(self.loss_types['recon'] == "MAE"):
+                            loss_recon_D  += self.MAE(D_i, D_Pred_i)/self.std_Train[i][0];
+                            loss_recon_V  += self.MAE(V_i, V_Pred_i)/self.std_Train[i][1];
 
                         self.timer.end("Reconstruction Loss");
 
@@ -640,7 +656,10 @@ class BayesianGLaSDI:
                         else:
                             dZ_Di_dt        : torch.Tensor      = Derivative1_Order2_NonUniform(U = Z_D_i, t_Grid = t_Grid_i);
                         
-                        loss_consistency_Z  += self.MSE(dZ_Di_dt, Z_V_i);
+                        if(self.loss_types['consistency'] == "MSE"):
+                            loss_consistency_Z  += self.MSE(dZ_Di_dt, Z_V_i);
+                        elif(self.loss_types['consistency'] == "MAE"):
+                            loss_consistency_Z  += self.MAE(dZ_Di_dt, Z_V_i);
 
                         # Next, make sure that V_Pred actually looks like the derivative of D_Pred. 
                         if(self.physics.Uniform_t_Grid  == True):
@@ -649,7 +668,11 @@ class BayesianGLaSDI:
                         else:
                             dD_Pred_i_dt    : torch.Tensor      = Derivative1_Order2_NonUniform(U = D_Pred_i, t_Grid = t_Grid_i);
 
-                        loss_consistency_U  += self.MSE(dD_Pred_i_dt, V_Pred_i);
+
+                        if(self.loss_types['consistency'] == "MSE"):
+                            loss_consistency_U  += self.MSE(dD_Pred_i_dt, V_Pred_i);
+                        elif(self.loss_types['consistency'] == "MAE"):
+                            loss_consistency_U  += self.MAE(dD_Pred_i_dt, V_Pred_i);
 
                         self.timer.end("Consistency Loss");
 
@@ -674,7 +697,11 @@ class BayesianGLaSDI:
                                                                     func    = lambda Z_D : model_device.Displacement_Autoencoder.Decode(Z_D), 
                                                                     inputs  = Z_D_i, 
                                                                     v       = Z_V_i)[1];
-                        loss_chain_rule_U += self.MSE(V_i, d_dz_D_Pred__Z_V_i);
+                        
+                        if(self.loss_types['chain_rule'] == "MSE"):
+                            loss_chain_rule_U += self.MSE(V_i, d_dz_D_Pred__Z_V_i);
+                        elif(self.loss_types['chain_rule'] == "MAE"):
+                            loss_chain_rule_U += self.MAE(V_i, d_dz_D_Pred__Z_V_i);
 
                         # Next, we compute the Z portion of the chain rule loss:
                         #       (d/dt)Z(t) \approx (d/dt)\phi_E,D(D(t))
@@ -684,7 +711,11 @@ class BayesianGLaSDI:
                                                                     func    = lambda D : model_device.Displacement_Autoencoder.Encode(D),
                                                                     inputs  = D_i, 
                                                                     v       = V_i)[1];
-                        loss_chain_rule_Z += self.MSE(Z_V_i, d_dx_Z_D__V);
+                        
+                        if(self.loss_types['chain_rule'] == "MSE"):
+                            loss_chain_rule_Z += self.MSE(Z_V_i, d_dx_Z_D__V);
+                        elif(self.loss_types['chain_rule'] == "MAE"):
+                            loss_chain_rule_Z += self.MAE(Z_V_i, d_dx_Z_D__V);
 
                         self.timer.end("Chain Rule Loss");
 
@@ -722,7 +753,8 @@ class BayesianGLaSDI:
                 # dynamics model. 
                 coefs, loss_LD, loss_coef       = LD.calibrate(Latent_States    = Latent_States, 
                                                                t_Grid           = t_Train_device,
-                                                               input_coefs      = train_coefs_list);
+                                                               input_coefs      = train_coefs_list,
+                                                               loss_type        = self.loss_types['LD']);
 
                 self.timer.end("Calibration");
 
@@ -779,10 +811,16 @@ class BayesianGLaSDI:
                         V_Rollout_Target_i      : torch.Tensor          = U_Rollout_Target_i[1];        # shape = (n_rollout_frames[i], physics.Frame_Shape)
                     
                         # Compute the losses for the i'th combination of parameter values!
-                        loss_rollout_Z_D  += self.MAE(Z_D_Rollout_Target_i, Z_D_Rollout_Predict_i);
-                        loss_rollout_Z_V  += self.MAE(Z_V_Rollout_Target_i, Z_V_Rollout_Predict_i);
-                        loss_rollout_D    += self.MAE(D_Rollout_Target_i,   D_Rollout_Predict_i)/self.std_Train[i][0];
-                        loss_rollout_V    += self.MAE(V_Rollout_Target_i,   V_Rollout_Predict_i)/self.std_Train[i][1];
+                        if(self.loss_types['rollout'] == "MSE"):
+                            loss_rollout_Z_D  += self.MSE(Z_D_Rollout_Target_i, Z_D_Rollout_Predict_i);
+                            loss_rollout_Z_V  += self.MSE(Z_V_Rollout_Target_i, Z_V_Rollout_Predict_i);
+                            loss_rollout_D    += self.MSE(D_Rollout_Target_i,   D_Rollout_Predict_i)/(self.std_Train[i][0]**2);
+                            loss_rollout_V    += self.MSE(V_Rollout_Target_i,   V_Rollout_Predict_i)/(self.std_Train[i][1]**2);
+                        elif(self.loss_types['rollout'] == "MAE"):
+                            loss_rollout_Z_D  += self.MAE(Z_D_Rollout_Target_i, Z_D_Rollout_Predict_i);
+                            loss_rollout_Z_V  += self.MAE(Z_V_Rollout_Target_i, Z_V_Rollout_Predict_i);
+                            loss_rollout_D    += self.MAE(D_Rollout_Target_i,   D_Rollout_Predict_i)/self.std_Train[i][0];
+                            loss_rollout_V    += self.MAE(V_Rollout_Target_i,   V_Rollout_Predict_i)/self.std_Train[i][1];
 
                     self.timer.end("Rollout Loss");
 
@@ -840,10 +878,16 @@ class BayesianGLaSDI:
                         Z_D_IC_Target_i, Z_V_IC_Target_i = model_device.Encode(D_IC_Target_i, V_IC_Target_i);
 
                         # Compute the losses for the i'th combination of parameter values!
-                        loss_IC_rollout_Z_D  += self.MAE(Z_D_IC_Target_i, Z_D_IC_Predict_i);
-                        loss_IC_rollout_Z_V  += self.MAE(Z_V_IC_Target_i, Z_V_IC_Predict_i);
-                        loss_IC_rollout_D    += self.MAE(D_IC_Target_i, D_IC_Predict_i)/self.std_Train[i][0];
-                        loss_IC_rollout_V    += self.MAE(V_IC_Target_i, V_IC_Predict_i)/self.std_Train[i][1];
+                        if(self.loss_types['IC_rollout'] == "MSE"):
+                            loss_IC_rollout_Z_D  += self.MSE(Z_D_IC_Target_i, Z_D_IC_Predict_i);
+                            loss_IC_rollout_Z_V  += self.MSE(Z_V_IC_Target_i, Z_V_IC_Predict_i);
+                            loss_IC_rollout_D    += self.MSE(D_IC_Target_i, D_IC_Predict_i)/(self.std_Train[i][0]**2);
+                            loss_IC_rollout_V    += self.MSE(V_IC_Target_i, V_IC_Predict_i)/(self.std_Train[i][1]**2);
+                        elif(self.loss_types['IC_rollout'] == "MAE"):
+                            loss_IC_rollout_Z_D  += self.MAE(Z_D_IC_Target_i, Z_D_IC_Predict_i);
+                            loss_IC_rollout_Z_V  += self.MAE(Z_V_IC_Target_i, Z_V_IC_Predict_i);
+                            loss_IC_rollout_D    += self.MAE(D_IC_Target_i, D_IC_Predict_i)/self.std_Train[i][0];
+                            loss_IC_rollout_V    += self.MAE(V_IC_Target_i, V_IC_Predict_i)/self.std_Train[i][1];
 
                     self.timer.end("IC Rollout Loss");
 

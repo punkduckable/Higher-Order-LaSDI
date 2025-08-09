@@ -86,6 +86,7 @@ class LatentDynamics:
 
     def calibrate(  self, 
                     Latent_States   : list[list[torch.Tensor]], 
+                    loss_type       : str,
                     t_Grid          : list[torch.Tensor], 
                     input_coefs     : list[torch.Tensor] = []) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
@@ -112,6 +113,9 @@ class LatentDynamics:
             derivative of the latent state during the p'th time step (whose time value corresponds 
             to the p'th element of t_Grid) when we use the i'th combination of parameter values. 
         
+        loss_type : str
+            The type of loss function to use. Must be either "MSE" or "MAE".
+
         t_Grid : list[troch.Tensor], len = n_param
             The i'th element should be a 1d tensor of shape (n_t(i)) whose j'th element holds the 
             time value corresponding to the j'th frame when we use the i'th combination of 

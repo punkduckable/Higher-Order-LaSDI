@@ -26,6 +26,14 @@ lasdi:
       coef:                 0.0001
       consistency:          1.0
 
+    loss_types:
+      recon:                "MAE"
+      chain_rule:           "MSE"
+      LD:                   "MSE"
+      rollout:              "MAE"
+      IC_rollout:           "MAE"
+      consistency:          "MSE"
+
     learnable_coefs:        true
   
 workflow:
@@ -67,9 +75,11 @@ physics:
   Explicit:
     n_t:                    501
     t_max:                  6
-    n_x:                    1001
-    x_min:                  -3.
-    x_max:                  3.
+    n_positions:            1000
+    x_min:                  -2.5
+    x_max:                  2.5
+    y_min:                  -2.5
+    y_max:                  2.5
     uniform_t_grid:         True
 
 
