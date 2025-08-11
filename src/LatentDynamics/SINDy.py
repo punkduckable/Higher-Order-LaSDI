@@ -342,15 +342,15 @@ class SINDy(LatentDynamics):
         n_IC : int = len(IC[0]);
         assert(n_IC == 1);
         for i in range(n_param):
-            assert(isinstance(IC[i], list));
-            assert(len(IC[i]) == n_IC);
-            assert(len(t_Grid[i].shape) == 2 or len(t_Grid[i].shape) == 1);
+            assert isinstance(IC[i], list),                                     "IC[%d] is not a list" % i;
+            assert len(IC[i]) == n_IC,                                          "len(IC[%d]) = %d, n_IC = %d" % (i, len(IC[i]), n_IC);
+            assert len(t_Grid[i].shape) == 2 or len(t_Grid[i].shape) == 1,      "len(t_Grid[%d].shape) = %d" % (i, len(t_Grid[i].shape));
             for j in range(n_IC):
-                assert(len(IC[i][j].shape) == 2);
-                assert(type(coefs)          == type(IC[i][j]));
-                assert(IC[i][j].shape[1]    == self.n_z);
+                assert len(IC[i][j].shape) == 2,                                "IC[%d][%d].shape = %s" % (i, j, str(IC[i][j].shape));
+                assert type(coefs)          == type(IC[i][j]),                  "type(coefs) = %s, type(IC[%d][%d]) = %s" % (str(type(coefs)), i, j, str(type(IC[i][j])));
+                assert IC[i][j].shape[1]    == self.n_z,                        "IC[%d][%d].shape[1] = %d, self.n_z = %d" % (i, j, IC[i][j].shape[1], self.n_z);
                 if(len(t_Grid[i].shape) == 2):
-                    assert(t_Grid[i].shape[0] == IC[i][j].shape[0]);
+                    assert t_Grid[i].shape[0] == IC[i][j].shape[0];
 
 
         # -----------------------------------------------------------------------------------------

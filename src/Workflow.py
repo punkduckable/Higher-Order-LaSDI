@@ -317,7 +317,7 @@ def main():
 
         # Generate the solution trajectory using the mean for the posterior distribution.
         param_random    : numpy.ndarray         = param_space.test_space[i_random, :].reshape(1, -1);
-        t_random        : numpy.ndarray         = trainer.t_Test[i_random];                         # shape = (n_t)
+        t_random        : torch.Tensor          = trainer.t_Test[i_random];                         # shape = (n_t)
         U_True_random   : list[torch.Tensor]    = trainer.U_Test[i_random];                         # length = n_IC        
         Zi_mean_np      : list[numpy.ndarray]   = average_rom(  model           = model,            # n_IC element list whose j'th element has shape (n_t(i), n_z)
                                                                 physics         = physics, 
@@ -354,7 +354,7 @@ def main():
             make_solution_movies(U_True         = U_True_random[i].detach().numpy(), 
                                  U_Pred         = U_Pred_random[i].detach().numpy(), 
                                  X              = physics.X_Positions, 
-                                 T              = t_random,
+                                 T              = t_random.detach().numpy(),
                                  fname_prefix   = prefix);
     
 

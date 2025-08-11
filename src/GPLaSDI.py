@@ -156,8 +156,8 @@ class BayesianGLaSDI:
         
         # Checks.
         n_IC    : int           = latent_dynamics.n_IC;
-        assert(model.n_IC       == n_IC);
-        assert(physics.n_IC     == n_IC);
+        assert model.n_IC       == n_IC, "model.n_IC = %d, n_IC = %d" % (model.n_IC, n_IC);
+        assert physics.n_IC     == n_IC, "physics.n_IC = %d, n_IC = %d" % (physics.n_IC, n_IC);
         self.n_IC               = n_IC;
 
         LOGGER.info("Initializing a GPLaSDI object"); 
@@ -249,8 +249,8 @@ class BayesianGLaSDI:
         """
         
         # Make sure we have at least one training data point.
-        assert(len(self.U_Train) > 0);
-        assert(len(self.U_Train) == self.param_space.n_train());
+        assert len(self.U_Train) > 0, "len(self.U_Train) = %d" % len(self.U_Train);
+        assert len(self.U_Train) == self.param_space.n_train(), "len(self.U_Train) = %d, self.param_space.n_train() = %d" % (len(self.U_Train), self.param_space.n_train());
 
 
         # Reset optimizer, if desirable. 
@@ -1100,24 +1100,24 @@ class BayesianGLaSDI:
         """
 
         # Checks
-        assert(isinstance(p_rollout, float));
-        assert(isinstance(U, list));
-        assert(isinstance(t, list));
-        assert(len(t) == len(U));
+        assert isinstance(p_rollout, float),    "type(p_rollout) = %s" % str(type(p_rollout));
+        assert isinstance(U, list),             "type(U) = %s" % str(type(U));
+        assert isinstance(t, list),             "type(t) = %s" % str(type(t));
+        assert len(t) == len(U),                "len(t) = %d, len(U) = %d" % (len(t), len(U));
 
-        assert(isinstance(U[0], list));
+        assert isinstance(U[0], list),          "type(U[0]) = %s" % str(type(U[0]));
         n_param     : int   = len(U);
 
         for i in range(n_param):
-            assert(isinstance(U[i], list));
-            assert(isinstance(t[i], torch.Tensor));
-            assert(len(U[i])        == self.n_IC);
-            assert(len(t[i].shape)  == 1);
+            assert isinstance(U[i], list),          "type(U[%d]) = %s" % (i, str(type(U[i])));
+            assert isinstance(t[i], torch.Tensor),  "type(t[%d]) = %s" % (i, str(type(t[i])));
+            assert len(U[i])        == self.n_IC,   "len(U[%d]) = %d, self.n_IC = %d" % (i, len(U[i]), self.n_IC);
+            assert len(t[i].shape)  == 1,           "len(t[%d].shape) = %d" % (i, len(t[i].shape));
 
             n_t_i : int = t[i].shape[0];
             for j in range(self.n_IC):
-                assert(isinstance(U[i][j], torch.Tensor));
-                assert(U[i][j].shape[0]     == n_t_i);
+                assert isinstance(U[i][j], torch.Tensor), "type(U[%d][%d]) = %s" % (i, j, str(type(U[i][j])));
+                assert U[i][j].shape[0]     == n_t_i,     "U[%d][%d].shape[0] = %d, n_t_i = %d" % (i, j, U[i][j].shape[0], n_t_i);
 
 
         # Other setup.        
@@ -1247,9 +1247,9 @@ class BayesianGLaSDI:
         """
 
         # Checks
-        assert(isinstance(p_IC_rollout, float));
-        assert(isinstance(t, list));
-        assert(p_IC_rollout >= 0.0 and p_IC_rollout <= 1.0);
+        assert isinstance(p_IC_rollout, float), "type(p_IC_rollout) = %s" % str(type(p_IC_rollout));
+        assert isinstance(t, list),             "type(t) = %s" % str(type(t));
+        assert p_IC_rollout >= 0.0 and p_IC_rollout <= 1.0, "p_IC_rollout = %f" % p_IC_rollout;
 
         n_param     : int   = len(t);
 
@@ -1347,9 +1347,9 @@ class BayesianGLaSDI:
         """
 
         self.timer.start("new_sample");
-        assert(len(self.U_Test)             >  0);
-        assert(len(self.U_Test)             == self.param_space.n_test());
-        assert(self.best_coefs.shape[0]     == self.param_space.n_train());
+        assert len(self.U_Test)             >  0,                           "len(self.U_Test) = %d" % len(self.U_Test);
+        assert len(self.U_Test)             == self.param_space.n_test(),   "len(self.U_Test) = %d, self.param_space.n_test() = %d" % (len(self.U_Test), self.param_space.n_test());
+        assert self.best_coefs.shape[0]     == self.param_space.n_train(),  "self.best_coefs.shape[0] = %d, self.param_space.n_train() = %d" % (self.best_coefs.shape[0], self.param_space.n_train());
 
         coefs : numpy.ndarray = self.best_coefs;                        # Shape = (n_train, n_coefs).
         LOGGER.info('\n~~~~~~~ Finding New Point ~~~~~~~');
@@ -1384,7 +1384,7 @@ class BayesianGLaSDI:
         # Concatenate the candidates to form an array of shape (n_candidates, n_coefs).
         n_candidates : int = len(candidate_parameters);
         LOGGER.info("There are %d candidate testing parameters (%d in the testing space, %d in the training set)" % (n_candidates, n_test, n_train));
-        assert(n_candidates >= 1);
+        assert n_candidates >= 1, "n_candidates = %d" % n_candidates;
         candidate_parameters    = numpy.array(candidate_parameters);
 
 

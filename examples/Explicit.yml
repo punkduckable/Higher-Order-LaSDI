@@ -13,25 +13,27 @@ lasdi:
     IC_rollout_update_freq: 100
     IC_dp_per_update:       0.01
 
-    max_iter:               15000
-    n_iter:                 3000
-    max_greedy_iter:        15000
+    max_iter:               17500
+    n_iter:                 2500
+    max_greedy_iter:        17500
 
     loss_weights:
       recon:                1.0
-      chain_rule:           1.0
       LD:                   1.0
-      rollout:              0.2
+      rollout:              0.0
       IC_rollout:           0.2
       coef:                 0.0001
+
+      chain_rule:           1.0
       consistency:          1.0
 
     loss_types:
-      recon:                "MAE"
-      chain_rule:           "MSE"
+      recon:                "MSE"
       LD:                   "MSE"
       rollout:              "MAE"
       IC_rollout:           "MAE"
+
+      chain_rule:           "MSE"
       consistency:          "MSE"
 
     learnable_coefs:        true
@@ -55,9 +57,10 @@ parameter_space:
     type:                   grid
 
 model:
-  type:                     pair
+  type:                     ae
   ae:
-    hidden_widths:          [100]
+    hidden_widths:          [250, 100, 100, 100]
+    activations:            ["sin", "sin", "sin", "sin"]
     latent_dimension:       10
   pair:
     hidden_widths:          [250, 100, 100, 100]
@@ -65,13 +68,14 @@ model:
     activations:            ["sin", "sin", "sin", "sin"]
 
 latent_dynamics:
-  type:                     spring
+  type:                     sindy
   coef_norm_order:          fro
   spring:
   sindy:
 
 physics:
   type:                     Explicit
+  
   Explicit:
     n_t:                    501
     t_max:                  6
@@ -80,6 +84,14 @@ physics:
     x_max:                  2.5
     y_min:                  -2.5
     y_max:                  2.5
+    uniform_t_grid:         False
+  
+  ExplicitSecondOrder:
+    n_t:                    501
+    t_max:                  6
+    n_x:                    1000
+    x_min:                  -3
+    x_max:                  3
     uniform_t_grid:         True
 
 

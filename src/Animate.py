@@ -403,17 +403,23 @@ def make_solution_movies(   U_True          : numpy.ndarray,
     # basic checks 
     # ---------------------------------------------------------------------------------------------
 
-    if U_True.shape != U_Pred.shape:
-        raise ValueError("U_True and U_Pred must have identical shape")
+    assert isinstance(U_True, numpy.ndarray),   "type(U_True) = %s" % str(type(U_True));
+    assert isinstance(U_Pred, numpy.ndarray),   "type(U_Pred) = %s" % str(type(U_Pred));
+    assert isinstance(X, numpy.ndarray),        "type(X) = %s" % str(type(X));
+    assert isinstance(T, numpy.ndarray),        "type(T) = %s" % str(type(T));
+    assert len(U_True.shape) == 3,              "U_True.shape = %s" % str(U_True.shape);
+    assert len(U_Pred.shape) == 3,              "U_Pred.shape = %s" % str(U_Pred.shape);
+    assert len(X.shape) == 2,                   "X.shape = %s" % str(X.shape);
+    assert len(T.shape) == 1,                   "T.shape = %s" % str(T.shape);
+    assert U_True.shape == U_Pred.shape,        "U_True.shape = %s, U_Pred.shape = %s" % (str(U_True.shape), str(U_Pred.shape));
+    assert X.shape[0] == 2,                     "X.shape[0] = %d" % X.shape[0];
+    assert T.shape[0] == U_True.shape[0],       "T.shape[0] = %d, U_True.shape[0] = %d" % (T.shape[0], U_True.shape[0]);
+    assert X.shape[1] == U_True.shape[2],       "X.shape[1] = %d, U_True.shape[2] = %d" % (X.shape[1], U_True.shape[2]);
     
-    N_t, n_comp, N_x = U_True.shape
-    if n_comp not in (1, 2):
-        raise ValueError("Second dimension of U_* must be 1 (scalar) or 2 (vector)")
-    if X.shape != (2, N_x):
-        raise ValueError("X must have shape (2, N_x)")
-    if T.shape != (N_t,):
-        raise ValueError("T must have shape (N_t,)")
-
+    N_t, n_comp, N_x = U_True.shape;
+    assert n_comp in (1, 2),                    "n_comp = %d" % n_comp;
+    
+    # Make sure the save directory exists.
     save_dir = Path(save_dir).expanduser().resolve();
     save_dir.mkdir(parents = True, exist_ok = True);
 
