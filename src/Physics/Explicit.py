@@ -106,8 +106,9 @@ class Explicit(Physics):
         -------------------------------------------------------------------------------------------
 
         X0 : list[numpy.ndarray], len = self.n_IC
-            i'th element has shape self.n_x (the number of grid points along the spatial axis) and
-            holds the i'th derivative of the initial state when we use param to define the FOM.
+            i'th element has shape (1, self.n_positions) (the number of grid points along the 
+            spatial axis) and holds the i'th derivative of the initial state when we use param to 
+            define the FOM.
         """
 
         # Checks.

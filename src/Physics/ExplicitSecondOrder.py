@@ -113,8 +113,9 @@ class Explicit(Physics):
         -------------------------------------------------------------------------------------------
 
         X0 : list[numpy.ndarray], len = self.n_IC
-            i'th element has shape self.n_x (the number of grid points along the spatial axis) and
-            holds the i'th derivative of the initial state when we use param to define the FOM.
+            i'th element has shape (1, self.n_positions) (the number of grid points along the 
+            spatial axis) and holds the i'th derivative of the initial state when we use param to 
+            define the FOM.
         """
 
         # Checks.
@@ -133,7 +134,7 @@ class Explicit(Physics):
         y_coords    : torch.Tensor  = torch.tensor(X[1, :], dtype = torch.float32);
         u0          : numpy.ndarray =  A*numpy.multiply(numpy.sin(2*x_coords)*numpy.cos(2*y_coords)                                                 + 0.2*numpy.cos(10*(x_coords + y_coords)), numpy.exp(-0.3*(x_coords*x_coords + y_coords*y_coords)));
         v0          : numpy.ndarray = -A*numpy.multiply(numpy.cos(2*x_coords)*numpy.cos(2*y_coords) - numpy.sin(2*x_coords)*numpy.sin(2*y_coords)   + 0.2*numpy.sin(10*(x_coords + y_coords)), numpy.exp(-0.3*(x_coords*x_coords + y_coords*y_coords)));
-        return [u0, v0];
+        return [u0.reshape(1, -1), v0.reshape(1, -1)];
     
 
 
