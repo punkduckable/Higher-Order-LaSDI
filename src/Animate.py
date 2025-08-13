@@ -11,6 +11,9 @@ import  matplotlib.pyplot           as      plt;
 from    matplotlib.animation        import  FuncAnimation, FFMpegWriter;
 
 
+# Set up logging.
+import  logging;
+LOGGER = logging.getLogger(__name__);
 
 
 
@@ -24,7 +27,7 @@ def _scalar_anim(   data        : numpy.ndarray,
                     X           : numpy.ndarray,
                     T           : numpy.ndarray,
                     save_dir    : Path          = Path("."),
-                    fps         : int           = 20,
+                    fps         : int           = 30,
                     dpi         : int           = 150,
                     cmap        : str           = "viridis") -> Path:  # data shape (N_t, N_x)
     """
@@ -56,7 +59,7 @@ def _scalar_anim(   data        : numpy.ndarray,
     save_dir : pathlib.Path, default ``Path('.')``
         Directory in which the movie is written.
     
-    fps : int, default 20
+    fps : int, default 30
         Frames per second.
     
     dpi : int, default 150
@@ -98,6 +101,18 @@ def _scalar_anim(   data        : numpy.ndarray,
         The name of the file where we want to save the animation.
     """
 
+    # Checks
+    assert(isinstance(data, numpy.ndarray), "type(data) = %s" % str(type(data)));
+    assert(isinstance(X, numpy.ndarray),    "type(X) = %s" % str(type(X)));
+    assert(isinstance(T, numpy.ndarray),    "type(T) = %s" % str(type(T)));
+    assert(len(data.shape) == 2,            "data.shape = %s" % str(data.shape));
+    assert(len(X.shape) == 2,               "X.shape = %s" % str(X.shape));
+    assert(len(T.shape) == 1,               "T.shape = %s" % str(T.shape));
+    assert(data.shape[0] == T.shape[0],     "data.shape[0] = %d, T.shape[0] = %d" % (data.shape[0], T.shape[0]));
+    assert(data.shape[1] == X.shape[1],     "data.shape[1] = %d, X.shape[1] = %d" % (data.shape[1], X.shape[1]));
+    assert(X.shape[0] == 2,                 "X.shape[0] = %d" % X.shape[0]);
+    assert(T.shape[0] == data.shape[0],     "T.shape[0] = %d, data.shape[0] = %d" % (T.shape[0], data.shape[0]));
+
     # Setup.
     N_t         : int   = T.shape[0];
     vmin                = data.min();
@@ -113,7 +128,7 @@ def _scalar_anim(   data        : numpy.ndarray,
                         cmap        = cmap,     # what colormap we use
                         vmin        = vmin,     # lower bounds for color scaling
                         vmax        = vmax,     # upper bounds for color scaling
-                        s           = 15);      # number of distinct colors used for plotting.
+                        s           = 60);      # Area of the markers.
 
     # Force the x and y axes to have equal scaling (so a unit in x equals a unit in y)
     ax.set_aspect("equal");
@@ -178,7 +193,7 @@ def _vector_anim(   data        : numpy.ndarray,
                     X           : numpy.ndarray,
                     T           : numpy.ndarray,
                     save_dir    : Path          = Path("."),
-                    fps         : int           = 20,
+                    fps         : int           = 30,
                     dpi         : int           = 150,
                     cmap        : str           = "viridis") -> Path:
     """
@@ -209,7 +224,7 @@ def _vector_anim(   data        : numpy.ndarray,
     save_dir : pathlib.Path, default ``Path('.')``
         Directory in which the movie is written.
     
-    fps : int, default 20
+    fps : int, default 30
         Frames per second.
     
     dpi : int, default 150
@@ -238,6 +253,18 @@ def _vector_anim(   data        : numpy.ndarray,
     * As for `_scalar_anim`, FFmpeg must be available.
     """
     
+    # Checks
+    assert(isinstance(data, numpy.ndarray), "type(data) = %s" % str(type(data)));
+    assert(isinstance(X, numpy.ndarray),    "type(X) = %s" % str(type(X)));
+    assert(isinstance(T, numpy.ndarray),    "type(T) = %s" % str(type(T)));
+    assert(len(data.shape) == 3,            "data.shape = %s" % str(data.shape));
+    assert(len(X.shape) == 2,               "X.shape = %s" % str(X.shape));
+    assert(len(T.shape) == 1,               "T.shape = %s" % str(T.shape));
+    assert(data.shape[1] == 2,              "data.shape[1] = %d" % data.shape[1]);
+    assert(X.shape[0] == 2,                 "X.shape[0] = %d" % X.shape[0]);
+    assert(data.shape[0] == T.shape[0],     "data.shape[0] = %d, T.shape[0] = %d" % (data.shape[0], T.shape[0]));
+    assert(data.shape[1] == X.shape[1],     "data.shape[1] = %d, X.shape[1] = %d" % (data.shape[1], X.shape[1]))
+
     # Setup.
     N_t         : int   = T.shape[0];
     magnitudes          = numpy.linalg.norm(data, axis = 1);
@@ -265,7 +292,7 @@ def _vector_anim(   data        : numpy.ndarray,
 
     # Add and label a colorbar for the magnitudes
     cb = fig.colorbar(q, ax = ax);
-    cb.set_label("|value|");
+    cb.set_label("|value|", rotation = 0);
 
     # Set initial plot title including the time stamp for frame 0
     time_text = ax.set_title(f"{title}\n$t$ = {T[0]:.3f}");
@@ -411,6 +438,7 @@ def make_solution_movies(   U_True          : numpy.ndarray,
     # ---------------------------------------------------------------------------------------------
 
     if n_comp == 1:
+        LOGGER.info("Making scalar field movie for %s" % fname_prefix);
         t_path = _scalar_anim(  data        = U_True[:, 0, :], 
                                 title       = "True field", 
                                 fname       = f"{fname_prefix}_True.mp4",
@@ -432,6 +460,7 @@ def make_solution_movies(   U_True          : numpy.ndarray,
                                 T           = T);
     
     else:  # 2 components: vector field  >:(   B)    >:U
+        LOGGER.info("Making vector field movie for %s" % fname_prefix);
         t_path = _vector_anim(  data        = U_True, 
                                 title       = "True vector field", 
                                 fname       = f"{fname_prefix}_True.mp4",

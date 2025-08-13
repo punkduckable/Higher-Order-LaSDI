@@ -65,10 +65,11 @@ class NonlinearElasticity(Physics):
 
         # Next, we need to setup X_Positions and Frame_Shape. Doing this is a bit tricky, because 
         # the solver actually picks both quantities. Specifically, in this case, Frame_Shape is 
-        # [2, N_Nodes, 2] and X_Positions has shape [N_Nodes, 2]. The issue is that we have to run 
-        # a simulation to get N_Nodes. We run a simulation with a final time of zero; this prompts
-        # the code to generate the mesh and nodes, but not to solve for anything
-        D, V, X, T                          = Simulate(t_final = 0, VisIt = False);     # D, V have shape (Nt, 2, N_Nodes)
+        # [2, num_positions] and X_Positions has shape [2, num_positions]. The issue is that we have 
+        # to run a simulation to get num_positions. We run a simulation with a final time of zero; 
+        # this prompts the code to generate the mesh and nodes, but not to solve for anything
+        D, V, X, T                          = Simulate(t_final = 0, VisIt = False);     # D, V have shape (Nt, 2, num_positions)
+
 
         # Call the super class initializer.
         super().__init__(config         = config, 
@@ -78,6 +79,7 @@ class NonlinearElasticity(Physics):
                          param_names    = param_names, 
                          Uniform_t_Grid = False,
                          n_IC           = 2);
+
 
         # Determine which index corresponds to s and which to mu (simulate accepts a two element
         # array holding s and mu. We need to know which element corresponds to mu and which to s).
@@ -111,9 +113,9 @@ class NonlinearElasticity(Physics):
         -------------------------------------------------------------------------------------------
 
         X0 : list[numpy.ndarray], len = self.n_IC
-            i'th element has shape (2, N_Nodes) (where N_Nodes = X.shape[0]) and holds the i'th 
-            derivative of the initial state when we use param to define the FOM.
-        
+            i'th element has shape (2, num_positions), where num_positions = self.X_Positions.shape[1]. 
+            This array holds the i'th derivative of the initial state when we use param to define 
+            the FOM.
         """
 
         # Checks.
@@ -181,10 +183,22 @@ class NonlinearElasticity(Physics):
         assert(param.shape[0]   == self.n_p);
         
         # Solve the PDE!
-        D, V, _, T  = Simulate(s = param[self.s_idx], shear_modulus = param[self.mu_idx], Positions = self.X_Positions);
+        D, dD_ds, _, S  = Simulate(s = param[self.s_idx], shear_modulus = param[self.mu_idx], Positions = self.X_Positions);
+
+        # The simulation runs too slowly, so we rescale the time grid by a factor of 10.
+        # Doing this requires us to rescale the velocity by a factor of 10. To see why, 
+        # let t denote the rescaled time and let s denote the original time. Then, by the
+        # chain rule,
+        # 
+        #   (dv/dt) = (dv/ds)(ds/dt)
+        #           = (dv/ds) / (dt/ds)
+        #           = 10*(dv/ds)
+        T     = S/10.0;
+        dD_dt = dD_ds*10.0;
+    
 
         # All done!
-        X       : list[torch.Tensor]    = [torch.Tensor(D), torch.Tensor(V)];
+        X       : list[torch.Tensor]    = [torch.Tensor(D), torch.Tensor(dD_dt)];
         t_Grid  : torch.Tensor          = torch.Tensor(T);
 
         return X, t_Grid;

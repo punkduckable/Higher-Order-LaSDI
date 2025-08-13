@@ -6,12 +6,10 @@ Higher-Order LaSDI provides tools for building reduced-order models from full or
 
 ## Getting Started
 
-The easiest way to explore the code is with the Jupyter notebook in `examples/2d2p.ipynb`. It demonstrates training and evaluating a model on a Burgers' equation data set. Launch Jupyter and run the notebook step by step.
-
 For a command line workflow use `src/Workflow.py` together with a YAML configuration file. Example configurations live in `examples/*.yml`. The following command trains on Burgers' equation
 
 ```bash
-python src/Workflow.py --config examples/Burgers.yml
+python src/Workflow.py --config examples/KleinGordon.yml
 ```
 
 `Workflow.py` orchestrates data generation, training via the `GPLaSDI` class and evaluation of the learned model.
@@ -101,7 +99,7 @@ $$\text{python setup.py install -v --user --with-parallel --with-gslib --CC=gcc 
 - `src/Model.py` – neural network autoencoders (`Autoencoder` and `Autoencoder_Pair`) used to encode full order states.
 - `src/ParameterSpace.py` – utilities for defining training and testing parameter grids.
 - `src/Workflow.py` – command line driver that loads configuration files, initializes all components and runs training.
-- `examples/` – configuration files and the 2‑d‑2‑p notebook demonstrating typical usage.
+- `examples/` – configuration files for the various examples. 
 - `src/Utilities` – finite difference and ODE solvers for both uniform and non-uniform grids.
 
 

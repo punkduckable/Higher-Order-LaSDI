@@ -538,15 +538,15 @@ def Simulate(mesh_file          : str           = "hexagon.mesh",
 
     U, DtU, X, T
 
-    D : numpy.ndarray, shape = (Nt, 2, N_Nodes)
+    D : numpy.ndarray, shape = (Nt, 2, num_positions)
         i, j, k element holds the j'th component of the solution at the k'th position (i.e., 
         X[i, :]) at the i'th time step (i.e., T[i]).
     
-    DtU : numpy.ndarray, shape = (Nt, 2, N_Nodes)
+    DtU : numpy.ndarray, shape = (Nt, 2, num_positions)
         i, j, k element holds the j'th component of the time derivative of the solution at the k'th 
         position (i.e., X[i]) at the i'th time step (i.e., T[i]).
 
-    X : numpy.ndarray, shape = (2, N_Nodes)
+    X : numpy.ndarray, shape = (2, num_positions)
         i'th row holds the position of the i'th node at which we evaluate the solution.
     
     T : numpy.ndarray, shape = (Nt)

@@ -5,13 +5,11 @@
 # Add the main directory to the search path.
 import  os;
 import  sys;
-src_Path        : str   = os.path.dirname(os.path.dirname(__file__));
-util_Path       : str   = os.path.join(src_Path, "Utilities");
+src_Path        : str   = os.path.dirname(os.path.abspath(os.path.pardir));
+util_Path       : str   = os.path.join(src_Path, os.path.join("src", "Utilities"));
 sys.path.append(util_Path);
 
 import  numpy;
-from    scipy.sparse.linalg import  spsolve;
-from    scipy.sparse        import  spdiags;
 import  torch;
 
 from    Physics             import  Physics;
@@ -29,6 +27,14 @@ class Burgers(Physics):
         """
         This is the initializer for the Burgers Physics class. This class essentially acts as a 
         wrapper around a 1D Burgers solver.
+
+        We use the following initial condition:
+        
+            u(0, x) = cos(pi*w*x) * exp(- a x^2 )
+            v(0, x) = (d/dt)u(t, x)|_{t = 0}
+        
+        where a and w are the corresponding parameter values. We compute v(0, x) by solving forward
+        a few time steps and the computing the time derivative using finite differences.
 
         
         -------------------------------------------------------------------------------------------
@@ -95,7 +101,7 @@ class Burgers(Physics):
         """
         Evaluates the initial condition at the points in self.X_Positions. In this case,
 
-            u(0, x) = a*exp(-x^2 / (2*w^2))
+            u(0, x) = cos(pi*w*x) * exp(- a x^2 )
             v(0, x) = (d/dt)u(t, x)|_{t = 0}
 
         where a and w are the corresponding parameter values. We compute v(0, x) by solving forward
@@ -133,7 +139,7 @@ class Burgers(Physics):
         w   : float     = param[self.w_idx];  
 
         # Get the initial displacement.
-        u0  : numpy.ndarray     = a * numpy.exp( -((self.X_Positions) ** 2) / 2 / w / w);
+        u0  : numpy.ndarray     = numpy.cos(numpy.pi * w * self.X_Positions) * numpy.exp( -a * (self.X_Positions) ** 2);
 
         # Calculate dt.
         n_t     : int           = self.config['Burgers']['n_t'];
@@ -176,16 +182,16 @@ class Burgers(Physics):
         Returns 
         -------------------------------------------------------------------------------------------
         
-        X, t_Grid
+        U, t_Grid
 
-        X : list[torch.Tensor], len = 2
+        U : list[torch.Tensor], len = 2
             i'th element has shape = (n_t, self.Frame_Shape), holds the i'th derivative of the FOM 
             solution when we use param to define the FOM. Specifically, the [j, ...] sub-array of 
             the returned array holds the i'th derivative of the FOM solution at t_Grid[j].
 
         t_Grid : torch.Tensor, shape = (n_t)
             i'th element holds the i'th time value at which we have an approximation to the FOM 
-            solution (the time value associated with X[i, ...]).
+            solution (the time value associated with U[i, ...]).
         """
 
         assert(isinstance(param, numpy.ndarray));
@@ -218,70 +224,36 @@ class Burgers(Physics):
         D       : torch.Tensor  = D.reshape(n_t, self.n_x);
         V       : torch.Tensor  = V.reshape(n_t, self.n_x);
 
-        new_X   : list[torch.Tensor]    = [D, V];
+        new_U   : list[torch.Tensor]    = [D, V];
 
         # All done!
-        return new_X, t_Grid;
-    
-
-    
-    def residual(self, U_hist : list[numpy.ndarray]) -> tuple[numpy.ndarray, float]:
-        """
-        This function computes the PDE residual (difference between the left and right hand side
-        of Burgers' equation when we substitute in the solution in U_hist).
+        return new_U, t_Grid;
 
 
-        -------------------------------------------------------------------------------------------
-        Arguments
-        -------------------------------------------------------------------------------------------
+if __name__ == "__main__":
+    # Pick a set of parameter values
+    a : float = 0.45;
+    w : float = 0.25;
 
-        U_hist : list[numpy.ndarray], len = 2
-            d'th element has shape (n_t, n_x), where n_t is the number of points along the 
-            temporal axis (this is specified by the configuration file) and n_x is the number of 
-            points along the spatial axis. The i,j element of the d'th array should hold the j'th 
-            component of the d'th derivative of the FOM solution at the i'th time step.
+    # Create the parameter array
+    param : numpy.ndarray = numpy.array([a, w]);
 
+    # Make a configuration dictionary to initialize the Burgers object.
+    config : dict = {'Burgers': {   'n_x'                   : 1001,
+                                    'x_min'                 : -3.0,
+                                    'x_max'                 : 3.0,
+                                    'n_t'                   : 501,
+                                    't_max'                 : 1.0,
+                                    'maxk'                  : 10,
+                                    'convergence_threshold' : 1e-8,
+                                    'uniform_t_grid'        : False } };
 
-        -------------------------------------------------------------------------------------------
-        Returns
-        -------------------------------------------------------------------------------------------
+    # Initialize the physics object.
+    physics : Burgers = Burgers(config = config, param_names = ['a', 'w']);
 
-        r, e
+    # Solve the Burgers equation.
+    U, t_Grid = physics.solve(param = param);
 
-        r : numpy.ndarray, shape = (n_t - 2, n_x - 2)
-            i, j element holds the residual at the i + 1'th temporal grid point and the j + 1'th 
-            spatial grid point. 
-
-        e : float 
-            The norm of r. 
-        """
-
-        # Run checks.
-        assert(len(U_hist.shape)     == 2);
-        assert(U_hist.shape[1]       == self.n_x);
-
-        # Extract only the position data.
-        U_hist = U_hist[0];
-
-        # Compute dt. 
-        n_t     : int           = self.config['Burgers']['n_t'];
-        t_max   : float         = self.config['Burgers']['t_max']; 
-        dt      : float         = t_max/(n_t - 1);
-
-        # First, approximate the spatial and temporal derivatives.
-        # first axis is time index, and second index is spatial index.
-        dUdx    : numpy.ndarray     = numpy.empty_like(U_hist);
-        dUdt    : numpy.ndarray     = numpy.empty_like(U_hist);
-
-        dUdx[:, :-1]    = (U_hist[:, 1:] - U_hist[:, :-1]) / self.dx;   # Use forward difference for all but the last time value.
-        dUdx[:, -1]     = dUdx[:, -2];                                  # Use backwards difference for the last time value
-        
-        dUdt[:-1, :]    = (U_hist[1:, :] - U_hist[:-1, :]) / dt;        # Use forward difference for all but the last position
-        dUdt[-1, :]     = dUdt[-2, :];                                  # Use backwards difference for the last time value.
-
-        # compute the residual + the norm of the residual.
-        r   : numpy.ndarray = dUdt - U_hist * dUdx;
-        e   : float         = numpy.linalg.norm(r);
-
-        # All done!
-        return r, e;
+    # Plot the solution.
+    from Burgers import Plot_Solution;
+    Plot_Solution(U = U, x = physics.X_Positions, t = t_Grid.detach().numpy());
