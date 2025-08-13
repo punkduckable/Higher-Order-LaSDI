@@ -9,7 +9,7 @@ import  os;
 import  numpy;
 import  matplotlib.pyplot           as      plt;
 from    matplotlib.animation        import  FuncAnimation, FFMpegWriter;
-
+from    matplotlib.colors           import  LinearSegmentedColormap;
 
 # Set up logging.
 import  logging;
@@ -102,16 +102,16 @@ def _scalar_anim(   data        : numpy.ndarray,
     """
 
     # Checks
-    assert(isinstance(data, numpy.ndarray), "type(data) = %s" % str(type(data)));
-    assert(isinstance(X, numpy.ndarray),    "type(X) = %s" % str(type(X)));
-    assert(isinstance(T, numpy.ndarray),    "type(T) = %s" % str(type(T)));
-    assert(len(data.shape) == 2,            "data.shape = %s" % str(data.shape));
-    assert(len(X.shape) == 2,               "X.shape = %s" % str(X.shape));
-    assert(len(T.shape) == 1,               "T.shape = %s" % str(T.shape));
-    assert(data.shape[0] == T.shape[0],     "data.shape[0] = %d, T.shape[0] = %d" % (data.shape[0], T.shape[0]));
-    assert(data.shape[1] == X.shape[1],     "data.shape[1] = %d, X.shape[1] = %d" % (data.shape[1], X.shape[1]));
-    assert(X.shape[0] == 2,                 "X.shape[0] = %d" % X.shape[0]);
-    assert(T.shape[0] == data.shape[0],     "T.shape[0] = %d, data.shape[0] = %d" % (T.shape[0], data.shape[0]));
+    assert isinstance(data, numpy.ndarray), "type(data) = %s" % str(type(data));
+    assert isinstance(X, numpy.ndarray),    "type(X) = %s" % str(type(X));
+    assert isinstance(T, numpy.ndarray),    "type(T) = %s" % str(type(T));
+    assert len(data.shape) == 2,            "data.shape = %s" % str(data.shape);
+    assert len(X.shape) == 2,               "X.shape = %s" % str(X.shape);
+    assert len(T.shape) == 1,               "T.shape = %s" % str(T.shape);
+    assert data.shape[0] == T.shape[0],     "data.shape[0] = %d, T.shape[0] = %d" % (data.shape[0], T.shape[0]);
+    assert data.shape[1] == X.shape[1],     "data.shape[1] = %d, X.shape[1] = %d" % (data.shape[1], X.shape[1]);
+    assert X.shape[0] == 2,                 "X.shape[0] = %d" % X.shape[0];
+    assert T.shape[0] == data.shape[0],     "T.shape[0] = %d, data.shape[0] = %d" % (T.shape[0], data.shape[0]);
 
     # Setup.
     N_t         : int   = T.shape[0];
@@ -254,16 +254,16 @@ def _vector_anim(   data        : numpy.ndarray,
     """
     
     # Checks
-    assert(isinstance(data, numpy.ndarray), "type(data) = %s" % str(type(data)));
-    assert(isinstance(X, numpy.ndarray),    "type(X) = %s" % str(type(X)));
-    assert(isinstance(T, numpy.ndarray),    "type(T) = %s" % str(type(T)));
-    assert(len(data.shape) == 3,            "data.shape = %s" % str(data.shape));
-    assert(len(X.shape) == 2,               "X.shape = %s" % str(X.shape));
-    assert(len(T.shape) == 1,               "T.shape = %s" % str(T.shape));
-    assert(data.shape[1] == 2,              "data.shape[1] = %d" % data.shape[1]);
-    assert(X.shape[0] == 2,                 "X.shape[0] = %d" % X.shape[0]);
-    assert(data.shape[0] == T.shape[0],     "data.shape[0] = %d, T.shape[0] = %d" % (data.shape[0], T.shape[0]));
-    assert(data.shape[1] == X.shape[1],     "data.shape[1] = %d, X.shape[1] = %d" % (data.shape[1], X.shape[1]))
+    assert isinstance(data, numpy.ndarray), "type(data) = %s" % str(type(data));
+    assert isinstance(X, numpy.ndarray),    "type(X) = %s" % str(type(X));
+    assert isinstance(T, numpy.ndarray),    "type(T) = %s" % str(type(T));
+    assert len(data.shape) == 3,            "data.shape = %s" % str(data.shape);
+    assert len(X.shape) == 2,               "X.shape = %s" % str(X.shape);
+    assert len(T.shape) == 1,               "T.shape = %s" % str(T.shape);
+    assert data.shape[1] == 2,              "data.shape[1] = %d" % data.shape[1];
+    assert X.shape[0] == 2,                 "X.shape[0] = %d" % X.shape[0];
+    assert data.shape[0] == T.shape[0],     "data.shape[0] = %d, T.shape[0] = %d" % (data.shape[0], T.shape[0]);
+    assert data.shape[1] == X.shape[1],     "data.shape[1] = %d, X.shape[1] = %d" % (data.shape[1], X.shape[1]);
 
     # Setup.
     N_t         : int   = T.shape[0];
@@ -341,7 +341,7 @@ def make_solution_movies(   U_True          : numpy.ndarray,
                             T               : numpy.ndarray,
                             save_dir        : str | Path    = "../Figures/",
                             fname_prefix    : str           = "solution",
-                            fps             : int           = 20,
+                            fps             : int           = 30,
                             dpi             : int           = 150,
                             cmap            : str           = "viridis") -> tuple[Path, Path, Path]:
     """
@@ -487,3 +487,126 @@ def make_solution_movies(   U_True          : numpy.ndarray,
                                 T           = T);
 
     return t_path, p_path, e_path
+
+
+
+
+# -------------------------------------------------------------------------------------------------
+# Specialized function for when the solution is a scalar field on a 2D grid
+# -------------------------------------------------------------------------------------------------
+
+def Animate_2D_Grid_Scalar( U           : numpy.ndarray,
+                            x_values    : numpy.ndarray,
+                            y_values    : numpy.ndarray,
+                            T           : numpy.ndarray,
+                            save_dir    : str = None,
+                            fname       : str = "Burgers2D.mp4",
+                            levels      : int = 300,
+                            fps         : int = 30,
+                            dpi         : int = 150) -> str:
+    """
+    Create an MP4 animation of the true scalar 2D field using filled contour plots.
+
+
+    Arguments
+    -------------------------------------------------------------------------------------------------
+
+    U : numpy.ndarray, shape = (N_t, 1, N_x*N_y)
+        Solution values over time flattened along space.
+
+    x_values, y_values : numpy.ndarray
+        1D arrays of spatial coordinates in x and y of lengths N_x and N_y, respectively.
+
+    T : numpy.ndarray, shape = (N_t)
+        Time stamps corresponding to the frames.
+
+    save_dir : str
+        Directory where the MP4 is saved. Defaults to '<project>/Figures/Burgers2D'.
+
+    fname : str
+        Output movie file name.
+
+    levels : int
+        Number of contour levels for contourf.
+
+    fps : int
+        Frames per second for the animation.
+
+    dpi : int
+        Resolution of the figure.
+
+
+    Returns
+    -------------------------------------------------------------------------------------------------
+
+    out_path : str
+        Absolute path to the saved MP4 file.
+    """
+
+    # Checks
+    assert isinstance(U, numpy.ndarray),            "U must be a numpy array";
+    assert isinstance(x_values, numpy.ndarray),     "x_values must be a numpy array";
+    assert isinstance(y_values, numpy.ndarray),     "y_values must be a numpy array";
+    assert isinstance(T, numpy.ndarray),            "T must be a numpy array";
+    assert U.ndim == 3 and U.shape[1] == 1,         "U must have shape (N_t, 1, N_x*N_y)";
+    assert x_values.ndim == 1 and y_values.ndim == 1 and T.ndim == 1;
+
+    N_t : int = U.shape[0];
+    N_x : int = x_values.shape[0];
+    N_y : int = y_values.shape[0];
+    assert U.shape[2] == N_x * N_y,                 "U's spatial dimension must be N_x*N_y";
+    assert T.shape[0] == N_t,                       "Length of T must equal number of frames";
+
+    # Reshape to (N_t, N_x, N_y)
+    U_grid : numpy.ndarray = U[:, 0, :].reshape(N_t, N_x, N_y);
+
+    # Prepare coordinates and global color limits
+    X, Y = numpy.meshgrid(x_values, y_values, indexing = 'ij');
+    vmin = float(U_grid.min());
+    vmax = float(U_grid.max());
+
+    # Gray-to-orange colormap
+    cmap = LinearSegmentedColormap.from_list(
+            'gray_to_orange',
+            ["midnightblue", "white", "slategray"],
+            N = 256);
+
+    # Figure and first frame
+    plt.rcParams.update({   "figure.dpi"        : dpi,
+                            "font.size"         : 12,
+                            "axes.grid"         : True,
+                            "grid.alpha"        : 0.25,
+                            "axes.spines.top"   : False,
+                            "axes.spines.right" : False});
+    fig, ax = plt.subplots();
+    cont = ax.contourf(X, Y, U_grid[0], levels = levels, cmap = cmap, vmin = vmin, vmax = vmax);
+    cb = fig.colorbar(cont, ax = ax);
+    ax.set_xlabel("x");
+    ax.set_ylabel("y", rotation = 0, labelpad = 10);
+    title_text = ax.set_title(f"2D Burgers (true)\n$t$ = {T[0]:.3f}");
+    ax.set_aspect('equal');
+
+    # Define the update function for the animation.
+    def update(frame: int):
+        nonlocal cont;
+        # Remove old contour collections
+        for c in cont.collections:
+            c.remove();
+
+        # Draw new frame
+        cont = ax.contourf(X, Y, U_grid[frame], levels = levels, cmap = cmap, vmin = vmin, vmax = vmax);
+        title_text.set_text(f"2D Burgers (true)\n$t$ = {T[frame]:.3f}");
+        return cont.collections + [title_text];
+
+    # Create the animation.
+    ani = FuncAnimation(fig, update, frames = N_t, blit = False, repeat = False);
+
+    # Save output
+    if save_dir is None:
+        save_dir = os.path.join(os.path.dirname(os.path.abspath(os.path.pardir)), "Figures", "Burgers2D");
+    os.makedirs(save_dir, exist_ok = True);
+    out_path = os.path.join(save_dir, fname);
+    ani.save(out_path, writer = FFMpegWriter(fps = fps, codec = "libx264"));
+    plt.close(fig);
+    return out_path;
+
