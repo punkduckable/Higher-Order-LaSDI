@@ -31,6 +31,7 @@ from    Advection           import  Advection;
 from    WaveEquation        import  WaveEquation;
 from    KleinGordon         import  KleinGordon;
 from    Telegraphers        import  Telegraphers;
+from    Burgers2D           import  Burgers2D;
 
 # Set up logger.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
@@ -50,6 +51,7 @@ ld_dict         =  {'sindy'                 : SINDy,
                     'spring'                : DampedSpring};
 physics_dict    =  {'Burgers'               : Burgers.Burgers,
                     'BurgersSecondOrder'    : BurgersSecondOrder.Burgers,
+                    'Burgers2D'             : Burgers2D,
                     'Explicit'              : Explicit.Explicit,
                     'ExplicitSecondOrder'   : ExplicitSecondOrder.Explicit,
                     'Advection'             : Advection,

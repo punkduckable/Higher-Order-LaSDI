@@ -1,0 +1,83 @@
+lasdi:
+  type:                     gplasdi
+  gplasdi:
+    lr:                     0.001
+    n_samples:              20
+
+    # Note that t_rollout is capped at 0.75 to ensure there are some frames to simulate forward.
+    p_rollout_init:         0.01
+    rollout_update_freq:    100
+    dp_per_update:          0.002
+
+    p_IC_rollout_init:      0.01
+    IC_rollout_update_freq: 100
+    IC_dp_per_update:       0.01
+
+    max_iter:               17500
+    n_iter:                 2500
+    max_greedy_iter:        17500
+
+    loss_weights:
+      recon:                1.0
+      LD:                   1.0
+      rollout:              0.0
+      IC_rollout:           0.0
+      coef:                 0.0001
+
+    loss_types:
+      recon:                "MAE"
+      LD:                   "MSE"
+      rollout:              "MAE"
+      IC_rollout:           "MAE"
+
+      chain_rule:           "MSE"
+      consistency:          "MSE"
+
+    learnable_coefs:        true
+
+workflow:
+  use_restart:              false
+  restart_file:             
+
+parameter_space:
+  parameters:
+    - name:                 k
+      test_space_type:      list
+      list:                 [0.45, 0.46, 0.47, 0.48, 0.49, 0.5, 0.51, 0.52, 0.53, 0.54, 0.55]
+    - name:                 nu
+      test_space_type:      uniform
+      min:                  0.009
+      max:                  0.011
+      sample_size:          11
+      log_scale:            false
+  test_space:
+    type:                   grid
+
+model:
+  type:                     autoencoder
+  autoencoder:
+    hidden_widths:          [250, 100, 100, 100]
+    latent_dimension:       5  
+    activations:            ["sin", "sin", "sin", "sin"]
+
+latent_dynamics:
+  type:                     sindy
+  coef_norm_order:          fro
+  sindy:
+
+physics:
+  type:                     Burgers2D
+
+  Burgers2D:
+    n_t:                    501
+    t_max:                  2.0
+    n_x:                    31
+    x_min:                  -2.0
+    x_max:                  2.0
+    n_y:                    31
+    y_min:                  -2.0
+    y_max:                  2.0
+    uniform_t_grid:         true
+    w:                      0.5
+
+

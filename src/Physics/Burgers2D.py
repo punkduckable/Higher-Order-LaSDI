@@ -187,12 +187,12 @@ class Burgers2D(Physics):
 
         # Call super class initializer
         super().__init__(   spatial_dim     = 2,
-                            Frame_Shape     = [2, self.n_x*self.n_y],
+                            Frame_Shape     = [1, self.n_x*self.n_y],
                             X_Positions     = coordinates,
                             config          = config,
                             param_names     = param_names,
                             Uniform_t_Grid  = bool(cfg['uniform_t_grid']),
-                            n_IC            = 1)
+                            n_IC            = 1);
 
         # Parameter indices for fast lookup
         self.k_idx  : int = self.param_names.index('k');

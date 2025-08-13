@@ -1087,16 +1087,17 @@ class BayesianGLaSDI:
             improves runtime. 
 
         n_rollout_frames : list[int], len = n_param
-            i'th element specifies how many frames we from the FOM solution for the i'th 
-            combination of parameter values we can rollout. Specifically, the first 
-            n_rollout_frames[i] frames from the i'th FOM solution are such that the time for 
-            each frame after rollout will be less than the final time for that FOM solution.
+            i'th element specifies how many frames we can rollout from the FOM solution for the 
+            i'th combination of parameter values. Specifically, the first n_rollout_frames[i] 
+            frames from the i'th FOM solution are such that the time for each frame after rollout 
+            will be less than the final time for that FOM solution.
 
-        U_Rollout_Targets : list[list[torch.Tensor]], len = n_param
+        U_Target_Indices : list[list[int]], len = n_param
             i'th element is an n_IC element list whose j'th element is a numpy.ndarray of shape 
             (n_rollout_frames[i], physics.Frame_Shape) whose (k, ...) element specifies the target 
             for the j'th time derivative of the k'th frame we rollout for the i'th combination of 
             parameter values.
+
         """
 
         # Checks
@@ -1186,7 +1187,8 @@ class BayesianGLaSDI:
 
             U_Rollout_Targets_i     : list[torch.Tensor]    = [];
             for j in range(self.n_IC):
-                # Interpolate the j'th component of U_Train_i.
+                # Interpolate the time series for the j'th derivative of the FOM solution when we 
+                # use the i'th combination of parameter values.
                 U_Train_ij          : numpy.ndarray = U_Train_i[j].detach().numpy();        # shape = (n_t(i), Physics.Frame_Shape)
                 U_Train_ij_interp                   = interpolate.CubicSpline(x = t_Train_i, y = U_Train_ij);
 
