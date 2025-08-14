@@ -27,7 +27,7 @@ from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
 from    SolveROMs                   import  get_FOM_max_std;
 from    FiniteDifference            import  Derivative1_Order4, Derivative1_Order2_NonUniform;
-
+from    Logging                     import  Log_Dictionary;
 
 # Setup Logger
 LOGGER : logging.Logger = logging.getLogger(__name__);
@@ -161,6 +161,7 @@ class BayesianGLaSDI:
         self.n_IC               = n_IC;
 
         LOGGER.info("Initializing a GPLaSDI object"); 
+        Log_Dictionary(LOGGER = LOGGER, D = config, level = logging.INFO);
 
         self.physics                        = physics;
         self.model                          = model;
@@ -287,20 +288,22 @@ class BayesianGLaSDI:
         Path(self.path_results).mkdir(      parents = True, exist_ok = True);
 
         # Rollout setup
-        self.timer.start("Rollout Setup");
-        if(p_rollout > 0):
+        if(self.loss_weights['rollout'] > 0 and p_rollout > 0):
+            self.timer.start("Rollout Setup");
+
             t_Grid_rollout, n_rollout_ICs, U_Target_Rollout_Trajectory = self._rollout_setup(
                                                                             t            = t_Train_device, 
                                                                             U            = U_Train_device, 
                                                                             p_rollout    = p_rollout);
-        self.timer.end("Rollout Setup");
+            self.timer.end("Rollout Setup");
 
         # IC rollout setup
-        self.timer.start("IC Rollout Setup");
-        if(p_IC_rollout > 0):
+        if(self.loss_weights['IC_rollout'] > 0 and p_IC_rollout > 0):
+            self.timer.start("IC Rollout Setup");
+
             t_Grid_IC_rollout, n_IC_rollout_frames, U_IC_Rollout_Targets = self._IC_rollout_setup(  t            = t_Train_device, 
                                                                                                     p_IC_rollout = p_IC_rollout);
-        self.timer.end("IC Rollout Setup"); 
+            self.timer.end("IC Rollout Setup"); 
 
         # If we are learning the latent dynamics coefficients, then we need to determine 
         # which combinations of parameters are in the training set. Specifically, each 
@@ -332,32 +335,36 @@ class BayesianGLaSDI:
 
             # Check if we need to update p_rollout. If so, then we also need to update 
             # t_Grid_rollout, n_rollout_ICs, and U_Target_Rollout_Trajectory
-            if(iter > 0 and ((iter % self.rollout_update_freq) == 0)):
+            if(self.loss_weights['rollout'] > 0 and iter > 0 and ((iter % self.rollout_update_freq) == 0)):
+                self.timer.start("Rollout Setup");
+
                 p_rollout  += self.dp_per_update;
                 p_rollout   = min(0.75, p_rollout);
 
                 LOGGER.info("p_rollout is now %f (increased %f)" % (p_rollout, self.dp_per_update));
 
-                self.timer.start("Rollout Setup");
                 if(p_rollout > 0):
                     t_Grid_rollout, n_rollout_ICs, U_Target_Rollout_Trajectory = self._rollout_setup(
                                                                                     t            = t_Train_device, 
                                                                                     U            = U_Train_device, 
                                                                                     p_rollout    = p_rollout);
+                
                 self.timer.end("Rollout Setup");
 
             # Check if we need to update IC rollout parameters
-            if(iter > 0 and ((iter % self.IC_rollout_update_freq) == 0)):
+            if(self.loss_weights['IC_rollout'] > 0 and iter > 0 and ((iter % self.IC_rollout_update_freq) == 0)):
+                self.timer.start("IC Rollout Setup");
+
                 p_IC_rollout  += self.IC_dp_per_update;
                 p_IC_rollout   = min(1.0, p_IC_rollout);
 
                 LOGGER.info("p_IC_rollout is now %f (increased %f)" % (p_IC_rollout, self.IC_dp_per_update));
 
                 # Setup IC rollout time grids and targets
-                self.timer.start("IC Rollout Setup");
                 if(p_IC_rollout > 0):
                     t_Grid_IC_rollout, n_IC_rollout_frames, U_IC_Rollout_Targets = self._IC_rollout_setup(  t            = t_Train_device, 
                                                                                                             p_IC_rollout = p_IC_rollout);
+                
                 self.timer.end("IC Rollout Setup"); 
 
             self.optimizer.zero_grad();
@@ -768,9 +775,10 @@ class BayesianGLaSDI:
                     # ----------------------------------------------------------------------------
                     # Setup Rollout losses.
 
-                    self.timer.start("Rollout Setup");
 
                     if(self.loss_weights['rollout'] > 0 and p_rollout > 0):
+                        self.timer.start("Rollout Setup");
+
                         # Select the latent states we want to use as initial conditions for the i'th 
                         # combination of parameter values. This should be the first 
                         # n_rollout_ICs[i] frames (n_rollout_ICs[i] is computed such that if we 
@@ -810,7 +818,7 @@ class BayesianGLaSDI:
                         # current encoder.
                         ROM_Rollout_Targets.append(list(model_device.Encode(*FOM_Rollout_Targets_i)));
                     
-                    self.timer.end("Rollout Setup");
+                        self.timer.end("Rollout Setup");
 
 
                 # --------------------------------------------------------------------------------
