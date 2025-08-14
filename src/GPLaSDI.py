@@ -178,6 +178,7 @@ class BayesianGLaSDI:
         self.rollout_update_freq    : float     = config['rollout_update_freq'];    # We increase p_rollout after this many iterations.
         self.dp_per_update          : float     = config['dp_per_update'];          # We increase p_rollout by this much each time we increase it.
         self.randomized_rollout     : bool      = config['randomized_rollout'];     # If true, then the duration is randomized for each IC, with p_rollout acting as a maximum. Otherwise, everything is rolled out by p_rollout.
+        self.rollout_spline_order   : int       = config['rollout_spline_order'];   # The order of the spline used to interpolate the rollout targets.
         self.p_IC_rollout_init      : float     = config['p_IC_rollout_init'];      # The proportion of the simulation we simulate forward when computing the IC rollout loss.
         self.IC_rollout_update_freq : float     = config['IC_rollout_update_freq']; # We increase p_IC_rollout after this many iterations.
         self.IC_dp_per_update       : float     = config['IC_dp_per_update'];       # We increase p_IC_rollout by this much each time we increase it.
@@ -1291,7 +1292,7 @@ class BayesianGLaSDI:
                 # Interpolate the time series for the j'th derivative of the FOM solution when we 
                 # use the i'th combination of parameter values.
                 U_Train_ij          : numpy.ndarray = U_Train_i[j].detach().numpy();        # shape = (n_t(i), Physics.Frame_Shape)
-                U_Train_ij_interp                   = interpolate.make_interp_spline(x = t_Train_i, y = U_Train_ij, k = self.config['rollout_spline_order']);
+                U_Train_ij_interp                   = interpolate.make_interp_spline(x = t_Train_i, y = U_Train_ij, k = self.rollout_spline_order);
 
                 U_Target_Rollout_Trajectory_ij : numpy.ndarray = numpy.empty((n_rollout_ICs_i, n_rollout_steps_i) + tuple(self.physics.Frame_Shape), dtype = numpy.float32);
                 for k in range(n_rollout_ICs_i):
