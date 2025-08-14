@@ -10,6 +10,7 @@ lasdi:
     rollout_update_freq:    100
     dp_per_update:          0.002
     randomized_rollout:     false    # If true, then the duration is randomized for each IC, with p_rollout acting as a maximum. Otherwise, everything is rolled out by p_rollout.
+    rollout_spline_order:   1
 
     p_IC_rollout_init:      0.01
     IC_rollout_update_freq: 100

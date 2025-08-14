@@ -1291,7 +1291,7 @@ class BayesianGLaSDI:
                 # Interpolate the time series for the j'th derivative of the FOM solution when we 
                 # use the i'th combination of parameter values.
                 U_Train_ij          : numpy.ndarray = U_Train_i[j].detach().numpy();        # shape = (n_t(i), Physics.Frame_Shape)
-                U_Train_ij_interp                   = interpolate.CubicSpline(x = t_Train_i, y = U_Train_ij);
+                U_Train_ij_interp                   = interpolate.make_interp_spline(x = t_Train_i, y = U_Train_ij, k = self.config['rollout_spline_order']);
 
                 U_Target_Rollout_Trajectory_ij : numpy.ndarray = numpy.empty((n_rollout_ICs_i, n_rollout_steps_i) + tuple(self.physics.Frame_Shape), dtype = numpy.float32);
                 for k in range(n_rollout_ICs_i):
