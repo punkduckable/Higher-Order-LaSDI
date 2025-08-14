@@ -8,6 +8,7 @@ lasdi:
     p_rollout_init:         0.01
     rollout_update_freq:    100
     dp_per_update:          0.002
+    randomized_rollout:     false    # If true, then the duration is randomized for each IC, with p_rollout acting as a maximum. Otherwise, everything is rolled out by p_rollout.
 
     p_IC_rollout_init:      0.01
     IC_rollout_update_freq: 100
@@ -55,7 +56,7 @@ parameter_space:
     type:                   grid
 
 model:
-  type:                     autoencoder
+  type:                     pair
   autoencoder:
     hidden_widths:          [250, 100, 100, 100]
     latent_dimension:       5  
@@ -66,14 +67,14 @@ model:
     activations:            ["sin", "sin", "sin", "sin"]
 
 latent_dynamics:
-  type:                     sindy
+  type:                     spring
   coef_norm_order:          fro
   spring:
 
   sindy:
 
 physics:
-  type:                     Burgers
+  type:                     BurgersSecondOrder
 
   Burgers:
     n_t:                    501

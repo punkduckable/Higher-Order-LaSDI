@@ -778,7 +778,7 @@ class BayesianGLaSDI:
                         # the final time for this combination of parameter values. Each element of 
                         # ROM_Rollout_IC is a 1 element list of torch.Tensor objects of shape 
                         # (n_rollout_ICs[i], n_z).
-                        ROM_Rollout_ICs.append([Z_i[:n_rollout_ICs[i], :]]);
+                        ROM_Rollout_ICs.append([Z_i[0][:n_rollout_ICs[i], :], Z_i[1][:n_rollout_ICs[i], :]]);
 
                         if(self.randomized_rollout == True):
                             # Generate the indices of the frames we want to use as the targets.
@@ -808,7 +808,7 @@ class BayesianGLaSDI:
 
                         # Fetch the corresponding target by encoding the FOM targets using the 
                         # current encoder.
-                        ROM_Rollout_Targets.append([model_device.Encode(*FOM_Rollout_Targets_i)]);
+                        ROM_Rollout_Targets.append(list(model_device.Encode(*FOM_Rollout_Targets_i)));
                     
                     self.timer.end("Rollout Setup");
 
