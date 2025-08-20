@@ -325,7 +325,7 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     LOGGER.debug("Adding values to the center of each pixel");
     for i in range(n1):
         for j in range(n2):
-            ax.text(i, j, round(values[i, j], 2), ha = 'center', va = 'center', color = 'k');
+            ax.text(i, j, round(values[i, j], 2), fontsize = 15, ha = 'center', va = 'center', color = 'k');
 
 
     # ---------------------------------------------------------------------------------------------
