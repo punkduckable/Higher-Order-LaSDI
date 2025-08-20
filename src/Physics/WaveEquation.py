@@ -72,7 +72,7 @@ class WaveEquation(Physics):
         assert('WaveEquation' in config);
 
         # Run a short simulation to determine the frame shape and positions.
-        U, DtU, X, T                        = Simulate(t_final = 0, VisIt = False);
+        U, DtU, X, T                        = Simulate(t_Grid = numpy.linspace(0, 0, 2), VisIt = False);
 
         # Call the super class initializer.
         super().__init__(config         = config,
@@ -177,8 +177,22 @@ class WaveEquation(Physics):
         assert(len(param.shape) == 1);
         assert(param.shape[0]   == self.n_p);
 
+        # Set up the t_Grid.
+        n_t     : int           = self.config['WaveEquation']['n_t'];
+        t_max   : float         = self.config['WaveEquation']['t_max']; 
+        t_Grid  : numpy.ndarray = numpy.linspace(0, t_max, n_t, dtype = numpy.float32);
+        if(self.Uniform_t_Grid == False):
+            r               : float = 0.2*(t_Grid[1] - t_Grid[0]);
+            t_adjustments           = numpy.random.uniform(low = -r, high = r, size = (n_t - 2));
+            t_Grid[1:-1]            = t_Grid[1:-1] + t_adjustments;
+
         # Solve the PDE using the external MFEM script.
-        U, DtU, _, Times = Simulate(k = param[self.k_idx], c = param[self.c_idx], Positions = self.X_Positions, VisIt = False);
+        U, DtU, _, Times = Simulate(k                   = param[self.k_idx], 
+                                    c                   = param[self.c_idx], 
+                                    Positions           = self.X_Positions, 
+                                    t_Grid              = t_Grid, 
+                                    VisIt               = False, 
+                                    serialization_steps = 1);
 
         X       : list[torch.Tensor] = [torch.Tensor(U), torch.Tensor(DtU)];
         t_Grid  : torch.Tensor       = torch.Tensor(Times);

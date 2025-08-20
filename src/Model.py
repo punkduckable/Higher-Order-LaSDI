@@ -357,8 +357,8 @@ class Autoencoder(torch.nn.Module):
         """
 
         # Check that the inputs have the correct shape.
-        assert(len(U.shape)         ==  len(self.reshape_shape) + 1);
-        assert(list(U.shape[1:])    ==  self.reshape_shape);
+        assert(len(U.shape)         ==  len(self.reshape_shape) + 1,    "U.shape = %s, self.reshape_shape = %s"     % (str(U.shape), str(self.reshape_shape)));
+        assert(list(U.shape[1:])    ==  self.reshape_shape,             "U.shape[1:] = %s, self.reshape_shape = %s" % (str(U.shape[1:]), str(self.reshape_shape)));
     
         # Encode the frames!
         return self.encoder(U);

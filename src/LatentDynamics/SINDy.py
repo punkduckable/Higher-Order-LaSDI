@@ -94,13 +94,15 @@ class SINDy(LatentDynamics):
         self.n_IC       : int   = 1;
 
         # TODO(kevin): other loss functions
-        self.MSE = torch.nn.MSELoss();
+        self.MSE = torch.nn.MSELoss(reduction = 'mean');
+        self.MAE = torch.nn.L1Loss(reduction = 'mean');
         return;
     
 
 
     def calibrate(  self,  
                     Latent_States   : list[list[torch.Tensor]], 
+                    loss_type       : str,
                     t_Grid          : list[torch.Tensor], 
                     input_coefs     : list[torch.Tensor] = []) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         r"""
@@ -125,6 +127,9 @@ class SINDy(LatentDynamics):
             during the p'th time step (whose time value corresponds to the p'th element of t_Grid) 
             when we use the i'th combination of parameter values. 
         
+        loss_type : str
+            The type of loss function to use. Must be either "MSE" or "MAE".
+
         t_Grid : list[torch.Tensor], len = n_param
             i'th element should be a 1d tensor of shape (n_t(i)) whose j'th element holds the time 
             value corresponding to the j'th frame when we use the i'th combination of parameter 
@@ -175,6 +180,9 @@ class SINDy(LatentDynamics):
                 assert(len(Latent_States[i][j].shape)   == 2);
                 assert(Latent_States[i][j].shape[-1]    == n_z);
 
+        # Run checks on loss_type.
+        assert(loss_type in ["MSE", "MAE"]);
+
         # Run checks on input_coefs.
         assert(isinstance(input_coefs, list));
         if(len(input_coefs) > 0):
@@ -208,11 +216,13 @@ class SINDy(LatentDynamics):
                 """
                 if(len(input_coefs) == 0):
                     result : tuple[torch.Tensor, torch.Tensor, torch.Tensor]    = self.calibrate(   Latent_States = [Latent_States[i]], 
-                                                                                                    t_Grid        = [t_Grid[i]]);
+                                                                                                    t_Grid        = [t_Grid[i]],
+                                                                                                    loss_type     = loss_type);
                 else:
-                    result                      = self.calibrate(Latent_States = [Latent_States[i]], 
+                    result                      = self.calibrate(Latent_States  = [Latent_States[i]], 
                                                                   t_Grid        = [t_Grid[i]],
-                                                                  input_coefs   = [input_coefs[i]]);
+                                                                  input_coefs   = [input_coefs[i]],
+                                                                  loss_type     = loss_type);
 
                 # Package the results from this combination of parameter values.
                 output_coefs_list.append(result[0]);
@@ -256,7 +266,10 @@ class SINDy(LatentDynamics):
             coefs   : torch.Tensor  = input_coefs[0].reshape(self.n_z + 1, self.n_z);
 
         # Compute the losses.
-        loss_sindy = self.MSE(dZdt, Z_1 @ coefs)
+        if(loss_type == "MSE"):
+            loss_sindy = self.MSE(dZdt, Z_1 @ coefs);
+        elif(loss_type == "MAE"):
+            loss_sindy = self.MAE(dZdt, Z_1 @ coefs);
         # NOTE(kevin): by default, this will be L1 norm.
         loss_coef = torch.norm(coefs, self.coef_norm_order)
 
@@ -329,15 +342,15 @@ class SINDy(LatentDynamics):
         n_IC : int = len(IC[0]);
         assert(n_IC == 1);
         for i in range(n_param):
-            assert(isinstance(IC[i], list));
-            assert(len(IC[i]) == n_IC);
-            assert(len(t_Grid[i].shape) == 2 or len(t_Grid[i].shape) == 1);
+            assert isinstance(IC[i], list),                                     "IC[%d] is not a list" % i;
+            assert len(IC[i]) == n_IC,                                          "len(IC[%d]) = %d, n_IC = %d" % (i, len(IC[i]), n_IC);
+            assert len(t_Grid[i].shape) == 2 or len(t_Grid[i].shape) == 1,      "len(t_Grid[%d].shape) = %d" % (i, len(t_Grid[i].shape));
             for j in range(n_IC):
-                assert(len(IC[i][j].shape) == 2);
-                assert(type(coefs)          == type(IC[i][j]));
-                assert(IC[i][j].shape[1]    == self.n_z);
+                assert len(IC[i][j].shape) == 2,                                "IC[%d][%d].shape = %s" % (i, j, str(IC[i][j].shape));
+                assert type(coefs)          == type(IC[i][j]),                  "type(coefs) = %s, type(IC[%d][%d]) = %s" % (str(type(coefs)), i, j, str(type(IC[i][j])));
+                assert IC[i][j].shape[1]    == self.n_z,                        "IC[%d][%d].shape[1] = %d, self.n_z = %d" % (i, j, IC[i][j].shape[1], self.n_z);
                 if(len(t_Grid[i].shape) == 2):
-                    assert(t_Grid[i].shape[0] == IC[i][j].shape[0]);
+                    assert t_Grid[i].shape[0] == IC[i][j].shape[0];
 
 
         # -----------------------------------------------------------------------------------------

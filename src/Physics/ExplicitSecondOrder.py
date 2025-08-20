@@ -17,9 +17,10 @@ class Explicit(Physics):
     def __init__(self, config : dict, param_names : list[str]) -> None:
         """
         This is the initializer for the Explicit class. This class essentially acts as a wrapper
-        around the following function of t and X = (x, y):
+        around the following function of t and x:
             
                   u(t, X)   =  A [ sin(2x - t)cos(2y - t) + 0.2 cos( (10(x + y) + t)cos(w t) ) ] exp(-0.3*(x^2 + y^2))
+            (d/dt)u(t, X)   = -A [ cos(2x - t)cos(2y - t) - sin(2x - t)sin(2y - t) + 0.2 sin( (10(x + y) + t)cos(w t) )[ cos(w t) - w(10(x + y) + t)sin(w t)] ] exp(-0.3*(x^2 + y^2))
 
         
         -------------------------------------------------------------------------------------------
@@ -42,20 +43,20 @@ class Explicit(Physics):
         """
 
         # Checks.
-        assert isinstance(param_names, list),   "type(param_names) = %s" % str(type(param_names));
-        assert len(param_names) == 2,           "len(param_names) = %d" % len(param_names);
-        assert 'A' in param_names,              "param_names = %s" % str(param_names);
-        assert 'w' in param_names,              "param_names = %s" % str(param_names);
+        assert(isinstance(param_names, list));
+        assert(len(param_names) == 2);
+        assert('A' in param_names);
+        assert('w' in param_names);
 
         # Make sure the config dictionary is actually for the Explicit physics model.
         assert('Explicit' in config);
 
         # Set up spatial variables
-        self.n_positions            : int           = config['Explicit']['n_positions'];    
-        self.x_min                  : float         = config['Explicit']['x_min'];
-        self.x_max                  : float         = config['Explicit']['x_max'];
-        self.y_min                  : float         = config['Explicit']['y_min'];
-        self.y_max                  : float         = config['Explicit']['y_max'];
+        self.n_positions            : int       = config['Explicit']['n_positions'];    
+        self.x_min                  : float     = config['Explicit']['x_min'];
+        self.x_max                  : float     = config['Explicit']['x_max'];
+        self.y_min                  : float     = config['Explicit']['y_min'];
+        self.y_max                  : float     = config['Explicit']['y_max'];
 
         # Set up the spatial grid.
         x_coords                    : numpy.ndarray = numpy.random.uniform(low = self.x_min, high = self.x_max, size = self.n_positions).astype(numpy.float32);
@@ -69,7 +70,7 @@ class Explicit(Physics):
                          Frame_Shape    = [1, self.n_positions],
                          param_names    = param_names, 
                          Uniform_t_Grid = config['Explicit']['uniform_t_grid'],
-                         n_IC           = 1);
+                         n_IC           = 2);
      
         # Determine which index corresponds to 'a' and 'w' (we pass an array of parameter values, 
         # we need this information to figure out which element corresponds to which variable).
@@ -85,11 +86,17 @@ class Explicit(Physics):
         """
         Evaluates the initial condition at the points in self.X_Positions. In this case,
         
-            u(t, x) =  A [ sin(2x - t)cos(2y - t) + 0.2 cos( (10(x + y) + t)cos(w t) ) ] exp(-0.3*(x^2 + y^2))
-  
+            u(t, (x, y)) =  A [ sin(2x - t)cos(2y - t) + 0.2 cos( (10(x + y) + t)cos(w t) ) ] exp(-0.3*(x^2 + y^2))
+        
+        Thus,
+            
+            v(t, (x, y))    = (d/dt)u(t, (x, y))
+                            = -A [ cos(2x - t)cos(2y - t) - sin(2x - t)sin(2y - t) + 0.2 sin( (10(x + y) + t)cos(w t) )[ cos(w t) - w(10(x + y) + t)sin(w t)] ] exp(-0.3*(x^2 + y^2))
+        
         Which means that
         
-            u(0, x) =  A [sin(2x)cos(2y) + 0.2*cos(10(x + y))]exp(-0.3*(x^2 + y^2))
+            u(0, (x, y)) =  A [ sin(2x)cos(2y)                   + 0.2*cos(10(x + y)) ]exp(-0.3*(x^2 + y^2))
+            v(0, (x, y)) = -A [ cos(2x)cos(2y) - sin(2x)sin(2y)  + 0.2*sin(10(x + y)) ]exp(-0.3*(x^2 + y^2))
 
 
         -------------------------------------------------------------------------------------------
@@ -125,14 +132,15 @@ class Explicit(Physics):
         X           : numpy.ndarray = self.X_Positions;
         x_coords    : torch.Tensor  = torch.tensor(X[0, :], dtype = torch.float32); 
         y_coords    : torch.Tensor  = torch.tensor(X[1, :], dtype = torch.float32);
-        u0          : numpy.ndarray =  A*numpy.multiply(numpy.sin(2*x_coords)*numpy.cos(2*y_coords) + 0.2*numpy.cos(10*(x_coords + y_coords)), numpy.exp(-0.3*(x_coords*x_coords + y_coords*y_coords)));
-        return [u0.reshape(1, -1)];
+        u0          : numpy.ndarray =  A*numpy.multiply(numpy.sin(2*x_coords)*numpy.cos(2*y_coords)                                                 + 0.2*numpy.cos(10*(x_coords + y_coords)), numpy.exp(-0.3*(x_coords*x_coords + y_coords*y_coords)));
+        v0          : numpy.ndarray = -A*numpy.multiply(numpy.cos(2*x_coords)*numpy.cos(2*y_coords) - numpy.sin(2*x_coords)*numpy.sin(2*y_coords)   + 0.2*numpy.sin(10*(x_coords + y_coords)), numpy.exp(-0.3*(x_coords*x_coords + y_coords*y_coords)));
+        return [u0.reshape(1, -1), v0.reshape(1, -1)];
     
 
 
     def solve(self, param : numpy.ndarray) -> tuple[list[torch.Tensor], torch.Tensor]:
         """
-        Evaluates u(t, X) (see __init__ docstring) on the t, x grids using the 
+        Evaluates u(t, x) and v(t, x) (see __init__ docstring) on the t, x grids using the 
         parameters in param.
 
 
@@ -151,14 +159,15 @@ class Explicit(Physics):
         
         U, t_Grid.
 
-        U : list[torch.Tensor], len = 1
-            A list whose lone elment is a torch.Tensor object of shape (n_t, self.n_positions), where 
-            n_t is the number of time steps when we solve the FOM using param. The i, j entry of this
-            array holds u(t[i], X[:, j]). 
+        U : list[torch.Tensor], len = 2
+            Holds the displacement (first element) and velocity (second element) of the FOM 
+            solution when we use param to define the FOM. Each element is a torch.Tensor object of 
+            shape (n_t, self.Frame_Shape), where n_t is the number of time steps when we solve the 
+            FOM using param.
 
         t_Grid : torch.Tensor, shape = (n_t)
             i'th element holds the i'th time value at which we have an approximation to the FOM 
-            solution (the time value associated with U[i, :]).
+            solution (the time value associated with X[0, i, ...]).
         """
        
         assert(isinstance(param, numpy.ndarray));
@@ -180,18 +189,29 @@ class Explicit(Physics):
             t_adjustments           = numpy.random.uniform(low = -r, high = r, size = (n_t - 2));
             t_Grid[1:-1]            = t_Grid[1:-1] + t_adjustments;
 
+
         # We know that
-        #   u(t, X) =  A [ sin(2x - t)cos(2y - t) + 0.2 cos( (10(x + y) + t)cos(w t) ) ] exp(-0.3*(x^2 + y^2))
-        U           : torch.Tensor = torch.empty((n_t, 1, self.n_positions), dtype = torch.float32);
+        #   u(t, (x, y)) =  A [ sin(2x - t)cos(2y - t) + 0.2 cos( (10(x + y) + t)cos(w t) ) ] exp(-0.3*(x^2 + y^2))
+        # Thus,
+        #   v(t, (x, y))    = (d/dt)u(t, x)
+        #                   = -A [ cos(2x - t)cos(2y - t) - sin(2x - t)sin(2y - t) + 0.2 sin( (10(x + y) + t)cos(w t) )[ cos(w t) - w(10(x + y) + t)sin(w t)] ] exp(-0.3*(x^2 + y^2))
         x_coords    : torch.Tensor = torch.tensor(self.X_Positions[0, :]);
         y_coords    : torch.Tensor = torch.tensor(self.X_Positions[1, :]);
+        U : torch.Tensor = torch.empty((n_t, 1, self.n_positions), dtype = torch.float32);
+        V : torch.Tensor = torch.empty((n_t, 1, self.n_positions), dtype = torch.float32);
         for i in range(n_t):
             t_i : float = t_Grid[i]*torch.ones(self.n_positions, dtype = torch.float32);
 
-            U[i, 0, :] = A*torch.multiply(  torch.sin(2.*x_coords - t_i) * torch.cos(2.*y_coords - t_i) +                               #  A*[ sin(2x - t)cos(2y - t)
-                                            0.2*torch.cos(torch.multiply(10*(x_coords + y_coords) + t_i, torch.cos(w*t_i))),            #      0.2*cos( (10(x + y) + t)cos(w t) ) ]*
-                                            torch.exp(-0.3*(torch.multiply(x_coords, x_coords) + torch.multiply(y_coords, y_coords)))); # exp(-0.3*(x^2 + y^2))
+            U[i, 0, :] = A*torch.multiply(  torch.multiply(torch.sin(2.*x_coords - t_i), torch.cos(2.*y_coords - t_i)) +                    #  A*[ sin(2x - t)cos(2y - t)] + 
+                                            0.2*torch.cos(torch.multiply(10*(x_coords + y_coords) + t_i, torch.cos(w*t_i))),                #       0.2*cos( (10(x + y) + t)cos(w t) ) ]*
+                                            torch.exp(-0.3*(torch.multiply(x_coords, x_coords) + torch.multiply(y_coords, y_coords))));     # exp(-0.3*(x^2 + y^2))
+            
+            V[i, 0, :] = -A*torch.multiply( torch.multiply(torch.cos(2.*x_coords - t_i), torch.cos(2.*y_coords - t_i)) -                    # -A*[ cos(2x - t)cos(2y - t) - 
+                                            torch.multiply(torch.sin(2.*x_coords - t_i), torch.sin(2.*y_coords - t_i)) +                    #      sin(2x - t)sin(2y - t)] + 
+                                            0.2*torch.multiply( torch.sin(torch.multiply(10*(x_coords + y_coords) + t_i, torch.cos(w*t_i))),#      0.2*sin( (10(x + y) + t)cos(w t) )*
+                                                                torch.cos(w*t_i) - w*(10*(x_coords + y_coords) + t_i)*torch.sin(w*t_i)),    #      [ cos(w t) - w(10(x + y) + t)sin(w t)] ] *
+                                            torch.exp(-0.3*(torch.multiply(x_coords, x_coords) + torch.multiply(y_coords, y_coords))));     # exp(-0.3*(x^2 + y^2))
 
         # All done!
-        return [U], torch.Tensor(t_Grid);
+        return [U, V], torch.Tensor(t_Grid);
         

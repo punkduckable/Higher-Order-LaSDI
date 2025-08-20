@@ -92,7 +92,7 @@ class BayesianGLaSDI:
     # An n_Train element list whose i'th element is an n_IC element list whose j'th element is a
     # float holding the std of the j'th derivative of the FOM solution when we use the i'th 
     # combination of training parameters.
-    std_Train : list[list[float]] = [];
+    std_Train : list[list[float]]       = [];
 
     # Same as U_Test, but used for the test set.
     U_Test  : list[list[torch.Tensor]]  = [];  
@@ -156,8 +156,8 @@ class BayesianGLaSDI:
         
         # Checks.
         n_IC    : int           = latent_dynamics.n_IC;
-        assert(model.n_IC       == n_IC);
-        assert(physics.n_IC     == n_IC);
+        assert model.n_IC       == n_IC, "model.n_IC = %d, n_IC = %d" % (model.n_IC, n_IC);
+        assert physics.n_IC     == n_IC, "physics.n_IC = %d, n_IC = %d" % (physics.n_IC, n_IC);
         self.n_IC               = n_IC;
 
         LOGGER.info("Initializing a GPLaSDI object"); 
@@ -183,10 +183,8 @@ class BayesianGLaSDI:
         self.max_iter               : int       = config['max_iter'];               # We stop training if restart_iter goes above this number. 
         self.max_greedy_iter        : int       = config['max_greedy_iter'];        # We stop performing greedy sampling if restart_iter goes above this number.
         self.loss_weights           : dict      = config['loss_weights'];           # A dictionary housing the weights of the various parts of the loss function.
+        self.loss_types             : dict      = config['loss_types'];             # A dictionary housing the type of loss function (MSE or MAE) for each part of the loss function.
         self.learnable_coefs        : bool      = config['learnable_coefs'];        # If True, the latent dynamics coefficients are learnable parameters. If false, we compute them using Least Squares.
-
-        LOGGER.debug("  - n_samples = %d, lr = %f, n_iter = %d, LD_weight = %f, coef_weight = %f" \
-                     % (self.n_samples, self.lr, self.n_iter, self.loss_weights['LD'], self.loss_weights['coef']));
 
         # Set the device to train on. We default to cpu.
         device = config['device'] if 'device' in config else 'cpu';
@@ -207,8 +205,8 @@ class BayesianGLaSDI:
         # Set up the optimizer and loss function.
         LOGGER.info("Setting up the optimizer with a learning rate of %f" % (self.lr));
         self.optimizer          : Optimizer = torch.optim.Adam(list(model.parameters()) + [self.test_coefs], lr = self.lr);
-        self.MSE                            = torch.nn.MSELoss();
-        self.MAE                            = torch.nn.L1Loss();
+        self.MSE                            = torch.nn.MSELoss(reduction = 'mean');
+        self.MAE                            = torch.nn.L1Loss(reduction = 'mean');
 
         # Set paths for checkpointing. 
         self.path_checkpoint    : str       = os.path.join(os.path.pardir, "checkpoint");
@@ -251,8 +249,8 @@ class BayesianGLaSDI:
         """
         
         # Make sure we have at least one training data point.
-        assert(len(self.U_Train) > 0);
-        assert(len(self.U_Train) == self.param_space.n_train());
+        assert len(self.U_Train) > 0, "len(self.U_Train) = %d" % len(self.U_Train);
+        assert len(self.U_Train) == self.param_space.n_train(), "len(self.U_Train) = %d, self.param_space.n_train() = %d" % (len(self.U_Train), self.param_space.n_train());
 
 
         # Reset optimizer, if desirable. 
@@ -373,7 +371,7 @@ class BayesianGLaSDI:
 
                 loss_recon          : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
     
-                Z_Rollout_IC        : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_rollout_frames[i], n_z) arrays.
+                Z_Rollout_ICs       : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_rollout_frames[i], n_z) arrays.
                 Z_Rollout_Targets   : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_rollout_frames[i], n_z) arrays.
 
                 # Cycle through the combinations of parameter values
@@ -407,7 +405,12 @@ class BayesianGLaSDI:
 
                     if(self.loss_weights['recon'] > 0):
                         self.timer.start("Reconstruction Loss");
-                        loss_recon += self.MSE(U_i, U_Pred_i) / (self.std_Train[i][0]**2);   # Scale the loss by the std of the FOM solution.
+
+                        if(self.loss_types['recon'] == "MSE"):
+                            loss_recon += self.MSE(U_i, U_Pred_i) / (self.std_Train[i][0]**2);
+                        elif(self.loss_types['recon'] == "MAE"):
+                            loss_recon += self.MAE(U_i, U_Pred_i) / self.std_Train[i][0];
+                        
                         self.timer.end("Reconstruction Loss");
 
 
@@ -424,7 +427,7 @@ class BayesianGLaSDI:
                         # the final time for this combination of parameter values. Each element of 
                         # Z_Rollout_IC is a 1 element list of torch.Tensor objects of shape 
                         # (n_rollout_frames[i], n_z).
-                        Z_Rollout_IC.append([Z_i[:n_rollout_frames[i], :]]);
+                        Z_Rollout_ICs.append([Z_i[:n_rollout_frames[i], :]]);
 
                         # Fetch the corresponding target by encoding the FOM targets using the 
                         # current encoder.
@@ -445,7 +448,8 @@ class BayesianGLaSDI:
                 # latent dynamics model. 
                 coefs, loss_LD, loss_coef       = LD.calibrate(Latent_States    = Latent_States, 
                                                                t_Grid           = t_Train_device,
-                                                               input_coefs      = train_coefs_list);
+                                                               input_coefs      = train_coefs_list,
+                                                               loss_type        = self.loss_types['LD']);
 
                 self.timer.end("Calibration");
 
@@ -470,11 +474,11 @@ class BayesianGLaSDI:
                     # Note that the latent dynamics are autonomous. Further, because we are simulating 
                     # each IC for the same amount of time, the specific values of the time are
                     # irreverent. The simulate function exploits this by solving one big IVP for each 
-                    # combination of parameter values, rather than n(i) smaller ones. 
+                    # combination of parameter values, rather than n(i) smaller ones.                         
                     Z_Rollout           : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(coefs   = coefs, 
-                                                                                                    IC      = Z_Rollout_IC, 
+                                                                                                    IC      = Z_Rollout_ICs, 
                                                                                                     t_Grid  = t_Grid_rollout);            
-                    
+
                     # Now cycle through the training examples.
                     for i in range(n_train):
                         # Fetch the latent displacement/velocity for the i'th combination of parameter
@@ -494,9 +498,13 @@ class BayesianGLaSDI:
                         U_Rollout_Target_i      : list[torch.Tensor]    = U_Rollout_Targets[i][0];      # shape = (n_rollout_frames[i], physics.Frame_Shape)
                     
                         # Compute the losses for the i'th combination of parameter values!
-                        loss_rollout_ROM  += self.MSE(Z_Rollout_Targets_i, Z_Rollout_Predict_i);   
-                        loss_rollout_FOM  += self.MSE(U_Rollout_Predict_i, U_Rollout_Target_i)/self.std_Train[i][0];     # Scale the loss by the std of the FOM solution.
-
+                        if(self.loss_types['rollout'] == "MSE"):
+                            loss_rollout_ROM  += self.MSE(Z_Rollout_Targets_i, Z_Rollout_Predict_i);   
+                            loss_rollout_FOM  += self.MSE(U_Rollout_Predict_i, U_Rollout_Target_i)/(self.std_Train[i][0]**2);
+                        elif(self.loss_types['rollout'] == "MAE"):
+                            loss_rollout_ROM  += self.MAE(Z_Rollout_Targets_i, Z_Rollout_Predict_i);   
+                            loss_rollout_FOM  += self.MAE(U_Rollout_Predict_i, U_Rollout_Target_i)/self.std_Train[i][0];
+                        
                     self.timer.end("Rollout Loss");
 
 
@@ -542,8 +550,12 @@ class BayesianGLaSDI:
                         Z_IC_Target_i = model_device.Encode(U_IC_Target_i);
 
                         # Compute the losses for the i'th combination of parameter values!
-                        loss_IC_rollout_ROM  += self.MSE(Z_IC_Target_i, Z_IC_Predict_i);
-                        loss_IC_rollout_FOM  += self.MSE(U_IC_Target_i, U_IC_Predict_i)/self.std_Train[i][0];    # Scale the loss by the std of the FOM solution.
+                        if(self.loss_types['IC_rollout'] == "MSE"):
+                            loss_IC_rollout_ROM  += self.MSE(Z_IC_Target_i, Z_IC_Predict_i);
+                            loss_IC_rollout_FOM  += self.MSE(U_IC_Target_i, U_IC_Predict_i)/(self.std_Train[i][0]**2);
+                        elif(self.loss_types['IC_rollout'] == "MAE"):
+                            loss_IC_rollout_ROM  += self.MAE(Z_IC_Target_i, Z_IC_Predict_i);
+                            loss_IC_rollout_FOM  += self.MAE(U_IC_Target_i, U_IC_Predict_i)/self.std_Train[i][0];
 
                     self.timer.end("IC Rollout Loss");
 
@@ -568,7 +580,7 @@ class BayesianGLaSDI:
                 # Setup. 
                 Latent_States       : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 2 element list of (n_t_i, n_z) arrays.
                 
-                Z_Rollout_IC        : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 2 element list of (n_rollout_frames[i], n_z) arrays.
+                Z_Rollout_ICs       : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 2 element list of (n_rollout_frames[i], n_z) arrays.
                 Z_Rollout_Targets   : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 2 element list of (n_rollout_frames[i], n_z) arrays.
 
                 loss_recon_D        : torch.Tensor              = torch.zeros(1, dtype = torch.float32, device = device);
@@ -621,8 +633,12 @@ class BayesianGLaSDI:
                         self.timer.start("Reconstruction Loss");
 
                         # Compute the reconstruction loss. 
-                        loss_recon_D  += self.MSE(D_i, D_Pred_i)/(self.std_Train[i][0]**2);    # Scale the loss by the std of the FOM solution.
-                        loss_recon_V  += self.MSE(V_i, V_Pred_i)/(self.std_Train[i][1]**2);    # Scale the loss by the std of the FOM solution.
+                        if(self.loss_types['recon'] == "MSE"):
+                            loss_recon_D  += self.MSE(D_i, D_Pred_i)/(self.std_Train[i][0]**2);
+                            loss_recon_V  += self.MSE(V_i, V_Pred_i)/(self.std_Train[i][1]**2);
+                        elif(self.loss_types['recon'] == "MAE"):
+                            loss_recon_D  += self.MAE(D_i, D_Pred_i)/self.std_Train[i][0];
+                            loss_recon_V  += self.MAE(V_i, V_Pred_i)/self.std_Train[i][1];
 
                         self.timer.end("Reconstruction Loss");
 
@@ -640,7 +656,10 @@ class BayesianGLaSDI:
                         else:
                             dZ_Di_dt        : torch.Tensor      = Derivative1_Order2_NonUniform(U = Z_D_i, t_Grid = t_Grid_i);
                         
-                        loss_consistency_Z  += self.MSE(dZ_Di_dt, Z_V_i);
+                        if(self.loss_types['consistency'] == "MSE"):
+                            loss_consistency_Z  += self.MSE(dZ_Di_dt, Z_V_i);
+                        elif(self.loss_types['consistency'] == "MAE"):
+                            loss_consistency_Z  += self.MAE(dZ_Di_dt, Z_V_i);
 
                         # Next, make sure that V_Pred actually looks like the derivative of D_Pred. 
                         if(self.physics.Uniform_t_Grid  == True):
@@ -649,7 +668,11 @@ class BayesianGLaSDI:
                         else:
                             dD_Pred_i_dt    : torch.Tensor      = Derivative1_Order2_NonUniform(U = D_Pred_i, t_Grid = t_Grid_i);
 
-                        loss_consistency_U  += self.MSE(dD_Pred_i_dt, V_Pred_i);
+
+                        if(self.loss_types['consistency'] == "MSE"):
+                            loss_consistency_U  += self.MSE(dD_Pred_i_dt, V_Pred_i);
+                        elif(self.loss_types['consistency'] == "MAE"):
+                            loss_consistency_U  += self.MAE(dD_Pred_i_dt, V_Pred_i);
 
                         self.timer.end("Consistency Loss");
 
@@ -674,7 +697,11 @@ class BayesianGLaSDI:
                                                                     func    = lambda Z_D : model_device.Displacement_Autoencoder.Decode(Z_D), 
                                                                     inputs  = Z_D_i, 
                                                                     v       = Z_V_i)[1];
-                        loss_chain_rule_U += self.MSE(V_i, d_dz_D_Pred__Z_V_i);
+                        
+                        if(self.loss_types['chain_rule'] == "MSE"):
+                            loss_chain_rule_U += self.MSE(V_i, d_dz_D_Pred__Z_V_i);
+                        elif(self.loss_types['chain_rule'] == "MAE"):
+                            loss_chain_rule_U += self.MAE(V_i, d_dz_D_Pred__Z_V_i);
 
                         # Next, we compute the Z portion of the chain rule loss:
                         #       (d/dt)Z(t) \approx (d/dt)\phi_E,D(D(t))
@@ -684,7 +711,11 @@ class BayesianGLaSDI:
                                                                     func    = lambda D : model_device.Displacement_Autoencoder.Encode(D),
                                                                     inputs  = D_i, 
                                                                     v       = V_i)[1];
-                        loss_chain_rule_Z += self.MSE(Z_V_i, d_dx_Z_D__V);
+                        
+                        if(self.loss_types['chain_rule'] == "MSE"):
+                            loss_chain_rule_Z += self.MSE(Z_V_i, d_dx_Z_D__V);
+                        elif(self.loss_types['chain_rule'] == "MAE"):
+                            loss_chain_rule_Z += self.MAE(Z_V_i, d_dx_Z_D__V);
 
                         self.timer.end("Chain Rule Loss");
 
@@ -699,9 +730,9 @@ class BayesianGLaSDI:
                         # n_rollout_frames[i] frames (n_rollout_frames[i] is computed such that if we 
                         # simulate the first n_rollout_frames[i] frames, the final times are less than 
                         # the final time for this combination of parameter values. Each element of 
-                        # Z_Rollout_IC is a 2 element list of torch.Tensor objects of shape 
+                        # Z_Rollout_ICs is a 2 element list of torch.Tensor objects of shape 
                         # (n_rollout_frames[i], n_z).
-                        Z_Rollout_IC.append([Z_D_i[:n_rollout_frames[i], :], Z_V_i[:n_rollout_frames[i], :]]);
+                        Z_Rollout_ICs.append([Z_D_i[:n_rollout_frames[i], :], Z_V_i[:n_rollout_frames[i], :]]);
 
                         # Fetch the corresponding target by encoding the FOM targets using the 
                         # current encoder.
@@ -722,7 +753,8 @@ class BayesianGLaSDI:
                 # dynamics model. 
                 coefs, loss_LD, loss_coef       = LD.calibrate(Latent_States    = Latent_States, 
                                                                t_Grid           = t_Train_device,
-                                                               input_coefs      = train_coefs_list);
+                                                               input_coefs      = train_coefs_list,
+                                                               loss_type        = self.loss_types['LD']);
 
                 self.timer.end("Calibration");
 
@@ -750,7 +782,7 @@ class BayesianGLaSDI:
                     # irreverent. The simulate function exploits this by solving one big IVP for each 
                     # combination of parameter values, rather than n(i) smaller ones. 
                     Z_Rollout           : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(coefs   = coefs, 
-                                                                                                    IC      = Z_Rollout_IC, 
+                                                                                                    IC      = Z_Rollout_ICs, 
                                                                                                     t_Grid  = t_Grid_rollout);            
 
                     # Now cycle through the training examples.
@@ -779,10 +811,16 @@ class BayesianGLaSDI:
                         V_Rollout_Target_i      : torch.Tensor          = U_Rollout_Target_i[1];        # shape = (n_rollout_frames[i], physics.Frame_Shape)
                     
                         # Compute the losses for the i'th combination of parameter values!
-                        loss_rollout_Z_D  += self.MAE(Z_D_Rollout_Target_i, Z_D_Rollout_Predict_i);
-                        loss_rollout_Z_V  += self.MAE(Z_V_Rollout_Target_i, Z_V_Rollout_Predict_i);
-                        loss_rollout_D    += self.MAE(D_Rollout_Target_i,   D_Rollout_Predict_i)/self.std_Train[i][0];
-                        loss_rollout_V    += self.MAE(V_Rollout_Target_i,   V_Rollout_Predict_i)/self.std_Train[i][1];
+                        if(self.loss_types['rollout'] == "MSE"):
+                            loss_rollout_Z_D  += self.MSE(Z_D_Rollout_Target_i, Z_D_Rollout_Predict_i);
+                            loss_rollout_Z_V  += self.MSE(Z_V_Rollout_Target_i, Z_V_Rollout_Predict_i);
+                            loss_rollout_D    += self.MSE(D_Rollout_Target_i,   D_Rollout_Predict_i)/(self.std_Train[i][0]**2);
+                            loss_rollout_V    += self.MSE(V_Rollout_Target_i,   V_Rollout_Predict_i)/(self.std_Train[i][1]**2);
+                        elif(self.loss_types['rollout'] == "MAE"):
+                            loss_rollout_Z_D  += self.MAE(Z_D_Rollout_Target_i, Z_D_Rollout_Predict_i);
+                            loss_rollout_Z_V  += self.MAE(Z_V_Rollout_Target_i, Z_V_Rollout_Predict_i);
+                            loss_rollout_D    += self.MAE(D_Rollout_Target_i,   D_Rollout_Predict_i)/self.std_Train[i][0];
+                            loss_rollout_V    += self.MAE(V_Rollout_Target_i,   V_Rollout_Predict_i)/self.std_Train[i][1];
 
                     self.timer.end("Rollout Loss");
 
@@ -840,10 +878,16 @@ class BayesianGLaSDI:
                         Z_D_IC_Target_i, Z_V_IC_Target_i = model_device.Encode(D_IC_Target_i, V_IC_Target_i);
 
                         # Compute the losses for the i'th combination of parameter values!
-                        loss_IC_rollout_Z_D  += self.MAE(Z_D_IC_Target_i, Z_D_IC_Predict_i);
-                        loss_IC_rollout_Z_V  += self.MAE(Z_V_IC_Target_i, Z_V_IC_Predict_i);
-                        loss_IC_rollout_D    += self.MAE(D_IC_Target_i, D_IC_Predict_i)/self.std_Train[i][0];
-                        loss_IC_rollout_V    += self.MAE(V_IC_Target_i, V_IC_Predict_i)/self.std_Train[i][1];
+                        if(self.loss_types['IC_rollout'] == "MSE"):
+                            loss_IC_rollout_Z_D  += self.MSE(Z_D_IC_Target_i, Z_D_IC_Predict_i);
+                            loss_IC_rollout_Z_V  += self.MSE(Z_V_IC_Target_i, Z_V_IC_Predict_i);
+                            loss_IC_rollout_D    += self.MSE(D_IC_Target_i, D_IC_Predict_i)/(self.std_Train[i][0]**2);
+                            loss_IC_rollout_V    += self.MSE(V_IC_Target_i, V_IC_Predict_i)/(self.std_Train[i][1]**2);
+                        elif(self.loss_types['IC_rollout'] == "MAE"):
+                            loss_IC_rollout_Z_D  += self.MAE(Z_D_IC_Target_i, Z_D_IC_Predict_i);
+                            loss_IC_rollout_Z_V  += self.MAE(Z_V_IC_Target_i, Z_V_IC_Predict_i);
+                            loss_IC_rollout_D    += self.MAE(D_IC_Target_i, D_IC_Predict_i)/self.std_Train[i][0];
+                            loss_IC_rollout_V    += self.MAE(V_IC_Target_i, V_IC_Predict_i)/self.std_Train[i][1];
 
                     self.timer.end("IC Rollout Loss");
 
@@ -1043,37 +1087,38 @@ class BayesianGLaSDI:
             improves runtime. 
 
         n_rollout_frames : list[int], len = n_param
-            i'th element specifies how many frames we from the FOM solution for the i'th 
-            combination of parameter values we can rollout. Specifically, the first 
-            n_rollout_frames[i] frames from the i'th FOM solution are such that the time for 
-            each frame after rollout will be less than the final time for that FOM solution.
+            i'th element specifies how many frames we can rollout from the FOM solution for the 
+            i'th combination of parameter values. Specifically, the first n_rollout_frames[i] 
+            frames from the i'th FOM solution are such that the time for each frame after rollout 
+            will be less than the final time for that FOM solution.
 
-        U_Rollout_Targets : list[list[torch.Tensor]], len = n_param
+        U_Target_Indices : list[list[int]], len = n_param
             i'th element is an n_IC element list whose j'th element is a numpy.ndarray of shape 
             (n_rollout_frames[i], physics.Frame_Shape) whose (k, ...) element specifies the target 
             for the j'th time derivative of the k'th frame we rollout for the i'th combination of 
             parameter values.
+
         """
 
         # Checks
-        assert(isinstance(p_rollout, float));
-        assert(isinstance(U, list));
-        assert(isinstance(t, list));
-        assert(len(t) == len(U));
+        assert isinstance(p_rollout, float),    "type(p_rollout) = %s" % str(type(p_rollout));
+        assert isinstance(U, list),             "type(U) = %s" % str(type(U));
+        assert isinstance(t, list),             "type(t) = %s" % str(type(t));
+        assert len(t) == len(U),                "len(t) = %d, len(U) = %d" % (len(t), len(U));
 
-        assert(isinstance(U[0], list));
+        assert isinstance(U[0], list),          "type(U[0]) = %s" % str(type(U[0]));
         n_param     : int   = len(U);
 
         for i in range(n_param):
-            assert(isinstance(U[i], list));
-            assert(isinstance(t[i], torch.Tensor));
-            assert(len(U[i])        == self.n_IC);
-            assert(len(t[i].shape)  == 1);
+            assert isinstance(U[i], list),          "type(U[%d]) = %s" % (i, str(type(U[i])));
+            assert isinstance(t[i], torch.Tensor),  "type(t[%d]) = %s" % (i, str(type(t[i])));
+            assert len(U[i])        == self.n_IC,   "len(U[%d]) = %d, self.n_IC = %d" % (i, len(U[i]), self.n_IC);
+            assert len(t[i].shape)  == 1,           "len(t[%d].shape) = %d" % (i, len(t[i].shape));
 
             n_t_i : int = t[i].shape[0];
             for j in range(self.n_IC):
-                assert(isinstance(U[i][j], torch.Tensor));
-                assert(U[i][j].shape[0]     == n_t_i);
+                assert isinstance(U[i][j], torch.Tensor), "type(U[%d][%d]) = %s" % (i, j, str(type(U[i][j])));
+                assert U[i][j].shape[0]     == n_t_i,     "U[%d][%d].shape[0] = %d, n_t_i = %d" % (i, j, U[i][j].shape[0], n_t_i);
 
 
         # Other setup.        
@@ -1142,7 +1187,8 @@ class BayesianGLaSDI:
 
             U_Rollout_Targets_i     : list[torch.Tensor]    = [];
             for j in range(self.n_IC):
-                # Interpolate the j'th component of U_Train_i.
+                # Interpolate the time series for the j'th derivative of the FOM solution when we 
+                # use the i'th combination of parameter values.
                 U_Train_ij          : numpy.ndarray = U_Train_i[j].detach().numpy();        # shape = (n_t(i), Physics.Frame_Shape)
                 U_Train_ij_interp                   = interpolate.CubicSpline(x = t_Train_i, y = U_Train_ij);
 
@@ -1203,9 +1249,9 @@ class BayesianGLaSDI:
         """
 
         # Checks
-        assert(isinstance(p_IC_rollout, float));
-        assert(isinstance(t, list));
-        assert(p_IC_rollout >= 0.0 and p_IC_rollout <= 1.0);
+        assert isinstance(p_IC_rollout, float), "type(p_IC_rollout) = %s" % str(type(p_IC_rollout));
+        assert isinstance(t, list),             "type(t) = %s" % str(type(t));
+        assert p_IC_rollout >= 0.0 and p_IC_rollout <= 1.0, "p_IC_rollout = %f" % p_IC_rollout;
 
         n_param     : int   = len(t);
 
@@ -1303,9 +1349,9 @@ class BayesianGLaSDI:
         """
 
         self.timer.start("new_sample");
-        assert(len(self.U_Test)             >  0);
-        assert(len(self.U_Test)             == self.param_space.n_test());
-        assert(self.best_coefs.shape[0]     == self.param_space.n_train());
+        assert len(self.U_Test)             >  0,                           "len(self.U_Test) = %d" % len(self.U_Test);
+        assert len(self.U_Test)             == self.param_space.n_test(),   "len(self.U_Test) = %d, self.param_space.n_test() = %d" % (len(self.U_Test), self.param_space.n_test());
+        assert self.best_coefs.shape[0]     == self.param_space.n_train(),  "self.best_coefs.shape[0] = %d, self.param_space.n_train() = %d" % (self.best_coefs.shape[0], self.param_space.n_train());
 
         coefs : numpy.ndarray = self.best_coefs;                        # Shape = (n_train, n_coefs).
         LOGGER.info('\n~~~~~~~ Finding New Point ~~~~~~~');
@@ -1340,7 +1386,7 @@ class BayesianGLaSDI:
         # Concatenate the candidates to form an array of shape (n_candidates, n_coefs).
         n_candidates : int = len(candidate_parameters);
         LOGGER.info("There are %d candidate testing parameters (%d in the testing space, %d in the training set)" % (n_candidates, n_test, n_train));
-        assert(n_candidates >= 1);
+        assert n_candidates >= 1, "n_candidates = %d" % n_candidates;
         candidate_parameters    = numpy.array(candidate_parameters);
 
 

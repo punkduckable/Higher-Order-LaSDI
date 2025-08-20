@@ -91,13 +91,15 @@ class DampedSpring(LatentDynamics):
         self.n_coefs    : int   = n_z*(2*n_z + 1);
 
         # Setup the loss function.
-        self.LD_LossFunction = torch.nn.MSELoss();
+        self.MSE = torch.nn.MSELoss(reduction = 'mean');
+        self.MAE = torch.nn.L1Loss(reduction = 'mean');
         return;
     
 
 
     def calibrate(self, 
                   Latent_States : list[torch.Tensor],
+                  loss_type     : str,
                   t_Grid        : list[torch.Tensor],
                   input_coefs   : list[torch.Tensor] = []) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         r"""
@@ -128,6 +130,9 @@ class DampedSpring(LatentDynamics):
             of the latent state during the p'th time step (whose time value corresponds to the p'th 
             element of t_Grid) when we use the i'th combination of parameter values. 
         
+        loss_type : str
+            The type of loss function to use. Must be either "MSE" or "MAE".
+
         t_Grid : list[torch.Tensor], len = n_param
             i'th element should be a 1d tensor of shape (n_t(i)) whose j'th element holds the time 
             value corresponding to the j'th frame when we use the i'th combination of parameter 
@@ -179,7 +184,10 @@ class DampedSpring(LatentDynamics):
                 assert(isinstance(Latent_States[i][j], torch.Tensor));
                 assert(len(Latent_States[i][j].shape)   == 2);
                 assert(Latent_States[i][j].shape[-1]    == n_z);
-    
+
+        # Run checks on loss_type.
+        assert(loss_type in ["MSE", "MAE"]);
+
         assert(isinstance(input_coefs, list));
         if(len(input_coefs) > 0):
             assert(isinstance(input_coefs, list));
@@ -208,11 +216,13 @@ class DampedSpring(LatentDynamics):
                 # Calibrate on the i'th combination of parameter values.
                 if(len(input_coefs) == 0):
                     result : tuple[torch.Tensor, torch.Tensor, torch.Tensor] = self.calibrate(  Latent_States = [Latent_States[i]], 
-                                                                                                t_Grid        = [t_Grid[i]]);
+                                                                                                t_Grid        = [t_Grid[i]],
+                                                                                                loss_type     = loss_type);
                 else:
                     result                                                   = self.calibrate(  Latent_States = [Latent_States[i]], 
                                                                                                 t_Grid        = [t_Grid[i]],
-                                                                                                input_coefs   = [input_coefs[i]]);
+                                                                                                input_coefs   = [input_coefs[i]],
+                                                                                                loss_type     = loss_type);
 
                 # Package the results from this combination of parameter values.
                 output_coefs_list.append(result[0]);
@@ -292,7 +302,11 @@ class DampedSpring(LatentDynamics):
         # -----------------------------------------------------------------------------------------
         # Compute the coefficient losses and return.
 
-        Loss_LD     = self.LD_LossFunction(d2Z_dt2, LD_RHS);
+        if(loss_type == "MSE"):
+            Loss_LD     = self.MSE(d2Z_dt2, LD_RHS);
+        elif(loss_type == "MAE"):
+            Loss_LD     = self.MAE(d2Z_dt2, LD_RHS);
+
         Loss_Coef   = torch.norm(coefs, self.coef_norm_order);
 
         # Prepare coefs and the losses to return.

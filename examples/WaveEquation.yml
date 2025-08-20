@@ -26,6 +26,14 @@ lasdi:
       coef:                 0.0001
       consistency:          1.0
 
+    loss_types:
+      recon:                "MAE"
+      chain_rule:           "MSE"
+      LD:                   "MSE"
+      rollout:              "MAE"
+      IC_rollout:           "MAE"
+      consistency:          "MSE"
+
     learnable_coefs:        true
 
 workflow:
@@ -64,5 +72,8 @@ latent_dynamics:
 physics:
   type:                     WaveEquation
   WaveEquation:
+    n_t:                    501
+    t_max:                  5.0
+    uniform_t_grid:         false
 
 

@@ -17,6 +17,8 @@ import  torch;
 
 import  Burgers;
 import  BurgersSecondOrder;
+import  Explicit;
+import  ExplicitSecondOrder;
 from    LatentDynamics      import  LatentDynamics;
 from    SINDy               import  SINDy;
 from    DampedSpring        import  DampedSpring;
@@ -24,12 +26,12 @@ from    ParameterSpace      import  ParameterSpace;
 from    GPLaSDI             import  BayesianGLaSDI;
 from    Model               import  Autoencoder, load_Autoencoder, Autoencoder_Pair, load_Autoencoder_Pair;
 from    Physics             import  Physics;
-from    Explicit            import  Explicit;
-from    NonlinearElasticity import  NonlinearElasticity
+from    NonlinearElasticity import  NonlinearElasticity;
 from    Advection           import  Advection;
 from    WaveEquation        import  WaveEquation;
 from    KleinGordon         import  KleinGordon;
 from    Telegraphers        import  Telegraphers;
+from    Burgers2D           import  Burgers2D;
 
 # Set up logger.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
@@ -49,7 +51,9 @@ ld_dict         =  {'sindy'                 : SINDy,
                     'spring'                : DampedSpring};
 physics_dict    =  {'Burgers'               : Burgers.Burgers,
                     'BurgersSecondOrder'    : BurgersSecondOrder.Burgers,
-                    'Explicit'              : Explicit,
+                    'Burgers2D'             : Burgers2D,
+                    'Explicit'              : Explicit.Explicit,
+                    'ExplicitSecondOrder'   : ExplicitSecondOrder.Explicit,
                     'Advection'             : Advection,
                     'NonlinearElasticity'   : NonlinearElasticity,
                     'WaveEquation'          : WaveEquation,
