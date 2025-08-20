@@ -156,32 +156,7 @@ def main():
 
     # Get a GP for each coefficient in the latent dynamics.
     gp_list         : list[GaussianProcessRegressor]    = fit_gps(param_space.train_space, trainer.best_coefs);
-
-    # Figure out which elements of the test set are in the training set.
-    in_train_set : torch.Tensor = torch.zeros(param_space.n_test(), dtype = torch.bool);
-    for i in range(param_space.n_train()):
-        for j in range(param_space.n_test()):
-            if(numpy.all(param_space.train_space[i, :] == param_space.test_space[j, :])):
-                in_train_set[j] = True;
-                break;
-
-    # Now, randomly sample an element of the test set that isn't in the training set.
-    i_random    : int   = random.randrange(0, param_space.n_test());
-    while(in_train_set[i_random] == True):
-        i_random    : int   = random.randrange(0, param_space.n_test());
     
-    # Plot the latent trajectories for the i_random'th element of the test set.
-    Plot_Latent_Trajectories(  physics         = physics,
-                               model           = model,
-                               latent_dynamics = latent_dynamics,
-                               gp_list         = gp_list,
-                               param_grid      = param_space.test_space[i_random, :].reshape(1, -1),
-                               n_samples       = trainer.n_samples,
-                               U_True          = [trainer.U_Test[i_random]],
-                               t_Grid          = [trainer.t_Test[i_random]],
-                               file_prefix     = config["physics"]["type"],
-                               figsize         = (15, 13));
-
     # Compute the relative error between the FOM solution and its prediction when we rollout the 
     # IC using the model.
     Max_Rollout_Rel_Error, Max_STD, Rollout_Rel_Error, STD  = SolveROMs.Rollout_Error_and_STD(
@@ -193,6 +168,24 @@ def main():
                                                                 t_Test          = trainer.t_Test,
                                                                 U_Test          = trainer.U_Test,
                                                                 n_samples       = trainer.n_samples);
+
+    # Find the index of the parameter combination that has the largest relative error; we unravel the 
+    # index to get the row, column number of the maximum entry of Max_Rollout_Rel_Error, then keep
+    # the row number.
+    i_worst        : int   = int(numpy.unravel_index(numpy.argmax(Max_Rollout_Rel_Error), Max_Rollout_Rel_Error.shape)[0]);
+
+    # Plot the latent trajectories for the i_worst'th element of the test set.
+    Plot_Latent_Trajectories(  physics         = physics,
+                               model           = model,
+                               latent_dynamics = latent_dynamics,
+                               gp_list         = gp_list,
+                               param_grid      = param_space.test_space[i_worst, :].reshape(1, -1),
+                               n_samples       = trainer.n_samples,
+                               U_True          = [trainer.U_Test[i_worst]],
+                               t_Grid          = [trainer.t_Test[i_worst]],
+                               file_prefix     = config["physics"]["type"],
+                               figsize         = (15, 13));
+
 
 
 
@@ -248,24 +241,25 @@ def main():
         
         # Append the relative error for the i'th combination of parameter values.
         Recon_Rel_Error.append(ith_Recon_Rel_Error);
+
     
 
     # First, plot the rollout relative error.
     for i in range(physics.n_IC):
         plt.figure();
-        plt.plot(trainer.t_Test[i_random], Rollout_Rel_Error[i_random][i]);
+        plt.plot(trainer.t_Test[i_worst], Rollout_Rel_Error[i_worst][i]);
         plt.xlabel("time (s)");
         plt.ylabel("Relative Error");
 
         if(i == 0):     
-            title_str       : str = "Relative Error of the rollout of U for %s"           % str(param_space.test_space[i_random]);
-            save_file_name  : str = config["physics"]["type"] + "_U_Rollout_Rel_Error_%s.png"                   % str(param_space.test_space[i_random]);   
+            title_str       : str = "Relative Error of the rollout of U for %s"           % str(param_space.test_space[i_worst]);
+            save_file_name  : str = config["physics"]["type"] + "_U_Rollout_Rel_Error_%s.png"                   % str(param_space.test_space[i_worst]);   
         elif(i == 1):   
-            title_str       : str = "Relative Error of the rollout of D_t U for %s"       % str(param_space.test_space[i_random]);
-            save_file_name  : str = config["physics"]["type"] + "_Dt_U_Rollout_Rel_Error_%s.png"                % str(param_space.test_space[i_random]);
+            title_str       : str = "Relative Error of the rollout of D_t U for %s"       % str(param_space.test_space[i_worst]);
+            save_file_name  : str = config["physics"]["type"] + "_Dt_U_Rollout_Rel_Error_%s.png"                % str(param_space.test_space[i_worst]);
         else:           
-            title_str       : str = "Relative Error of the rollout of D_t^%d U for %s"    % (i, str(param_space.test_space[i_random]));
-            save_file_name  : str = config["physics"]["type"] + "_Dt^%d_U_Rollout_Rel_Error_%s.png"             % (i, str(param_space.test_space[i_random]));
+            title_str       : str = "Relative Error of the rollout of D_t^%d U for %s"    % (i, str(param_space.test_space[i_worst]));
+            save_file_name  : str = config["physics"]["type"] + "_Dt^%d_U_Rollout_Rel_Error_%s.png"             % (i, str(param_space.test_space[i_worst]));
 
         # Plot the figure.
         plt.title(title_str);
@@ -277,19 +271,19 @@ def main():
     # Next, plot the reconstruction relative error.
     for i in range(physics.n_IC):
         plt.figure();
-        plt.plot(trainer.t_Test[i_random], Recon_Rel_Error[i_random][i]);
+        plt.plot(trainer.t_Test[i_worst], Recon_Rel_Error[i_worst][i]);
         plt.xlabel("time (s)");
         plt.ylabel("Relative Error");
         
         if(i == 0):     
-            title_str       : str = "Relative Error of the reconstruction of U for %s"        % str(param_space.test_space[i_random]);
-            save_file_name  : str = config["physics"]["type"] + "_U_Recon_Rel_Error_%s.png"                         % str(param_space.test_space[i_random]);   
+            title_str       : str = "Relative Error of the reconstruction of U for %s"        % str(param_space.test_space[i_worst]);
+            save_file_name  : str = config["physics"]["type"] + "_U_Recon_Rel_Error_%s.png"                         % str(param_space.test_space[i_worst]);   
         elif(i == 1):   
-            title_str       : str = "Relative Error of the reconstruction of D_t U for %s"    % str(param_space.test_space[i_random]);
-            save_file_name  : str = config["physics"]["type"] + "_Dt_U_Recon_Rel_Error_%s.png"                      % str(param_space.test_space[i_random]);
+            title_str       : str = "Relative Error of the reconstruction of D_t U for %s"    % str(param_space.test_space[i_worst]);
+            save_file_name  : str = config["physics"]["type"] + "_Dt_U_Recon_Rel_Error_%s.png"                      % str(param_space.test_space[i_worst]);
         else:           
-            title_str       : str = "Relative Error of the reconstruction of D_t^%d U for %s" % (i, str(param_space.test_space[i_random]));
-            save_file_name  : str = config["physics"]["type"] + "_Dt^%d_U_Recon_Rel_Error_%s.png"                   % (i, str(param_space.test_space[i_random]));
+            title_str       : str = "Relative Error of the reconstruction of D_t^%d U for %s" % (i, str(param_space.test_space[i_worst]));
+            save_file_name  : str = config["physics"]["type"] + "_Dt^%d_U_Recon_Rel_Error_%s.png"                   % (i, str(param_space.test_space[i_worst]));
 
         # Plot the figure.
         plt.title(title_str);
@@ -305,20 +299,20 @@ def main():
     # Make animations of the solution, its reconstruction, and the error between the two.
     # ---------------------------------------------------------------------------------------------
 
-    # Make movies for the mean predicted solution, true solution, and error for the i_random'th 
+    # Make movies for the mean predicted solution, true solution, and error for the i_worst'th 
     # combination of parameters.
 
     # If X_Positions has the form (2, N_Positions), then the solution must either be a 
     # scalar field or a 2d vector field. Let's plot the solution.
     if(len(physics.X_Positions.shape) == 2 and  physics.X_Positions.shape[0] == 2):
         
-        # First, generate latent trajectories for the i_random'th element of the test set.
-        LOGGER.debug("Generating trajectory plot for testing combination %d: %s" % (i_random, param_space.test_space[i_random]));
+        # First, generate latent trajectories for the i_worst'th element of the test set.
+        LOGGER.debug("Generating trajectory plot for testing combination %d: %s" % (i_worst, param_space.test_space[i_worst]));
 
         # Generate the solution trajectory using the mean for the posterior distribution.
-        param_random    : numpy.ndarray         = param_space.test_space[i_random, :].reshape(1, -1);
-        t_random        : torch.Tensor          = trainer.t_Test[i_random];                         # shape = (n_t)
-        U_True_random   : list[torch.Tensor]    = trainer.U_Test[i_random];                         # length = n_IC        
+        param_random    : numpy.ndarray         = param_space.test_space[i_worst, :].reshape(1, -1);
+        t_random        : torch.Tensor          = trainer.t_Test[i_worst];                          # shape = (n_t)
+        U_True_random   : list[torch.Tensor]    = trainer.U_Test[i_worst];                          # length = n_IC        
         Zi_mean_np      : list[numpy.ndarray]   = average_rom(  model           = model,            # n_IC element list whose j'th element has shape (n_t(i), n_z)
                                                                 physics         = physics, 
                                                                 latent_dynamics = latent_dynamics, 
@@ -344,11 +338,11 @@ def main():
         n_IC        : int                   = physics.n_IC;
         for i in range(n_IC):
             if(i == 0):
-                prefix : str = "%s_U_%s"        % (config["physics"]["type"], str(param_space.test_space[i_random]));
+                prefix : str = "%s_U_%s"        % (config["physics"]["type"], str(param_space.test_space[i_worst]));
             elif(i == 1):
-                prefix : str = "%s_Dt_U_%s"     % (config["physics"]["type"], str(param_space.test_space[i_random]));
+                prefix : str = "%s_Dt_U_%s"     % (config["physics"]["type"], str(param_space.test_space[i_worst]));
             else:
-                prefix : str = "%s_Dt^%d_U_%s"  % (config["physics"]["type"], i, str(param_space.test_space[i_random]));
+                prefix : str = "%s_Dt^%d_U_%s"  % (config["physics"]["type"], i, str(param_space.test_space[i_worst]));
 
             # Make the movie.
             make_solution_movies(U_True         = U_True_random[i].detach().numpy(), 

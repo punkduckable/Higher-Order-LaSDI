@@ -6,7 +6,7 @@ Higher-Order LaSDI provides tools for building reduced-order models from full or
 
 ## Getting Started
 
-For a command line workflow use `src/Workflow.py` together with a YAML configuration file. Example configurations live in `examples/*.yml`. The following command trains on Burgers' equation
+For a command line workflow use `src/Workflow.py` together with a YAML configuration file. Example configurations live in `examples/*.yml`. The following command trains on the Klein-Gordon equation
 
 ```bash
 python src/Workflow.py --config examples/KleinGordon.yml
