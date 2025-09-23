@@ -191,13 +191,13 @@ class Telegraphers(Physics):
             t_Grid[1:-1]            = t_Grid[1:-1] + t_adjustments;
 
         # Solve the PDE using the external MFEM script.
-        U, DtU, _, Times = Simulate(w               = param[self.w_idx], 
-                                    alpha           = param[self.alpha_idx], 
-                                    k               = self.k, 
-                                    Positions       = self.X_Positions,
-                                    t_Grid          = t_Grid,
-                                    VisIt           = False, 
-                                    serialize_steps = 1);
+        U, DtU, _, Times = Simulate(w                   = param[self.w_idx], 
+                                    alpha               = param[self.alpha_idx], 
+                                    k                   = self.k, 
+                                    Positions           = self.X_Positions,
+                                    t_Grid              = t_Grid,
+                                    VisIt               = False, 
+                                    serialization_steps = 1);
 
         X       : list[torch.Tensor] = [torch.Tensor(U), torch.Tensor(DtU)];
         t_Grid  : torch.Tensor       = torch.Tensor(Times);

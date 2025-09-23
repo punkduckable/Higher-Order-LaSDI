@@ -71,7 +71,7 @@ class KleinGordon(Physics):
         assert('KleinGordon' in config);
 
         # Run a short simulation to determine the frame shape and positions.
-        U, DtU, X, T                        = Simulate(t_final = 0, VisIt = False);   
+        U, DtU, X, T                        = Simulate(t_Grid = numpy.linspace(0, 0, 2), VisIt = False);
 
         # Call the super class initializer.
         super().__init__(   config         = config,

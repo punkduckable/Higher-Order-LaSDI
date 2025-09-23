@@ -15,26 +15,26 @@ lasdi:
     IC_rollout_update_freq: 100
     IC_dp_per_update:       0.01
 
-    max_iter:               17500
-    n_iter:                 2500
-    max_greedy_iter:        17500
+    max_iter:               36000
+    n_iter:                 6000
+    max_greedy_iter:        36000
 
     loss_weights:
       recon:                1.0
       chain_rule:           1.0
       LD:                   1.0
-      rollout:              0.2
-      IC_rollout:           0.2
-      coef:                 0.0001
+      rollout:              1.0
+      IC_rollout:           1.0
+      coef:                 0.001
       consistency:          1.0
 
     loss_types:
       recon:                "MAE"
-      chain_rule:           "MSE"
-      LD:                   "MSE"
+      chain_rule:           "MAE"
+      LD:                   "MAE"
       rollout:              "MAE"
       IC_rollout:           "MAE"
-      consistency:          "MSE"
+      consistency:          "MAE"
 
     learnable_coefs:        true
 

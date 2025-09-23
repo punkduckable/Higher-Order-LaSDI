@@ -194,12 +194,12 @@ class NonlinearElasticity(Physics):
             t_Grid[1:-1]            = t_Grid[1:-1] + t_adjustments;
 
         # Solve the PDE!
-        D, dD_ds, _, S  = Simulate( s               = param[self.s_idx], 
-                                    shear_modulus   = param[self.mu_idx], 
-                                    Positions       = self.X_Positions, 
-                                    t_Grid          = t_Grid, 
-                                    VisIt           = False, 
-                                    serialize_steps = 1);
+        D, dD_ds, _, S  = Simulate( s                   = param[self.s_idx], 
+                                    shear_modulus       = param[self.mu_idx], 
+                                    Positions           = self.X_Positions, 
+                                    t_Grid              = t_Grid, 
+                                    VisIt               = False, 
+                                    serialization_steps = 1);
 
         # The simulation runs too slowly, so we rescale the time grid by a factor of 10.
         # Doing this requires us to rescale the velocity by a factor of 10. To see why, 
