@@ -378,20 +378,20 @@ class HyperelasticOperator(mfem.PyTimeDependentOperator):
 # Main function
 # -------------------------------------------------------------------------------------------------
 
-def Simulate(   meshfile_name   : str           = "beam-quad.mesh", 
-                ser_ref_levels  : int           = 2,
-                par_ref_levels  : int           = 0,
-                order           : int           = 2,
-                ode_solver_type : int           = 14,
-                t_Grid          : numpy.ndarray = numpy.linspace(0, 50.0, 2501),
-                Positions       : numpy.ndarray = numpy.empty(0),
-                viscosity       : float         = 1e-2,
-                shear_modulus   : float         = 0.25, 
-                bulk_modulus    : float         = 5.0,
-                num_positions   : int           = 1000,
-                s               : float         = 1.0,
-                serialize_steps : int           = 5, 
-                VisIt           : bool          = True) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]:
+def Simulate(   meshfile_name       : str           = "beam-quad.mesh", 
+                ser_ref_levels      : int           = 2,
+                par_ref_levels      : int           = 0,
+                order               : int           = 2,
+                ode_solver_type     : int           = 14,
+                t_Grid              : numpy.ndarray = numpy.linspace(0, 50.0, 2501),
+                Positions           : numpy.ndarray = numpy.empty(0),
+                viscosity           : float         = 1e-2,
+                shear_modulus       : float         = 0.25, 
+                bulk_modulus        : float         = 5.0,
+                num_positions       : int           = 1000,
+                s                   : float         = 1.0,
+                serialization_steps : int           = 5, 
+                VisIt               : bool          = True) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """
     This examples solves a time dependent nonlinear elasticity problem of the form 
 
@@ -467,7 +467,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
     s : float
         specifies the constant "s" in the initial velocity.
 
-    serialize_steps : int
+    serialization_steps : int
         Specifies how frequently we serialize (save) and visualize the solution.
 
     VisIt : bool
@@ -794,7 +794,7 @@ def Simulate(   meshfile_name   : str           = "beam-quad.mesh",
         t, dt = ode_solver.Step(VD, t_Grid[t_idx - 1], dt)
 
         # Should we serialize?
-        if ((t_idx % serialize_steps) == 0) or (t_idx == len(t_Grid) - 1):
+        if ((t_idx % serialization_steps) == 0) or (t_idx == len(t_Grid) - 1):
             # Find energy.
             ee = oper.ElasticEnergy(D_gf);
             ke = oper.KineticEnergy(V_gf);
