@@ -280,10 +280,10 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     """
 
     # Checks
-    assert(isinstance(values, numpy.ndarray));
-    assert(isinstance(param_space, ParameterSpace));
-    assert(param_space.n_p  == 2);
-    assert(values.ndim      == 2);
+    assert isinstance(values, numpy.ndarray),       "type(values) = %s" % type(values);
+    assert isinstance(param_space, ParameterSpace), "type(param_space) = %s" % type(param_space);
+    assert param_space.n_p  == 2,                    "param_space.n_p = %d != 2" % param_space.n_p;
+    assert values.ndim      == 2,                    "values.ndim = %d != 2" % values.ndim;
 
     p1_grid : numpy.ndarray     = param_space.test_meshgrid[0][:, 0];
     p2_grid : numpy.ndarray     = param_space.test_meshgrid[1][0, :];
@@ -373,7 +373,7 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
 
 
 
-def trainSpace_RelativeErrors_Heatmap(trainer         : 'BayesianGLaSDI',
+def trainSpace_RelativeErrors_Heatmap(trainer        : 'BayesianGLaSDI',
                                      param_space     : ParameterSpace,
                                      figsize         : tuple[int]    = (10, 10), 
                                      title           : str           = '',
@@ -422,18 +422,18 @@ def trainSpace_RelativeErrors_Heatmap(trainer         : 'BayesianGLaSDI',
     """
 
     # Checks
-    assert(isinstance(param_space, ParameterSpace));
-    assert(hasattr(trainer, 'U_Train'));
-    assert(isinstance(trainer.U_Train, list));
-    assert(isinstance(figsize, tuple));
-    assert(len(figsize) == 2);
+    assert isinstance(param_space, ParameterSpace), "type(param_space) = %s" % type(param_space);
+    assert hasattr(trainer, 'U_Train'),             "trainer has no U_Train attribute";
+    assert isinstance(trainer.U_Train, list),       "type(trainer.U_Train) = %s" % type(trainer.U_Train);
+    assert isinstance(figsize, tuple),              "type(figsize) = %s" % type(figsize);
+    assert len(figsize) == 2,                       "len(figsize) = %d" % len(figsize);
 
     # Get the number of train trajectories and parameter names
-    n_train     : int       = len(trainer.U_Train);
+    n_train     : int       = len(trainer.U_Train);     # len = n_train, i'th element is a list of length n_IC
     param_names : list[str] = param_space.param_names;
     n_p         : int       = param_space.n_p;
     
-    assert(n_train == param_space.n_train());
+    assert n_train == param_space.n_train(),        "n_train = %d != param_space.n_train() = %d" % (n_train, param_space.n_train());
     
     LOGGER.info("Making train space relative errors heatmap for %d training trajectories with parameters %s" % (n_train, str(param_names)));
 
