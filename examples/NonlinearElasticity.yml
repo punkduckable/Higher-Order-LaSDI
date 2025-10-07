@@ -41,6 +41,7 @@ lasdi:
 workflow:
   use_restart:              False 
   restart_file:             
+  plot_train_rel_errors:    False
 
 parameter_space:
   parameters:

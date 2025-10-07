@@ -30,17 +30,19 @@ lasdi:
 
     loss_types:
       recon:                "MAE"
-      chain_rule:           "MSE"
-      LD:                   "MSE"
+      chain_rule:           "MAE"
+      LD:                   "MAE"
       rollout:              "MAE"
       IC_rollout:           "MAE"
-      consistency:          "MSE"
+      consistency:          "MAE"
 
     learnable_coefs:        true
 
 workflow:
   use_restart:              false
-  restart_file:             
+  restart_file:  
+  plot_train_rel_errors:    False
+           
 
 parameter_space:
   parameters:
@@ -57,7 +59,7 @@ parameter_space:
     type:                   grid
 
 model:
-  type:                     autoencoder
+  type:                     pair
   autoencoder:
     hidden_widths:          [250, 100, 100, 100]
     latent_dimension:       5  
@@ -68,14 +70,14 @@ model:
     activations:            ["sin", "sin", "sin", "sin"]
 
 latent_dynamics:
-  type:                     sindy
+  type:                     spring
   coef_norm_order:          fro
   spring:
 
   sindy:
 
 physics:
-  type:                     Burgers
+  type:                     BurgersSecondOrder
 
   Burgers:
     n_t:                    501
@@ -87,4 +89,13 @@ physics:
     convergence_threshold:  0.00000001
     uniform_t_grid:         false
 
+  BurgersSecondOrder:
+    n_t:                    501
+    t_max:                  1.
+    n_x:                    1001
+    x_min:                  -3.
+    x_max:                  3.
+    maxk:                   10
+    convergence_threshold:  0.00000001
+    uniform_t_grid:         false
 
