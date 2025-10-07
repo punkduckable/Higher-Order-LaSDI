@@ -23,14 +23,14 @@ lasdi:
       recon:                1.0
       LD:                   1.0
       rollout:              1.0
-      IC_rollout:           0.0
+      IC_rollout:           1.0
       coef:                 0.0001
 
     loss_types:
-      recon:                "MSE"
-      LD:                   "MSE"
-      rollout:              "MSE"
-      IC_rollout:           "MSE"
+      recon:                "MAE"
+      LD:                   "MAE"
+      rollout:              "MAE"
+      IC_rollout:           "MAE"
 
     learnable_coefs:        true
 
@@ -47,8 +47,8 @@ parameter_space:
       sample_size:          11
       log_scale:            false
     - name:                 g
-      min:                  1.5
-      max:                  1.7
+      min:                  1.55
+      max:                  1.60
       test_space_type:      uniform
       sample_size:          11
       log_scale:            false
