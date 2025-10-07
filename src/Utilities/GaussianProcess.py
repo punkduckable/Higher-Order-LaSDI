@@ -52,11 +52,11 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
     """
 
     # Checks.
-    assert(isinstance(Y, numpy.ndarray));
-    assert(isinstance(X, numpy.ndarray));
-    assert(len(Y.shape)         == 2);
-    assert(len(X.shape)         == 2);
-    assert(X.shape[0]           == Y.shape[0]);
+    assert isinstance(Y, numpy.ndarray),        "type(Y) = %s" % str(type(Y));
+    assert isinstance(X, numpy.ndarray),        "type(X) = %s" % str(type(X));
+    assert len(Y.shape)         == 2,           "Y.shape = %s" % str(Y.shape);
+    assert len(X.shape)         == 2,           "X.shape = %s" % str(X.shape);
+    assert X.shape[0]           == Y.shape[0],  "X.shape = %s, Y.shape = %s" % (str(X.shape), str(Y.shape));
 
     # Setup.
     n_GPs   : int   = Y.shape[1];
@@ -125,9 +125,9 @@ def eval_gp(gp_list : list[GaussianProcessRegressor], Inputs : numpy.ndarray) ->
     """
 
     # Checks
-    assert(isinstance(gp_list, list));
-    assert(isinstance(Inputs, numpy.ndarray));
-    assert(len(Inputs.shape) == 2);
+    assert isinstance(gp_list, list),           "type(gp_list) = %s" % str(type(gp_list));
+    assert isinstance(Inputs, numpy.ndarray),   "type(Inputs) = %s" % str(type(Inputs));
+    assert len(Inputs.shape) == 2,              "Inputs.shape = %s" % str(Inputs.shape);
 
     # Setup 
     n_GPs       : int           = len(gp_list);
@@ -180,10 +180,10 @@ def sample_coefs(   gp_list     : list[GaussianProcessRegressor],
     """
 
     # Checks.
-    assert(isinstance(gp_list, list));
-    assert(isinstance(Input, numpy.ndarray));
-    assert(isinstance(n_samples, int));
-    assert(len(Input.shape) == 1);
+    assert isinstance(gp_list, list),           "type(gp_list) = %s" % str(type(gp_list));
+    assert isinstance(Input, numpy.ndarray),    "type(Input) = %s" % str(type(Input));
+    assert isinstance(n_samples, int),          "type(n_samples) = %s" % str(type(n_samples));
+    assert len(Input.shape) == 1,               "Inputs.shape = %s" % str(Inputs.shape);
 
     # Setup.
     n_GPs           : int           = len(gp_list);

@@ -521,7 +521,7 @@ def trainSpace_RelativeErrors_Heatmap(trainer        : 'BayesianGLaSDI',
         plt.tight_layout();
         
         # Save the figure
-        save_file_path : str = os.path.join(os.path.join(os.path.pardir, "Figures"), save_file_name + ".png");
+        save_file_path : str = os.path.join(os.path.join(os.path.pardir, "Figures"), ("D^%d U_" % d) + save_file_name + ".png");
         fig.savefig(save_file_path, dpi = 150, bbox_inches = 'tight');
         LOGGER.info("Saved heatmap to %s" % save_file_path);
     
