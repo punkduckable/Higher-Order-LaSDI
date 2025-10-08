@@ -377,7 +377,7 @@ def trainSpace_RelativeErrors_Heatmap(trainer        : 'BayesianGLaSDI',
                                      param_space     : ParameterSpace,
                                      figsize         : tuple[int]    = (10, 10), 
                                      title           : str           = '',
-                                     save_file_name  : str           = "TrainSpaceRelativeErrorHeatmap") -> None:
+                                     file_prefix     : str           = "") -> None:
     """
     This function creates heatmaps showing the relative errors between all pairs of training 
     trajectories. The (i,j) cell of the d'th heatmap displays the relative error of d'th 
@@ -409,10 +409,10 @@ def trainSpace_RelativeErrors_Heatmap(trainer        : 'BayesianGLaSDI',
     title : str
         The plot title. This will be displayed at the top of the heatmap.
 
-    save_file_name : str
-        The name of the file (without path) in which to save the figure in the Figures directory.
-        Default is "TrainSpaceRelativeErrorHeatmap".
-
+    file_prefix : str
+        We prepend this string to "TrainSpaceRelativeErrorHeatmap" to get the name of the file 
+        (without path) in which to save the figure in the Figures directory.
+    
 
     -----------------------------------------------------------------------------------------------
     Returns
@@ -521,7 +521,7 @@ def trainSpace_RelativeErrors_Heatmap(trainer        : 'BayesianGLaSDI',
         plt.tight_layout();
         
         # Save the figure
-        save_file_path : str = os.path.join(os.path.join(os.path.pardir, "Figures"), ("D^%d U_" % d) + save_file_name + ".png");
+        save_file_path : str = os.path.join(os.path.join(os.path.pardir, "Figures"), file_prefix + ("_D^%d U_" % d) + "TrainSpaceRelativeErrorHeatmap.png");
         fig.savefig(save_file_path, dpi = 150, bbox_inches = 'tight');
         LOGGER.info("Saved heatmap to %s" % save_file_path);
     
