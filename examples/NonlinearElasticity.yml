@@ -15,46 +15,47 @@ lasdi:
     IC_rollout_update_freq: 100
     IC_dp_per_update:       0.01
 
-    max_iter:               17500
-    n_iter:                 2500
-    max_greedy_iter:        17500
+    max_iter:               20000
+    n_iter:                 4000
+    max_greedy_iter:        20000
 
     loss_weights:
       recon:                1.0
       chain_rule:           1.0
       LD:                   1.0
-      rollout:              0.2
-      IC_rollout:           0.2
+      rollout:              1.0
+      IC_rollout:           1.0
       coef:                 0.0001
       consistency:          1.0
 
     loss_types:
       recon:                "MAE"
-      chain_rule:           "MSE"
-      LD:                   "MSE"
+      chain_rule:           "MAE"
+      LD:                   "MAE"
       rollout:              "MAE"
       IC_rollout:           "MAE"
-      consistency:          "MSE"
+      consistency:          "MAE"
 
     learnable_coefs:        true
 
 workflow:
-  use_restart:              False
+  use_restart:              False 
   restart_file:             
+  plot_train_rel_errors:    False
 
 parameter_space:
   parameters:
     - name:                 s
-      min:                  0.9
-      max:                  1.1
+      min:                  0.96
+      max:                  1.04
       test_space_type:      uniform
-      sample_size:          10
+      sample_size:          11
       log_scale:            false
     - name:                 mu
-      min:                  0.23
-      max:                  0.27
+      min:                  0.15
+      max:                  0.35
       test_space_type:      uniform
-      sample_size:          10
+      sample_size:          11
       log_scale:            false
   test_space:
     type:                   grid
@@ -74,8 +75,8 @@ latent_dynamics:
 physics:
   type:                     NonlinearElasticity
   NonlinearElasticity:
-    n_t:                    2501
-    t_max:                  50.0
+    n_t:                    501
+    t_max:                  10.0
     uniform_t_grid:         false
 
 

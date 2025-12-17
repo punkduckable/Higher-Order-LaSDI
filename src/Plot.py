@@ -280,10 +280,10 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     """
 
     # Checks
-    assert(isinstance(values, numpy.ndarray));
-    assert(isinstance(param_space, ParameterSpace));
-    assert(param_space.n_p  == 2);
-    assert(values.ndim      == 2);
+    assert isinstance(values, numpy.ndarray),       "type(values) = %s" % type(values);
+    assert isinstance(param_space, ParameterSpace), "type(param_space) = %s" % type(param_space);
+    assert param_space.n_p  == 2,                    "param_space.n_p = %d != 2" % param_space.n_p;
+    assert values.ndim      == 2,                    "values.ndim = %d != 2" % values.ndim;
 
     p1_grid : numpy.ndarray     = param_space.test_meshgrid[0][:, 0];
     p2_grid : numpy.ndarray     = param_space.test_meshgrid[1][0, :];
@@ -366,6 +366,164 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     # Save the figure.
     save_file_path : str = os.path.join(os.path.join(os.path.pardir, "Figures"), save_file_name);
     fig.savefig(save_file_path);
+    
+    # Show the plot and then return!
+    plt.show();
+    return;
+
+
+
+def trainSpace_RelativeErrors_Heatmap(trainer        : 'BayesianGLaSDI',
+                                     param_space     : ParameterSpace,
+                                     figsize         : tuple[int]    = (10, 10), 
+                                     title           : str           = '',
+                                     file_prefix     : str           = "") -> None:
+    """
+    This function creates heatmaps showing the relative errors between all pairs of training 
+    trajectories. The (i,j) cell of the d'th heatmap displays the relative error of d'th 
+    derivative of the i-th train trajectory relative to the d'th derivative of the j-th train 
+    trajectory, computed as:
+    
+        relative_error[d, i,j] = 100 * ||U_Train[i][d] - U_Train[j][d]||_2 / ||U_Train[j][d]||_2
+        
+    Each row and column is labeled with the corresponding parameter values (displayed as tuples), 
+    and the title includes the parameter names to provide context.
+
+    
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+
+    trainer : BayesianGLaSDI
+        A GPLaSDI (or BayesianGLaSDI) object that holds the training trajectories in its U_Train 
+        attribute. U_Train should be a list of length n_train, where each element is a list of 
+        torch.Tensors representing different initial conditions or derivatives.
+
+    param_space : ParameterSpace
+        A ParameterSpace object which holds the training parameter combinations in its train_space 
+        attribute. The parameter names are stored in param_space.param_names.
+
+    figsize : tuple[int], len = 2
+        A two-element tuple specifying the size of the overall figure. Default is (10, 10).
+
+    title : str
+        The plot title. This will be displayed at the top of the heatmap.
+
+    file_prefix : str
+        We prepend this string to "TrainSpaceRelativeErrorHeatmap" to get the name of the file 
+        (without path) in which to save the figure in the Figures directory.
+    
+
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    Nothing!
+    """
+
+    # Checks
+    assert isinstance(param_space, ParameterSpace), "type(param_space) = %s" % type(param_space);
+    assert hasattr(trainer, 'U_Train'),             "trainer has no U_Train attribute";
+    assert isinstance(trainer.U_Train, list),       "type(trainer.U_Train) = %s" % type(trainer.U_Train);
+    assert isinstance(figsize, tuple),              "type(figsize) = %s" % type(figsize);
+    assert len(figsize) == 2,                       "len(figsize) = %d" % len(figsize);
+
+    # Get the number of train trajectories and parameter names
+    n_train     : int       = len(trainer.U_Train);     # len = n_train, i'th element is a list of length n_IC
+    param_names : list[str] = param_space.param_names;
+    n_p         : int       = param_space.n_p;
+    
+    assert n_train == param_space.n_train(),        "n_train = %d != param_space.n_train() = %d" % (n_train, param_space.n_train());
+    
+    LOGGER.info("Making train space relative errors heatmap for %d training trajectories with parameters %s" % (n_train, str(param_names)));
+
+    
+    # ---------------------------------------------------------------------------------------------
+    # Compute the relative errors between all pairs of train trajectories
+    
+    # Initialize the relative error matrix
+    n_IC            : int           = trainer.n_IC;
+    relative_errors : numpy.ndarray = numpy.zeros((n_IC, n_train, n_train));
+    
+    # Compute relative errors for all pairs (i, j)
+    for d in range(n_IC):
+        for i in range(n_train):
+            # Flatten all tensors in U_Train[i] into a single vector
+            Uk_i_flat : torch.Tensor = trainer.U_Train[i][d];
+            
+            for j in range(n_train):
+                # Flatten all tensors in U_Train[j] into a single vector
+                Uk_j_flat : torch.Tensor = trainer.U_Train[j][d];
+                
+                # Compute the relative error: ||U_i - U_j||_2 / ||U_j||_2
+                numerator   : float = torch.norm(Uk_i_flat - Uk_j_flat, p = 2).item();
+                denominator : float = torch.norm(Uk_j_flat, p = 2).item();
+                
+                if denominator > 0:
+                    relative_errors[d, i, j] = 100*(numerator / denominator);
+                else:
+                    relative_errors[d, i, j] = -1.0;  # Handle division by zero
+        
+        
+    # ---------------------------------------------------------------------------------------------
+    # Create parameter labels for rows and columns
+    
+    # Get the train parameter combinations
+    train_params : numpy.ndarray = param_space.train_space;  # shape = (n_train, n_p)
+    
+    # Create labels as tuples of parameter values
+    param_labels : list[str] = [];
+    for i in range(n_train):
+        param_tuple : tuple = tuple(numpy.round(train_params[i, :], 2));
+        param_labels.append(str(param_tuple));
+    
+    
+    # ---------------------------------------------------------------------------------------------
+    # Make the heatmaps!
+    
+    for d in range(n_IC):
+        # Set up the figure
+        fig, ax = plt.subplots(1, 1, figsize = figsize);
+        LOGGER.debug("Creating the relative errors heatmap");
+        
+        # Set up the color map
+        from matplotlib.colors import LinearSegmentedColormap;
+        cmap = LinearSegmentedColormap.from_list('rg', ['C0', 'w', 'C3'], N = 256);
+            
+        # Plot the heatmap using imshow
+        im = ax.imshow(relative_errors[d, :, :], cmap = cmap, aspect = 'auto');
+        fig.colorbar(im, ax = ax, fraction = 0.04);
+        
+        # Set the tick labels
+        ax.set_xticks(numpy.arange(n_train));
+        ax.set_yticks(numpy.arange(n_train));
+        ax.set_xticklabels(param_labels, rotation = 45, ha = 'right', fontsize = 8);
+        ax.set_yticklabels(param_labels, fontsize = 8);
+        
+        # Add the relative error values as text in each cell
+        LOGGER.debug("Adding relative error values to each cell");
+        for i in range(n_train):
+            for j in range(n_train):
+                ax.text(j, i, f'{relative_errors[d, i, j]:.2f}%', 
+                    fontsize = 8, ha = 'center', va = 'center', color = 'k');
+        
+    
+        # Create a title that includes the parameter names
+        param_names_tuple   : str = str(tuple(param_names));
+        full_title          : str = title + '\n' + f'Parameters: {param_names_tuple}' if title else f'Train Space Relative Errors\nParameters: {param_names_tuple}';
+        
+        # Set plot labels and title
+        ax.set_xlabel('Train trajectory (j)', fontsize = 12);
+        ax.set_ylabel('Train trajectory (i)', fontsize = 12);
+        ax.set_title("D^%d U Relative Errors" % d + '\n' + full_title, fontsize = 15);
+        
+        # Adjust layout to prevent label cutoff
+        plt.tight_layout();
+        
+        # Save the figure
+        save_file_path : str = os.path.join(os.path.join(os.path.pardir, "Figures"), file_prefix + ("_D^%d U_" % d) + "TrainSpaceRelativeErrorHeatmap.png");
+        fig.savefig(save_file_path, dpi = 150, bbox_inches = 'tight');
+        LOGGER.info("Saved heatmap to %s" % save_file_path);
     
     # Show the plot and then return!
     plt.show();

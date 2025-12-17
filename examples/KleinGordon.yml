@@ -41,6 +41,7 @@ lasdi:
 workflow:
   use_restart:              False
   restart_file:             
+  plot_train_rel_errors:    False
 
 parameter_space:
   parameters:
@@ -48,13 +49,13 @@ parameter_space:
       min:                  0.24
       max:                  0.26
       test_space_type:      uniform
-      sample_size:          10
+      sample_size:          11
       log_scale:            false
     - name:                 w
       min:                  1.8
       max:                  2.2
       test_space_type:      uniform
-      sample_size:          10
+      sample_size:          11
       log_scale:            false
   test_space:
     type:                   grid

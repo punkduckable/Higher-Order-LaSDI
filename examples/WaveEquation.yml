@@ -15,16 +15,16 @@ lasdi:
     IC_rollout_update_freq: 100
     IC_dp_per_update:       0.01
 
-    max_iter:               20000
-    n_iter:                 4000
-    max_greedy_iter:        20000
+    max_iter:               45000
+    n_iter:                 5000
+    max_greedy_iter:        45000
 
     loss_weights:
       recon:                1.0
-      chain_rule:           0.0
+      chain_rule:           1.0
       LD:                   1.0
       rollout:              1.0
-      IC_rollout:           0.0
+      IC_rollout:           1.0
       coef:                 0.001
       consistency:          1.0
 
@@ -39,8 +39,9 @@ lasdi:
     learnable_coefs:        true
 
 workflow:
-  use_restart:              False
-  restart_file:             
+  use_restart:              True
+  restart_file:             WaveEquation_09_30_2025_09_43.npy
+  plot_train_rel_errors:    False
 
 parameter_space:
   parameters:

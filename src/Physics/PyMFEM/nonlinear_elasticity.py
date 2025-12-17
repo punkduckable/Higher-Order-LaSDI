@@ -447,7 +447,7 @@ def Simulate(   meshfile_name       : str           = "beam-quad.mesh",
         specifies the time grid. We simulate the dynamics from t_Grid[0] to t_Grid[-1]; we assume 
         that the elements of t_Grid form an increasing sequence.
     
-    Positions : numpy.ndarray, optional
+    Positions : numpy.ndarray, shape = (2, num_positions)
         An optional argument. If empty, we generate new positions from scratch. If it is not empty, 
         then Positions should be a 2D array whose i'th row holds the position of the i'th position 
         at which we evaluate the solution.
@@ -660,7 +660,7 @@ def Simulate(   meshfile_name       : str           = "beam-quad.mesh",
 
 
     # ---------------------------------------------------------------------------------------------
-    # 5. Extract the positions of the nodes.
+    # 5. Set up positions at which we will evaluate the solution.
 
     if(Positions.size == 0):
         if(myid == 0): LOGGER.info("Sampling %d positions in the mesh" % num_positions);

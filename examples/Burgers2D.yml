@@ -28,18 +28,20 @@ lasdi:
 
     loss_types:
       recon:                "MAE"
-      LD:                   "MSE"
+      LD:                   "MAE"
       rollout:              "MAE"
       IC_rollout:           "MAE"
 
-      chain_rule:           "MSE"
-      consistency:          "MSE"
+      chain_rule:           "MAE"
+      consistency:          "MAE"
 
     learnable_coefs:        true
 
 workflow:
-  use_restart:              True
-  restart_file:             Burgers2D_08_14_2025_10_25_Variable_dt_Rollout.npy
+  use_restart:              False
+  restart_file:            
+  plot_train_rel_errors:    False
+
 
 parameter_space:
   parameters:

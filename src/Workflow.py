@@ -33,7 +33,7 @@ from    GaussianProcess             import  fit_gps, eval_gp;
 from    Initialize                  import  Initialize_Trainer;
 from    Sample                      import  Run_Samples, Update_Train_Space;
 from    Logging                     import  Initialize_Logger, Log_Dictionary;
-from    Plot                        import  Plot_Heatmap2d, Plot_Latent_Trajectories;
+from    Plot                        import  Plot_Heatmap2d, Plot_Latent_Trajectories, trainSpace_RelativeErrors_Heatmap;
 from    Animate                     import  make_solution_movies;
 from    SolveROMs                   import  average_rom;
 
@@ -92,7 +92,7 @@ def main():
 
 
     # ---------------------------------------------------------------------------------------------
-    # Run the next step
+    # Train!
     # ---------------------------------------------------------------------------------------------
 
     # Determine what the next step is. If we are loading from a restart, then the restart should
@@ -186,6 +186,11 @@ def main():
                                file_prefix     = config["physics"]["type"],
                                figsize         = (15, 13));
 
+
+    # Plot the relative error between the trajectories for the final training set.
+    trainSpace_RelativeErrors_Heatmap(  trainer     = trainer, 
+                                        param_space = trainer.param_space, 
+                                        file_prefix = config["physics"]["type"]);
 
 
 
@@ -517,6 +522,11 @@ def step(trainer        : BayesianGLaSDI,
         # Generate the trajectories for all new testing and training parameters. Append these new
         # trajectories to trainer's U_Train and U_Test attributes.
         result, next_step = Run_Samples(trainer, config);
+        
+        if(config["workflow"]["plot_train_rel_errors"] == True):
+            trainSpace_RelativeErrors_Heatmap(  trainer     = trainer, 
+                                                param_space = trainer.param_space, 
+                                                file_prefix = "initial_" + config["physics"]["type"]);
 
 
     else:
