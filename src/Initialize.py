@@ -22,6 +22,7 @@ import  ExplicitSecondOrder;
 from    LatentDynamics      import  LatentDynamics;
 from    SINDy               import  SINDy;
 from    DampedSpring        import  DampedSpring;
+from    DampedSpring_weak   import  DampedSpring_weak;
 from    ParameterSpace      import  ParameterSpace;
 from    GPLaSDI             import  BayesianGLaSDI;
 from    Model               import  Autoencoder, load_Autoencoder, Autoencoder_Pair, load_Autoencoder_Pair;
@@ -48,7 +49,8 @@ model_load_dict =  {'ae'                    : load_Autoencoder,
                     'pair'                  : load_Autoencoder_Pair,
                     'autoencoder_pair'      : load_Autoencoder_Pair};
 ld_dict         =  {'sindy'                 : SINDy, 
-                    'spring'                : DampedSpring};
+                    'spring'                : DampedSpring,
+                    'spring_weak'           : DampedSpring_weak};
 physics_dict    =  {'Burgers'               : Burgers.Burgers,
                     'BurgersSecondOrder'    : BurgersSecondOrder.Burgers,
                     'Burgers2D'             : Burgers2D,
@@ -163,7 +165,11 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Bayesia
 
     # Initialize the trainer object. If we are using a restart file, then load the 
     # trainer from that file.
-    trainer                 = trainer_dict[trainer_type](physics, model, latent_dynamics, param_space, config['lasdi'][trainer_type]);
+    # trainer                 = trainer_dict[trainer_type](physics, model, latent_dynamics, param_space, config['lasdi'][trainer_type]);
+    if ld_type == 'spring_w':
+            trainer         = trainer_dict[trainer_type](physics, model, latent_dynamics, param_space, config['lasdi'][trainer_type],config['latent_dynamics']['spring_w']);
+    else:
+            trainer         = trainer_dict[trainer_type](physics, model, latent_dynamics, param_space, config['lasdi'][trainer_type]);
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
         trainer.load(restart_dict['trainer']);
 
