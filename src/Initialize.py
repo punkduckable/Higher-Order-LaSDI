@@ -50,7 +50,7 @@ model_load_dict =  {'ae'                    : load_Autoencoder,
                     'autoencoder_pair'      : load_Autoencoder_Pair};
 ld_dict         =  {'sindy'                 : SINDy, 
                     'spring'                : DampedSpring,
-                    'spring_weak'           : DampedSpring_weak};
+                    'spring_w'           : DampedSpring_weak};
 physics_dict    =  {'Burgers'               : Burgers.Burgers,
                     'BurgersSecondOrder'    : BurgersSecondOrder.Burgers,
                     'Burgers2D'             : Burgers2D,

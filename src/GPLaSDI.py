@@ -241,8 +241,9 @@ class BayesianGLaSDI:
 
 
     # def train(self, reset_optim : bool = True) -> None:
-    def train(self,
-              weak:   bool = False) -> None:
+    def train(  self,
+                reset_optim : bool = True,
+                weak:   bool = False) -> None:
         """
         Runs a round of training on the model.
 
@@ -879,9 +880,16 @@ class BayesianGLaSDI:
                 # called "coefs" of shape (n_train, n_coefs), where n_train = number of training 
                 # parameter parameters and n_coefs denotes the number of coefficients in the latent
                 # dynamics model. 
-                coefs, loss_LD, loss_coef       = LD.calibrate(Latent_States    = Latent_States, 
-                                                               t_Grid           = t_Train_device,
-                                                               input_coefs      = train_coefs_list,
+                # coefs, loss_LD, loss_coef       = LD.calibrate(Latent_States    = Latent_States, 
+                #                                                t_Grid           = t_Train_device,
+                #                                                input_coefs      = train_coefs_list,
+                #                                                loss_type        = self.loss_types['LD']);
+                
+                if weak:
+                    coefs, loss_LD, loss_coef       = LD.calibrate(Phis = self.Phis,dPhis = self.dPhis,d2Phis = self.d2Phis, Latent_States = Latent_States, t_Grid    = t_Train_device, input_coefs      = train_coefs_list,
+                                                               loss_type        = self.loss_types['LD']);
+                else:
+                    coefs, loss_LD, loss_coef       = LD.calibrate(Latent_States = Latent_States, t_Grid    = t_Train_device, input_coefs      = train_coefs_list,
                                                                loss_type        = self.loss_types['LD']);
 
                 self.timer.end("Calibration");

@@ -70,7 +70,8 @@ model:
     activations:            ["sin", "sin", "sin", "sin"]
 
 latent_dynamics:
-  type:                     spring
+  # type:                     spring
+  type:                     spring_w
   coef_norm_order:          fro
   # spring:
   spring_w:
