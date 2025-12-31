@@ -97,7 +97,7 @@ class Physics:
             shape doesn't really matter. 
 
         config: dict 
-            A dictionary housing the settings for the Explicit object. This should be the "physics" 
+            A dictionary housing the settings for the Physics object. This should be the "physics" 
             sub-dictionary of the configuration file. 
 
         param_names: list[str], len = 2
@@ -211,7 +211,7 @@ class Physics:
 
         t_Grid : torch.Tensor, shape = (n_t)
             i'th element holds the i'th time value at which we have an approximation to the FOM 
-            solution (the time value associated with X[0, i, ...]).
+            solution (the time value associated with X[0][i, ...]).
         """
 
         raise RuntimeError("Abstract method Physics.solve!");
