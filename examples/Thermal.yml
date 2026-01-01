@@ -48,11 +48,12 @@ parameter_space:
   parameters:
     - name:                 laser powers
       test_space_type:      file
-      file:                 /g/g20/robertrs/Vast/AI4NS/ROM_AI4NS_material_Ti64/test/metadata.txt
+      file:                 /p/lustre1/robertrs/AI4NS/ROM_AI4NS_material_Ti64/test/metadata.txt
     - name:                 scan speed
       test_space_type:      file
-      file:                 /g/g20/robertrs/Vast/AI4NS/ROM_AI4NS_material_Ti64/test/metadata.txt
-
+      file:                 /p/lustre1/robertrs/AI4NS/ROM_AI4NS_material_Ti64/test/metadata.txt
+  test_space:
+    type:                   grid
 
 model:
   type:                     ae
@@ -74,6 +75,6 @@ physics:
   type:                     Thermal
   
   Thermal:
-    hdf5_dir:               /g/g20/robertrs/Vast/AI4NS/ROM_AI4NS_material_Ti64/hdf5/
+    hdf5_dir:               /p/lustre1/robertrs/AI4NS/ROM_AI4NS_material_Ti64/hdf5/
 
 
