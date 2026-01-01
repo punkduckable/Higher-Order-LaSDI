@@ -36,7 +36,7 @@ class Thermal(Physics):
     the grid of parameter values. Thus, the IC function will protest if the user specifies 
     parameters outside of the grid.
     """
-    def __init__(self, config : dict) -> None:
+    def __init__(self, config : dict, param_names : list[str]) -> None:
         """
         Initialize a Thermal object.
 
@@ -48,6 +48,9 @@ class Thermal(Physics):
             This should be the "Physics" sub-dictionary of the main configuration file. It should 
             have a "hdf5_dir" key which specifies the path to the directory housing a metadata
             file and a 2D grid of simulation results (each stored in a separate hdf5 file).
+
+        param_names : list[str]
+            A list of the parameter names. In this case, we expect "laser power" and "scan speed".
         """
 
         # First, let's fetch the hdf5 directory.
@@ -63,7 +66,7 @@ class Thermal(Physics):
         h5_files : list[str] = glob.glob(os.path.join(self.hdf5_dir, "*.h5"));
         with h5py.File(h5_files[0], "r") as f:
             # Fetch the nodet dataset and its shape.
-            nodet_ds = f.get("nodet");
+            nodet_ds : h5py.Dataset = f.get("nodet");
             if nodet_ds is None:
                 raise RuntimeError("Nodet dataset not found in file %s" % h5_files[0]);
             nodet_shape = nodet_ds.shape;
@@ -91,7 +94,7 @@ class Thermal(Physics):
             assert(nodes_coords_shape[1] == 3);
 
             # Convert to numpy array.
-            X_Positions : numpy.ndarray = nodes_coords_ds.value;
+            X_Positions : numpy.ndarray = nodes_coords_ds[:, :];
 
 
 
@@ -104,7 +107,7 @@ class Thermal(Physics):
                             Frame_Shape     = frame_shape,
                             X_Positions     = X_Positions,
                             config          = config, 
-                            param_names     = ['laser_power', 'scan_speed'], 
+                            param_names     = param_names, 
                             Uniform_t_Grid  = Uniform_t_Grid,
                             n_IC            = n_IC);
         
@@ -155,7 +158,7 @@ class Thermal(Physics):
             # Cycle through the header. 
             while(True):
                 line : str = metadata_file.readline();
-                if(line[0] == '='):
+                if('=' in line):
                     break;
                 else:
                     continue;
@@ -163,8 +166,10 @@ class Thermal(Physics):
             # After the header, we need to parse two lines, then we can begin reading files.
             _ = metadata_file.readline();       # blank line
             _ = metadata_file.readline();       # line describing table entries.
-            lines : list[str] = metadata_file.readlines();
+            lines : list[str] = metadata_file.readlines()
             n_lines : int = len(lines);
+            print("n_lines = %d" % n_lines);
+            print("lines = %s" % str(lines));
 
             # Cycle through the lines.
             for i in range(n_lines):
@@ -175,7 +180,7 @@ class Thermal(Physics):
                 power       : float = float(parts[0]);
                 speed       : float = float(parts[1]);    
                 file_name   : str = parts[2].strip();
-            
+                
                 # Determine which power and scan speed this corresponds to.
                 power_idx : int = self.laser_powers.index(power);
                 speed_idx : int = self.scan_speeds.index(speed);
@@ -291,7 +296,7 @@ class Thermal(Physics):
 
         # Fetch the file name
         requested_file : str = self.file_names[power_index, speed_index];
-        with open(os.path.join(self.hdf5_dir, requested_file), 'r') as f:
+        with h5py.File(os.path.join(self.hdf5_dir, requested_file), 'r') as f:
             # Fetch the nodet dataset and its shape, make sure it has n_nodes nodes.
             nodet_ds = f.get("nodet");
             if nodet_ds is None:
@@ -307,7 +312,7 @@ class Thermal(Physics):
             time_shape = time_ds.shape;       # should be (n_time_steps,)
             assert(len(time_shape) == 1);
             assert(time_shape[0] == nodet_shape[0]);
-            time_values : numpy.ndarray = time_ds.value;
+            time_values : numpy.ndarray = time_ds[:];
 
             # Convert the nodet dataset to a torch.Tensor.
             n_time_steps : int          = nodet_shape[0];

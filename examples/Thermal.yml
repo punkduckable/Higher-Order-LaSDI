@@ -75,6 +75,6 @@ physics:
   type:                     Thermal
   
   Thermal:
-    hdf5_dir:               /p/lustre1/robertrs/AI4NS/ROM_AI4NS_material_Ti64/hdf5/
+    hdf5_dir:               /p/lustre1/robertrs/AI4NS/ROM_AI4NS_material_Ti64/test/
 
 
