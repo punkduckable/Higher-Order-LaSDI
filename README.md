@@ -30,9 +30,19 @@ The code has been tested with the following packages:
 - matplotlib (3.9.2)
 - seaborn (0.13.2)
 - ffmpeg (1.4)
+- cmake (3.28.1)
+- mpi4py (4.0.3)
+
+If you plan to use one of the mfem examples, then you also need the mfem pacakage and associated dependencies:
+
 - mfem (4.7.0.1)
 - cmake (3.28.1)
 - mpi4py (4.0.3)
+
+Alternatively, if you plan to load from an hdf5 file, you need the h5py package:
+
+- hdf5 (1.14.5)
+- h5py (3.14.0)
 
 Note 1: To generate animations of the true FOM solution, learned FOM solution, and the error between them, you need to install ffmpeg.
 To do this, run "conda install -c conda-forge ffmpeg" inside of your conda environment. 
