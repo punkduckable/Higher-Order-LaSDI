@@ -307,9 +307,10 @@ def main():
     # Make movies for the mean predicted solution, true solution, and error for the i_worst'th 
     # combination of parameters.
 
-    # If X_Positions has the form (2, N_Positions), then the solution must either be a 
-    # scalar field or a 2d vector field. Let's plot the solution.
-    if(len(physics.X_Positions.shape) == 2 and  physics.X_Positions.shape[0] == 2):
+    # If X_Positions has the form (2, N_Positions) or (3, N_Positions), then the solution must 
+    # either be a scalar field on a 2d or 3d domain, or a 2d/3d vector field in a 2d/3d domain. 
+    # In these cases, we can make an animation of the solution.... let's do that!
+    if((len(physics.X_Positions.shape) == 2) and (physics.X_Positions.shape[0] in (2, 3))):
         
         # First, generate latent trajectories for the i_worst'th element of the test set.
         LOGGER.debug("Generating trajectory plot for testing combination %d: %s" % (i_worst, param_space.test_space[i_worst]));

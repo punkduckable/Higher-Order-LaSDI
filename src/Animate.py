@@ -31,8 +31,8 @@ def _scalar_anim(   data        : numpy.ndarray,
                     dpi         : int           = 150,
                     cmap        : str           = "viridis") -> Path:  # data shape (N_t, N_x)
     """
-    Create an MP4 showing the evolution of a **scalar** field sampled on a
-    point cloud.
+    Create an MP4 showing the evolution of a **scalar** field sampled on a point cloud in 
+    2d or 3d domain.
 
 
 
@@ -50,10 +50,10 @@ def _scalar_anim(   data        : numpy.ndarray,
     fname : str
         File name (without directory) of the resulting movie.
     
-    X : ndarray, shape (2, N_x), optional
-        Sensor coordinates.
+    X : ndarray, shape (2, N_x) or (3, N_x)
+        Sensor coordinates. Can be a 2d or 3d array.
     
-    T : ndarray, shape (N_t,), optional
+    T : ndarray, shape (N_t,)
         Time stamps. 
     
     save_dir : pathlib.Path, default ``Path('.')``
@@ -78,6 +78,7 @@ def _scalar_anim(   data        : numpy.ndarray,
         Absolute path of the saved MP4.
 
     
+
     -------------------------------------------------------------------------------------------
     Notes
     -------------------------------------------------------------------------------------------
@@ -87,18 +88,6 @@ def _scalar_anim(   data        : numpy.ndarray,
     installation must be on ``$PATH``.
     * Colours are normalised globally (``vmin``, ``vmax`` from *all* frames)
     so that colour is comparable across time.
-    """
-    
-    """
-    data : numpy.ndarray, shape = (N_t, N_x)
-        An array whose i,j element holds the value we want to plot at the j'th position in the
-        i'th frame.
-
-    title : str
-        The title for the movie we make
-    
-    fname : str
-        The name of the file where we want to save the animation.
     """
 
     # Checks
@@ -110,7 +99,7 @@ def _scalar_anim(   data        : numpy.ndarray,
     assert len(T.shape) == 1,               "T.shape = %s" % str(T.shape);
     assert data.shape[0] == T.shape[0],     "data.shape = %s, T.shape = %s" % (str(data.shape), str(T.shape));
     assert data.shape[1] == X.shape[1],     "data.shape = %s, X.shape = %s" % (str(data.shape), str(X.shape));
-    assert X.shape[0] == 2,                 "X.shape = %s" % str(X.shape);
+    assert X.shape[0] in (2, 3),            "X.shape = %s" % str(X.shape);
     assert T.shape[0] == data.shape[0],     "T.shape = %s, data.shape = %s" % (str(T.shape), str(data.shape));
 
     # Setup.
@@ -122,14 +111,24 @@ def _scalar_anim(   data        : numpy.ndarray,
     fig, ax = plt.subplots();
 
     # Plot the initial frame of the data as a filled triangular contour plot
-    scat = ax.scatter(  X[0],                   # array of x coordinates for the triangulation
-                        X[1],                   # array of y coordinates for the triangulation
-                        c           = data[0],  # data values at those (x,y) positions for the first time slice
-                        cmap        = cmap,     # what colormap we use
-                        vmin        = vmin,     # lower bounds for color scaling
-                        vmax        = vmax,     # upper bounds for color scaling
-                        s           = 60);      # Area of the markers.
-
+    if(X.shape[0] == 2):
+        scat = ax.scatter(  X[0],                   # array of x coordinates for the triangulation
+                            X[1],                   # array of y coordinates for the triangulation
+                            c           = data[0],  # data values at those (x,y) positions for the first time slice
+                            cmap        = cmap,     # what colormap we use
+                            vmin        = vmin,     # lower bounds for color scaling
+                            vmax        = vmax,     # upper bounds for color scaling
+                            s           = 60);      # Area of the markers.
+    else:
+        scat = ax.scatter3D(X[0],                   # array of x coordinates for the triangulation
+                            X[1],                   # array of y coordinates for the triangulation
+                            X[2],                   # array of z coordinates for the triangulation
+                            c           = data[0],  # data values at those (x,y,z) positions for the first time slice
+                            cmap        = cmap,     # what colormap we use
+                            vmin        = vmin,     # lower bounds for color scaling
+                            vmax        = vmax,     # upper bounds for color scaling
+                            s           = 60);      # Area of the markers.
+   
     # Force the x and y axes to have equal scaling (so a unit in x equals a unit in y)
     ax.set_aspect("equal");
 
@@ -206,8 +205,9 @@ def _vector_anim(   data        : numpy.ndarray,
     Arguments
     -------------------------------------------------------------------------------------------
 
-    data : ndarray, shape (N_t, 2, N_x)
-        Vector values (``u, v`` components) for every time step and sensor.
+    data : ndarray, shape (N_t, 2, N_x) or (N_t, 3, N_x)
+        Vector values (``u, v`` components if 2d, or ``u, v, w`` components if 3d) for every 
+        time step and sensor.
     
     title : str
         Text for the figure title & colour-bar label.
@@ -215,10 +215,10 @@ def _vector_anim(   data        : numpy.ndarray,
     fname : str
         File name (without directory) of the resulting movie.
     
-    X : ndarray, shape (2, N_x), optional
-        Sensor coordinates. 
+    X : ndarray, shape (2, N_x) or (3, N_x)
+        Sensor coordinates. Can be a 2d or 3d array.
     
-    T : ndarray, shape (N_t,), optional
+    T : ndarray, shape (N_t,)
         Time stamps.
     
     save_dir : pathlib.Path, default ``Path('.')``
@@ -260,8 +260,8 @@ def _vector_anim(   data        : numpy.ndarray,
     assert len(data.shape) == 3,            "data.shape = %s" % str(data.shape);
     assert len(X.shape) == 2,               "X.shape = %s" % str(X.shape);
     assert len(T.shape) == 1,               "T.shape = %s" % str(T.shape);
-    assert data.shape[1] == 2,              "data.shape = %s" % str(data.shape);
-    assert X.shape[0] == 2,                 "X.shape = %s" % str(X.shape);
+    assert data.shape[1] in (2, 3),              "data.shape = %s" % str(data.shape);
+    assert X.shape[0] in (2, 3),            "X.shape = %s" % str(X.shape);
     assert data.shape[0] == T.shape[0],     "data.shape = %s, T.shape = %s" % (str(data.shape), str(T.shape));
     assert data.shape[2] == X.shape[1],     "data.shape = %s, X.shape = %s" % (str(data.shape), str(X.shape));
 
@@ -275,18 +275,31 @@ def _vector_anim(   data        : numpy.ndarray,
     fig, ax = plt.subplots();
 
     # Create a new figure and a single subplot (axes) object
-    q = ax.quiver(  X[0],                           # 1D array of x-coordinates for arrow bases
-                    X[1],                           # 1D array of y-coordinates for arrow bases
-                    data[0, 0, :],                  # 1D array of x-components of vectors at frame 0
-                    data[0, 1, :],                  # 1D array of y-components of vectors at frame 0
-                    magnitudes[0],                  # scalar values used to color each arrow by its length
-                    cmap            = cmap,         # colormap mapping magnitudes → colors
-                    clim            = (vmin, vmax), # set color limits
-                    angles          = "xy",         # interpret U/V in Cartesian coords
-                    scale_units     = "xy",         # scale arrow lengths in data units
-                    scale           = 1.0,          # no additional scaling
-                    width           = 0.007);       # arrow shaft width
-    
+    if(X.shape[0] == 2):
+        q = ax.quiver(  X[0],                           # 1D array of x-coordinates for arrow bases
+                        X[1],                           # 1D array of y-coordinates for arrow bases
+                        data[0, 0, :],                  # 1D array of x-components of vectors at frame 0
+                        data[0, 1, :],                  # 1D array of y-components of vectors at frame 0
+                        magnitudes[0],                  # scalar values used to color each arrow by its length
+                        cmap            = cmap,         # colormap mapping magnitudes → colors
+                        clim            = (vmin, vmax), # set color limits
+                        angles          = "xy",         # interpret U/V in Cartesian coords
+                        scale_units     = "xy",         # scale arrow lengths in data units
+                        scale           = 1.0,          # no additional scaling
+                        width           = 0.007);       # arrow shaft width
+    else: # 3d
+        q = ax.quiver(  X[0],                           # 1D array of x-coordinates for arrow bases
+                        X[1],                           # 1D array of y-coordinates for arrow bases
+                        X[2],                           # 1D array of z-coordinates for arrow bases
+                        data[0, 0, :],                  # 1D array of x-components of vectors at frame 0
+                        data[0, 1, :],                  # 1D array of y-components of vectors at frame 0
+                        data[0, 2, :],                  # 1D array of z-components of vectors at frame 0
+                        magnitudes[0],                  # scalar values used to color each arrow by its length
+                        cmap            = cmap,         # colormap mapping magnitudes → colors
+                        clim            = (vmin, vmax), # set color limits
+                        scale           = 1.0,          # no additional scaling
+                        width           = 0.007);       # arrow shaft width
+
     # Keep x and y axes at the same scale so arrows aren’t distorted
     ax.set_aspect("equal");
 
@@ -305,7 +318,10 @@ def _vector_anim(   data        : numpy.ndarray,
         """
         
         # Update the quiver vectors and their color values
-        q.set_UVC(data[frame, 0, :], data[frame, 1, :], magnitudes[frame]);
+        if(X.shape[0] == 2):
+            q.set_UVC(data[frame, 0, :], data[frame, 1, :], magnitudes[frame]);
+        else: # 3d
+            q.set_UVC(data[frame, 0, :], data[frame, 1, :], data[frame, 2, :], magnitudes[frame]);
         
         # Update the title with the new time
         time_text.set_text(f"{title}\n$t$ = {T[frame]:.3f}");
@@ -346,20 +362,19 @@ def make_solution_movies(   U_True          : numpy.ndarray,
                             cmap            : str           = "viridis") -> tuple[Path, Path, Path]:
     """
     Create three movies visualising a spatio-temporal solution: the true field, the predicted 
-    field, and their difference.
-
+    field, and their difference. The solution can be a scalar or vector field in a 2d or 3d domain.
     
     -----------------------------------------------------------------------------------------------
     Parameters
     -----------------------------------------------------------------------------------------------
 
-    U_True, U_Pred : numpy.ndarray, shape = (N_t, 1, N_x) or (N_t, 2, N_x)
+    U_True, U_Pred : numpy.ndarray, shape = (N_t, 1, N_x), (N_t, 2, N_x), or (N_t, 3, N_x)
         Arrays of shape holding the true and predicted signal, respectively. If they have shape 
-        (N_t, 1, N_x) then the solution should be a scalar field. If it is 2 then the solution 
-        should be a 2-D vector field. 
+        (N_t, 1, N_x) then the solution should be a scalar field. If it is 2 or 3 then the 
+        solution should be a 2-D or 3-D vector field, respectively. 
 
-    X : numpy.ndarray, shape = (2, N_x)
-        Each column gives the (x, y) coordinates of a sensor point.
+    X : numpy.ndarray, shape = (2, N_x) or (3, N_x)
+        Each column gives the (x, y) (2D) or (x, y, z) (3d) coordinates of a sensor point.
     
     T : numpy.ndarray, shape = (N_t)
         i'th element holds the value of the i'th time step.
@@ -412,12 +427,12 @@ def make_solution_movies(   U_True          : numpy.ndarray,
     assert len(X.shape) == 2,                   "X.shape = %s" % str(X.shape);
     assert len(T.shape) == 1,                   "T.shape = %s" % str(T.shape);
     assert U_True.shape == U_Pred.shape,        "U_True.shape = %s, U_Pred.shape = %s" % (str(U_True.shape), str(U_Pred.shape));
-    assert X.shape[0] == 2,                     "X.shape = %s" % str(X.shape);
+    assert X.shape[0] in (2, 3),                "X.shape = %s" % str(X.shape);
     assert T.shape[0] == U_True.shape[0],       "T.shape = %s, U_True.shape = %s" % (str(T.shape), str(U_True.shape));
     assert X.shape[1] == U_True.shape[2],       "X.shape = %s, U_True.shape = %s" % (str(X.shape), str(U_True.shape));
     
     N_t, n_comp, N_x = U_True.shape;
-    assert n_comp in (1, 2),                    "n_comp = %s" % n_comp;
+    assert n_comp in (1, 2, 3),                 "n_comp = %s" % n_comp;
     
     # Make sure the save directory exists.
     save_dir = Path(save_dir).expanduser().resolve();
@@ -465,7 +480,7 @@ def make_solution_movies(   U_True          : numpy.ndarray,
                                 X           = X,
                                 T           = T);
     
-    else:  # 2 components: vector field  >:(   B)    >:U
+    else:  # 2 or 3 components: vector field
         LOGGER.info("Making vector field movie for %s" % fname_prefix);
         t_path = _vector_anim(  data        = U_True, 
                                 title       = "True vector field", 
