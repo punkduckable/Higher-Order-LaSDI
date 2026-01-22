@@ -312,6 +312,10 @@ class Autoencoder(torch.nn.Module):
         self.activations    : list[str] = activations;
         self.reshape_shape  : list[int] = reshape_shape;
         LOGGER.info("Initializing an Autoencoder with latent space dimension %d" % self.n_z);
+        LOGGER.info("  Reshape shape: %s" % str(reshape_shape));
+        LOGGER.info("  Widths: %s" % str(widths));
+        LOGGER.info("  Activations: %s" % str(activations));
+
 
         # Build the encoder, decoder.
         LOGGER.info("Initializing the encoder...");
@@ -627,7 +631,7 @@ class Autoencoder_Pair(torch.nn.Module):
 
         # Call the super class initializer.
         super().__init__();
-        LOGGER.info("Initializing an Autoencoder_Pair...");
+        LOGGER.info("Initializing an Autoencoder_Pair");
 
         # In general, the FOM solution may be vector valued and have multiple spatial dimensions. 
         # We need to know the shape of each FOM frame. 

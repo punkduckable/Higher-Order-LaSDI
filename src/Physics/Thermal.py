@@ -71,14 +71,6 @@ class Thermal(Physics):
                 raise RuntimeError("Nodet dataset not found in file %s" % h5_files[0]);
             nodet_shape = nodet_ds.shape;
 
-
-
-            print(type(nodet_shape))
-            print(nodet_shape)
-
-
-
-
             # the shape should be (n_time_steps, n_nodes). We want n_nodes.
             assert(len(nodet_shape) == 2);
             assert(nodet_shape[1] > 0);
@@ -95,12 +87,6 @@ class Thermal(Physics):
 
             # Convert to numpy array.
             X_Positions : numpy.ndarray = nodes_coords_ds[:, :];
-
-
-
-            print(type(X_Positions))
-            print(X_Positions.shape)
-            print(X_Positions[:10]);
 
         # We are now ready to initialize the super class.
         super().__init__(   spatial_dim     = spatial_dim,
@@ -168,8 +154,6 @@ class Thermal(Physics):
             _ = metadata_file.readline();       # line describing table entries.
             lines : list[str] = metadata_file.readlines()
             n_lines : int = len(lines);
-            print("n_lines = %d" % n_lines);
-            print("lines = %s" % str(lines));
 
             # Cycle through the lines.
             for i in range(n_lines):
