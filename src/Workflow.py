@@ -115,6 +115,9 @@ def main():
     # Initialize the trainer.
     trainer, param_space, physics, model, latent_dynamics = Initialize_Trainer(config, restart_dict);
 
+    # Calculate and print the number of parameters
+    count_parameters(model, latent_dynamics, trainer);
+
     # Start running steps.
     result, next_step = step(trainer, next_step, config, use_restart);
 
@@ -437,6 +440,67 @@ def main():
 # -------------------------------------------------------------------------------------------------
 # Helper functions
 # -------------------------------------------------------------------------------------------------
+
+def count_parameters(   model          : torch.nn.Module, 
+                        latent_dynamics : LatentDynamics,
+                        trainer         : BayesianGLaSDI) -> None:
+    """
+    Calculate and print the number of parameters in the model, latent dynamics, and trainer.
+    
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+    
+    model : torch.nn.Module
+        The neural network model (autoencoder).
+        
+    latent_dynamics : LatentDynamics
+        The latent dynamics model.
+        
+    trainer : BayesianGLaSDI
+        The trainer object which may contain learnable coefficients.
+    """
+    
+    # Count model parameters
+    total_params = 0;
+    trainable_params = 0;
+    
+    for param in model.parameters():
+        total_params += param.numel();
+        if param.requires_grad:
+            trainable_params += param.numel();
+    
+
+    # Count learnable coefficients from trainer (only applies if we are learning the latent 
+    #dynamics coefficients)
+    coef_params = 0;
+    if hasattr(trainer, 'test_coefs') and trainer.test_coefs is not None:
+        coef_params = trainer.test_coefs.numel();
+    
+    # Print summary
+    LOGGER.info("=" * 80);
+    LOGGER.info("Model Parameter Summary");
+    LOGGER.info("=" * 80);
+    LOGGER.info("Model (Autoencoder/Autoencoder_Pair):");
+    LOGGER.info("  Total parameters:      {:,}".format(total_params));
+    LOGGER.info("  Trainable parameters:  {:,}".format(trainable_params));
+    LOGGER.info("  Non-trainable:         {:,}".format(total_params - trainable_params));
+    
+    if coef_params > 0:
+        LOGGER.info("Learnable Coefficients:");
+        LOGGER.info("  Total parameters:      {:,}".format(coef_params));
+    
+    grand_total = total_params + coef_params;
+    grand_trainable = trainable_params + coef_params;
+    
+    LOGGER.info("=" * 80);
+    LOGGER.info("Grand Total:");
+    LOGGER.info("  Total parameters:      {:,}".format(grand_total));
+    LOGGER.info("  Trainable parameters:  {:,}".format(grand_trainable));
+    LOGGER.info("=" * 80);
+    
+    return;
+
 
 def step(trainer        : BayesianGLaSDI, 
          next_step      : NextStep, 
