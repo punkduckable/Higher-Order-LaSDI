@@ -167,7 +167,7 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Bayesia
 
     # Initialize the trainer object. If we are using a restart file, then load the 
     # trainer from that file.
-    trainer                 = trainer_dict[trainer_type](physics, model, latent_dynamics, param_space, config['lasdi'][trainer_type]);
+    trainer                 = trainer_dict[trainer_type](physics, model, latent_dynamics, param_space, config);
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
         trainer.load(restart_dict['trainer']);
 
