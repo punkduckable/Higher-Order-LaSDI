@@ -219,13 +219,17 @@ class BayesianGLaSDI:
         self.MAE                            = torch.nn.L1Loss(reduction = 'mean');
 
         # Set paths for checkpointing. 
-        self.path_checkpoint    : str       = os.path.join(os.path.pardir, "checkpoint");
-        self.path_results       : str       = os.path.join(os.path.pardir, "results");
+        # Use absolute paths to ensure directories are created in the correct location
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)));
+        self.path_checkpoint    : str       = os.path.join(base_dir, "checkpoint");
+        self.path_results       : str       = os.path.join(base_dir, "results");
 
         # Make sure the checkpoints and results directories exist.
         from pathlib import Path;
-        Path(os.path.dirname(self.path_checkpoint)).mkdir(  parents = True, exist_ok = True);
-        Path(os.path.dirname(self.path_results)).mkdir(     parents = True, exist_ok = True);
+        Path(self.path_checkpoint).mkdir(   parents = True, exist_ok = True);
+        Path(self.path_results).mkdir(      parents = True, exist_ok = True);
+        LOGGER.info("Checkpoint directory: %s" % self.path_checkpoint);
+        LOGGER.info("Results directory: %s" % self.path_results);
 
         # Set up variables to aide checkpointing
         self.best_coefs     = numpy.zeros((self.param_space.n_test(), self.latent_dynamics.n_coefs), dtype = numpy.float32);
@@ -384,12 +388,26 @@ class BayesianGLaSDI:
         # -----------------------------------------------------------------------------------------
         # Initialize loss tracking
         
+        # Set up filenames using physics type
+        base_filename = self.config['physics']['type'];
+        loss_history_file = os.path.join(self.path_results, base_filename + '_loss_history.npz');
+        loss_by_param_file = os.path.join(self.path_results, base_filename + '_loss_by_param.pkl');
+        
+        # Delete existing files if starting fresh (restart_iter == 0)
+        # This ensures we don't append to results from previous training runs
+        if self.restart_iter == 0:
+            if os.path.exists(loss_by_param_file):
+                os.remove(loss_by_param_file);
+                LOGGER.info("Deleted existing loss_by_param file: %s" % loss_by_param_file);
+            if os.path.exists(loss_history_file):
+                os.remove(loss_history_file);
+                LOGGER.info("Deleted existing loss_history file: %s" % loss_history_file);
+        
         # Load existing loss history if restarting, otherwise initialize empty arrays
         # Note: Component losses are stored in self.loss_by_param, so we only need to track:
         # - iterations (epoch numbers)
         # - total_loss (overall total, sum of all components)
         # - LD_loss and coef_loss (not stored in loss_by_param)
-        loss_history_file = os.path.join(self.path_results, 'loss_history.npz');
         if os.path.exists(loss_history_file) and self.restart_iter > 0:
             LOGGER.info("Loading existing loss history from %s" % loss_history_file);
             loss_history = numpy.load(loss_history_file);
@@ -407,14 +425,16 @@ class BayesianGLaSDI:
         # Initialize per-parameter-combination loss tracking
         # Each dictionary maps parameter tuple -> dict with 'epochs' and 'losses' lists
         # We'll also track "total" which is the sum across all parameter combinations
-        if not hasattr(self, 'loss_by_param'):
-            import pickle;
-            loss_by_param_file = os.path.join(self.path_results, 'loss_by_param.pkl');
-            if os.path.exists(loss_by_param_file) and self.restart_iter > 0:
-                LOGGER.info("Loading existing per-parameter loss tracking from %s" % loss_by_param_file);
-                with open(loss_by_param_file, 'rb') as f:
-                    self.loss_by_param = pickle.load(f);
-            else:
+        import pickle;
+        
+        # Load existing loss_by_param if restarting (always try to load, don't check hasattr)
+        if os.path.exists(loss_by_param_file) and self.restart_iter > 0:
+            LOGGER.info("Loading existing per-parameter loss tracking from %s" % loss_by_param_file);
+            with open(loss_by_param_file, 'rb') as f:
+                self.loss_by_param = pickle.load(f);
+        else:
+            # Initialize fresh if starting from scratch
+            if not hasattr(self, 'loss_by_param'):
                 self.loss_by_param = {};
         
         # -----------------------------------------------------------------------------------------
@@ -1267,17 +1287,11 @@ class BayesianGLaSDI:
 
             # Convert coefs to numpy and find the maximum element.
             # Store a detached copy for reporting (needed after backprop), but keep original for gradient flow
-            coefs_detached  : numpy.ndarray = coefs.detach().cpu().numpy();                # Shape = (n_train, n_coefs).
-            max_coef        : numpy.float32 = numpy.abs(coefs_detached).max();
+            with torch.no_grad():
+                coefs_detached  : numpy.ndarray = coefs.detach().cpu().numpy();                # Shape = (n_train, n_coefs).
+                max_coef        : numpy.float32 = numpy.abs(coefs_detached).max();
 
-            # Free up memory before backpropagation to prevent OOM
-            # Clear PyTorch cache if using CUDA
-            if self.device == 'cuda':
-                torch.cuda.empty_cache();
-            
-            # Force garbage collection to free up Python objects
-            import gc;
-            gc.collect();
+
 
 
             # -------------------------------------------------------------------------------------
@@ -1291,11 +1305,6 @@ class BayesianGLaSDI:
             loss.backward();
             LOGGER.debug("Backward Pass - backward() complete, calling optimizer.step()");
             self.optimizer.step();
-            
-            # Clear cache again after backprop to free up gradient memory
-            if self.device == 'cuda':
-                torch.cuda.empty_cache();
-
             LOGGER.debug("Backward Pass - complete (iteration %d)" % (iter + 1));
 
             # Check if we hit a new minimum loss. If so, make a checkpoint, record the loss and 
@@ -1404,52 +1413,51 @@ class BayesianGLaSDI:
                 if loss_name in self.loss_by_param:
                     self._store_total_loss(loss_name, iter + 1, total_loss_val);
             
-            # Save loss history to file after each iteration
-            # Component losses are stored in loss_by_param (saved separately as pickle)
-            # Only save non-duplicate information here
-            save_dict = {
-                'iterations'    : numpy.array(iterations),
-                'total_loss'    : numpy.array(total_loss),
-                'LD_loss'       : numpy.array(LD_loss),
-                'coef_loss'     : numpy.array(coef_loss),
-            };
-            
-            # Set a unique filename for the loss history files. This should use the physics type 
-            # and the time. 
-            import time;
-            import pickle;
-            base_filename       : str   = self.config['physics']['type'] + '_' + str(time.time());
-            loss_by_param_file  : str   = os.path.join(self.path_results, base_filename + '_loss_by_param.pkl');
-            loss_history_file   : str   = os.path.join(self.path_results, base_filename + '_loss_history.npz');
-
-            # Save per-parameter-combination loss tracking
-            # Only save losses relevant to the current model type
-            filtered_loss_by_param = {};
-            if not is_autoencoder_pair:
-                # Autoencoder losses
-                for loss_name in ['recon', 'rollout_ROM', 'rollout_FOM', 'IC_rollout_ROM', 'IC_rollout_FOM']:
-                    if loss_name in self.loss_by_param:
-                        filtered_loss_by_param[loss_name] = self.loss_by_param[loss_name];
-            else:  # is_autoencoder_pair
-                # Autoencoder_Pair losses
-                for loss_name in ['recon_D', 'recon_V', 'consistency_Z', 'consistency_U', 
-                                  'chain_rule_U', 'chain_rule_Z',
-                                  'rollout_ROM_D', 'rollout_ROM_V', 'rollout_FOM_D', 'rollout_FOM_V',
-                                  'IC_rollout_Z_D', 'IC_rollout_Z_V', 'IC_rollout_D', 'IC_rollout_V']:
-                    if loss_name in self.loss_by_param:
-                        filtered_loss_by_param[loss_name] = self.loss_by_param[loss_name];
-            
-            with open(loss_by_param_file, 'wb') as f:
-                pickle.dump(filtered_loss_by_param, f);
-            
-            numpy.savez(loss_history_file, **save_dict);
-            
-            LOGGER.debug("Saved loss history to %s" % loss_history_file);
             LOGGER.debug("Completed training iteration %d/%d" % (iter + 1, next_iter));
             self.timer.end("train_step");
         
         # We are ready to wrap up the training procedure.
         self.timer.start("finalize");
+        
+        # Save loss history to file after training is complete
+        # Component losses are stored in loss_by_param (saved separately as pickle)
+        # Only save non-duplicate information here
+        import time;
+        import pickle;
+        base_filename       : str   = self.config['physics']['type'];
+        loss_by_param_file  : str   = os.path.join(self.path_results, base_filename + '_loss_by_param.pkl');
+        loss_history_file   : str   = os.path.join(self.path_results, base_filename + '_loss_history.npz');
+
+        # Save per-parameter-combination loss tracking
+        # Only save losses relevant to the current model type
+        filtered_loss_by_param = {};
+        if not is_autoencoder_pair:
+            # Autoencoder losses
+            for loss_name in ['recon', 'rollout_ROM', 'rollout_FOM', 'IC_rollout_ROM', 'IC_rollout_FOM']:
+                if loss_name in self.loss_by_param:
+                    filtered_loss_by_param[loss_name] = self.loss_by_param[loss_name];
+        else:  # is_autoencoder_pair
+            # Autoencoder_Pair losses
+            for loss_name in ['recon_D', 'recon_V', 'consistency_Z', 'consistency_U', 
+                              'chain_rule_U', 'chain_rule_Z',
+                              'rollout_ROM_D', 'rollout_ROM_V', 'rollout_FOM_D', 'rollout_FOM_V',
+                              'IC_rollout_Z_D', 'IC_rollout_Z_V', 'IC_rollout_D', 'IC_rollout_V']:
+                if loss_name in self.loss_by_param:
+                    filtered_loss_by_param[loss_name] = self.loss_by_param[loss_name];
+        
+        with open(loss_by_param_file, 'wb') as f:
+            pickle.dump(filtered_loss_by_param, f);
+        
+        save_dict = {
+            'iterations'    : numpy.array(iterations),
+            'total_loss'    : numpy.array(total_loss),
+            'LD_loss'       : numpy.array(LD_loss),
+            'coef_loss'     : numpy.array(coef_loss),
+        };
+        numpy.savez(loss_history_file, **save_dict);
+        
+        LOGGER.info("Saved loss history to %s" % loss_history_file);
+        LOGGER.info("Saved per-parameter loss tracking to %s" % loss_by_param_file);
 
         # Now that we have completed another round of training, update the restart iteration.
         self.restart_iter += self.n_iter;
