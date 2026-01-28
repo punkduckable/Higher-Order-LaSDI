@@ -59,10 +59,10 @@ class NonlinearElasticity(Physics):
         """
 
         # Checks.
-        assert(isinstance(param_names, list));
-        assert(len(param_names) == 2);
-        assert('s'  in param_names);
-        assert('mu' in param_names);
+        assert isinstance(param_names, list), "type(param_names) = %s" % str(type(param_names));
+        assert len(param_names) == 2,         "len(param_names) = %d, param_names = %s" % (len(param_names), str(param_names));
+        assert 's'  in param_names,           "param_names = %s" % str(param_names);
+        assert 'mu' in param_names,           "param_names = %s" % str(param_names);
         assert('NonlinearElasticity' in config);
 
         # Next, we need to setup X_Positions and Frame_Shape. Doing this is a bit tricky, because 
@@ -121,10 +121,10 @@ class NonlinearElasticity(Physics):
         """
 
         # Checks.
-        assert(isinstance(param, numpy.ndarray));
-        assert(self.X_Positions is not None);
-        assert(len(param.shape) == 1);
-        assert(param.shape[0]   == self.n_p);
+        assert isinstance(param, numpy.ndarray), "type(param) = %s" % str(type(param));
+        assert self.X_Positions is not None,     "self.X_Positions is None";
+        assert len(param.shape) == 1,            "len(param.shape) = %d" % len(param.shape);
+        assert param.shape[0]   == self.n_p,     "param.shape = %s, self.n_p = %d" % (str(param.shape), self.n_p);
 
         # Fetch s.
         s   : float             = param[self.s_idx];
@@ -180,9 +180,9 @@ class NonlinearElasticity(Physics):
             solution (the time value associated with X[i, ...]).
         """
 
-        assert(isinstance(param, numpy.ndarray));
-        assert(len(param.shape) == 1);
-        assert(param.shape[0]   == self.n_p);
+        assert isinstance(param, numpy.ndarray), "type(param) = %s" % str(type(param));
+        assert len(param.shape) == 1,            "len(param.shape) = %d" % len(param.shape);
+        assert param.shape[0]   == self.n_p,     "param.shape = %s, self.n_p = %d" % (str(param.shape), self.n_p);
         
         # Set up the t_Grid.
         n_t     : int           = self.config['NonlinearElasticity']['n_t'];

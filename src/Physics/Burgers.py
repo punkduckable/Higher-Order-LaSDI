@@ -54,11 +54,11 @@ class Burgers(Physics):
         """
 
         # Checks
-        assert(isinstance(param_names, list));
-        assert(len(param_names) == 2);
-        assert(isinstance(config, dict));
-        assert('a' in param_names);
-        assert('w' in param_names);
+        assert isinstance(param_names, list), "type(param_names) = %s" % str(type(param_names));
+        assert len(param_names) == 2,         "len(param_names) = %d" % len(param_names);
+        assert isinstance(config, dict),      "type(config) = %s" % str(type(config));
+        assert 'a' in param_names,            "param_names = %s" % str(param_names);
+        assert 'w' in param_names,            "param_names = %s" % str(param_names);
         
         # Make sure the config dictionary is actually for Burgers' equation.
         assert('Burgers' in config);
@@ -68,7 +68,7 @@ class Burgers(Physics):
         self.x_min          : float     = config['Burgers']['x_min'];                   # Minimum value of the spatial variable in the problem domain
         self.x_max          : float     = config['Burgers']['x_max'];                   # Maximum value of the spatial variable in the problem domain
         self.dx             : float     = (self.x_max - self.x_min) / (self.n_x - 1);   # Spacing between grid points along the spatial axis.
-        assert(self.dx > 0.);
+        assert self.dx > 0.,          "self.dx = %s, self.dx must be positive" % self.dx;
 
         # Call the super class initializer.
         super().__init__(config         = config, 
@@ -120,10 +120,10 @@ class Burgers(Physics):
         """
 
         # Checks.
-        assert(isinstance(param, numpy.ndarray));
-        assert(self.X_Positions is not None);
-        assert(len(param.shape) == 1);
-        assert(param.shape[0]   == self.n_p);
+        assert isinstance(param, numpy.ndarray), "type(param) = %s" % str(type(param));
+        assert self.X_Positions is not None,     "self.X_Positions is None";
+        assert len(param.shape) == 1,            "len(param.shape) = %d" % len(param.shape);
+        assert param.shape[0]   == self.n_p,     "param.shape = %s, self.n_p = %d" % (str(param.shape), self.n_p);
 
 
         # Fetch the parameter values.
@@ -167,9 +167,9 @@ class Burgers(Physics):
             solution (the time value associated with U[i, ...]).
         """
 
-        assert(isinstance(param, numpy.ndarray));
-        assert(len(param.shape) == 1);
-        assert(param.shape[0]   == self.n_p);
+        assert isinstance(param, numpy.ndarray), "type(param) = %s" % str(type(param));
+        assert len(param.shape) == 1,            "len(param.shape) = %d" % len(param.shape);
+        assert param.shape[0]   == self.n_p,     "param.shape = %s, self.n_p = %d" % (str(param.shape), self.n_p);
         
 
         # Fetch the initial condition.
@@ -253,12 +253,12 @@ def residual_burgers(   un          : numpy.ndarray,
     """
 
     # Checks.
-    assert(isinstance(un,           numpy.ndarray));
-    assert(isinstance(un1_guess,    numpy.ndarray));
-    assert(isinstance(idx_m1,       numpy.ndarray));
-    assert(len(un.shape)            == 1);
-    assert(un.shape                 == un1_guess.shape);
-    assert(un.shape                 == idx_m1.shape);
+    assert isinstance(un,           numpy.ndarray),         "type(un) = %s" % str(type(un));
+    assert isinstance(un1_guess,    numpy.ndarray),         "type(un1_guess) = %s" % str(type(un1_guess));
+    assert isinstance(idx_m1,       numpy.ndarray),         "type(idx_m1) = %s" % str(type(idx_m1));
+    assert len(un.shape)            == 1,                   "len(un.shape) = %d" % len(un.shape);
+    assert un.shape                 == un1_guess.shape,     "un.shape = %s, un1_guess.shape = %s" % (str(un.shape), str(un1_guess.shape));
+    assert un.shape                 == idx_m1.shape,        "un.shape = %s, idx_m1.shape = %s" % (str(un.shape), str(idx_m1.shape));
 
     # Compute flux difference term: f[i]    = c * (un1_guess[i]^2 - un1_guess[i] * un1_guess[i - 1])
     #                                       = c * un1_guess[i]( un1_guess[i] - un1_guess[i - 1])
@@ -311,10 +311,10 @@ def jacobian(   u       : numpy.ndarray,
     """
 
     # Checks.
-    assert(isinstance(u,           numpy.ndarray));
-    assert(isinstance(idx_m1,      numpy.ndarray));
-    assert(len(u.shape)            == 1);
-    assert(u.shape                 == idx_m1.shape);
+    assert isinstance(u,           numpy.ndarray),  "type(u) = %s" % str(type(u));   
+    assert isinstance(idx_m1,      numpy.ndarray),  "type(idx_m1) = %s" % str(type(idx_m1));
+    assert len(u.shape)            == 1,            "len(u.shape) = %d" % len(u.shape);
+    assert u.shape                 == idx_m1.shape, "u.shape = %s, idx_m1.shape = %s" % (str(u.shape), str(idx_m1.shape));
 
     # Diagonal: dr_i / du_i = 1 + c*(2*u_i - u_{i + 1})
     diag_comp           = 1.0 + c * (2 * u - u[idx_m1]);

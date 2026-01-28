@@ -72,8 +72,8 @@ class Thermal(Physics):
             nodet_shape = nodet_ds.shape;
 
             # the shape should be (n_time_steps, n_nodes). We want n_nodes.
-            assert(len(nodet_shape) == 2);
-            assert(nodet_shape[1] > 0);
+            assert len(nodet_shape) == 2, "len(nodet_shape) = %d" % len(nodet_shape);
+            assert nodet_shape[1] > 0,    "nodet_shape = %s, nodet_shape[1] must be positive" % str(nodet_shape);
             frame_shape : list[int] = [nodet_shape[1]];
 
             # Now we can fetch the node coordinates, which should have shape (n_nodes, 3).
@@ -81,9 +81,9 @@ class Thermal(Physics):
             if nodes_coords_ds is None:
                 raise RuntimeError("Nodes coordinates dataset not found in file %s" % h5_files[0]);
             nodes_coords_shape  = nodes_coords_ds.shape;
-            assert(len(nodes_coords_shape) == 2);
-            assert(nodes_coords_shape[0] == frame_shape[0]);
-            assert(nodes_coords_shape[1] == 3);
+            assert len(nodes_coords_shape) == 2,            "nodes_coords_shape = %s" % str(nodes_coords_shape);
+            assert nodes_coords_shape[0] == frame_shape[0], "nodes_coords_shape = %s, frame_shape = %s" % (str(nodes_coords_shape), str(frame_shape));
+            assert nodes_coords_shape[1] == 3,              "nodes_coords_shape = %s" % str(nodes_coords_shape);
 
             # Convert to numpy array.
             X_Positions : numpy.ndarray = nodes_coords_ds[:, :];
@@ -180,8 +180,8 @@ class Thermal(Physics):
                      
                     # Make sure nodet_ds has shape (n_time_steps, n_nodes).
                     nodet_shape = nodet_ds.shape;
-                    assert(len(nodet_shape) == 2);
-                    assert(nodet_shape[1] == self.X_Positions.shape[0]);
+                    assert len(nodet_shape) == 2,                       "len(nodet_shape) = %d" % len(nodet_shape);
+                    assert nodet_shape[1] == self.X_Positions.shape[0], "nodet_shape = %s, self.X_Positions.shape = %s" % (str(nodet_shape), str(self.X_Positions.shape));
 
                     # Store the first entry of the nodet dataset.
                     self.IC_array[power_idx, speed_idx, :] = nodet_ds[0, :];
@@ -217,14 +217,14 @@ class Thermal(Physics):
         """
 
         assert isinstance(param, numpy.ndarray), "type(param) = %s" % str(type(param));
-        assert param.size == 2, "param shape = %s" % str(param.shape);
+        assert param.size == 2,                  "param shape = %s" % str(param.shape);
         
         # Make sure the laser powers and scan speeds are in self.laser_powers and self.scan_speeds,
         # respectively.
         requested_laser_power   : float = param[0];
         requested_scan_speed    : float = param[1];
         assert requested_laser_power in self.laser_powers, "requested laser power = %f, self.laser_powers = %s" % (requested_laser_power, str(self.laser_powers))
-        assert requested_scan_speed in self.scan_speeds, "requested scan speed = %f, self.scan_speeds = %s" % (requested_scan_speed, str(self.scan_speeds)) 
+        assert requested_scan_speed in self.scan_speeds,   "requested scan speed = %f, self.scan_speeds = %s"   % (requested_scan_speed, str(self.scan_speeds)) 
 
         # If so, fetch the corresponding initial condition.
         power_index : int = self.laser_powers.index(requested_laser_power);
@@ -265,14 +265,14 @@ class Thermal(Physics):
         """
 
         assert isinstance(param, numpy.ndarray), "type(param) = %s" % str(type(param));
-        assert param.size == 2, "param shape = %s" % str(param.shape);
+        assert param.size == 2,                  "param shape = %s" % str(param.shape);
         
         # Make sure the laser powers and scan speeds are in self.laser_powers and self.scan_speeds,
         # respectively.
         requested_laser_power   : float = param[0];
         requested_scan_speed    : float = param[1];
         assert requested_laser_power in self.laser_powers, "requested laser power = %f, self.laser_powers = %s" % (requested_laser_power, str(self.laser_powers))
-        assert requested_scan_speed in self.scan_speeds, "requested scan speed = %f, self.scan_speeds = %s" % (requested_scan_speed, str(self.scan_speeds)) 
+        assert requested_scan_speed in self.scan_speeds,   "requested scan speed = %f, self.scan_speeds = %s" % (requested_scan_speed, str(self.scan_speeds)) 
 
         # If so, fetch the corresponding initial condition.
         power_index : int = self.laser_powers.index(requested_laser_power);
@@ -286,17 +286,19 @@ class Thermal(Physics):
             if nodet_ds is None:
                 raise RuntimeError("Nodet dataset not found in file %s" % requested_file);
             nodet_shape = nodet_ds.shape;       # should be (n_time_steps, n_nodes)
-            assert(len(nodet_shape) == 2);
-            assert(nodet_shape[1] == self.X_Positions.shape[0]);
+            assert len(nodet_shape) == 2,                       "len(nodet_shape) = %d" % len(nodet_shape);
+            assert nodet_shape[1] == self.X_Positions.shape[0], "nodet_shape = %s, self.X_Positions.shape = %s" % (str(nodet_shape), str(self.X_Positions.shape));
+            LOGGER.info("Loaded nodet dataset with shape %s" % str(nodet_shape));
 
             # Fetch the time values. 
             time_ds = f.get("time");
             if time_ds is None:
                 raise RuntimeError("Time dataset not found in file %s" % requested_file);
             time_shape = time_ds.shape;       # should be (n_time_steps,)
-            assert(len(time_shape) == 1);
-            assert(time_shape[0] == nodet_shape[0]);
+            assert len(time_shape) == 1,            "len(time_shape) = %d" % len(time_shape);
+            assert time_shape[0] == nodet_shape[0], "time_shape = %s, nodet_shape = %s" % (str(time_shape), str(nodet_shape));
             time_values : numpy.ndarray = time_ds[:];
+            LOGGER.info("Loaded time dataset with shape %s" % str(time_shape));
 
             # Convert the nodet dataset to a torch.Tensor.
             n_time_steps : int          = nodet_shape[0];
