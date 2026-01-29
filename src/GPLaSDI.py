@@ -198,7 +198,7 @@ class BayesianGLaSDI:
 
         # Set the device to train on. We default to cpu.
         device = gplasdi_config['device'] if 'device' in gplasdi_config else 'cpu';
-        if (device == 'cuda'):
+        if (device.startswith('cuda')):
             assert(torch.cuda.is_available());
             self.device = device;
         elif (device == 'mps'):
@@ -220,7 +220,7 @@ class BayesianGLaSDI:
 
         # Set paths for checkpointing. 
         # Use absolute paths to ensure directories are created in the correct location
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)));
+        base_dir = os.path.dirname(os.path.abspath(__file__));
         self.path_checkpoint    : str       = os.path.join(base_dir, "checkpoint");
         self.path_results       : str       = os.path.join(base_dir, "results");
 
@@ -232,7 +232,7 @@ class BayesianGLaSDI:
         LOGGER.info("Results directory: %s" % self.path_results);
 
         # Set up variables to aide checkpointing
-        self.best_coefs     = numpy.zeros((self.param_space.n_test(), self.latent_dynamics.n_coefs), dtype = numpy.float32);
+        self.best_coefs     = None;
         self.best_epoch     = -1;
         self.restart_iter   = 0;                # Iteration number at the end of the last training period
         
@@ -376,7 +376,7 @@ class BayesianGLaSDI:
             for i in range(n_train):
                 ith_train_in_test : bool = False;
                 for j in range(self.param_space.n_test()):
-                    if(numpy.all(self.param_space.test_space[j, :] == self.param_space.train_space[i, :])):
+                    if(numpy.allclose(self.param_space.test_space[j, :], self.param_space.train_space[i, :], rtol = 1e-12, atol = 1e-14)):
                         train_coefs_list.append(self.test_coefs[j, :]);
                         ith_train_in_test = True;
                         break;
@@ -1466,7 +1466,7 @@ class BayesianGLaSDI:
         # training.
         assert(self.best_coefs is not None);
         LOGGER.info("Model attained it's best performance on epoch %d. Replacing model with the checkpoint from that epoch" % self.best_epoch);
-        state_dict  = torch.load(self.path_checkpoint + '/' + 'checkpoint.pt');
+        state_dict  = torch.load(self.path_checkpoint + '/' + 'checkpoint.pt', map_location = 'cpu');
         self.model.load_state_dict(state_dict);
 
         # Report timing information.
@@ -1644,7 +1644,9 @@ class BayesianGLaSDI:
 
             # Interpolate each U_Train[i][j], then evaluate it at the target times.
             U_Train_i               : list[torch.Tensor]            = U[i];                         # len = n_IC, i'th element is a torch.Tensor of shape (n_t(i), ...)
-            t_Train_i               : numpy.ndarray                 = t[i].detach().numpy();        # shape = (n_t(i))
+            # NOTE: SciPy interpolation expects NumPy arrays on CPU.
+            t_Train_i               : numpy.ndarray                 = t[i].detach().cpu().numpy();  # shape = (n_t(i))
+            t_Rollout_i             : numpy.ndarray                 = t_Grid_rollout[i].detach().cpu().numpy();  # shape = (n_rollout_steps_i,)
 
             # Fetch the number of frames we will rollout and the number of time 
             # steps we will rollout.
@@ -1656,15 +1658,55 @@ class BayesianGLaSDI:
             for j in range(self.n_IC):
                 # Interpolate the time series for the j'th derivative of the FOM solution when we 
                 # use the i'th combination of parameter values.
-                U_Train_ij          : numpy.ndarray = U_Train_i[j].detach().numpy();        # shape = (n_t(i), Physics.Frame_Shape)
-                U_Train_ij_interp                   = interpolate.make_interp_spline(x = t_Train_i, y = U_Train_ij, k = self.rollout_spline_order);
+                U_Train_ij  : numpy.ndarray = U_Train_i[j].detach().cpu().numpy();  # shape = (n_t(i), Physics.Frame_Shape)
+
+                # `make_interp_spline` requires:
+                # - x strictly increasing (no duplicates)
+                # - len(x) > k
+                # Adaptive time stepping (or I/O artifacts) can violate this, so we sanitize x and
+                # fall back to a safe linear interpolator if needed.
+                t_unique, unique_idx = numpy.unique(t_Train_i, return_index=True);
+                y_unique = U_Train_ij[unique_idx, ...];
+                if t_unique.size < 2:
+                    raise RuntimeError("Not enough unique time points for rollout interpolation (n_unique=%d)" % t_unique.size);
+
+                # Ensure increasing order (numpy.unique returns sorted t_unique, but indices are to
+                # the original unsorted array; re-order y_unique to match sorted t_unique).
+                sort_idx = numpy.argsort(t_unique);
+                t_unique = t_unique[sort_idx];
+                y_unique = y_unique[sort_idx, ...];
+
+                # Choose spline order that is feasible; otherwise use linear interpolation.
+                k_eff = min(int(self.rollout_spline_order), int(t_unique.size - 1));
+                try:
+                    if k_eff >= 2:
+                        U_Train_ij_interp = interpolate.make_interp_spline(x=t_unique, y=y_unique, k=k_eff);
+                        interp_kind = "spline(k=%d)" % k_eff;
+                    else:
+                        raise ValueError("k too small for spline")
+                except Exception as e:
+                    # Linear fallback (still fine since our query times are within bounds).
+                    U_Train_ij_interp = interpolate.interp1d(
+                        x=t_unique,
+                        y=y_unique,
+                        kind="linear",
+                        axis=0,
+                        bounds_error=False,
+                        fill_value=(y_unique[0, ...], y_unique[-1, ...]),
+                        assume_sorted=True,
+                    );
+                    interp_kind = "linear"
+                    LOGGER.debug("Rollout interpolation fallback (%s) for param %d, IC-deriv %d: %s" % (interp_kind, i, j, str(e)));
 
                 U_Target_Rollout_Trajectory_ij : numpy.ndarray = numpy.empty((n_rollout_ICs_i, n_rollout_steps_i) + tuple(self.physics.Frame_Shape), dtype = numpy.float32);
                 for k in range(n_rollout_ICs_i):
                     # Evaluate the i,j interpolator at the target times for the k'th rollout IC.
                     # The target times for the k'th IC rollout are the rollout timnes for the 1st 
                     # frame (t_Grid_rollout) plus the time of the k'th IC (t_Train_i[k]).
-                    U_Target_Rollout_Trajectory_ij[k, ...] = U_Train_ij_interp(t_Grid_rollout[i] + t_Train_i[k]*numpy.ones_like(t_Grid_rollout[i], dtype = numpy.float32));
+                    target_times = t_Rollout_i + t_Train_i[k]
+                    # Guard against tiny roundoff causing a time slightly outside bounds.
+                    target_times = numpy.clip(target_times, t_unique[0], t_unique[-1])
+                    U_Target_Rollout_Trajectory_ij[k, ...] = U_Train_ij_interp(target_times).astype(numpy.float32, copy=False);
 
                 # Evaluate the interpolation at the final rollout times for the i'th combination of
                 # parameter values.
@@ -1825,6 +1867,7 @@ class BayesianGLaSDI:
         self.timer.start("new_sample");
         assert len(self.U_Test)             >  0,                           "len(self.U_Test) = %d" % len(self.U_Test);
         assert len(self.U_Test)             == self.param_space.n_test(),   "len(self.U_Test) = %d, self.param_space.n_test() = %d" % (len(self.U_Test), self.param_space.n_test());
+        assert self.best_coefs is not None,                                 "best_coefs is None (did training run and checkpoint succeed?)";
         assert self.best_coefs.shape[0]     == self.param_space.n_train(),  "self.best_coefs.shape[0] = %d, self.param_space.n_train() = %d" % (self.best_coefs.shape[0], self.param_space.n_train());
 
         coefs : numpy.ndarray = self.best_coefs;                        # Shape = (n_train, n_coefs).
@@ -1836,7 +1879,7 @@ class BayesianGLaSDI:
         model       : torch.nn.Module   = self.model.cpu();
         n_test      : int               = self.param_space.n_test();
         n_train     : int               = self.param_space.n_train();
-        model.load_state_dict(torch.load(self.path_checkpoint + '/' + 'checkpoint.pt'));
+        model.load_state_dict(torch.load(self.path_checkpoint + '/' + 'checkpoint.pt', map_location = 'cpu'));
 
         # First, find the candidate parameters. This is the elements of the testing set that 
         # are not already in the training set.
@@ -1845,10 +1888,11 @@ class BayesianGLaSDI:
         for i in range(n_test):
             ith_Test_param = self.param_space.test_space[i, :];
             
-            # Check if the i'th testing parameter is in the training set
+            # Check if the i'th testing parameter is in the training set (all close returns True if
+            # the two arrays are equal to within a tolerance)
             in_train : bool = False;
             for j in range(n_train):
-                if(numpy.any(numpy.all(self.param_space.train_space[j, :] == ith_Test_param))):
+                if numpy.allclose(self.param_space.train_space[j, :], ith_Test_param, rtol = 1e-12, atol = 1e-14):
                     in_train = True;
                     break;
             
@@ -1884,13 +1928,13 @@ class BayesianGLaSDI:
         coef_samples : list[numpy.ndarray] = [sample_coefs(gp_list, candidate_parameters[i, :], self.n_samples) for i in range(n_candidates)];
 
         # Now, solve the latent dynamics forward in time for each set of coefficients in 
-        # coef_samples. There are n_test combinations of parameter values, and we have n_samples 
-        # sets of coefficients for each combination of parameter values. For the i'th one of those,
-        # we want to solve the latent dynamics for n_t(i) times steps. Each solution frame consists
-        # of n_IC elements of \marthbb{R}^{n_z}.
+        # coef_samples. There are n_candidates combinations of parameter values, and we have 
+        # n_samples sets of coefficients for each combination of parameter values. For the i'th one
+        # of those, we want to solve the latent dynamics for n_t(i) times steps. Each solution 
+        # frame consists of n_IC elements of \marthbb{R}^{n_z}.
         # 
-        # Thus, we store the latent states in an n_test element list whose i'th element is an n_IC
-        # element list whose j'th element is an array of shape (n_samples, n_t(i), n_z) whose
+        # Thus, we store the latent states in an n_candidates element list whose i'th element is an 
+        # n_IC element list whose j'th element is an array of shape (n_samples, n_t(i), n_z) whose
         # p, q, r element holds the r'th component of j'th derivative of the latent state at the 
         # q'th time step when we use the p'th set of coefficient values sampled from the posterior
         # distribution for the i'th combination of testing parameter values.
@@ -1899,13 +1943,16 @@ class BayesianGLaSDI:
         for i in range(n_candidates):
             LatentStates_i  : list[numpy.ndarray]    = [];
             for j in range(self.n_IC):
-                LatentStates_i.append(numpy.ndarray([self.n_samples, len(self.t_Test[j]), n_z]));
+                # Each candidate can have a different number of time samples (adaptive stepping,
+                # truncated outputs, etc.), so allocate per-candidate.
+                LatentStates_i.append(numpy.empty([self.n_samples, len(t_Candidates[i]), n_z], dtype=numpy.float32));
             LatentStates.append(LatentStates_i);
         
         for i in range(n_candidates):
             # Fetch the t_Grid for the i'th combination of parameter values.
-            t_Grid  : numpy.ndarray = t_Candidates[i].reshape(1, -1).detach().numpy();
-            n_t_j   : int           = len(t_Grid);
+            # Use a 1D time grid (shared across ICs). This avoids accidental shape/length
+            # mismatches due to 2D handling downstream.
+            t_Grid  : numpy.ndarray = t_Candidates[i].detach().numpy().reshape(-1);
 
             # Simulate one sample at a time; store the resulting frames.           
             for j in range(self.n_samples):
