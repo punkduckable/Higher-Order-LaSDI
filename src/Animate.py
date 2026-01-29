@@ -10,6 +10,7 @@ import  numpy;
 import  matplotlib.pyplot           as      plt;
 from    matplotlib.animation        import  FuncAnimation, FFMpegWriter;
 from    matplotlib.colors           import  LinearSegmentedColormap;
+from    mpl_toolkits.mplot3d        import  Axes3D;  # noqa: F401 (registers 3D projection)
 
 # Set up logging.
 import  logging;
@@ -107,8 +108,16 @@ def _scalar_anim(   data        : numpy.ndarray,
     vmin                = data.min();
     vmax                = data.max();
 
-    # Create a new figure and a single subplot (axes) object
-    fig, ax = plt.subplots();
+    # Ensure output directory exists.
+    save_dir = Path(save_dir);
+    save_dir.mkdir(parents = True, exist_ok = True);
+
+    # Create a new figure/axes object (2D or 3D depending on X).
+    if(X.shape[0] == 2):
+        fig, ax = plt.subplots();
+    else:
+        fig = plt.figure();
+        ax = fig.add_subplot(111, projection = "3d");
 
     # Plot the initial frame of the data as a filled triangular contour plot
     if(X.shape[0] == 2):
@@ -127,10 +136,14 @@ def _scalar_anim(   data        : numpy.ndarray,
                             cmap        = cmap,     # what colormap we use
                             vmin        = vmin,     # lower bounds for color scaling
                             vmax        = vmax,     # upper bounds for color scaling
-                            s           = 60);      # Area of the markers.
+                            s           = 20);      # Area of the markers.
    
-    # Force the x and y axes to have equal scaling (so a unit in x equals a unit in y)
-    ax.set_aspect("equal");
+    # Force equal aspect (2D) / box aspect (3D) if available.
+    if X.shape[0] == 2:
+        ax.set_aspect("equal");
+    else:
+        if hasattr(ax, "set_box_aspect"):
+            ax.set_box_aspect((1, 1, 1));
 
     # Add a colorbar to the figure, linked to the contour collection `scat`
     cb = fig.colorbar(scat, ax = ax);
@@ -163,18 +176,14 @@ def _scalar_anim(   data        : numpy.ndarray,
     ani = FuncAnimation(fig,                # the Figure object to animate
                         update,             # the function that draws each frame
                         frames  = N_t,      # total number of frames (N_t)
-                        blit    = True,     # whether to use blitting for faster animation (only redraws changed parts)
+                        blit    = (X.shape[0] == 2),  # blitting is unreliable for 3D artists
                         repeat  = False);   # whether the animation should loop when it reaches the end
 
-    # Build the full output path by joining the directory and filename
-    out_path = os.path.join(save_dir, fname);
-
-    # For debugging, print the path strings
-    print(out_path);
-    print(save_dir / fname);
+    # Build the full output path.
+    out_path = save_dir / fname;
 
     # Save the animation to a file using ffmpeg
-    ani.save(   out_path,
+    ani.save(   str(out_path),
                 writer      =   FFMpegWriter(   fps = fps,              # frames per second
                                                 codec = "libx264"));    # video codec (libx264 for H.264)
 
@@ -266,13 +275,21 @@ def _vector_anim(   data        : numpy.ndarray,
     assert data.shape[2] == X.shape[1],     "data.shape = %s, X.shape = %s" % (str(data.shape), str(X.shape));
 
     # Setup.
+    save_dir = Path(save_dir);
+    save_dir.mkdir(parents = True, exist_ok = True);
+
     N_t         : int   = T.shape[0];
     magnitudes          = numpy.linalg.norm(data, axis = 1);
-    vmin                = data.min();
-    vmax                = data.max();
+    vmin                = magnitudes.min();
+    vmax                = magnitudes.max();
 
     # Make a quiver plot using the data
-    fig, ax = plt.subplots();
+    if X.shape[0] == 2:
+        fig, ax = plt.subplots();
+    else:
+        # 3D vector-field animation is not robustly supported by the current update logic.
+        # (Matplotlib 3D quiver objects do not support q.set_UVC like 2D quiver does.)
+        raise NotImplementedError("3D vector-field animation is not supported. X.shape = %s" % str(X.shape));
 
     # Create a new figure and a single subplot (axes) object
     if(X.shape[0] == 2):
@@ -337,7 +354,7 @@ def _vector_anim(   data        : numpy.ndarray,
     
     # Construct output filepath and save the animation using ffmpeg
     out_path = save_dir / fname;
-    ani.save(out_path, writer = FFMpegWriter(fps = fps, codec = "libx264"));
+    ani.save(str(out_path), writer = FFMpegWriter(fps = fps, codec = "libx264"));
 
     # Close the figure to free memory
     plt.close(fig);
@@ -355,7 +372,7 @@ def make_solution_movies(   U_True          : numpy.ndarray,
                             U_Pred          : numpy.ndarray,
                             X               : numpy.ndarray,
                             T               : numpy.ndarray,
-                            save_dir        : str | Path    = "../Figures/",
+                            save_dir        : str | Path | None  = None,
                             fname_prefix    : str           = "solution",
                             fps             : int           = 30,
                             dpi             : int           = 150,
@@ -422,6 +439,11 @@ def make_solution_movies(   U_True          : numpy.ndarray,
     assert isinstance(U_Pred, numpy.ndarray),   "type(U_Pred) = %s" % str(type(U_Pred));
     assert isinstance(X, numpy.ndarray),        "type(X) = %s" % str(type(X));
     assert isinstance(T, numpy.ndarray),        "type(T) = %s" % str(type(T));
+    # Accept scalar fields as either (N_t, N_x) or (N_t, 1, N_x).
+    if len(U_True.shape) == 2:
+        U_True = U_True[:, None, :];
+    if len(U_Pred.shape) == 2:
+        U_Pred = U_Pred[:, None, :];
     assert len(U_True.shape) == 3,              "U_True.shape = %s" % str(U_True.shape);
     assert len(U_Pred.shape) == 3,              "U_Pred.shape = %s" % str(U_Pred.shape);
     assert len(X.shape) == 2,                   "X.shape = %s" % str(X.shape);
@@ -434,7 +456,10 @@ def make_solution_movies(   U_True          : numpy.ndarray,
     N_t, n_comp, N_x = U_True.shape;
     assert n_comp in (1, 2, 3),                 "n_comp = %s" % n_comp;
     
-    # Make sure the save directory exists.
+    # Default save directory: <Higher-Order-LaSDI>/Figures (independent of CWD).
+    if save_dir is None:
+        project_dir = Path(__file__).resolve().parent.parent;
+        save_dir = project_dir / "Figures";
     save_dir = Path(save_dir).expanduser().resolve();
     save_dir.mkdir(parents = True, exist_ok = True);
 
