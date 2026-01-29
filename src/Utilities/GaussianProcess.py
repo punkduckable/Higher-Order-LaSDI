@@ -5,6 +5,7 @@
 import  numpy;
 from    sklearn.gaussian_process.kernels    import  ConstantKernel, RBF;
 from    sklearn.gaussian_process            import  GaussianProcessRegressor;
+from    sklearn.preprocessing               import  StandardScaler;
 
 
 
@@ -61,6 +62,12 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
     # Setup.
     n_GPs   : int   = Y.shape[1];
 
+    # Scale inputs to improve conditioning of kernel hyperparameter optimization.
+    # This is especially important when parameters have very different magnitudes
+    # (e.g., ~1e-9 and ~1e-4), which can trigger many ConvergenceWarnings.
+    x_scaler = StandardScaler();
+    Xs: numpy.ndarray = x_scaler.fit_transform(X);
+
     # Transpose Y so that each row corresponds to a particular coefficient. This allows us to 
     # iterate over the GPs by iterating through the rows of Y.
     Y = Y.T;
@@ -72,15 +79,28 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
     for i in range(n_GPs):
         targets_i   : numpy.ndarray     = Y[i, :];
 
+        # Scale targets per coefficient (each GP has its own target distribution).
+        y_mean: float = float(numpy.mean(targets_i));
+        y_std: float  = float(numpy.std(targets_i));
+        if y_std <= 0.0:
+            y_std = 1.0;
+        targets_i_s: numpy.ndarray = (targets_i - y_mean) / y_std;
+
         # Make the kernel.
         # kernel = ConstantKernel() * Matern(length_scale_bounds = (0.01, 1e5), nu = 1.5)
-        kernel  = ConstantKernel() * RBF(length_scale_bounds = (0.1, 1e5));
+        kernel  = ConstantKernel(constant_value = 1.0, constant_value_bounds = (1e-6, 1e8)) * \
+                  RBF(length_scale_bounds = (1e-3, 1e3));
 
         # Initialize the GP object.
         gp      = GaussianProcessRegressor(kernel = kernel, n_restarts_optimizer = 10, random_state = 1);
 
         # Fit it to the data (train), then add it to the list of trained GPs
-        gp.fit(X, targets_i);
+        gp.fit(Xs, targets_i_s);
+
+        # Attach scaling so eval_gp/sample_coefs can use physical units.
+        gp._x_scaler = x_scaler;  # type: ignore[attr-defined]
+        gp._y_mean   = y_mean;    # type: ignore[attr-defined]
+        gp._y_std    = y_std;     # type: ignore[attr-defined]
         gp_list.append(gp);
 
     # All done!
@@ -135,10 +155,23 @@ def eval_gp(gp_list : list[GaussianProcessRegressor], Inputs : numpy.ndarray) ->
     pred_mean   : numpy.ndarray = numpy.zeros([n_inputs, n_GPs]);
     pred_std    : numpy.ndarray = numpy.zeros([n_inputs, n_GPs]);
 
-    # Find the means and SDs of the posterior distribution for each GP evaluated at the 
+    # Find the means and SDs of the posterior distribution for each GP evaluated at the
     # various inputs.
     for i in range(n_GPs):
-        pred_mean[:, i], pred_std[:, i] = gp_list[i].predict(Inputs, return_std = True);
+        gp = gp_list[i];
+        Xq: numpy.ndarray = Inputs;
+        if hasattr(gp, "_x_scaler"):
+            Xq = gp._x_scaler.transform(Inputs);  # type: ignore[attr-defined]
+
+        m_i, s_i = gp.predict(Xq, return_std = True);
+
+        # Undo target scaling if present.
+        if hasattr(gp, "_y_mean") and hasattr(gp, "_y_std"):
+            m_i = m_i * gp._y_std + gp._y_mean;  # type: ignore[attr-defined]
+            s_i = s_i * gp._y_std;               # type: ignore[attr-defined]
+
+        pred_mean[:, i] = m_i;
+        pred_std[:, i]  = s_i;
 
     # All done!
     return pred_mean, pred_std;
@@ -183,7 +216,7 @@ def sample_coefs(   gp_list     : list[GaussianProcessRegressor],
     assert isinstance(gp_list, list),           "type(gp_list) = %s" % str(type(gp_list));
     assert isinstance(Input, numpy.ndarray),    "type(Input) = %s" % str(type(Input));
     assert isinstance(n_samples, int),          "type(n_samples) = %s" % str(type(n_samples));
-    assert len(Input.shape) == 1,               "Inputs.shape = %s" % str(Inputs.shape);
+    assert len(Input.shape) == 1,               "Input.shape = %s" % str(Input.shape);
 
     # Setup.
     n_GPs           : int           = len(gp_list);
