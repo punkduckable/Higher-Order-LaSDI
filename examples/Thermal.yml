@@ -15,15 +15,15 @@ lasdi:
     IC_rollout_update_freq: 100
     IC_dp_per_update:       0.01
 
-    max_iter:               64000
-    n_iter:                 8000
-    max_greedy_iter:        64000
+    max_iter:               2100
+    n_iter:                 700
+    max_greedy_iter:        2100
 
     loss_weights:
       recon:                1.0
       LD:                   1.0
-      rollout:              1.0
-      IC_rollout:           1.0
+      rollout:              0.0
+      IC_rollout:           0.0
       coef:                 0.001
 
       chain_rule:           1.0
@@ -48,23 +48,19 @@ parameter_space:
   parameters:
     - name:                 laser powers
       test_space_type:      file
-      file:                 /p/lustre1/robertrs/AI4NS/ROM_AI4NS_material_Ti64/test/metadata.txt
+      file:                 /p/lustre1/robertrs/AI4NS/Generate_Data/test/metadata.txt
     - name:                 scan speed
       test_space_type:      file
-      file:                 /p/lustre1/robertrs/AI4NS/ROM_AI4NS_material_Ti64/test/metadata.txt
+      file:                 /p/lustre1/robertrs/AI4NS/Generate_Data/test/metadata.txt
   test_space:
     type:                   grid
 
 model:
   type:                     ae
   ae:
-    hidden_widths:          [2500, 500, 200, 100]
+    hidden_widths:          [1200, 600, 300, 150]
     activations:            ["GELU", "GELU", "GELU", "GELU"]
-    latent_dimension:       10
-  pair:
-    hidden_widths:          [250, 100, 100, 100]
-    latent_dimension:       10 
-    activations:            ["sin", "sin", "sin", "sin"]
+    latent_dimension:       20
 
 latent_dynamics:
   type:                     sindy
@@ -75,6 +71,6 @@ physics:
   type:                     Thermal
   
   Thermal:
-    hdf5_dir:               /p/lustre1/robertrs/AI4NS/ROM_AI4NS_material_Ti64/test/
+    hdf5_dir:               /p/lustre1/robertrs/AI4NS/Generate_Data/test/
 
 

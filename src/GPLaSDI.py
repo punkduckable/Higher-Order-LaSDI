@@ -218,11 +218,12 @@ class BayesianGLaSDI:
         self.MSE                            = torch.nn.MSELoss(reduction = 'mean');
         self.MAE                            = torch.nn.L1Loss(reduction = 'mean');
 
-        # Set paths for checkpointing. 
-        # Use absolute paths to ensure directories are created in the correct location
-        base_dir = os.path.dirname(os.path.abspath(__file__));
-        self.path_checkpoint    : str       = os.path.join(base_dir, "checkpoint");
-        self.path_results       : str       = os.path.join(base_dir, "results");
+        # Set paths for checkpointing/results.
+        # Put these in the Higher-Order-LaSDI project root.
+        src_dir     = os.path.dirname(os.path.abspath(__file__));
+        project_dir = os.path.abspath(os.path.join(src_dir, os.pardir));
+        self.path_checkpoint    : str = os.path.join(project_dir, "checkpoint");
+        self.path_results       : str = os.path.join(project_dir, "results");
 
         # Make sure the checkpoints and results directories exist.
         from pathlib import Path;
