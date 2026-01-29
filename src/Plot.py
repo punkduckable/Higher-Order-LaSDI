@@ -120,37 +120,37 @@ def Plot_Latent_Trajectories(physics         : Physics,
     """ 
 
     # Checks
-    assert(isinstance(physics, Physics));
-    assert(isinstance(model, torch.nn.Module));
-    assert(isinstance(latent_dynamics, LatentDynamics));
-    assert(isinstance(gp_list, list));
-    assert(len(gp_list)     == latent_dynamics.n_coefs);
+    assert isinstance(physics, Physics),                "type(physics) = %s" % type(physics);
+    assert isinstance(model, torch.nn.Module),          "type(model) = %s" % type(model);
+    assert isinstance(latent_dynamics, LatentDynamics), "type(latent_dynamics) = %s" % type(latent_dynamics);
+    assert isinstance(gp_list, list),                   "type(gp_list) = %s" % type(gp_list);
+    assert len(gp_list)     == latent_dynamics.n_coefs, "len(gp_list) = %d != latent_dynamics.n_coefs = %d" % (len(gp_list), latent_dynamics.n_coefs);
     for i in range(latent_dynamics.n_coefs):
-        assert(isinstance(gp_list[i], GaussianProcessRegressor));
+        assert isinstance(gp_list[i], GaussianProcessRegressor), "type(gp_list[%d]) = %s" % (i, type(gp_list[i]));
 
-    assert(isinstance(param_grid, numpy.ndarray));
-    assert(param_grid.ndim     == 2);
-    assert(param_grid.shape[1] == physics.n_p);
+    assert isinstance(param_grid, numpy.ndarray),        "type(param_grid) = %s" % type(param_grid);
+    assert param_grid.ndim     == 2,                     "param_grid.ndim = %d != 2" % param_grid.ndim;
+    assert param_grid.shape[1] == physics.n_p,           "param_grid.shape = %s != physics.n_p = %d" % (str(param_grid.shape), physics.n_p);
     n_param : int = param_grid.shape[0];
 
-    assert(isinstance(n_samples, int));
-    assert(isinstance(U_True, list));
-    assert(isinstance(t_Grid, list));
-    assert(len(t_Grid)      == n_param);
-    assert(len(U_True)      == n_param);
+    assert isinstance(n_samples, int),                  "type(n_samples) = %s" % type(n_samples);
+    assert isinstance(U_True, list),                    "type(U_True) = %s" % type(U_True);
+    assert isinstance(t_Grid, list),                    "type(t_Grid) = %s" % type(t_Grid);
+    assert len(t_Grid)      == n_param,                 "len(t_Grid) = %d != n_param = %d" % (len(t_Grid), n_param);
+    assert len(U_True)      == n_param,                 "len(U_True) = %d != n_param = %d" % (len(U_True), n_param);
     for i in range(n_param):
-        assert(isinstance(U_True[i], list));
-        assert(len(U_True[i])  == physics.n_IC);
-        assert(isinstance(t_Grid[i], torch.Tensor));
-        assert(t_Grid[i].ndim     == 1);
+        assert isinstance(U_True[i], list),             "type(U_True[%d]) = %s" % (i, type(U_True[i]));
+        assert len(U_True[i])  == physics.n_IC,         "len(U_True[%d]) = %d != physics.n_IC = %d" % (i, len(U_True[i]), physics.n_IC);
+        assert isinstance(t_Grid[i], torch.Tensor),     "type(t_Grid[%d]) = %s" % (i, type(t_Grid[i]));
+        assert t_Grid[i].ndim     == 1,                 "t_Grid[%d].ndim = %d != 1" % (i, t_Grid[i].ndim);
         n_t_i : int = t_Grid[i].shape[0];   # number of time steps for the i'th combination of parameter values.
         for j in range(physics.n_IC):
-            assert(isinstance(U_True[i][j], torch.Tensor));
-            assert(U_True[i][j].ndim >= 2);
-            assert(U_True[i][j].shape[0]    == n_t_i);
+            assert isinstance(U_True[i][j], torch.Tensor),  "type(U_True[%d][%d]) = %s" % (i, j, type(U_True[i][j]));
+            assert U_True[i][j].ndim >= 2,                  "U_True[%d][%d].ndim = %d < 2" % (i, j, U_True[i][j].ndim);
+            assert U_True[i][j].shape[0]    == n_t_i,       "U_True[%d][%d].shape[0] = %d != n_t_i = %d" % (i, j, U_True[i][j].shape[0], n_t_i);
 
-    assert(isinstance(figsize, tuple));
-    assert(len(figsize)     == 2);
+    assert isinstance(figsize, tuple), "type(figsize) = %s" % type(figsize);
+    assert len(figsize)     == 2,       "len(figsize) = %d != 2" % len(figsize);
 
 
     # ---------------------------------------------------------------------------------------------
@@ -194,6 +194,8 @@ def Plot_Latent_Trajectories(physics         : Physics,
     # Set up the subplots.
     LOGGER.info("Making latent trajectory plots for %d combinations of parameter values" % n_param);
     for i in range(n_param):
+        # Time grid for this parameter combination (used as x-axis).
+        t_np: numpy.ndarray = t_Grid[i].detach().cpu().numpy();
         for j in range(physics.n_IC):
             # Set up the plot for this combination of parameter values.
             plt.figure(figsize = figsize);
@@ -201,11 +203,11 @@ def Plot_Latent_Trajectories(physics         : Physics,
             # Plot the predicted latent trajectories
             for s in range(n_samples):
                 for k in range(latent_dynamics.n_z):
-                    plt.plot(Predicted_Latent_Trajectories[i][j][:, s, k], 'C' + str(k), linewidth = 1, alpha = 0.3);
+                    plt.plot(t_np, Predicted_Latent_Trajectories[i][j][:, s, k], 'C' + str(k), linewidth = 1, alpha = 0.3);
 
             # Plot each component of the latent trajectories
             for k in range(latent_dynamics.n_z):
-                plt.plot(True_Latent_Trajectories[i][j][:, k], 'C' + str(k), linewidth = 3, alpha = 0.75);
+                plt.plot(t_np, True_Latent_Trajectories[i][j][:, k], 'C' + str(k), linewidth = 3, alpha = 0.75);
             
             # Determine the title and save file name.
             if(j == 0):
@@ -296,11 +298,11 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     p2_grid : numpy.ndarray     = param_space.test_meshgrid[1][0, :];
     n1      : int               = p1_grid.shape[0];
     n2      : int               = p2_grid.shape[0];
-    assert(values.shape[0]  == n1);
-    assert(values.shape[1]  == n2);
+    assert values.shape[0]  == n1, "values.shape[0] = %d != n1 = %d" % (values.shape[0], n1);
+    assert values.shape[1]  == n2, "values.shape[1] = %d != n2 = %d" % (values.shape[1], n2);
 
-    assert(isinstance(figsize, tuple));
-    assert(len(figsize)     == 2);
+    assert isinstance(figsize, tuple), "type(figsize) = %s" % type(figsize);
+    assert len(figsize)     == 2,      "len(figsize) = %d != 2" % len(figsize);
     
     # Setup.
     n_train         : int           = param_space.n_train();
@@ -464,9 +466,15 @@ def trainSpace_RelativeErrors_Heatmap(trainer        : 'BayesianGLaSDI',
                 # Flatten all tensors in U_Train[j] into a single vector
                 Uk_j_flat : torch.Tensor = trainer.U_Train[j][d];
                 
+                # Different training trajectories have different numbers of time steps. 
+                # To ensure we can compute the relative error, we truncate the longer 
+                # trajectory to the length of the shorter one.
+                min_n_t : int = min(Uk_i_flat.shape[0], Uk_j_flat.shape[0]);
+
+                # Now we can compute the relative error.
                 # Compute the relative error: ||U_i - U_j||_2 / ||U_j||_2
-                numerator   : float = torch.norm(Uk_i_flat - Uk_j_flat, p = 2).item();
-                denominator : float = torch.norm(Uk_j_flat, p = 2).item();
+                numerator   : float = torch.norm(Uk_i_flat[:min_n_t] - Uk_j_flat[:min_n_t], p = 2).item();
+                denominator : float = torch.norm(Uk_j_flat[:min_n_t], p = 2).item();
                 
                 if denominator > 0:
                     relative_errors[d, i, j] = 100*(numerator / denominator);
