@@ -85,8 +85,9 @@ class Thermal(Physics):
             assert nodes_coords_shape[0] == frame_shape[0], "nodes_coords_shape = %s, frame_shape = %s" % (str(nodes_coords_shape), str(frame_shape));
             assert nodes_coords_shape[1] == 3,              "nodes_coords_shape = %s" % str(nodes_coords_shape);
 
-            # Convert to numpy array.
-            X_Positions : numpy.ndarray = nodes_coords_ds[:, :];
+            # Convert to numpy array, then transpose it so that it has shape (3, n_nodes); this is the 
+            # shape that the animate functions expect.
+            X_Positions : numpy.ndarray = nodes_coords_ds[:, :].T;
 
         # We are now ready to initialize the super class.
         super().__init__(   spatial_dim     = spatial_dim,
@@ -136,7 +137,7 @@ class Thermal(Physics):
         """
         n_powers : int = len(self.laser_powers);
         n_speeds : int = len(self.scan_speeds);
-        n_nodes  : int = self.X_Positions.shape[0];
+        n_nodes  : int = self.X_Positions.shape[1];
         self.IC_array   : numpy.ndarray = numpy.empty((n_powers, n_speeds, n_nodes), dtype = numpy.float32);
         self.file_names : numpy.ndarray = numpy.empty((n_powers, n_speeds), dtype = object)
 
@@ -180,8 +181,8 @@ class Thermal(Physics):
                      
                     # Make sure nodet_ds has shape (n_time_steps, n_nodes).
                     nodet_shape = nodet_ds.shape;
-                    assert len(nodet_shape) == 2,                       "len(nodet_shape) = %d" % len(nodet_shape);
-                    assert nodet_shape[1] == self.X_Positions.shape[0], "nodet_shape = %s, self.X_Positions.shape = %s" % (str(nodet_shape), str(self.X_Positions.shape));
+                    assert len(nodet_shape) == 2,       "len(nodet_shape) = %d" % len(nodet_shape);
+                    assert nodet_shape[1] == n_nodes,   "nodet_shape = %s, self.X_Positions.shape = %s" % (str(nodet_shape), str(self.X_Positions.shape));
 
                     # Store the first entry of the nodet dataset.
                     self.IC_array[power_idx, speed_idx, :] = nodet_ds[0, :];
@@ -287,7 +288,7 @@ class Thermal(Physics):
                 raise RuntimeError("Nodet dataset not found in file %s" % requested_file);
             nodet_shape = nodet_ds.shape;       # should be (n_time_steps, n_nodes)
             assert len(nodet_shape) == 2,                       "len(nodet_shape) = %d" % len(nodet_shape);
-            assert nodet_shape[1] == self.X_Positions.shape[0], "nodet_shape = %s, self.X_Positions.shape = %s" % (str(nodet_shape), str(self.X_Positions.shape));
+            assert nodet_shape[1] == self.X_Positions.shape[1], "nodet_shape = %s, self.X_Positions.shape = %s" % (str(nodet_shape), str(self.X_Positions.shape));
             LOGGER.info("Loaded nodet dataset with shape %s" % str(nodet_shape));
 
             # Fetch the time values. 

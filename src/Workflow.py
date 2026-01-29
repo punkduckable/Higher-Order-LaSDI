@@ -328,9 +328,9 @@ def main():
 
         # Generate the solution trajectory using the mean for the posterior distribution.
         param_worst    : numpy.ndarray         = param_space.test_space[i_worst, :].reshape(1, -1);
-        t_worst         : torch.Tensor          = trainer.t_Test[i_worst];                          # shape = (n_t)
-        U_True_wors    : list[torch.Tensor]    = trainer.U_Test[i_worst];                          # length = n_IC        
-        Zi_mean_np      : list[numpy.ndarray]   = average_rom(  model           = model,            # n_IC element list whose j'th element has shape (n_t(i), n_z)
+        t_worst        : torch.Tensor          = trainer.t_Test[i_worst];                          # shape = (n_t)
+        U_True_worst   : list[torch.Tensor]    = trainer.U_Test[i_worst];                          # length = n_IC        
+        Zi_mean_np     : list[numpy.ndarray]   = average_rom(   model           = model,            # n_IC element list whose j'th element has shape (n_t(i), n_z)
                                                                 physics         = physics, 
                                                                 latent_dynamics = latent_dynamics, 
                                                                 gp_list         = gp_list, 
@@ -695,7 +695,7 @@ def Save(   param_space         : ParameterSpace,
     # Checks.
     n_IC    : int   = latent_dynamics.n_IC;
     assert model.n_IC       == n_IC, "model.n_IC = %d != n_IC = %d" % (model.n_IC, n_IC);
-    assert physics.n_IC     == n_IC, "physics.n_IC = %d != n_IC = %d" % (physics.n_IC, n_IC);
+    assert(physics.n_IC     == n_IC);
 
 
     # Save restart (or final) file.
