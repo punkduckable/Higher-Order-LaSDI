@@ -126,7 +126,7 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     else:
         num_train_current   : int   = len(trainer.U_Train);
         num_train_new       : int   = trainer.param_space.n_train() - num_train_current;
-    assert(num_train_new > 0);
+    assert num_train_new > 0, "num_train_new = %d <= 0" % num_train_new;
     LOGGER.info("Adding %d new parameter combinations to the training set (currently has %d)" % (num_train_new, num_train_current));
 
     # Fetch the parameters. We assume that if the user has added new training parameter 
@@ -169,7 +169,7 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
             trainer.U_Test : list[list[torch.Tensor]]   = trainer.U_Test + new_U_Test;
             trainer.t_Test : list[torch.Tensor]         = trainer.t_Test + new_t_Test;
             
-        assert(len(trainer.U_Test) == trainer.param_space.n_test());
+        assert len(trainer.U_Test) == trainer.param_space.n_test(), "len(trainer.U_Test) = %d != trainer.param_space.n_test() = %d" % (len(trainer.U_Test), trainer.param_space.n_test());
 
 
     # Do the same thing for the training points. We do this one at a time. If a particular set of
@@ -218,7 +218,7 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
         trainer.t_Train         = trainer.t_Train + new_t_Train;
         trainer.std_Train       = trainer.std_Train + new_std_Train;
 
-    assert(len(trainer.U_Train) == trainer.param_space.n_train());
+    assert len(trainer.U_Train) == trainer.param_space.n_train(), "len(trainer.U_Train) = %d != trainer.param_space.n_train() = %d" % (len(trainer.U_Train), trainer.param_space.n_train());
 
 
     # ---------------------------------------------------------------------------------------------

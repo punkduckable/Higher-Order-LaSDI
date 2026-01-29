@@ -327,27 +327,27 @@ def main():
         LOGGER.debug("Generating trajectory plot for testing combination %d: %s" % (i_worst, param_space.test_space[i_worst]));
 
         # Generate the solution trajectory using the mean for the posterior distribution.
-        param_random    : numpy.ndarray         = param_space.test_space[i_worst, :].reshape(1, -1);
-        t_random        : torch.Tensor          = trainer.t_Test[i_worst];                          # shape = (n_t)
-        U_True_random   : list[torch.Tensor]    = trainer.U_Test[i_worst];                          # length = n_IC        
+        param_worst    : numpy.ndarray         = param_space.test_space[i_worst, :].reshape(1, -1);
+        t_worst         : torch.Tensor          = trainer.t_Test[i_worst];                          # shape = (n_t)
+        U_True_wors    : list[torch.Tensor]    = trainer.U_Test[i_worst];                          # length = n_IC        
         Zi_mean_np      : list[numpy.ndarray]   = average_rom(  model           = model,            # n_IC element list whose j'th element has shape (n_t(i), n_z)
                                                                 physics         = physics, 
                                                                 latent_dynamics = latent_dynamics, 
                                                                 gp_list         = gp_list, 
-                                                                param_grid      = param_random, 
-                                                                t_Grid          = [t_random])[0];   # shape = (n_t, n_IC, n_z)
+                                                                param_grid      = param_worst, 
+                                                                t_Grid          = [t_worst])[0];   # shape = (n_t, n_IC, n_z)
 
         # Map Zi_mean_np to a tensor and then decode.
         Zi_mean     : list[torch.Tensor]    = [];
         for i in range(len(Zi_mean_np)):
             Zi_mean.append(torch.Tensor(Zi_mean_np[i]));
-        U_Pred_random : tuple[torch.Tensor] | torch.Tensor    = model.Decode(*Zi_mean);             # length = n_IC
+        U_Pred_worst : tuple[torch.Tensor] | torch.Tensor    = model.Decode(*Zi_mean);             # length = n_IC
 
         # Convert U_Pred to a list
-        if(isinstance(U_Pred_random, tuple)):
-            U_Pred_random = list(U_Pred_random);
-        elif(isinstance(U_Pred_random, torch.Tensor)):
-            U_Pred_random = [U_Pred_random];
+        if(isinstance(U_Pred_worst, tuple)):
+            U_Pred_worst = list(U_Pred_worst);
+        elif(isinstance(U_Pred_worst, torch.Tensor)):
+            U_Pred_worst = [U_Pred_worst];
         else:
             raise ValueError("U_Pred is not a tuple or a torch.Tensor");
 
@@ -362,10 +362,10 @@ def main():
                 prefix : str = "%s_Dt^%d_U_%s"  % (config["physics"]["type"], i, str(param_space.test_space[i_worst]));
 
             # Make the movie.
-            make_solution_movies(U_True         = U_True_random[i].detach().numpy(), 
-                                 U_Pred         = U_Pred_random[i].detach().numpy(), 
+            make_solution_movies(U_True         = U_True_worst[i].detach().numpy(), 
+                                 U_Pred         = U_Pred_worst[i].detach().numpy(), 
                                  X              = physics.X_Positions, 
-                                 T              = t_random.detach().numpy(),
+                                 T              = t_worst.detach().numpy(),
                                  fname_prefix   = prefix);
     
 
@@ -614,10 +614,14 @@ def step(trainer        : BayesianGLaSDI,
     # If fail or complete, break the loop regardless of use_restart.
     if ((result is Result.Fail) or (result is Result.Complete)):
         return result, next_step;
+
+    # If we're doing a single-step restart run, return after one step.
+    if use_restart == True:
+        return result, next_step;
         
     # Continue the workflow.
     LOGGER.info("Next step is: %s" % next_step);
-    result, next_step = step(trainer, next_step, config);
+    result, next_step = step(trainer, next_step, config, use_restart = use_restart);
 
     # All done!
     return result, next_step;
@@ -690,8 +694,8 @@ def Save(   param_space         : ParameterSpace,
 
     # Checks.
     n_IC    : int   = latent_dynamics.n_IC;
-    assert(model.n_IC       == n_IC);
-    assert(physics.n_IC     == n_IC);
+    assert model.n_IC       == n_IC, "model.n_IC = %d != n_IC = %d" % (model.n_IC, n_IC);
+    assert physics.n_IC     == n_IC, "physics.n_IC = %d != n_IC = %d" % (physics.n_IC, n_IC);
 
 
     # Save restart (or final) file.

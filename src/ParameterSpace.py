@@ -539,7 +539,7 @@ class ParameterSpace:
         """
 
         # Make sure param has n_p components/can be appended to the set of training parameters.
-        assert(self.train_space.shape[1] == param_values.size);
+        assert self.train_space.shape[1] == param_values.size, "self.train_space.shape[1] = %d != param_values.size = %d" % (self.train_space.shape[1], param_values.size);
 
         # Add the new parameter to the training space by appending it as a new row to 
         # self.train_space
@@ -655,9 +655,9 @@ class ParameterSpace:
         self.n_init_train       : int                   = dict_['n_init_train'];
 
         # Run checks
-        assert(self.n_init_train            == dict_['n_init_train']);
-        assert(self.train_space.shape[1]    == self.n_p);
-        assert(self.test_space.shape[1]     == self.n_p);
+        assert self.n_init_train            == dict_['n_init_train'], "self.n_init_train = %d != dict_['n_init_train'] = %d" % (self.n_init_train, dict_['n_init_train']);
+        assert self.train_space.shape[1]    == self.n_p,          "self.train_space.shape[1] = %d != self.n_p = %d" % (self.train_space.shape[1], self.n_p);
+        assert self.test_space.shape[1]     == self.n_p,          "self.test_space.shape[1] = %d != self.n_p = %d" % (self.test_space.shape[1], self.n_p);
 
         # All done!
         return;
