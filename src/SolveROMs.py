@@ -87,19 +87,19 @@ def average_rom(model           : torch.nn.Module,
     """
 
     # Checks. 
-    assert(isinstance(param_grid, numpy.ndarray));
-    assert(param_grid.ndim    == 2);
+    assert isinstance(param_grid, numpy.ndarray),   "type(param_grid) = %s, expected numpy.ndarray" % (type(param_grid) == numpy.ndarray);
+    assert param_grid.ndim    == 2,                 "param_grid.ndim = %d, expected 2" % (param_grid.ndim);
     n_param : int   = param_grid.shape[0];
     n_p     : int   = param_grid.shape[1];
 
-    assert(isinstance(gp_list, list));
-    assert(isinstance(t_Grid, list));
-    assert(len(t_Grid)  == n_param);
+    assert isinstance(gp_list, list),               "type(gp_list) = %s, expected list" % (type(gp_list) == list);
+    assert isinstance(t_Grid, list),                "type(t_Grid) = %s, expected list" % (type(t_Grid) == list);
+    assert len(t_Grid)  == n_param,                 "len(t_Grid) = %d, n_param %d" % (len(t_Grid), n_param);
 
     n_IC    : int   = latent_dynamics.n_IC;
     n_z     : int   = latent_dynamics.n_z;
-    assert(model.n_IC       == n_IC);
-    assert(physics.n_IC     == n_IC);
+    assert model.n_IC       == n_IC,                "model.n_IC = %d, n_IC %d" % (model.n_IC, n_IC);
+    assert physics.n_IC     == n_IC,                "physics.n_IC = %d, n_IC %d" % (physics.n_IC, n_IC);
 
 
     # For each parameter in param_grid, fetch the corresponding initial condition and then encode
@@ -204,24 +204,24 @@ def sample_roms(model           : torch.nn.Module,
     """
     
     # Checks
-    assert(isinstance(gp_list, list));
-    assert(isinstance(t_Grid, list));
-    assert(isinstance(n_samples, int));
+    assert isinstance(gp_list, list), "type(gp_list) = %s, expected list" % (type(gp_list) == list);
+    assert isinstance(t_Grid, list), "type(t_Grid) = %s, expected list" % (type(t_Grid) == list);
+    assert isinstance(n_samples, int), "type(n_samples) = %s, expected int" % (type(n_samples) == int);
 
-    assert(isinstance(param_grid, numpy.ndarray));
-    assert(len(param_grid.shape)    == 2);
+    assert isinstance(param_grid, numpy.ndarray), "type(param_grid) = %s, expected numpy.ndarray" % (type(param_grid));
+    assert len(param_grid.shape)    == 2, "len(param_grid.shape) = %d, expected 2" % (len(param_grid.shape));
     n_param     : int               = param_grid.shape[0];
     n_p         : int               = param_grid.shape[1];
 
-    assert(len(t_Grid)              == n_param);
+    assert len(t_Grid)              == n_param, "len(t_Grid) = %d, n_param %d" % (len(t_Grid), n_param);
     for i in range(n_param):
-        assert(isinstance(t_Grid[i], numpy.ndarray) or isinstance(t_Grid[i], torch.Tensor));
+        assert isinstance(t_Grid[i], numpy.ndarray) or isinstance(t_Grid[i], torch.Tensor), "type(t_Grid[%d]) = %s, expected numpy.ndarray or torch.Tensor" % (i, type(t_Grid[i]));
 
     n_coef      : int               = len(gp_list);
     n_IC        : int               = latent_dynamics.n_IC;
     n_z         : int               = model.n_z;
-    assert(physics.n_IC             == n_IC);
-    assert(model.n_IC               == n_IC);
+    assert physics.n_IC             == n_IC, "physics.n_IC = %d, n_IC %d" % (physics.n_IC, n_IC);
+    assert model.n_IC               == n_IC, "model.n_IC = %d, n_IC %d" % (model.n_IC, n_IC);
 
 
     # Reshape t_Grid so that the i'th element is a numpy.ndarray of shape (1, n_t(i)). This is what 
@@ -354,32 +354,32 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
     """
     
     # Run checks.
-    assert(isinstance(LatentStates,         list));
-    assert(isinstance(LatentStates[0],      list));
-    assert(isinstance(LatentStates[0][0],   numpy.ndarray));
-    assert(len(LatentStates[0][0].shape)    == 3);
+    assert isinstance(LatentStates,         list),                  "type(LatentStates) = %s, expected list" % (type(LatentStates));
+    assert isinstance(LatentStates[0],      list),                  "type(LatentStates[0]) = %s, expected list" % (type(LatentStates[0]));
+    assert isinstance(LatentStates[0][0],   numpy.ndarray),         "type(LatentStates[0][0]) = %s, expected numpy.ndarray" % (type(LatentStates[0][0]));
+    assert len(LatentStates[0][0].shape)    == 3,                   "len(LatentStates[0][0].shape) = %d, expected 3" % (len(LatentStates[0][0].shape));
 
     n_param : int   = len(LatentStates);
     n_IC    : int   = len(LatentStates[0]);
     n_z     : int   = LatentStates[0][0].shape[2];
 
-    assert(n_z  == model.n_z);
+    assert n_z  == model.n_z, "n_z = %d, expected %d" % (n_z, model.n_z);
 
     for i in range(n_param):
-        assert(isinstance(LatentStates[i], list));
-        assert(len(LatentStates[i]) == n_IC);
+        assert isinstance(LatentStates[i], list),                   "type(LatentStates[%d]) = %s, expected list" % (i, type(LatentStates[i]));
+        assert len(LatentStates[i]) == n_IC,                        "len(LatentStates[%d]) = %d, expected %d" % (i, len(LatentStates[i]), n_IC);
 
-        assert(isinstance(LatentStates[i][0],   numpy.ndarray));
-        assert(len(LatentStates[i][0].shape)    == 3);
+        assert isinstance(LatentStates[i][0],   numpy.ndarray),     "type(LatentStates[%d][0]) = %s, expected numpy.ndarray" % (i, type(LatentStates[i][0]));
+        assert len(LatentStates[i][0].shape)    == 3,               "len(LatentStates[%d][0].shape) = %d, expected 3" % (i, len(LatentStates[i][0].shape));
         n_samples_i : int   = LatentStates[i][0].shape[0];
         n_t_i       : int   = LatentStates[i][0].shape[1];
 
         for j in range(1, n_IC):
-            assert(isinstance(LatentStates[i][j],   numpy.ndarray));
-            assert(len(LatentStates[i][j].shape)    == 3);
-            assert(LatentStates[i][j].shape[0]      == n_samples_i);
-            assert(LatentStates[i][j].shape[1]      == n_t_i);
-            assert(LatentStates[i][j].shape[2]      == n_z);
+            assert isinstance(LatentStates[i][j],   numpy.ndarray), "type(LatentStates[%d][%d]) = %s, expected numpy.ndarray" % (i, j, type(LatentStates[i][j]));
+            assert len(LatentStates[i][j].shape)    == 3,           "len(LatentStates[%d][%d].shape) = %d, expected 3" % (i, j, len(LatentStates[i][j].shape));
+            assert LatentStates[i][j].shape[0]      == n_samples_i, "LatentStates[%d][%d].shape = %s, expected %d" % (i, j, str(LatentStates[i][j].shape), n_samples_i);
+            assert LatentStates[i][j].shape[1]      == n_t_i,       "LatentStates[%d][%d].shape = %s, expected %d" % (i, j, str(LatentStates[i][j].shape), n_t_i);
+            assert LatentStates[i][j].shape[2]      == n_z,         "LatentStates[%d][%d].shape = %s, expected %d" % (i, j, str(LatentStates[i][j].shape), n_z);
 
 
     # Find the index that gives the largest STD!
@@ -387,7 +387,7 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
     m_index     : int       = 0;
     
     if(isinstance(model, Autoencoder)):
-        assert(n_IC == 1);
+        assert n_IC == 1, "n_IC = %d, expected 1" % (n_IC);
 
         for i in range(n_param):
             # Fetch the set of latent trajectories for the i'th combination of parameter values.
@@ -427,7 +427,7 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
 
 
     elif(isinstance(model, Autoencoder_Pair)):
-        assert(n_IC == 2);
+        assert n_IC == 2, "n_IC = %d, expected 2" % (n_IC);
 
         for i in range(n_param):
             # Fetch the set of latent trajectories for the i'th combination of parameter values.
@@ -578,33 +578,35 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
     """ 
 
     # Run checks
-    assert(isinstance(gp_list,          list));
-    assert(isinstance(t_Test,           list));
-    assert(isinstance(U_Test,           list));
+    assert isinstance(gp_list,          list),      "type(gp_list) = %s, expected list" % (type(gp_list));
+    assert isinstance(t_Test,           list),      "type(t_Test) = %s, expected list" % (type(t_Test));
+    assert isinstance(U_Test,           list),      "type(U_Test) = %s, expected list" % (type(U_Test));
+    assert isinstance(n_samples,        int),       "type(n_samples) = %s, expected int" % (type(n_samples));
+    assert len(t_Test)  == len(U_Test),             "len(t_Test) = %d, len(U_Test) %d" % (len(t_Test), len(U_Test));
+    assert len(gp_list) == latent_dynamics.n_coefs, "len(gp_list) = %d, expected %d" % (len(gp_list), latent_dynamics.n_coefs);
 
-    param_test  : numpy.ndarray         = param_space.test_space;
-    assert(isinstance(param_test,       numpy.ndarray));
-    assert(len(param_test.shape)        == 2);
-    assert(isinstance(n_samples,        int));
-    assert(len(gp_list)                 == latent_dynamics.n_coefs);
-
+    
+    # Fetch the number of testing parameter combinations.
     n_Test  : int   = len(U_Test);   
-    assert(len(U_Test)                  == n_Test);
-    assert(param_test.shape[0]          == n_Test);
+    
+    # Run additional checks.
+    param_test  : numpy.ndarray         = param_space.test_space;
+    assert isinstance(param_test,       numpy.ndarray),     "type(param_test) = %s, expected numpy.ndarray" % (type(param_test));
+    assert len(param_test.shape)        == 2,               "len(param_test.shape) = %d, expected 2" % (len(param_test.shape));
+    assert param_test.shape[0]          == n_Test,          "param_test.shape = %s, n_Test %d" % (str(param_test.shape), n_Test);
 
-    assert(isinstance(U_Test[0],        list));
     n_IC    : int                       = len(U_Test[0]);
     for i in range(n_Test):
-        assert(isinstance(U_Test[i],    list));
-        assert(len(U_Test[i])           == n_IC);
+        assert isinstance(U_Test[i],    list),              "type(U_Test[%d]) = %s, expected list" % (i, type(U_Test[i]));
+        assert len(U_Test[i])           == n_IC,            "len(U_Test[%d]) = %d, n_IC %d" % (i, len(U_Test[i]), n_IC);
     
-        for j in range(n_IC):
-            assert(isinstance(t_Test[j],    torch.Tensor));
-            assert(len(t_Test[j].shape)     == 1);
-            n_t_j   : int = t_Test[j].shape[0];
+        assert isinstance(t_Test[i],    torch.Tensor),      "type(t_Test[%d]) = %s, expected torch.Tensor" % (i, type(t_Test[i]));
+        assert len(t_Test[i].shape)     == 1,               "len(t_Test[%d].shape) = %d, expected 1" % (i, len(t_Test[i].shape));
+        n_t_i   : int = t_Test[i].shape[0];
 
-            assert(isinstance(U_Test[i][j], torch.Tensor));
-            assert(U_Test[i][j].shape[0]    == n_t_j);
+        for j in range(n_IC):
+            assert isinstance(U_Test[i][j], torch.Tensor),  "type(U_Test[%d][%d]) = %s, expected torch.Tensor" % (i, j, type(U_Test[i][j]));
+            assert U_Test[i][j].shape[0]    == n_t_i,       "U_Test[%d][%d].shape = %s, n_t_i = %d" % (i, j, str(U_Test[i][j].shape), n_t_i);
     
 
     # ---------------------------------------------------------------------------------------------
