@@ -22,6 +22,7 @@ import  numpy;
 import  torch;
 import  matplotlib.pyplot           as      plt;
 from    sklearn.gaussian_process    import  GaussianProcessRegressor;
+from    pathlib                     import  Path;
 
 import  SolveROMs;
 from    Enums                       import  NextStep, Result;
@@ -84,8 +85,11 @@ def main():
         restart_filename : str = config['workflow']['restart_file'];
         LOGGER.info("Loading from restart (%s)" % restart_filename);
 
-        # Set up the restart path.
-        restart_path : str = os.path.join(os.path.join(os.path.pardir, "results"), restart_filename);
+        # Set up the restart path under Higher-Order-LaSDI/results (independent of CWD).
+        _SRC_DIR: Path = Path(__file__).resolve().parent;      # Higher-Order-LaSDI/src
+        _PROJECT_DIR: Path = _SRC_DIR.parent;                 # Higher-Order-LaSDI
+        results_dir: Path = _PROJECT_DIR / "results";
+        restart_path: str = str(results_dir / restart_filename);
     
     LOGGER.info("Done! Took %fs" % (time.perf_counter() - timer));
 
@@ -273,7 +277,9 @@ def main():
         plt.title(title_str);
     
         # Now save the figure.
-        plt.savefig(os.path.join(os.path.join(os.path.pardir, "Figures"), save_file_name));
+        figures_dir: Path = Path(__file__).resolve().parent.parent / "Figures";
+        figures_dir.mkdir(parents=True, exist_ok=True);
+        plt.savefig(str(figures_dir / save_file_name));
 
 
     # Next, plot the reconstruction relative error.
@@ -297,7 +303,9 @@ def main():
         plt.title(title_str);
     
         # Now save the figure.
-        plt.savefig(os.path.join(os.path.join(os.path.pardir, "Figures"), save_file_name));
+        figures_dir: Path = Path(__file__).resolve().parent.parent / "Figures";
+        figures_dir.mkdir(parents=True, exist_ok=True);
+        plt.savefig(str(figures_dir / save_file_name));
     
     plt.show();
 
@@ -706,7 +714,19 @@ def Save(   param_space         : ParameterSpace,
         restart_filename : str = config["physics"]["type"] + '_' + date_str + '.npy';
     
     # Set up the restart path.
-    restart_path        = os.path.join(os.path.join(os.path.pardir, "results"), restart_filename);
+    # Use an absolute results directory under the project root (Higher-Order-LaSDI/results),
+    # independent of the current working directory.
+    #
+    # Prefer trainer.path_results if available (keeps consistency with GPLaSDI).
+    from pathlib import Path;
+    if hasattr(trainer, "path_results"):
+        results_dir = Path(trainer.path_results);
+    else:
+        src_dir = Path(__file__).resolve().parent;
+        project_dir = src_dir.parent;
+        results_dir = project_dir / "results";
+    results_dir.mkdir(parents=True, exist_ok=True);
+    restart_path = str(results_dir / restart_filename);
 
     # Build the restart save dictionary and then save it.
     restart_dict = {'parameter_space'   : param_space.export(),

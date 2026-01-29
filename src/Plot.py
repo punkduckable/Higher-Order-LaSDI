@@ -2,12 +2,17 @@
 # Import and Setup
 # -------------------------------------------------------------------------------------------------
 
-import  os;
-import  sys;
-physics_path    : str   = os.path.join(os.path.curdir, "Physics");
-ld_path         : str   = os.path.join(os.path.curdir, "LatentDynamics");
-sys.path.append(physics_path);
-sys.path.append(ld_path);
+import os;
+import sys;
+from pathlib import Path;
+
+# Resolve paths relative to the project root (Higher-Order-LaSDI/), independent of CWD.
+_SRC_DIR: Path = Path(__file__).resolve().parent;          # Higher-Order-LaSDI/src
+_PROJECT_DIR: Path = _SRC_DIR.parent;                     # Higher-Order-LaSDI
+_PHYSICS_DIR: Path = _SRC_DIR / "Physics";
+_LD_DIR: Path = _SRC_DIR / "LatentDynamics";
+sys.path.append(str(_PHYSICS_DIR));
+sys.path.append(str(_LD_DIR));
 
 import  logging;
 
@@ -218,8 +223,10 @@ def Plot_Latent_Trajectories(physics         : Physics,
             plt.ylabel(r'$z$');
             plt.title(title);
 
-            # Save the figure.
-            save_file_path : str = os.path.join(os.path.join(os.path.pardir, "Figures"), save_file_name);
+            # Save the figure under Higher-Order-LaSDI/Figures (independent of CWD).
+            figures_dir: Path = _PROJECT_DIR / "Figures";
+            figures_dir.mkdir(parents=True, exist_ok=True);
+            save_file_path: str = str(figures_dir / save_file_name);
             plt.savefig(save_file_path);
 
             # Show the plot for this IC and combination of parameter values.
@@ -363,8 +370,10 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     ax.set_ylabel(param_names[1], fontsize = 15, rotation = 0);
     ax.set_title(title, fontsize = 25);
 
-    # Save the figure.
-    save_file_path : str = os.path.join(os.path.join(os.path.pardir, "Figures"), save_file_name);
+    # Save the figure under Higher-Order-LaSDI/Figures (independent of CWD).
+    figures_dir: Path = _PROJECT_DIR / "Figures";
+    figures_dir.mkdir(parents=True, exist_ok=True);
+    save_file_path: str = str(figures_dir / save_file_name);
     fig.savefig(save_file_path);
     
     # Show the plot and then return!
@@ -520,8 +529,10 @@ def trainSpace_RelativeErrors_Heatmap(trainer        : 'BayesianGLaSDI',
         # Adjust layout to prevent label cutoff
         plt.tight_layout();
         
-        # Save the figure
-        save_file_path : str = os.path.join(os.path.join(os.path.pardir, "Figures"), file_prefix + ("_D^%d U_" % d) + "TrainSpaceRelativeErrorHeatmap.png");
+        # Save the figure under Higher-Order-LaSDI/Figures (independent of CWD).
+        figures_dir: Path = _PROJECT_DIR / "Figures";
+        figures_dir.mkdir(parents=True, exist_ok=True);
+        save_file_path: str = str(figures_dir / (file_prefix + ("_D^%d U_" % d) + "TrainSpaceRelativeErrorHeatmap.png"));
         fig.savefig(save_file_path, dpi = 150, bbox_inches = 'tight');
         LOGGER.info("Saved heatmap to %s" % save_file_path);
     
