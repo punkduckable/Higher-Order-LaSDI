@@ -215,9 +215,13 @@ class BayesianGLaSDI:
         return bool(self.normalize and (self.data_mean is not None) and (self.data_std is not None));
 
 
-    def _compute_mean_std_from_U(self, U: list[list[torch.Tensor]], eps: float = 1.0e-12) -> tuple[list[float], list[float]]:
+    def _compute_mean_std_from_U(self, U: list[list[torch.Tensor]], eps: float = 1.0e-12) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
         """
-        Compute mean/std across ALL entries in U for each IC separately.
+        Compute per-node/per-component mean/std from U for each IC separately.
+
+        If U[i][j] has shape (n_t, ...) (time along axis 0), we compute:
+          mean_j[...], std_j[...] over the union of all time frames and training parameters,
+        i.e. we collapse the (i, t) axes but NOT the trailing spatial/component axes.
 
         We do this without concatenating everything to avoid large memory spikes.
         """
@@ -227,31 +231,44 @@ class BayesianGLaSDI:
         for i in range(len(U)):
             assert len(U[i]) == n_IC, "U[%d] has %d ICs but expected %d" % (i, len(U[i]), n_IC);
 
-        sum_      : list[float] = [0.0] * n_IC;
-        sum_sq    : list[float] = [0.0] * n_IC;
-        count     : list[int]   = [0]   * n_IC;
+        # Allocate accumulators per IC (shape = Frame_Shape / trailing dims).
+        sum_      : list[torch.Tensor] = [None] * n_IC  # type: ignore[assignment]
+        sum_sq    : list[torch.Tensor] = [None] * n_IC  # type: ignore[assignment]
+        count     : list[int]          = [0]    * n_IC;
 
         for i in range(len(U)):
             for j in range(n_IC):
                 T: torch.Tensor = U[i][j];
                 assert isinstance(T, torch.Tensor), "U[%d][%d] is not a torch.Tensor" % (i, j);
-                Td = T.detach().double();
-                sum_[j]   += float(Td.sum().item());
-                sum_sq[j] += float((Td * Td).sum().item());
-                count[j]  += int(Td.numel());
+                assert T.ndim >= 2, "U[%d][%d] must have shape (n_t, ...) but got %s" % (i, j, str(tuple(T.shape)));
+                Td = T.detach().double().cpu();               # (n_t, ...)
+                n_t_i = int(Td.shape[0]);
+                trailing_shape = Td.shape[1:];
 
-        means: list[float] = [];
-        stds : list[float] = [];
+                # Initialize per-IC accumulators on first sight.
+                if sum_[j] is None:
+                    sum_[j]   = torch.zeros(trailing_shape, dtype = torch.float64);
+                    sum_sq[j] = torch.zeros(trailing_shape, dtype = torch.float64);
+                else:
+                    assert tuple(sum_[j].shape) == tuple(trailing_shape), \
+                        "Shape mismatch for IC %d: expected %s, got %s" % (j, str(tuple(sum_[j].shape)), str(tuple(trailing_shape)));
+
+                # Accumulate across time axis only.
+                sum_[j]   += Td.sum(dim = 0);
+                sum_sq[j] += (Td * Td).sum(dim = 0);
+                count[j]  += n_t_i;
+
+        means: list[torch.Tensor] = [];
+        stds : list[torch.Tensor] = [];
         for j in range(n_IC):
             assert count[j] > 0, "No elements found for IC %d" % j;
-            mean_j: float = sum_[j] / float(count[j]);
-            var_j: float  = (sum_sq[j] / float(count[j])) - (mean_j * mean_j);
-            if var_j < 0.0:
-                # Numerical guard
-                var_j = 0.0;
-            std_j: float = float(numpy.sqrt(max(var_j, eps)));
-            means.append(mean_j);
-            stds.append(std_j);
+            assert sum_[j] is not None and sum_sq[j] is not None;
+            mean_j: torch.Tensor = sum_[j] / float(count[j]);                              # (...)
+            var_j: torch.Tensor  = (sum_sq[j] / float(count[j])) - (mean_j * mean_j);      # (...)
+            var_j = torch.clamp(var_j, min = 0.0);
+            std_j: torch.Tensor  = torch.sqrt(torch.clamp(var_j, min = eps));              # (...)
+            means.append(mean_j.to(dtype = torch.float32));
+            stds.append(std_j.to(dtype = torch.float32));
         return means, stds;
 
 
@@ -262,12 +279,20 @@ class BayesianGLaSDI:
         """
         assert self.normalize, "Normalization is disabled";
         means, stds = self._compute_mean_std_from_U(self.U_Train);
-        self.data_mean = [torch.tensor(m, dtype = torch.float32) for m in means];
-        self.data_std  = [torch.tensor(s, dtype = torch.float32) for s in stds];
+        self.data_mean = means;
+        self.data_std  = stds;
 
         LOGGER.info("Normalization enabled. Per-IC mean/std:");
         for j in range(len(means)):
-            LOGGER.info("  IC %d: mean = %.6e, std = %.6e" % (j, means[j], stds[j]));
+            m = means[j].detach().cpu();
+            s = stds[j].detach().cpu();
+            LOGGER.info(
+                "  IC %d: mean range [%.6e, %.6e], std range [%.6e, %.6e]" % (
+                    j,
+                    float(m.min().item()), float(m.max().item()),
+                    float(s.min().item()), float(s.max().item()),
+                )
+            );
         return;
 
 
@@ -296,8 +321,8 @@ class BayesianGLaSDI:
         if not self.has_normalization():
             return x;
         assert self.data_mean is not None and self.data_std is not None;
-        m = float(self.data_mean[ic_idx].detach().cpu().item());
-        s = float(self.data_std[ic_idx].detach().cpu().item());
+        m = self.data_mean[ic_idx].detach().cpu().numpy();
+        s = self.data_std[ic_idx].detach().cpu().numpy();
         return x * s + m;
 
 
@@ -308,7 +333,7 @@ class BayesianGLaSDI:
         if not self.has_normalization():
             return std_x;
         assert self.data_std is not None;
-        s = float(self.data_std[ic_idx].detach().cpu().item());
+        s = self.data_std[ic_idx].detach().cpu().numpy();
         return std_x * s;
 
 
@@ -824,6 +849,8 @@ class BayesianGLaSDI:
 
                         # Convert to tensors and reshape for encoding
                         U_IC_i            : torch.Tensor              = torch.tensor(FOM_IC_i[0], dtype = torch.float32, device = device).reshape((1,) + FOM_IC_i[0].shape);
+                        if self.has_normalization():
+                            U_IC_i = self.normalize_tensor(U_IC_i, 0);
                         
                         # Encode the FOM initial conditions
                         Z_IC_i = model_device.Encode(U_IC_i);
@@ -1318,6 +1345,9 @@ class BayesianGLaSDI:
                         # Convert to tensors and reshape for encoding
                         D_IC_i            : torch.Tensor              = torch.tensor(FOM_IC_i[0], dtype = torch.float32, device = device).reshape((1,) + FOM_IC_i[0].shape);
                         V_IC_i            : torch.Tensor              = torch.tensor(FOM_IC_i[1], dtype = torch.float32, device = device).reshape((1,) + FOM_IC_i[1].shape);
+                        if self.has_normalization():
+                            D_IC_i = self.normalize_tensor(D_IC_i, 0);
+                            V_IC_i = self.normalize_tensor(V_IC_i, 1);
                         
                         # Encode the FOM initial conditions
                         Z_D_IC_i, Z_V_IC_i = model_device.Encode(D_IC_i, V_IC_i);
@@ -2029,10 +2059,11 @@ class BayesianGLaSDI:
                  'timer'                    : self.timer.export(), 
                  'test_coefs'               : self.test_coefs,
                  'optimizer'                : self.optimizer.state_dict(),
-                 # Normalization (training-only stats). Stored as plain floats for portability.
+                # Normalization (training-only stats).
                  'normalize'                : self.normalize,
-                 'data_mean'                : None if self.data_mean is None else [float(m.detach().cpu().item()) for m in self.data_mean],
-                 'data_std'                 : None if self.data_std  is None else [float(s.detach().cpu().item()) for s in self.data_std]};
+                # Store as numpy arrays (one per IC) so we can preserve per-node/per-component stats.
+                'data_mean'                : None if self.data_mean is None else [m.detach().cpu().numpy() for m in self.data_mean],
+                'data_std'                 : None if self.data_std  is None else [s.detach().cpu().numpy() for s in self.data_std]};
         return dict_;
 
 
@@ -2076,8 +2107,9 @@ class BayesianGLaSDI:
         dm = dict_.get('data_mean', None);
         ds = dict_.get('data_std', None);
         if self.normalize and (dm is not None) and (ds is not None):
-            self.data_mean = [torch.tensor(float(x), dtype = torch.float32) for x in dm];
-            self.data_std  = [torch.tensor(float(x), dtype = torch.float32) for x in ds];
+            # Backward compatible: allow scalars (old) or arrays (new per-node).
+            self.data_mean = [torch.tensor(x, dtype = torch.float32) for x in dm];
+            self.data_std  = [torch.tensor(x, dtype = torch.float32) for x in ds];
         else:
             self.data_mean = None;
             self.data_std  = None;
