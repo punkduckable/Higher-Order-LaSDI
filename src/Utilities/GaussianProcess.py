@@ -3,9 +3,11 @@
 # -------------------------------------------------------------------------------------------------
 
 import  numpy;
+import  warnings;
 from    sklearn.gaussian_process.kernels    import  ConstantKernel, RBF;
 from    sklearn.gaussian_process            import  GaussianProcessRegressor;
 from    sklearn.preprocessing               import  StandardScaler;
+from    sklearn.exceptions                  import  ConvergenceWarning;
 
 
 
@@ -89,13 +91,21 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
         # Make the kernel.
         # kernel = ConstantKernel() * Matern(length_scale_bounds = (0.01, 1e5), nu = 1.5)
         kernel  = ConstantKernel(constant_value = 1.0, constant_value_bounds = (1e-6, 1e8)) * \
-                  RBF(length_scale_bounds = (1e-3, 1e3));
+                  RBF(length_scale_bounds = (1e-6, 1e3));
 
         # Initialize the GP object.
-        gp      = GaussianProcessRegressor(kernel = kernel, n_restarts_optimizer = 10, random_state = 1);
+        #
+        # NOTE: n_restarts_optimizer can make fitting extremely slow and spammy on some HPC setups,
+        # especially when length_scale hits its bound (ConvergenceWarning). We keep this small to
+        # avoid the appearance of "hanging" during greedy sampling.
+        gp      = GaussianProcessRegressor(kernel = kernel, n_restarts_optimizer = 1, random_state = 1);
 
         # Fit it to the data (train), then add it to the list of trained GPs
-        gp.fit(Xs, targets_i_s);
+        with warnings.catch_warnings():
+            # This warning is common (length_scale near bound) and can print hundreds of times
+            # across many coefficients/restarts. It is not fatal, so silence it.
+            warnings.filterwarnings("ignore", category = ConvergenceWarning);
+            gp.fit(Xs, targets_i_s);
 
         # Attach scaling so eval_gp/sample_coefs can use physical units.
         gp._x_scaler = x_scaler;  # type: ignore[attr-defined]
