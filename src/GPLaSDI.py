@@ -30,6 +30,7 @@ from    LatentDynamics              import  LatentDynamics;
 from    SolveROMs                   import  get_FOM_max_std;
 from    FiniteDifference            import  Derivative1_Order4, Derivative1_Order2_NonUniform;
 from    Logging                     import  Log_Dictionary;
+from    MoveOptimizer               import  Move_Optimizer_To_Device;
 
 # Setup Logger
 LOGGER : logging.Logger = logging.getLogger(__name__);
@@ -39,46 +40,6 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 # BayesianGLaSDI class
 # -------------------------------------------------------------------------------------------------
-
-# move optimizer parameters to device
-def optimizer_to(optim : Optimizer, device : str) -> None:
-    """
-    This function moves an optimizer object to a specific device. 
-
-
-    -----------------------------------------------------------------------------------------------
-    Arguments
-    -----------------------------------------------------------------------------------------------
-
-    optim : Optimizer
-        The optimizer whose device we want to change.
-
-    device : str
-        The device we want to move optim onto. 
-
-
-    -----------------------------------------------------------------------------------------------
-    Returns
-    -----------------------------------------------------------------------------------------------
-
-    Nothing.
-    """
-
-    # Cycle through the optimizer's parameters.
-    for param in optim.state.values():
-        # Not sure there are any global tensors in the state dict
-        if isinstance(param, torch.Tensor):
-            param.data = param.data.to(device);
-            if param._grad is not None:
-                param._grad.data = param._grad.data.to(device);
-        elif isinstance(param, dict):
-            for subparam in param.values():
-                if isinstance(subparam, torch.Tensor):
-                    subparam.data = subparam.data.to(device);
-                    if subparam._grad is not None:
-                        subparam._grad.data = subparam._grad.data.to(device);
-
-
 
 class BayesianGLaSDI:
     # An n_Train element list. The i'th element is is an n_IC element list whose j'th element is a
@@ -1992,7 +1953,7 @@ class BayesianGLaSDI:
         self.timer.load(dict_['timer']);
         self.optimizer.load_state_dict(dict_['optimizer']);
         if (self.device != 'cpu'):
-            optimizer_to(self.optimizer, self.device);
+            Move_Optimizer_To_Device(self.optimizer, self.device);
 
         # All done!
         return;
