@@ -35,7 +35,8 @@ def average_rom(model           : torch.nn.Module,
                 latent_dynamics : LatentDynamics, 
                 gp_list         : list[GaussianProcessRegressor], 
                 param_grid      : numpy.ndarray,
-                t_Grid          : list[numpy.ndarray | torch.Tensor]) -> list[numpy.ndarray]:
+                t_Grid          : list[numpy.ndarray | torch.Tensor],
+                trainer         = None) -> list[numpy.ndarray]:
     """
     This function simulates the latent dynamics for a set of parameter values by using the mean of
     the posterior distribution for each coefficient's posterior distribution. Specifically, for 
@@ -74,6 +75,12 @@ def average_rom(model           : torch.nn.Module,
         whose k'th or (0, k)'th entry specifies the k'th time value we want to find the latent 
         states when we use the j'th initial conditions and the i'th set of coefficients.
 
+    trainer : GPLaSDI
+        The trainer object. We use this to get normalization stats if they are enabled.
+        If normalization is enabled, we use the stats to normalize initial conditions and
+        de-normalize predictions for reporting/plots.
+        before encoding them.
+    
     
     -----------------------------------------------------------------------------------------------
     Returns
@@ -105,7 +112,7 @@ def average_rom(model           : torch.nn.Module,
     # For each parameter in param_grid, fetch the corresponding initial condition and then encode
     # it. This gives us a list whose i'th element holds the encoding of the i'th initial condition.
     LOGGER.debug("Fetching latent space initial conditions for %d combinations of parameters." % n_param);
-    Z0      : list[list[numpy.ndarray]] = model.latent_initial_conditions(param_grid, physics);
+    Z0      : list[list[numpy.ndarray]] = model.latent_initial_conditions(param_grid, physics, trainer = trainer);
 
     # Evaluate each GP at each combination of parameter values. This returns two arrays, the 
     # first of which is a 2d array of shape (n_param, n_coef) whose i,j element specifies the mean 
@@ -148,7 +155,8 @@ def sample_roms(model           : torch.nn.Module,
                 gp_list         : list[GaussianProcessRegressor], 
                 param_grid      : numpy.ndarray, 
                 t_Grid          : list[numpy.ndarray | torch.Tensor],
-                n_samples       : int) ->           list[list[numpy.ndarray]]:
+                n_samples       : int,
+                trainer         = None) ->           list[list[numpy.ndarray]]:
     """
     This function samples the latent coefficients, solves the corresponding latent dynamics, and 
     then returns the resulting latent solutions. 
@@ -241,7 +249,7 @@ def sample_roms(model           : torch.nn.Module,
     # list whose j'th element is an array of shape (1, n_z) holding the IC for the j'th derivative
     # of the latent state when we use the i'th combination of parameter values. 
     LOGGER.debug("Fetching latent space initial conditions for %d combinations of parameters." % n_param);
-    Z0      : list[list[numpy.ndarray]] = model.latent_initial_conditions(param_grid, physics);
+    Z0      : list[list[numpy.ndarray]] = model.latent_initial_conditions(param_grid, physics, trainer = trainer);
 
 
     # Now, for each combination of parameters, draw n_samples samples from the posterior
@@ -483,7 +491,8 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
                             gp_list         : list[GaussianProcessRegressor],
                             t_Test          : list[torch.Tensor],
                             U_Test          : list[list[torch.Tensor]],
-                            n_samples       : int) -> tuple[numpy.ndarray, numpy.ndarray, list[list[numpy.ndarray]], list[list[numpy.ndarray]]]:
+                            n_samples       : int,
+                            trainer         = None) -> tuple[numpy.ndarray, numpy.ndarray, list[list[numpy.ndarray]], list[list[numpy.ndarray]]]:
     """
     This function computes the relative error and STD between the FOM solution and its 
     prediction when we rollout the FOM solution using the the ICs and mean of the posterior 
@@ -615,10 +624,10 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
     # For each combination of parameter values in the testing set, sample the latent coefficients 
     # and solve the latent dynamics forward in time. 
     LOGGER.info("Generating latent dynamics trajectories for %d samples of the coefficients for %d combinations of testing parameter" % (n_samples, n_Test));
-    Zis_samples     : list[list[numpy.ndarray]] = sample_roms(model, physics, latent_dynamics, gp_list, param_test, t_Test, n_samples);    # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_samples, n_z)
+    Zis_samples     : list[list[numpy.ndarray]] = sample_roms(model, physics, latent_dynamics, gp_list, param_test, t_Test, n_samples, trainer = trainer);    # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_samples, n_z)
 
     LOGGER.info("Generating latent dynamics trajectories using posterior distribution means for %d combinations of testing parameter" % (n_Test));
-    Zis_mean        : list[list[numpy.ndarray]] = average_rom(model, physics, latent_dynamics, gp_list, param_test, t_Test);               # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_z)
+    Zis_mean        : list[list[numpy.ndarray]] = average_rom(model, physics, latent_dynamics, gp_list, param_test, t_Test, trainer = trainer);               # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_z)
         
 
     # ---------------------------------------------------------------------------------------------
@@ -652,6 +661,10 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
     # ---------------------------------------------------------------------------------------------
     # Compute std, max_std. 
 
+    # If the workflow uses normalization, U_Test and decoded predictions are in normalized
+    # units. De-normalize here for meaningful physical errors/plots using the trainer.
+    use_denorm: bool = (trainer is not None) and hasattr(trainer, "has_normalization") and trainer.has_normalization();
+
     if(isinstance(model, Autoencoder)):
         for i in range(n_Test):
             # -------------------------------------------------------------------------------------
@@ -659,9 +672,13 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
 
             # Decode the mean latent trajectories for each combination of parameter values.
             U_Pred_Mean_i       : numpy.ndarray = model.Decode(torch.Tensor(Zis_mean[i][0])).detach().numpy();
+            if use_denorm:
+                U_Pred_Mean_i = trainer.denormalize_np(U_Pred_Mean_i, 0);
 
             # Fetch the corresponding test predictions.
             U_Test_i            : numpy.ndarray = U_Test[i][0].detach().numpy();                # (n_t_i, physics.Frame_Shape)
+            if use_denorm:
+                U_Test_i = trainer.denormalize_np(U_Test_i, 0);
 
             # Compute the std of the components of the FOM solution.
             U_Test_i_std   : float = numpy.std(U_Test_i);
@@ -689,7 +706,8 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
                 U_Pred_i[:, j, ...]             = U_Pred_ij;
         
             # Compute the STD across the sample axis.
-            STD[i][0]       = numpy.std(U_Pred_i, axis = 1);
+            STD_i0 = numpy.std(U_Pred_i, axis = 1);
+            STD[i][0]       = trainer.scale_std_np(STD_i0, 0) if use_denorm else STD_i0;
             max_STD[i, 0]   = STD[i][0].max();
         
     
@@ -701,12 +719,18 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
 
             # Decode the mean latent trajectories for each combination of parameter values.
             U_Pred_Mean_i       : list[torch.Tensor]    = model.Decode(torch.Tensor(Zis_mean[i][0]), torch.Tensor(Zis_mean[i][1]));
-            D_Pred_Mean_i       : numpy.ndarray         = U_Pred_Mean_i[0].detach().numpy();            # (n_t_i, physics.Frame_Shape)
-            V_Pred_Mean_i       : numpy.ndarray         = U_Pred_Mean_i[1].detach().numpy();            # (n_t_i, physics.Frame_Shape)
+            D_Pred_Mean_i       : numpy.ndarray         = U_Pred_Mean_i[0].detach().numpy();  # (n_t_i, physics.Frame_Shape)
+            V_Pred_Mean_i       : numpy.ndarray         = U_Pred_Mean_i[1].detach().numpy();  # (n_t_i, physics.Frame_Shape)
+            if use_denorm:
+                D_Pred_Mean_i = trainer.denormalize_np(D_Pred_Mean_i, 0);
+                V_Pred_Mean_i = trainer.denormalize_np(V_Pred_Mean_i, 1);
 
             # Fetch the corresponding test predictions.
-            D_Test_i            : numpy.ndarray         = U_Test[i][0].detach().numpy();                # (n_t_i, physics.Frame_Shape)
-            V_Test_i            : numpy.ndarray         = U_Test[i][1].detach().numpy();                # (n_t_i, physics.Frame_Shape)
+            D_Test_i            : numpy.ndarray         = U_Test[i][0].detach().numpy();       # (n_t_i, physics.Frame_Shape)
+            V_Test_i            : numpy.ndarray         = U_Test[i][1].detach().numpy();       # (n_t_i, physics.Frame_Shape)
+            if use_denorm:
+                D_Test_i = trainer.denormalize_np(D_Test_i, 0);
+                V_Test_i = trainer.denormalize_np(V_Test_i, 1);
             
             # Compute the std of the components of the FOM solution.
             D_Test_i_std        : float                 = numpy.std(D_Test_i);
@@ -739,8 +763,10 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
                 V_Pred_i[:, j, ...]                 = U_Pred_ij[1].detach().numpy();
 
             # Compute the STD across the sample axis.
-            STD[i][0]       = numpy.std(D_Pred_i, axis = 1);
-            STD[i][1]       = numpy.std(V_Pred_i, axis = 1);
+            STD_D = numpy.std(D_Pred_i, axis = 1);
+            STD_V = numpy.std(V_Pred_i, axis = 1);
+            STD[i][0]       = trainer.scale_std_np(STD_D, 0) if use_denorm else STD_D;
+            STD[i][1]       = trainer.scale_std_np(STD_V, 1) if use_denorm else STD_V;
 
             max_STD[i, 0]   = STD[i][0].max();  
             max_STD[i, 1]   = STD[i][1].max();  

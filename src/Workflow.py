@@ -174,7 +174,8 @@ def main():
                                                                 gp_list         = gp_list,
                                                                 t_Test          = trainer.t_Test,
                                                                 U_Test          = trainer.U_Test,
-                                                                n_samples       = trainer.n_samples);
+                                                                n_samples       = trainer.n_samples,
+                                                                trainer         = trainer);
 
     # Find the index of the parameter combination that has the largest relative error; we unravel the 
     # index to get the row, column number of the maximum entry of Max_Rollout_Rel_Error, then keep
@@ -191,6 +192,7 @@ def main():
                                U_True          = [trainer.U_Test[i_worst]],
                                t_Grid          = [trainer.t_Test[i_worst]],
                                file_prefix     = config["physics"]["type"],
+                               trainer         = trainer,
                                figsize         = (15, 13));
 
 
@@ -233,8 +235,12 @@ def main():
             ij_Recon_Rel_Error      : numpy.ndarray = numpy.zeros(n_t_i);
 
             # Fetch the reconstruction and true solution.
-            ij_Reconstruction   : numpy.ndarray = ith_Reconstruction[j].detach().numpy();   # shape = (n_t_i, physics.Frame_Shape)
-            ij_True             : numpy.ndarray = trainer.U_Test[i][j].detach().numpy();    # shape = (n_t_i, physics.Frame_Shape)
+            if hasattr(trainer, "has_normalization") and trainer.has_normalization():
+                ij_Reconstruction = trainer.denormalize_tensor(ith_Reconstruction[j], j).detach().numpy();   # physical units
+                ij_True           = trainer.denormalize_tensor(trainer.U_Test[i][j], j).detach().numpy();    # physical units
+            else:
+                ij_Reconstruction   : numpy.ndarray = ith_Reconstruction[j].detach().numpy();   # shape = (n_t_i, physics.Frame_Shape)
+                ij_True             : numpy.ndarray = trainer.U_Test[i][j].detach().numpy();    # shape = (n_t_i, physics.Frame_Shape)
 
             # Compute the std of each component of the true solution.
             ij_True_std         : float          = numpy.std(ij_True);
@@ -335,7 +341,8 @@ def main():
                                                                 latent_dynamics = latent_dynamics, 
                                                                 gp_list         = gp_list, 
                                                                 param_grid      = param_worst, 
-                                                                t_Grid          = [t_worst])[0];   # shape = (n_t, n_IC, n_z)
+                                                                t_Grid          = [t_worst],
+                                                                trainer         = trainer)[0];   # shape = (n_t, n_IC, n_z)
 
         # Map Zi_mean_np to a tensor and then decode.
         Zi_mean     : list[torch.Tensor]    = [];
@@ -362,8 +369,15 @@ def main():
                 prefix : str = "%s_Dt^%d_U_%s"  % (config["physics"]["type"], i, str(param_space.test_space[i_worst]));
 
             # Make the movie.
-            make_solution_movies(U_True         = U_True_worst[i].detach().numpy(), 
-                                 U_Pred         = U_Pred_worst[i].detach().numpy(), 
+            if hasattr(trainer, "has_normalization") and trainer.has_normalization():
+                U_true_np = trainer.denormalize_tensor(U_True_worst[i], i).detach().numpy();
+                U_pred_np = trainer.denormalize_tensor(U_Pred_worst[i], i).detach().numpy();
+            else:
+                U_true_np = U_True_worst[i].detach().numpy();
+                U_pred_np = U_Pred_worst[i].detach().numpy();
+
+            make_solution_movies(U_True         = U_true_np, 
+                                 U_Pred         = U_pred_np, 
                                  X              = physics.X_Positions, 
                                  T              = t_worst.detach().numpy(),
                                  fname_prefix   = prefix);

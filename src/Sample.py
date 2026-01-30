@@ -82,9 +82,10 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
 
     This function first determines how many testing/training parameter combinations are new (we 
     have not found the corresponding trajectories). We generate the trajectory for each of these
-    parameter combinations, then append those trajectories onto trainer.U_Train/U_Test. It also 
-    computes the std of the FOM solution for each combination of training parameters and stores 
-    the results in trainer.std_Train.
+    parameter combinations, then append those trajectories onto trainer.U_Train/U_Test.
+
+    If normalization is enabled, we compute a single mean/std from TRAINING data
+    only (once) and normalize both training and testing trajectories using those values.
 
 
     
@@ -162,6 +163,12 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
     if (num_test_new > 0):
         new_U_Test, new_t_Test  = trainer.physics.generate_solutions(new_test_params);
 
+        # If normalization is already configured (stats exist), normalize the new testing data
+        # before appending. If stats don't exist yet, we'll normalize the full datasets after we
+        # compute stats from the training set (below).
+        if hasattr(trainer, "has_normalization") and trainer.has_normalization():
+            trainer.normalize_U_inplace(new_U_Test);
+
         if(len(trainer.U_Test) == 0):
             trainer.U_Test  : list[list[torch.Tensor]]  = new_U_Test;
             trainer.t_Test  : list[torch.Tensor]        = new_t_Test;
@@ -174,11 +181,9 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
 
     # Do the same thing for the training points. We do this one at a time. If a particular set of
     # parameters is in the testing set, then we take the pre-generated solution from there rather
-    # than re-generating the solution from scratch. Also, we compute the std of the FOM solution 
-    # for each combination of training parameters and store the results in trainer.std_Train.
+    # than re-generating the solution from scratch.
     new_U_Train     : list[list[torch.Tensor]]  = [];
     new_t_Train     : list[torch.Tensor]        = [];
-    new_std_Train   : list[list[float]]         = [];
     for i in range(num_train_new):
         # Check if the i'th combination of training parameters is in the testing set.
         ith_Train_param     : numpy.ndarray = new_train_params[i, :];
@@ -199,26 +204,36 @@ def Run_Samples(trainer : BayesianGLaSDI, config : dict) -> tuple[NextStep, Resu
         if(found_param_in_test == False):
             LOGGER.info("Couldn't find training parameter %d in the testing set; generating solution" % i);
             ith_new_U_Train, ith_new_t_Train = trainer.physics.generate_solutions(new_train_params[i, :].reshape(1, -1));
+
+            # If normalization stats exist, normalize this newly-generated training trajectory
+            # before appending.
+            if hasattr(trainer, "has_normalization") and trainer.has_normalization():
+                trainer.normalize_U_inplace(ith_new_U_Train);
+
             new_U_Train = new_U_Train + ith_new_U_Train;
             new_t_Train = new_t_Train + ith_new_t_Train;
 
-        # compute the std of the FOM solution for the i'th combination of training parameters.
-        jth_std_Train : list[float] = [];
-        for k in range(trainer.n_IC):
-            jth_std_Train.append(torch.std(new_U_Train[-1][k]).item());
-        new_std_Train.append(jth_std_Train); 
-    
     # Now append the new training, points to U_Train.
     if(len(trainer.U_Train) == 0):
         trainer.U_Train         = new_U_Train;
         trainer.t_Train         = new_t_Train;
-        trainer.std_Train       = new_std_Train;
     else:
         trainer.U_Train         = trainer.U_Train + new_U_Train;
         trainer.t_Train         = trainer.t_Train + new_t_Train;
-        trainer.std_Train       = trainer.std_Train + new_std_Train;
 
     assert len(trainer.U_Train) == trainer.param_space.n_train(), "len(trainer.U_Train) = %d != trainer.param_space.n_train() = %d" % (len(trainer.U_Train), trainer.param_space.n_train());
+
+
+    # ---------------------------------------------------------------------------------------------
+    # Global normalization setup (training-only stats)
+    #
+    # If enabled and stats are not set yet, compute mean/std from the (unnormalized) training data,
+    # store them on the trainer, then normalize both training and testing trajectories in-place.
+    if hasattr(trainer, "normalize") and bool(trainer.normalize):
+        if not (hasattr(trainer, "has_normalization") and trainer.has_normalization()):
+            trainer.set_normalization_stats_from_training();
+            trainer.normalize_U_inplace(trainer.U_Train);
+            trainer.normalize_U_inplace(trainer.U_Test);
 
 
     # ---------------------------------------------------------------------------------------------

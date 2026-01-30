@@ -4,6 +4,10 @@ lasdi:
     lr:                     0.001
     n_samples:              20
 
+    # If true, compute a single global mean/std from TRAINING data only, and normalize
+    # all training/testing trajectories using these values.
+    normalize:              true
+
     # Note that t_rollout is capped at 0.75 to ensure there are some frames to simulate forward.
     p_rollout_init:         0.01
     rollout_update_freq:    100
@@ -15,27 +19,27 @@ lasdi:
     IC_rollout_update_freq: 100
     IC_dp_per_update:       0.01
 
-    max_iter:               2100
-    n_iter:                 700
-    max_greedy_iter:        2100
+    max_iter:               2000
+    n_iter:                 500
+    max_greedy_iter:        2000
 
     loss_weights:
       recon:                1.0
       LD:                   1.0
       rollout:              0.0
       IC_rollout:           0.0
-      coef:                 0.001
+      coef:                 0.0001
 
       chain_rule:           1.0
       consistency:          1.0
 
     loss_types:
-      recon:                "MAE"
-      LD:                   "MAE"
-      rollout:              "MAE"
-      IC_rollout:           "MAE"
-      chain_rule:           "MAE"
-      consistency:          "MAE"
+      recon:                "MSE"
+      LD:                   "MSE"
+      rollout:              "MSE"
+      IC_rollout:           "MSE"
+      chain_rule:           "MSE"
+      consistency:          "MSE"
 
     learnable_coefs:        true
   
@@ -58,9 +62,9 @@ parameter_space:
 model:
   type:                     ae
   ae:
-    hidden_widths:          [1200, 600, 300, 150]
-    activations:            ["GELU", "GELU", "GELU", "GELU"]
-    latent_dimension:       20
+    hidden_widths:          [1000, 200, 200, 200]
+    activations:            ["ReLU", "ReLU", "ReLU", "ReLU"]
+    latent_dimension:       10
 
 latent_dynamics:
   type:                     sindy

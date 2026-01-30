@@ -51,12 +51,7 @@ class BayesianGLaSDI:
     # element holds the time value for the j'th frame when we use the i'th combination of training 
     # parameters.
     t_Train : list[torch.Tensor]        = []; 
-
-    # An n_Train element list whose i'th element is an n_IC element list whose j'th element is a
-    # float holding the std of the j'th derivative of the FOM solution when we use the i'th 
-    # combination of training parameters.
-    std_Train : list[list[float]]       = [];
-
+    
     # Same as U_Test, but used for the test set.
     U_Test  : list[list[torch.Tensor]]  = [];  
 
@@ -159,6 +154,13 @@ class BayesianGLaSDI:
         self.loss_types             : dict      = gplasdi_config['loss_types'];             # A dictionary housing the type of loss function (MSE or MAE) for each part of the loss function.
         self.learnable_coefs        : bool      = gplasdi_config['learnable_coefs'];        # If True, the latent dynamics coefficients are learnable parameters. If false, we compute them using Least Squares.
 
+        # Optional normalization (training-only stats).
+        # If enabled, we compute a single mean/std across ALL training trajectories (per IC),
+        # then normalize both training + testing trajectories using these values.
+        self.normalize : bool = bool(gplasdi_config.get('normalize', False));
+        self.data_mean                : list[torch.Tensor] | None = None;   # per-IC scalar tensors (CPU)
+        self.data_std                 : list[torch.Tensor] | None = None;   # per-IC scalar tensors (CPU)
+
         # Set the device to train on. We default to cpu.
         device = gplasdi_config['device'] if 'device' in gplasdi_config else 'cpu';
         if (device.startswith('cuda')):
@@ -205,6 +207,131 @@ class BayesianGLaSDI:
 
 
 
+    # -------------------------------------------------------------------------------------------------
+    # Normalization helpers
+    # -------------------------------------------------------------------------------------------------
+
+    def has_normalization(self) -> bool:
+        return bool(self.normalize and (self.data_mean is not None) and (self.data_std is not None));
+
+
+    def _compute_mean_std_from_U(self, U: list[list[torch.Tensor]], eps: float = 1.0e-12) -> tuple[list[float], list[float]]:
+        """
+        Compute mean/std across ALL entries in U for each IC separately.
+
+        We do this without concatenating everything to avoid large memory spikes.
+        """
+        assert isinstance(U, list) and len(U) > 0, "U must be a non-empty list";
+        n_IC: int = len(U[0]);
+        assert n_IC > 0, "n_IC must be positive";
+        for i in range(len(U)):
+            assert len(U[i]) == n_IC, "U[%d] has %d ICs but expected %d" % (i, len(U[i]), n_IC);
+
+        sum_      : list[float] = [0.0] * n_IC;
+        sum_sq    : list[float] = [0.0] * n_IC;
+        count     : list[int]   = [0]   * n_IC;
+
+        for i in range(len(U)):
+            for j in range(n_IC):
+                T: torch.Tensor = U[i][j];
+                assert isinstance(T, torch.Tensor), "U[%d][%d] is not a torch.Tensor" % (i, j);
+                Td = T.detach().double();
+                sum_[j]   += float(Td.sum().item());
+                sum_sq[j] += float((Td * Td).sum().item());
+                count[j]  += int(Td.numel());
+
+        means: list[float] = [];
+        stds : list[float] = [];
+        for j in range(n_IC):
+            assert count[j] > 0, "No elements found for IC %d" % j;
+            mean_j: float = sum_[j] / float(count[j]);
+            var_j: float  = (sum_sq[j] / float(count[j])) - (mean_j * mean_j);
+            if var_j < 0.0:
+                # Numerical guard
+                var_j = 0.0;
+            std_j: float = float(numpy.sqrt(max(var_j, eps)));
+            means.append(mean_j);
+            stds.append(std_j);
+        return means, stds;
+
+
+    def set_normalization_stats_from_training(self) -> None:
+        """
+        Compute and store mean/std from current training trajectories.
+        Stats live on the trainer only; downstream utilities should be passed the trainer.
+        """
+        assert self.normalize, "Normalization is disabled";
+        means, stds = self._compute_mean_std_from_U(self.U_Train);
+        self.data_mean = [torch.tensor(m, dtype = torch.float32) for m in means];
+        self.data_std  = [torch.tensor(s, dtype = torch.float32) for s in stds];
+
+        LOGGER.info("Normalization enabled. Per-IC mean/std:");
+        for j in range(len(means)):
+            LOGGER.info("  IC %d: mean = %.6e, std = %.6e" % (j, means[j], stds[j]));
+        return;
+
+
+    def normalize_tensor(self, X: torch.Tensor, ic_idx: int) -> torch.Tensor:
+        if not self.has_normalization():
+            return X;
+        assert self.data_mean is not None and self.data_std is not None;
+        m = self.data_mean[ic_idx].to(X.device);
+        s = self.data_std[ic_idx].to(X.device);
+        return (X - m) / s;
+
+
+    def denormalize_tensor(self, X: torch.Tensor, ic_idx: int) -> torch.Tensor:
+        if not self.has_normalization():
+            return X;
+        assert self.data_mean is not None and self.data_std is not None;
+        m = self.data_mean[ic_idx].to(X.device);
+        s = self.data_std[ic_idx].to(X.device);
+        return X * s + m;
+
+
+    def denormalize_np(self, x: numpy.ndarray, ic_idx: int) -> numpy.ndarray:
+        """
+        De-normalize a numpy array using the trainer's stored stats (per IC).
+        """
+        if not self.has_normalization():
+            return x;
+        assert self.data_mean is not None and self.data_std is not None;
+        m = float(self.data_mean[ic_idx].detach().cpu().item());
+        s = float(self.data_std[ic_idx].detach().cpu().item());
+        return x * s + m;
+
+
+    def scale_std_np(self, std_x: numpy.ndarray, ic_idx: int) -> numpy.ndarray:
+        """
+        Convert a standard deviation computed in normalized units to physical units.
+        """
+        if not self.has_normalization():
+            return std_x;
+        assert self.data_std is not None;
+        s = float(self.data_std[ic_idx].detach().cpu().item());
+        return std_x * s;
+
+
+    def normalize_U_inplace(self, U: list[list[torch.Tensor]]) -> None:
+        """
+        Normalize a dataset in-place (per IC) using stored mean/std.
+        """
+        if not self.has_normalization():
+            return;
+        assert self.data_mean is not None and self.data_std is not None;
+        n_IC: int = len(self.data_mean);
+        for i in range(len(U)):
+            assert len(U[i]) == n_IC, "U[%d] has %d ICs but expected %d" % (i, len(U[i]), n_IC);
+            for j in range(n_IC):
+                U[i][j] = self.normalize_tensor(U[i][j], j);
+        return;
+
+
+    
+    # ---------------------------------------------------------------------------------------------
+    # Loss Tracking Helpers.
+    # ---------------------------------------------------------------------------------------------
+
     def _store_loss_by_param(self, loss_name: str, param_tuple: tuple, epoch: int, loss_value: float) -> None:
         """
         Helper function to store a loss value for a specific parameter combination.
@@ -249,6 +376,11 @@ class BayesianGLaSDI:
         self.loss_by_param[loss_name]['total']['epochs'].append(epoch);
         self.loss_by_param[loss_name]['total']['losses'].append(loss_value);
 
+
+
+    # ---------------------------------------------------------------------------------------------
+    # Training Loop.
+    # ---------------------------------------------------------------------------------------------
 
 
     def train(self, reset_optim : bool = True) -> None:
@@ -481,8 +613,8 @@ class BayesianGLaSDI:
                         self.timer.start("Reconstruction Loss");
                         LOGGER.debug("Reconstruction Loss (Autoencoder) - start for parameter combination %d" % i);
 
-                        # Compute normalized difference once
-                        diff = (U_i - U_Pred_i) / self.std_Train[i][0];
+                        # Reconstruction residual (data is either physical units or normalized).
+                        diff = (U_i - U_Pred_i);
                         
                         # Compute loss from normalized difference
                         if(self.loss_types['recon'] == "MSE"):
@@ -646,9 +778,9 @@ class BayesianGLaSDI:
                         # Get the corresponding FOM targets.
                         FOM_Rollout_Target_i      : list[torch.Tensor]  = FOM_Rollout_Targets[i][0];    # shape = (n_rollout_ICs[i], physics.Frame_Shape)
                     
-                        # Compute normalized differences once
+                        # Compute differences once
                         diff_ROM = ROM_Rollout_Targets_i - ROM_Rollout_Predict_i;
-                        diff_FOM = (FOM_Rollout_Predict_i - FOM_Rollout_Target_i) / self.std_Train[i][0];
+                        diff_FOM = (FOM_Rollout_Predict_i - FOM_Rollout_Target_i);
                         
                         # Compute losses from normalized differences
                         if(self.loss_types['rollout'] == "MSE"):
@@ -716,9 +848,9 @@ class BayesianGLaSDI:
                         # Encode the FOM targets for latent space comparison
                         Z_IC_Target_i = model_device.Encode(U_IC_Target_i);
 
-                        # Compute normalized differences once
+                        # Compute differences once
                         diff_ROM = Z_IC_Target_i - Z_IC_Predict_i;
-                        diff_FOM = (U_IC_Predict_i - U_IC_Target_i) / self.std_Train[i][0];
+                        diff_FOM = (U_IC_Predict_i - U_IC_Target_i);
                         
                         # Compute losses from normalized differences
                         if(self.loss_types['IC_rollout'] == "MSE"):
@@ -836,9 +968,9 @@ class BayesianGLaSDI:
                         self.timer.start("Reconstruction Loss");
                         LOGGER.debug("Reconstruction Loss (Autoencoder_Pair) - start for parameter combination %d" % i);
 
-                        # Compute normalized differences once
-                        diff_D = (D_i - D_Pred_i) / self.std_Train[i][0];
-                        diff_V = (V_i - V_Pred_i) / self.std_Train[i][1];
+                        # Compute differences once
+                        diff_D = (D_i - D_Pred_i);
+                        diff_V = (V_i - V_Pred_i);
                         
                         # Compute losses from normalized differences
                         if(self.loss_types['recon'] == "MSE"):
@@ -1125,11 +1257,11 @@ class BayesianGLaSDI:
                         FOM_D_Rollout_Target_i  : torch.Tensor          = FOM_Rollout_Targets_i[0];       # shape = (n_rollout_ICs[i], physics.Frame_Shape)
                         FOM_V_Rollout_Target_i  : torch.Tensor          = FOM_Rollout_Targets_i[1];       # shape = (n_rollout_ICs[i], physics.Frame_Shape)
                     
-                        # Compute normalized differences once
+                        # Compute differences once
                         diff_ROM_D = ROM_D_Rollout_Target_i - ROM_D_Rollout_Predict_i;
                         diff_ROM_V = ROM_V_Rollout_Target_i - ROM_V_Rollout_Predict_i;
-                        diff_FOM_D = (FOM_D_Rollout_Target_i - FOM_D_Rollout_Predict_i) / self.std_Train[i][0];
-                        diff_FOM_V = (FOM_V_Rollout_Target_i - FOM_V_Rollout_Predict_i) / self.std_Train[i][1];
+                        diff_FOM_D = (FOM_D_Rollout_Target_i - FOM_D_Rollout_Predict_i);
+                        diff_FOM_V = (FOM_V_Rollout_Target_i - FOM_V_Rollout_Predict_i);
                         
                         # Compute losses from normalized differences
                         if(self.loss_types['rollout'] == "MSE"):
@@ -1217,11 +1349,11 @@ class BayesianGLaSDI:
                         # Encode the FOM targets for latent space comparison
                         Z_D_IC_Target_i, Z_V_IC_Target_i = model_device.Encode(D_IC_Target_i, V_IC_Target_i);
 
-                        # Compute normalized differences once
+                        # Compute differences once
                         diff_Z_D = Z_D_IC_Target_i - Z_D_IC_Predict_i;
                         diff_Z_V = Z_V_IC_Target_i - Z_V_IC_Predict_i;
-                        diff_D = (D_IC_Target_i - D_IC_Predict_i) / self.std_Train[i][0];
-                        diff_V = (V_IC_Target_i - V_IC_Predict_i) / self.std_Train[i][1];
+                        diff_D = (D_IC_Target_i - D_IC_Predict_i);
+                        diff_V = (V_IC_Target_i - V_IC_Predict_i);
                         
                         # Compute losses from normalized differences
                         if(self.loss_types['IC_rollout'] == "MSE"):
@@ -1811,7 +1943,8 @@ class BayesianGLaSDI:
         # of the encoding of the initial condition for the j'th derivative of the latent dynamics 
         # corresponding to the i'th candidate combination of parameter values.
         Z0 : list[list[numpy.ndarray]]  = model.latent_initial_conditions(  param_grid  = candidate_parameters, 
-                                                                            physics     = self.physics);
+                                                                            physics     = self.physics,
+                                                                            trainer     = self);
 
         # Train the GPs on the training data, get one GP per latent space coefficient.
         gp_list : list[GaussianProcessRegressor] = fit_gps(self.param_space.train_space, coefs);
@@ -1895,7 +2028,11 @@ class BayesianGLaSDI:
                  'restart_iter'             : self.restart_iter, 
                  'timer'                    : self.timer.export(), 
                  'test_coefs'               : self.test_coefs,
-                 'optimizer'                : self.optimizer.state_dict()};
+                 'optimizer'                : self.optimizer.state_dict(),
+                 # Normalization (training-only stats). Stored as plain floats for portability.
+                 'normalize'                : self.normalize,
+                 'data_mean'                : None if self.data_mean is None else [float(m.detach().cpu().item()) for m in self.data_mean],
+                 'data_std'                 : None if self.data_std  is None else [float(s.detach().cpu().item()) for s in self.data_std]};
         return dict_;
 
 
@@ -1934,12 +2071,16 @@ class BayesianGLaSDI:
         self.best_epoch     : int                       = dict_['restart_iter'];        # The current model has the best loss so far.
         self.restart_iter   : int                       = dict_['restart_iter'];
 
-        # Now compute the std of the FOM solution for each combination of training parameters.
-        self.std_Train    : list[list[float]] = [];
-        for i in range(len(self.U_Train)):
-            self.std_Train.append([]);
-            for j in range(len(self.U_Train[i])):
-                self.std_Train[i].append(torch.std(self.U_Train[i][j]));
+        # Restore normalization stats (if present).
+        self.normalize = bool(dict_.get('normalize', False));
+        dm = dict_.get('data_mean', None);
+        ds = dict_.get('data_std', None);
+        if self.normalize and (dm is not None) and (ds is not None):
+            self.data_mean = [torch.tensor(float(x), dtype = torch.float32) for x in dm];
+            self.data_std  = [torch.tensor(float(x), dtype = torch.float32) for x in ds];
+        else:
+            self.data_mean = None;
+            self.data_std  = None;
 
         # Next, compute n_IC.           
         self.n_IC = len(self.U_Test[0]);

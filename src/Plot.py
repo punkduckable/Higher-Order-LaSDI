@@ -61,6 +61,7 @@ def Plot_Latent_Trajectories(physics         : Physics,
                              U_True          : list[list[torch.Tensor]],
                              t_Grid          : list[torch.Tensor],
                              file_prefix     : str,
+                             trainer         = None,
                              figsize         : tuple[int]    = (15, 13)) -> None:
     """
     This function plots the latent trajectories of the latent dynamics model for a combination of 
@@ -167,7 +168,8 @@ def Plot_Latent_Trajectories(physics         : Physics,
                                                                     gp_list         = gp_list, 
                                                                     param_grid      = param_grid,
                                                                     t_Grid          = t_Grid,
-                                                                    n_samples       = n_samples);
+                                                                    n_samples       = n_samples,
+                                                                    trainer         = trainer);
     
     # Now encode the FOM trajectories. Store these in an n_param element list whose i'th element
     # is an n_IC element list whose j'th element is a numpy array of shape (n_t(i), n_z) holding
