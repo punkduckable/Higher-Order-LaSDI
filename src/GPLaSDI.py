@@ -18,6 +18,8 @@ import  numpy;
 from    torch.optim                 import  Optimizer;
 from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 from    scipy                       import  interpolate;
+import  pickle;
+import  time;
 
 from    GaussianProcess             import  sample_coefs, fit_gps;
 from    Model                       import  Autoencoder, Autoencoder_Pair;
@@ -279,11 +281,12 @@ class BayesianGLaSDI:
         loss_value : float
             Total loss value to store
         """
-        if loss_name in self.loss_by_param:
-            if 'total' not in self.loss_by_param[loss_name]:
-                self.loss_by_param[loss_name]['total'] = {'epochs': [], 'losses': []};
-            self.loss_by_param[loss_name]['total']['epochs'].append(epoch);
-            self.loss_by_param[loss_name]['total']['losses'].append(loss_value);
+        if loss_name not in self.loss_by_param:
+            self.loss_by_param[loss_name] = {};
+        if 'total' not in self.loss_by_param[loss_name]:
+            self.loss_by_param[loss_name]['total'] = {'epochs': [], 'losses': []};
+        self.loss_by_param[loss_name]['total']['epochs'].append(epoch);
+        self.loss_by_param[loss_name]['total']['losses'].append(loss_value);
 
 
 
@@ -324,7 +327,6 @@ class BayesianGLaSDI:
         n_train             : int               = self.param_space.n_train();
         p_rollout           : float             = min(0.75, self.p_rollout_init + self.dp_per_update*(self.restart_iter//self.rollout_update_freq));
         p_IC_rollout        : float             = min(1.0, self.p_IC_rollout_init + self.IC_dp_per_update*(self.restart_iter//self.IC_rollout_update_freq));
-        LD                  : LatentDynamics    = self.latent_dynamics;
         best_loss           : float             = numpy.inf;                    # Stores the lowest loss we get in this round of training.
 
         # Map everything to self's device.
@@ -373,7 +375,6 @@ class BayesianGLaSDI:
         # the index of each train space element within the test space.
         train_coefs_list : list[torch.Tensor] = [];
         if(self.learnable_coefs == True):
-            train_coefs_list : list[torch.Tensor] = [];
             for i in range(n_train):
                 ith_train_in_test : bool = False;
                 for j in range(self.param_space.n_test()):
@@ -389,54 +390,28 @@ class BayesianGLaSDI:
         # -----------------------------------------------------------------------------------------
         # Initialize loss tracking
         
-        # Set up filenames using physics type
-        base_filename = self.config['physics']['type'];
-        loss_history_file = os.path.join(self.path_results, base_filename + '_loss_history.npz');
-        loss_by_param_file = os.path.join(self.path_results, base_filename + '_loss_by_param.pkl');
+        # Set up filename for loss_by_param.
+        # NOTE: must match the filename we save at the end of training so restarts work.
+        base_filename       : str = self.config['physics']['type'];
+        loss_by_param_path  : str = os.path.join(self.path_results, base_filename + '_loss_by_param.pkl');
         
         # Delete existing files if starting fresh (restart_iter == 0)
         # This ensures we don't append to results from previous training runs
         if self.restart_iter == 0:
-            if os.path.exists(loss_by_param_file):
-                os.remove(loss_by_param_file);
-                LOGGER.info("Deleted existing loss_by_param file: %s" % loss_by_param_file);
-            if os.path.exists(loss_history_file):
-                os.remove(loss_history_file);
-                LOGGER.info("Deleted existing loss_history file: %s" % loss_history_file);
-        
-        # Load existing loss history if restarting, otherwise initialize empty arrays
-        # Note: Component losses are stored in self.loss_by_param, so we only need to track:
-        # - iterations (epoch numbers)
-        # - total_loss (overall total, sum of all components)
-        # - LD_loss and coef_loss (not stored in loss_by_param)
-        if os.path.exists(loss_history_file) and self.restart_iter > 0:
-            LOGGER.info("Loading existing loss history from %s" % loss_history_file);
-            loss_history = numpy.load(loss_history_file);
-            iterations = list(loss_history['iterations']);
-            total_loss = list(loss_history['total_loss']);
-            LD_loss = list(loss_history.get('LD_loss', []));
-            coef_loss = list(loss_history.get('coef_loss', []));
-        else:
-            LOGGER.info("Initializing new loss history");
-            iterations = [];
-            total_loss = [];
-            LD_loss = [];
-            coef_loss = [];
-        
-        # Initialize per-parameter-combination loss tracking
-        # Each dictionary maps parameter tuple -> dict with 'epochs' and 'losses' lists
-        # We'll also track "total" which is the sum across all parameter combinations
-        import pickle;
-        
+            if os.path.exists(loss_by_param_path):
+                os.remove(loss_by_param_path);
+                LOGGER.info("Deleted existing loss_by_param file: %s" % loss_by_param_path);
+
         # Load existing loss_by_param if restarting (always try to load, don't check hasattr)
-        if os.path.exists(loss_by_param_file) and self.restart_iter > 0:
-            LOGGER.info("Loading existing per-parameter loss tracking from %s" % loss_by_param_file);
-            with open(loss_by_param_file, 'rb') as f:
+        if os.path.exists(loss_by_param_path) and self.restart_iter > 0:
+            LOGGER.info("Loading existing per-parameter loss tracking from %s" % loss_by_param_path);
+            with open(loss_by_param_path, 'rb') as f:
                 self.loss_by_param = pickle.load(f);
         else:
             # Initialize fresh if starting from scratch
             if not hasattr(self, 'loss_by_param'):
                 self.loss_by_param = {};
+        
         
         # -----------------------------------------------------------------------------------------
         # Run the iterations!
@@ -485,49 +460,30 @@ class BayesianGLaSDI:
                 
                 self.timer.end("IC Rollout Setup"); 
 
-            # Zero gradients with set_to_none=True for better memory efficiency
-            self.optimizer.zero_grad(set_to_none=True);
+            # Zero gradients.
+            self.optimizer.zero_grad();
             LOGGER.debug("Zeroed gradients for iteration %d" % (iter + 1));
 
 
             # -------------------------------------------------------------------------------------
             # Compute losses
             
-            # Initialize loss variables (only for current model type)
-            loss_LD = torch.zeros(1, dtype=torch.float32, device=device);
-            loss_coef = torch.zeros(1, dtype=torch.float32, device=device);
-            
             if not is_autoencoder_pair:
-                loss_recon = torch.zeros(1, dtype=torch.float32, device=device);
-                loss_rollout_FOM = torch.zeros(1, dtype=torch.float32, device=device);
-                loss_rollout_ROM = torch.zeros(1, dtype=torch.float32, device=device);
-                loss_IC_rollout_FOM = torch.zeros(1, dtype=torch.float32, device=device);
-                loss_IC_rollout_ROM = torch.zeros(1, dtype=torch.float32, device=device);
-            else:  # is_autoencoder_pair
-                loss_recon_D = torch.zeros(1, dtype=torch.float32, device=device);
-                loss_recon_V = torch.zeros(1, dtype=torch.float32, device=device);
-                loss_consistency_Z = torch.zeros(1, dtype=torch.float32, device=device);
-                loss_consistency_U = torch.zeros(1, dtype=torch.float32, device=device);
-                loss_chain_rule_U = torch.zeros(1, dtype=torch.float32, device=device);
-                loss_chain_rule_Z = torch.zeros(1, dtype=torch.float32, device=device);
-                loss_rollout_FOM_D = torch.zeros(1, dtype=torch.float32, device=device);
-                loss_rollout_FOM_V = torch.zeros(1, dtype=torch.float32, device=device);
-                loss_rollout_ROM_D = torch.zeros(1, dtype=torch.float32, device=device);
-                loss_rollout_ROM_V = torch.zeros(1, dtype=torch.float32, device=device);
-                loss_IC_rollout_D = torch.zeros(1, dtype=torch.float32, device=device);
-                loss_IC_rollout_V = torch.zeros(1, dtype=torch.float32, device=device);
-                loss_IC_rollout_Z_D = torch.zeros(1, dtype=torch.float32, device=device);
-                loss_IC_rollout_Z_V = torch.zeros(1, dtype=torch.float32, device=device);
+                # Initialize losses. 
+                loss_recon              : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_LD                 : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_coef               : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_rollout_FOM        : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_rollout_ROM        : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_IC_rollout_FOM     : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_IC_rollout_ROM     : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
 
-            if not is_autoencoder_pair:
                 # Setup. 
-                Latent_States       : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_t_i, n_z) arrays.
-
-    
-                ROM_Rollout_ICs     : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_rollout_ICs[i], n_z) arrays.
-                FOM_Rollout_Targets : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_rollout_ICs[i], physics.Frame_Shape) arrays holding the FOM rollout targets.
-                ROM_Rollout_Targets : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_rollout_ICs[i], n_z) arrays holding the ROM rollout targets.
-                Rollout_Indices     : list[int]                 = [];       # len = n_train. i'th element is an array of shape (n_rollout_ICs[i]) specifying the indices (in rollout trajectories) of the frames we use as rollout targets.
+                Latent_States           : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_t_i, n_z) arrays.
+                ROM_Rollout_ICs         : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_rollout_ICs[i], n_z) arrays.
+                FOM_Rollout_Targets     : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_rollout_ICs[i], physics.Frame_Shape) arrays holding the FOM rollout targets.
+                ROM_Rollout_Targets     : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_rollout_ICs[i], n_z) arrays holding the ROM rollout targets.
+                Rollout_Indices         : list[int]                 = [];       # len = n_train. i'th element is an array of shape (n_rollout_ICs[i]) specifying the indices (in rollout trajectories) of the frames we use as rollout targets.
                 
                 # Cycle through the combinations of parameter values
                 for i in range(n_train):
@@ -569,17 +525,17 @@ class BayesianGLaSDI:
                         
                         # Compute loss from normalized difference
                         if(self.loss_types['recon'] == "MSE"):
-                            sample_recon_loss = torch.mean(diff**2);
+                            recon_loss_ith_param = torch.mean(diff**2);
                         elif(self.loss_types['recon'] == "MAE"):
-                            sample_recon_loss = torch.mean(torch.abs(diff));
+                            recon_loss_ith_param = torch.mean(torch.abs(diff));
                         else:
-                            sample_recon_loss = torch.zeros(1, dtype=torch.float32, device=device);
+                            raise ValueError("Invalid reconstruction loss type: %s" % self.loss_types['recon']);
                         
-                        loss_recon += sample_recon_loss;
+                        loss_recon += recon_loss_ith_param;
                         
-                        # Store per-parameter-combination loss
-                        param_tuple = tuple(self.param_space.train_space[i, :]);
-                        self._store_loss_by_param('recon', param_tuple, iter + 1, sample_recon_loss.item());
+                        # Store recon loss for this parameter combination.
+                        ith_param_tuple = tuple(self.param_space.train_space[i, :]);
+                        self._store_loss_by_param('recon', ith_param_tuple, iter + 1, recon_loss_ith_param.item());
                         
                         LOGGER.debug("Reconstruction Loss (Autoencoder) - complete for parameter combination %d" % i);
                         self.timer.end("Reconstruction Loss");
@@ -602,11 +558,14 @@ class BayesianGLaSDI:
                         ROM_Rollout_ICs.append([Z_i[:n_rollout_ICs[i], :]]);
 
                         if(self.randomized_rollout == True):
-                            # Generate the indices of the frames we want to use as the targets.
-                            Rollout_Indices_i   : numpy.ndarray = numpy.random.randint(0, t_Grid_rollout[i].shape[0], n_rollout_ICs[i]);
+                            # Generate the indices of the frames we want to use as the targets. For each 
+                            # rollable frame, x, we have already integrated the ROM over the t_Grid_rollout
+                            # using the encoding of x as the IC (and have the corresponding trajectory). We 
+                            # randomly sample one of the frames in the trajectory to use as the target.
+                            Rollout_Indices_i   : numpy.ndarray = numpy.random.randint(0, t_Grid_rollout[i].shape[0], n_rollout_ICs[i]); # shape = (n_rollout_ICs[i])
                             Rollout_Indices.append(Rollout_Indices_i);
 
-                            # Fetch the corresponding targets.
+                            # Fetch the corresponding targets for the i'th combination of parameter values.
                             FOM_Rollout_Targets_i : list[torch.Tensor] = [];
                             for j in range(self.n_IC):
                                 FOM_Rollout_Targets_ij : numpy.ndarray = numpy.empty((n_rollout_ICs[i],) + tuple(self.physics.Frame_Shape), dtype = numpy.float32);
@@ -627,12 +586,15 @@ class BayesianGLaSDI:
                             FOM_Rollout_Targets.append(FOM_Rollout_Targets_i);
 
 
-                        # Fetch the corresponding target by encoding the FOM targets using the 
-                        # current encoder.
+                        # Fetch the corresponding ROM rollout targets by encoding the FOM rollout 
+                        # targets using the current encoder.
                         ROM_Rollout_Targets.append([model_device.Encode(*FOM_Rollout_Targets_i)]);
                     
                         LOGGER.debug("Rollout Setup (Autoencoder) - complete for parameter combination %d" % i);
                         self.timer.end("Rollout Setup");
+
+                # Store total recon loss.
+                self._store_total_loss('recon', iter + 1, loss_recon.item());
 
 
                 # --------------------------------------------------------------------------------
@@ -645,10 +607,25 @@ class BayesianGLaSDI:
                 # called "coefs" of shape (n_train, n_coefs), where n_train = number of training 
                 # combinations of parameters and n_coefs denotes the number of coefficients in the 
                 # latent dynamics model. 
-                coefs, loss_LD, loss_coef       = LD.calibrate(Latent_States    = Latent_States, 
-                                                               t_Grid           = t_Train_device,
-                                                               input_coefs      = train_coefs_list,
-                                                               loss_type        = self.loss_types['LD']);
+                coefs, loss_LD_list, loss_coef_list = self.latent_dynamics.calibrate(
+                                                                Latent_States    = Latent_States, 
+                                                                t_Grid           = t_Train_device,
+                                                                input_coefs      = train_coefs_list,
+                                                                loss_type        = self.loss_types['LD']);
+
+                # Append the LD and coefficint losses to loss_by_param.
+                for i in range(n_train):
+                    param_tuple = tuple(self.param_space.train_space[i, :]);
+                    self._store_loss_by_param('LD',   param_tuple, iter + 1, loss_LD_list[i].item());
+                    self._store_loss_by_param('coef', param_tuple, iter + 1, loss_coef_list[i].item());
+
+                # Compute the total loss.
+                loss_LD   = torch.sum(torch.stack(loss_LD_list));
+                loss_coef = torch.sum(torch.stack(loss_coef_list));
+
+                # Append the total loss to loss_by_param.
+                self._store_total_loss('LD', iter + 1, loss_LD.item());
+                self._store_total_loss('coef', iter + 1, loss_coef.item());
 
                 self.timer.end("Calibration");
 
@@ -714,23 +691,27 @@ class BayesianGLaSDI:
                         
                         # Compute losses from normalized differences
                         if(self.loss_types['rollout'] == "MSE"):
-                            sample_rollout_ROM = torch.mean(diff_ROM**2);
-                            sample_rollout_FOM = torch.mean(diff_FOM**2);
+                            loss_rollout_ROM_ith_param = torch.mean(diff_ROM**2);
+                            loss_rollout_FOM_ith_param = torch.mean(diff_FOM**2);
                         elif(self.loss_types['rollout'] == "MAE"):
-                            sample_rollout_ROM = torch.mean(torch.abs(diff_ROM));
-                            sample_rollout_FOM = torch.mean(torch.abs(diff_FOM));
+                            loss_rollout_ROM_ith_param = torch.mean(torch.abs(diff_ROM));
+                            loss_rollout_FOM_ith_param = torch.mean(torch.abs(diff_FOM));
                         else:
-                            sample_rollout_ROM = torch.zeros(1, dtype=torch.float32, device=device);
-                            sample_rollout_FOM = torch.zeros(1, dtype=torch.float32, device=device);
+                            loss_rollout_ROM_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
+                            loss_rollout_FOM_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
                         
-                        loss_rollout_ROM += sample_rollout_ROM;
-                        loss_rollout_FOM += sample_rollout_FOM;
+                        loss_rollout_ROM += loss_rollout_ROM_ith_param;
+                        loss_rollout_FOM += loss_rollout_FOM_ith_param;
                         
                         # Store per-parameter-combination loss
                         param_tuple = tuple(self.param_space.train_space[i, :]);
-                        self._store_loss_by_param('rollout_ROM', param_tuple, iter + 1, sample_rollout_ROM.item());
-                        self._store_loss_by_param('rollout_FOM', param_tuple, iter + 1, sample_rollout_FOM.item());
+                        self._store_loss_by_param('rollout_ROM', param_tuple, iter + 1, loss_rollout_ROM_ith_param.item());
+                        self._store_loss_by_param('rollout_FOM', param_tuple, iter + 1, loss_rollout_FOM_ith_param.item());
                         
+                    # Store total rollout loss.
+                    self._store_total_loss('rollout_ROM', iter + 1, loss_rollout_ROM.item());
+                    self._store_total_loss('rollout_FOM', iter + 1, loss_rollout_FOM.item());
+
                     LOGGER.debug("Rollout Loss (Autoencoder) - complete");
                     self.timer.end("Rollout Loss");
 
@@ -780,22 +761,26 @@ class BayesianGLaSDI:
                         
                         # Compute losses from normalized differences
                         if(self.loss_types['IC_rollout'] == "MSE"):
-                            sample_IC_rollout_ROM = torch.mean(diff_ROM**2);
-                            sample_IC_rollout_FOM = torch.mean(diff_FOM**2);
+                            loss_IC_rollout_ROM_ith_param = torch.mean(diff_ROM**2);
+                            loss_IC_rollout_FOM_ith_param = torch.mean(diff_FOM**2);
                         elif(self.loss_types['IC_rollout'] == "MAE"):
-                            sample_IC_rollout_ROM = torch.mean(torch.abs(diff_ROM));
-                            sample_IC_rollout_FOM = torch.mean(torch.abs(diff_FOM));
+                            loss_IC_rollout_ROM_ith_param = torch.mean(torch.abs(diff_ROM));
+                            loss_IC_rollout_FOM_ith_param = torch.mean(torch.abs(diff_FOM));
                         else:
-                            sample_IC_rollout_ROM = torch.zeros(1, dtype=torch.float32, device=device);
-                            sample_IC_rollout_FOM = torch.zeros(1, dtype=torch.float32, device=device);
+                            loss_IC_rollout_ROM_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
+                            loss_IC_rollout_FOM_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
                         
-                        loss_IC_rollout_ROM += sample_IC_rollout_ROM;
-                        loss_IC_rollout_FOM += sample_IC_rollout_FOM;
+                        loss_IC_rollout_ROM += loss_IC_rollout_ROM_ith_param;
+                        loss_IC_rollout_FOM += loss_IC_rollout_FOM_ith_param;
                         
                         # Store per-parameter-combination loss
                         param_tuple = tuple(self.param_space.train_space[i, :]);
-                        self._store_loss_by_param('IC_rollout_ROM', param_tuple, iter + 1, sample_IC_rollout_ROM.item());
-                        self._store_loss_by_param('IC_rollout_FOM', param_tuple, iter + 1, sample_IC_rollout_FOM.item());
+                        self._store_loss_by_param('IC_rollout_ROM', param_tuple, iter + 1, loss_IC_rollout_ROM_ith_param.item());
+                        self._store_loss_by_param('IC_rollout_FOM', param_tuple, iter + 1, loss_IC_rollout_FOM_ith_param.item());
+
+                    # Store total IC rollout loss.
+                    self._store_total_loss('IC_rollout_ROM', iter + 1, loss_IC_rollout_ROM.item());
+                    self._store_total_loss('IC_rollout_FOM', iter + 1, loss_IC_rollout_FOM.item());
 
                     LOGGER.debug("IC Rollout Loss (Autoencoder) - complete");
                     self.timer.end("IC Rollout Loss");
@@ -815,11 +800,29 @@ class BayesianGLaSDI:
                         self.loss_weights['rollout']    * loss_rollout + 
                         self.loss_weights['IC_rollout'] * loss_IC_rollout + 
                         self.loss_weights['coef']       * loss_coef);
+                self._store_total_loss('total', iter + 1, loss.item());
                 LOGGER.debug("Total loss (Autoencoder) computed: %f" % loss.item());
 
 
 
             else:  # is_autoencoder_pair
+                # Initialize losses. 
+                loss_LD                 : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_coef               : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_recon_D            : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_recon_V            : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_consistency_Z      : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_consistency_U      : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_chain_rule_U       : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_chain_rule_Z       : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_rollout_FOM_D      : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_rollout_FOM_V      : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_rollout_ROM_D      : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_rollout_ROM_V      : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_IC_rollout_D       : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_IC_rollout_V       : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_IC_rollout_Z_D     : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_IC_rollout_Z_V     : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
                 # Setup. 
                 Latent_States       : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 2 element list of (n_t_i, n_z) arrays.
 
@@ -878,22 +881,22 @@ class BayesianGLaSDI:
                         
                         # Compute losses from normalized differences
                         if(self.loss_types['recon'] == "MSE"):
-                            sample_recon_D = torch.mean(diff_D**2);
-                            sample_recon_V = torch.mean(diff_V**2);
+                            recon_D_loss_ith_param = torch.mean(diff_D**2);
+                            recon_V_loss_ith_param = torch.mean(diff_V**2);
                         elif(self.loss_types['recon'] == "MAE"):
-                            sample_recon_D = torch.mean(torch.abs(diff_D));
-                            sample_recon_V = torch.mean(torch.abs(diff_V));
+                            recon_D_loss_ith_param = torch.mean(torch.abs(diff_D));
+                            recon_V_loss_ith_param = torch.mean(torch.abs(diff_V));
                         else:
-                            sample_recon_D = torch.zeros(1, dtype=torch.float32, device=device);
-                            sample_recon_V = torch.zeros(1, dtype=torch.float32, device=device);
+                            recon_D_loss_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
+                            recon_V_loss_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
                         
-                        loss_recon_D += sample_recon_D;
-                        loss_recon_V += sample_recon_V;
+                        loss_recon_D += recon_D_loss_ith_param;
+                        loss_recon_V += recon_V_loss_ith_param;
                         
                         # Store per-parameter-combination loss
                         param_tuple = tuple(self.param_space.train_space[i, :]);
-                        self._store_loss_by_param('recon_D', param_tuple, iter + 1, sample_recon_D.item());
-                        self._store_loss_by_param('recon_V', param_tuple, iter + 1, sample_recon_V.item());
+                        self._store_loss_by_param('recon_D', param_tuple, iter + 1, recon_D_loss_ith_param.item());
+                        self._store_loss_by_param('recon_V', param_tuple, iter + 1, recon_V_loss_ith_param.item());
 
                         LOGGER.debug("Reconstruction Loss (Autoencoder_Pair) - complete for parameter combination %d" % i);
                         self.timer.end("Reconstruction Loss");
@@ -917,12 +920,12 @@ class BayesianGLaSDI:
                         diff_Z = dZ_Di_dt - Z_V_i;
                         
                         # Compute loss from difference
-                        sample_consistency_Z = torch.mean(diff_Z**2) if self.loss_types['consistency'] == "MSE" else torch.mean(torch.abs(diff_Z));
-                        loss_consistency_Z  += sample_consistency_Z;
+                        consistency_Z_loss_ith_param = torch.mean(diff_Z**2) if self.loss_types['consistency'] == "MSE" else torch.mean(torch.abs(diff_Z));
+                        loss_consistency_Z          += consistency_Z_loss_ith_param;
                         
                         # Store per-parameter-combination loss
                         param_tuple = tuple(self.param_space.train_space[i, :]);
-                        self._store_loss_by_param('consistency_Z', param_tuple, iter + 1, sample_consistency_Z.item());
+                        self._store_loss_by_param('consistency_Z', param_tuple, iter + 1, consistency_Z_loss_ith_param.item());
 
                         # Next, make sure that V_Pred actually looks like the derivative of D_Pred. 
                         if(self.physics.Uniform_t_Grid  == True):
@@ -935,11 +938,11 @@ class BayesianGLaSDI:
                         diff_U = dD_Pred_i_dt - V_Pred_i;
                         
                         # Compute loss from difference
-                        sample_consistency_U = torch.mean(diff_U**2) if self.loss_types['consistency'] == "MSE" else torch.mean(torch.abs(diff_U));
-                        loss_consistency_U  += sample_consistency_U;
+                        consistency_U_loss_ith_param = torch.mean(diff_U**2) if self.loss_types['consistency'] == "MSE" else torch.mean(torch.abs(diff_U));
+                        loss_consistency_U          += consistency_U_loss_ith_param;
                         
                         # Store per-parameter-combination loss
-                        self._store_loss_by_param('consistency_U', param_tuple, iter + 1, sample_consistency_U.item());
+                        self._store_loss_by_param('consistency_U', param_tuple, iter + 1, consistency_U_loss_ith_param.item());
 
                         LOGGER.debug("Consistency Loss (Autoencoder_Pair) - complete for parameter combination %d" % i);
                         self.timer.end("Consistency Loss");
@@ -971,12 +974,12 @@ class BayesianGLaSDI:
                         diff_U = V_i - d_dz_D_Pred__Z_V_i;
                         
                         # Compute loss from difference
-                        sample_chain_rule_U = torch.mean(diff_U**2) if self.loss_types['chain_rule'] == "MSE" else torch.mean(torch.abs(diff_U));
-                        loss_chain_rule_U += sample_chain_rule_U;
+                        chain_rule_U_loss_ith_param = torch.mean(diff_U**2) if self.loss_types['chain_rule'] == "MSE" else torch.mean(torch.abs(diff_U));
+                        loss_chain_rule_U          += chain_rule_U_loss_ith_param;
                         
                         # Store per-parameter-combination loss
                         param_tuple = tuple(self.param_space.train_space[i, :]);
-                        self._store_loss_by_param('chain_rule_U', param_tuple, iter + 1, sample_chain_rule_U.item());
+                        self._store_loss_by_param('chain_rule_U', param_tuple, iter + 1, chain_rule_U_loss_ith_param.item());
 
                         # Next, we compute the Z portion of the chain rule loss:
                         #       (d/dt)Z(t) \approx (d/dt)\phi_E,D(D(t))
@@ -991,18 +994,18 @@ class BayesianGLaSDI:
                         diff_Z = Z_V_i - d_dx_Z_D__V;
                         
                         # Compute loss from difference
-                        sample_chain_rule_Z = torch.mean(diff_Z**2) if self.loss_types['chain_rule'] == "MSE" else torch.mean(torch.abs(diff_Z));
-                        loss_chain_rule_Z += sample_chain_rule_Z;
+                        chain_rule_Z_loss_ith_param = torch.mean(diff_Z**2) if self.loss_types['chain_rule'] == "MSE" else torch.mean(torch.abs(diff_Z));
+                        loss_chain_rule_Z          += chain_rule_Z_loss_ith_param;
                         
                         # Store per-parameter-combination loss
-                        self._store_loss_by_param('chain_rule_Z', param_tuple, iter + 1, sample_chain_rule_Z.item());
+                        self._store_loss_by_param('chain_rule_Z', param_tuple, iter + 1, chain_rule_Z_loss_ith_param.item());
 
                         LOGGER.debug("Chain Rule Loss (Autoencoder_Pair) - complete for parameter combination %d" % i);
                         self.timer.end("Chain Rule Loss");
 
+
                     # ----------------------------------------------------------------------------
                     # Setup Rollout losses.
-
 
                     if(self.loss_weights['rollout'] > 0 and p_rollout > 0):
                         self.timer.start("Rollout Setup");
@@ -1050,6 +1053,13 @@ class BayesianGLaSDI:
                         LOGGER.debug("Rollout Setup (Autoencoder_Pair) - complete for parameter combination %d" % i);
                         self.timer.end("Rollout Setup");
 
+                # Store the total recon, consistency, and chain rule losses.
+                self._store_total_loss('recon', iter + 1, loss_recon.item());
+                self._store_total_loss('consistency_Z', iter + 1, loss_consistency_Z.item());
+                self._store_total_loss('consistency_U', iter + 1, loss_consistency_U.item());
+                self._store_total_loss('chain_rule_U', iter + 1, loss_chain_rule_U.item());
+                self._store_total_loss('chain_rule_Z', iter + 1, loss_chain_rule_Z.item());
+
 
                 # --------------------------------------------------------------------------------
                 # Latent Dynamics, Coefficient losses
@@ -1062,10 +1072,25 @@ class BayesianGLaSDI:
                 # called "coefs" of shape (n_train, n_coefs), where n_train = number of training 
                 # parameter parameters and n_coefs denotes the number of coefficients in the latent
                 # dynamics model. 
-                coefs, loss_LD, loss_coef       = LD.calibrate(Latent_States    = Latent_States, 
-                                                               t_Grid           = t_Train_device,
-                                                               input_coefs      = train_coefs_list,
-                                                               loss_type        = self.loss_types['LD']);
+                coefs, loss_LD_list, loss_coef_list   = self.latent_dynamics.calibrate(   
+                                                            Latent_States    = Latent_States, 
+                                                            t_Grid           = t_Train_device,
+                                                            input_coefs      = train_coefs_list,
+                                                            loss_type        = self.loss_types['LD']);
+
+                # Append the LD and coefficient losses to loss_by_param.
+                for i in range(n_train):
+                    param_tuple = tuple(self.param_space.train_space[i, :]);
+                    self._store_loss_by_param('LD', param_tuple, iter + 1, loss_LD_list[i].item());
+                    self._store_loss_by_param('coef', param_tuple, iter + 1, loss_coef_list[i].item());
+
+                # Compute the total loss.
+                loss_LD = torch.sum(torch.stack(loss_LD_list));
+                loss_coef = torch.sum(torch.stack(loss_coef_list));
+
+                # Append the total loss to loss_by_param.
+                self._store_total_loss('LD', iter + 1, loss_LD.item());
+                self._store_total_loss('coef', iter + 1, loss_coef.item());
 
                 LOGGER.debug("Calibration (Autoencoder_Pair) - complete");
                 self.timer.end("Calibration");
@@ -1147,33 +1172,38 @@ class BayesianGLaSDI:
                         
                         # Compute losses from normalized differences
                         if(self.loss_types['rollout'] == "MSE"):
-                            sample_rollout_ROM_D = torch.mean(diff_ROM_D**2);
-                            sample_rollout_ROM_V = torch.mean(diff_ROM_V**2);
-                            sample_rollout_FOM_D = torch.mean(diff_FOM_D**2);
-                            sample_rollout_FOM_V = torch.mean(diff_FOM_V**2);
+                            rollout_ROM_D_loss_ith_param = torch.mean(diff_ROM_D**2);
+                            rollout_ROM_V_loss_ith_param = torch.mean(diff_ROM_V**2);
+                            rollout_FOM_D_loss_ith_param = torch.mean(diff_FOM_D**2);
+                            rollout_FOM_V_loss_ith_param = torch.mean(diff_FOM_V**2);
                         elif(self.loss_types['rollout'] == "MAE"):
-                            sample_rollout_ROM_D = torch.mean(torch.abs(diff_ROM_D));
-                            sample_rollout_ROM_V = torch.mean(torch.abs(diff_ROM_V));
-                            sample_rollout_FOM_D = torch.mean(torch.abs(diff_FOM_D));
-                            sample_rollout_FOM_V = torch.mean(torch.abs(diff_FOM_V));
+                            rollout_ROM_D_loss_ith_param = torch.mean(torch.abs(diff_ROM_D));
+                            rollout_ROM_V_loss_ith_param = torch.mean(torch.abs(diff_ROM_V));
+                            rollout_FOM_D_loss_ith_param = torch.mean(torch.abs(diff_FOM_D));
+                            rollout_FOM_V_loss_ith_param = torch.mean(torch.abs(diff_FOM_V));
                         else:
-                            sample_rollout_ROM_D = torch.zeros(1, dtype=torch.float32, device=device);
-                            sample_rollout_ROM_V = torch.zeros(1, dtype=torch.float32, device=device);
-                            sample_rollout_FOM_D = torch.zeros(1, dtype=torch.float32, device=device);
-                            sample_rollout_FOM_V = torch.zeros(1, dtype=torch.float32, device=device);
+                            rollout_ROM_D_loss_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
+                            rollout_ROM_V_loss_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
+                            rollout_FOM_D_loss_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
+                            rollout_FOM_V_loss_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
                         
-                        loss_rollout_ROM_D  += sample_rollout_ROM_D;
-                        loss_rollout_ROM_V  += sample_rollout_ROM_V;
-                        loss_rollout_FOM_D  += sample_rollout_FOM_D;
-                        loss_rollout_FOM_V  += sample_rollout_FOM_V;
+                        loss_rollout_ROM_D  += rollout_ROM_D_loss_ith_param;
+                        loss_rollout_ROM_V  += rollout_ROM_V_loss_ith_param;
+                        loss_rollout_FOM_D  += rollout_FOM_D_loss_ith_param;
+                        loss_rollout_FOM_V  += rollout_FOM_V_loss_ith_param;
                         
                         # Store per-parameter-combination loss
                         param_tuple = tuple(self.param_space.train_space[i, :]);
-                        for loss_name, sample_loss in [('rollout_ROM_D', sample_rollout_ROM_D), 
-                                                        ('rollout_ROM_V', sample_rollout_ROM_V),
-                                                        ('rollout_FOM_D', sample_rollout_FOM_D),
-                                                        ('rollout_FOM_V', sample_rollout_FOM_V)]:
-                            self._store_loss_by_param(loss_name, param_tuple, iter + 1, sample_loss.item());
+                        self._store_loss_by_param('rollout_ROM_D', param_tuple, iter + 1, rollout_ROM_D_loss_ith_param.item());
+                        self._store_loss_by_param('rollout_ROM_V', param_tuple, iter + 1, rollout_ROM_V_loss_ith_param.item());
+                        self._store_loss_by_param('rollout_FOM_D', param_tuple, iter + 1, rollout_FOM_D_loss_ith_param.item());
+                        self._store_loss_by_param('rollout_FOM_V', param_tuple, iter + 1, rollout_FOM_V_loss_ith_param.item());
+
+                    # Store total rollout loss.
+                    self._store_total_loss('rollout_ROM_D', iter + 1, loss_rollout_ROM_D.item());
+                    self._store_total_loss('rollout_ROM_V', iter + 1, loss_rollout_ROM_V.item());
+                    self._store_total_loss('rollout_FOM_D', iter + 1, loss_rollout_FOM_D.item());
+                    self._store_total_loss('rollout_FOM_V', iter + 1, loss_rollout_FOM_V.item());
 
                     LOGGER.debug("Rollout Loss (Autoencoder_Pair) - complete");
                     self.timer.end("Rollout Loss");
@@ -1193,8 +1223,8 @@ class BayesianGLaSDI:
                         FOM_IC_i          : list[numpy.ndarray]       = self.physics.initial_condition(param_i);
                         
                         # Convert to tensors and reshape for encoding
-                        D_IC_i            : torch.Tensor              = torch.tensor(FOM_IC_i[0], dtype=torch.float32, device=device).reshape((1,) + FOM_IC_i[0].shape);
-                        V_IC_i            : torch.Tensor              = torch.tensor(FOM_IC_i[1], dtype=torch.float32, device=device).reshape((1,) + FOM_IC_i[1].shape);
+                        D_IC_i            : torch.Tensor              = torch.tensor(FOM_IC_i[0], dtype = torch.float32, device = device).reshape((1,) + FOM_IC_i[0].shape);
+                        V_IC_i            : torch.Tensor              = torch.tensor(FOM_IC_i[1], dtype = torch.float32, device = device).reshape((1,) + FOM_IC_i[1].shape);
                         
                         # Encode the FOM initial conditions
                         Z_D_IC_i, Z_V_IC_i = model_device.Encode(D_IC_i, V_IC_i);
@@ -1234,33 +1264,38 @@ class BayesianGLaSDI:
                         
                         # Compute losses from normalized differences
                         if(self.loss_types['IC_rollout'] == "MSE"):
-                            sample_IC_rollout_Z_D = torch.mean(diff_Z_D**2);
-                            sample_IC_rollout_Z_V = torch.mean(diff_Z_V**2);
-                            sample_IC_rollout_D = torch.mean(diff_D**2);
-                            sample_IC_rollout_V = torch.mean(diff_V**2);
+                            IC_rollout_Z_D_loss_ith_param = torch.mean(diff_Z_D**2);
+                            IC_rollout_Z_V_loss_ith_param = torch.mean(diff_Z_V**2);
+                            IC_rollout_D_loss_ith_param = torch.mean(diff_D**2);
+                            IC_rollout_V_loss_ith_param = torch.mean(diff_V**2);
                         elif(self.loss_types['IC_rollout'] == "MAE"):
-                            sample_IC_rollout_Z_D = torch.mean(torch.abs(diff_Z_D));
-                            sample_IC_rollout_Z_V = torch.mean(torch.abs(diff_Z_V));
-                            sample_IC_rollout_D = torch.mean(torch.abs(diff_D));
-                            sample_IC_rollout_V = torch.mean(torch.abs(diff_V));
+                            IC_rollout_Z_D_loss_ith_param = torch.mean(torch.abs(diff_Z_D));
+                            IC_rollout_Z_V_loss_ith_param = torch.mean(torch.abs(diff_Z_V));
+                            IC_rollout_D_loss_ith_param = torch.mean(torch.abs(diff_D));
+                            IC_rollout_V_loss_ith_param = torch.mean(torch.abs(diff_V));
                         else:
-                            sample_IC_rollout_Z_D = torch.zeros(1, dtype=torch.float32, device=device);
-                            sample_IC_rollout_Z_V = torch.zeros(1, dtype=torch.float32, device=device);
-                            sample_IC_rollout_D = torch.zeros(1, dtype=torch.float32, device=device);
-                            sample_IC_rollout_V = torch.zeros(1, dtype=torch.float32, device=device);
+                            IC_rollout_Z_D_loss_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
+                            IC_rollout_Z_V_loss_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
+                            IC_rollout_D_loss_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
+                            IC_rollout_V_loss_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
                         
-                        loss_IC_rollout_Z_D  += sample_IC_rollout_Z_D;
-                        loss_IC_rollout_Z_V  += sample_IC_rollout_Z_V;
-                        loss_IC_rollout_D    += sample_IC_rollout_D;
-                        loss_IC_rollout_V    += sample_IC_rollout_V;
+                        loss_IC_rollout_Z_D  += IC_rollout_Z_D_loss_ith_param;
+                        loss_IC_rollout_Z_V  += IC_rollout_Z_V_loss_ith_param;
+                        loss_IC_rollout_D    += IC_rollout_D_loss_ith_param;
+                        loss_IC_rollout_V    += IC_rollout_V_loss_ith_param;
                         
                         # Store per-parameter-combination loss
                         param_tuple = tuple(self.param_space.train_space[i, :]);
-                        for loss_name, sample_loss in [('IC_rollout_Z_D', sample_IC_rollout_Z_D),
-                                                        ('IC_rollout_Z_V', sample_IC_rollout_Z_V),
-                                                        ('IC_rollout_D', sample_IC_rollout_D),
-                                                        ('IC_rollout_V', sample_IC_rollout_V)]:
-                            self._store_loss_by_param(loss_name, param_tuple, iter + 1, sample_loss.item());
+                        self._store_loss_by_param('IC_rollout_Z_D', param_tuple, iter + 1, IC_rollout_Z_D_loss_ith_param.item());
+                        self._store_loss_by_param('IC_rollout_Z_V', param_tuple, iter + 1, IC_rollout_Z_V_loss_ith_param.item());
+                        self._store_loss_by_param('IC_rollout_D', param_tuple, iter + 1, IC_rollout_D_loss_ith_param.item());
+                        self._store_loss_by_param('IC_rollout_V', param_tuple, iter + 1, IC_rollout_V_loss_ith_param.item());
+
+                    # Store total IC rollout loss.
+                    self._store_total_loss('IC_rollout_Z_D', iter + 1, loss_IC_rollout_Z_D.item());
+                    self._store_total_loss('IC_rollout_Z_V', iter + 1, loss_IC_rollout_Z_V.item());
+                    self._store_total_loss('IC_rollout_D', iter + 1, loss_IC_rollout_D.item());
+                    self._store_total_loss('IC_rollout_V', iter + 1, loss_IC_rollout_V.item());
 
                     LOGGER.debug("IC Rollout Loss (Autoencoder_Pair) - complete");
                     self.timer.end("IC Rollout Loss");
@@ -1284,6 +1319,7 @@ class BayesianGLaSDI:
                         self.loss_weights['IC_rollout']     * loss_IC_rollout +
                         self.loss_weights['LD']             * loss_LD + 
                         self.loss_weights['coef']           * loss_coef);
+                self._store_total_loss('total', iter + 1, loss.item());
                 LOGGER.debug("Total loss (Autoencoder_Pair) computed: %f" % loss.item());
 
             # Convert coefs to numpy and find the maximum element.
@@ -1370,95 +1406,28 @@ class BayesianGLaSDI:
 
             self.timer.end("Report");
             
-
-
-            # -------------------------------------------------------------------------------------
-            # Store loss history 
-            
-            iterations.append(iter + 1);
-            total_loss.append(loss.item());
-            
-            # Store losses that are not in loss_by_param
-            LD_loss.append(loss_LD.item() if self.loss_weights['LD'] > 0 else 0.0);
-            coef_loss.append(loss_coef.item() if self.loss_weights['coef'] > 0 else 0.0);
-            
-            # Store total losses (summed across all parameter combinations) in loss_by_param
-            # Component losses are already stored per-parameter during loss computation
-            if not is_autoencoder_pair:
-                total_losses = {
-                    'recon': loss_recon.item() if self.loss_weights['recon'] > 0 else 0.0,
-                    'rollout_ROM': loss_rollout_ROM.item() if self.loss_weights['rollout'] > 0 and p_rollout > 0 else 0.0,
-                    'rollout_FOM': loss_rollout_FOM.item() if self.loss_weights['rollout'] > 0 and p_rollout > 0 else 0.0,
-                    'IC_rollout_ROM': loss_IC_rollout_ROM.item() if self.loss_weights['IC_rollout'] > 0 and p_IC_rollout > 0 else 0.0,
-                    'IC_rollout_FOM': loss_IC_rollout_FOM.item() if self.loss_weights['IC_rollout'] > 0 and p_IC_rollout > 0 else 0.0,
-                };
-            else:  # is_autoencoder_pair
-                total_losses = {
-                    'recon_D': loss_recon_D.item() if self.loss_weights['recon'] > 0 else 0.0,
-                    'recon_V': loss_recon_V.item() if self.loss_weights['recon'] > 0 else 0.0,
-                    'consistency_Z': loss_consistency_Z.item() if self.loss_weights['consistency'] > 0 else 0.0,
-                    'consistency_U': loss_consistency_U.item() if self.loss_weights['consistency'] > 0 else 0.0,
-                    'chain_rule_U': loss_chain_rule_U.item() if self.loss_weights['chain_rule'] > 0 else 0.0,
-                    'chain_rule_Z': loss_chain_rule_Z.item() if self.loss_weights['chain_rule'] > 0 else 0.0,
-                    'rollout_ROM_D': loss_rollout_ROM_D.item() if self.loss_weights['rollout'] > 0 and p_rollout > 0 else 0.0,
-                    'rollout_ROM_V': loss_rollout_ROM_V.item() if self.loss_weights['rollout'] > 0 and p_rollout > 0 else 0.0,
-                    'rollout_FOM_D': loss_rollout_FOM_D.item() if self.loss_weights['rollout'] > 0 and p_rollout > 0 else 0.0,
-                    'rollout_FOM_V': loss_rollout_FOM_V.item() if self.loss_weights['rollout'] > 0 and p_rollout > 0 else 0.0,
-                    'IC_rollout_Z_D': loss_IC_rollout_Z_D.item() if self.loss_weights['IC_rollout'] > 0 and p_IC_rollout > 0 else 0.0,
-                    'IC_rollout_Z_V': loss_IC_rollout_Z_V.item() if self.loss_weights['IC_rollout'] > 0 and p_IC_rollout > 0 else 0.0,
-                    'IC_rollout_D': loss_IC_rollout_D.item() if self.loss_weights['IC_rollout'] > 0 and p_IC_rollout > 0 else 0.0,
-                    'IC_rollout_V': loss_IC_rollout_V.item() if self.loss_weights['IC_rollout'] > 0 and p_IC_rollout > 0 else 0.0,
-                };
-            
-            for loss_name, total_loss_val in total_losses.items():
-                if loss_name in self.loss_by_param:
-                    self._store_total_loss(loss_name, iter + 1, total_loss_val);
-            
             LOGGER.debug("Completed training iteration %d/%d" % (iter + 1, next_iter));
             self.timer.end("train_step");
         
         # We are ready to wrap up the training procedure.
         self.timer.start("finalize");
         
-        # Save loss history to file after training is complete
-        # Component losses are stored in loss_by_param (saved separately as pickle)
-        # Only save non-duplicate information here
-        import time;
-        import pickle;
-        base_filename       : str   = self.config['physics']['type'];
-        loss_by_param_file  : str   = os.path.join(self.path_results, base_filename + '_loss_by_param.pkl');
-        loss_history_file   : str   = os.path.join(self.path_results, base_filename + '_loss_history.npz');
 
-        # Save per-parameter-combination loss tracking
-        # Only save losses relevant to the current model type
-        filtered_loss_by_param = {};
-        if not is_autoencoder_pair:
-            # Autoencoder losses
-            for loss_name in ['recon', 'rollout_ROM', 'rollout_FOM', 'IC_rollout_ROM', 'IC_rollout_FOM']:
-                if loss_name in self.loss_by_param:
-                    filtered_loss_by_param[loss_name] = self.loss_by_param[loss_name];
-        else:  # is_autoencoder_pair
-            # Autoencoder_Pair losses
-            for loss_name in ['recon_D', 'recon_V', 'consistency_Z', 'consistency_U', 
-                              'chain_rule_U', 'chain_rule_Z',
-                              'rollout_ROM_D', 'rollout_ROM_V', 'rollout_FOM_D', 'rollout_FOM_V',
-                              'IC_rollout_Z_D', 'IC_rollout_Z_V', 'IC_rollout_D', 'IC_rollout_V']:
-                if loss_name in self.loss_by_param:
-                    filtered_loss_by_param[loss_name] = self.loss_by_param[loss_name];
+        # -------------------------------------------------------------------------------------
+        # Save loss history to file after training is complete
+        # -------------------------------------------------------------------------------------
         
-        with open(loss_by_param_file, 'wb') as f:
-            pickle.dump(filtered_loss_by_param, f);
+        # Component losses are stored in loss_by_param (saved separately as pickle)
+
+        # Keep filename consistent with the one used for restart/load above.
+        base_filename       : str   = self.config['physics']['type'];
+        loss_by_param_path  : str   = os.path.join(self.path_results, base_filename + '_loss_by_param.pkl');
+
+        # Save self.loss_by_param to file.     
+        with open(loss_by_param_path, 'wb') as f:
+            pickle.dump(self.loss_by_param, f);
         
-        save_dict = {
-            'iterations'    : numpy.array(iterations),
-            'total_loss'    : numpy.array(total_loss),
-            'LD_loss'       : numpy.array(LD_loss),
-            'coef_loss'     : numpy.array(coef_loss),
-        };
-        numpy.savez(loss_history_file, **save_dict);
-        
-        LOGGER.info("Saved loss history to %s" % loss_history_file);
-        LOGGER.info("Saved per-parameter loss tracking to %s" % loss_by_param_file);
+        LOGGER.info("Saved per-parameter loss tracking to %s" % loss_by_param_path);
 
         # Now that we have completed another round of training, update the restart iteration.
         self.restart_iter += self.n_iter;
@@ -1527,7 +1496,7 @@ class BayesianGLaSDI:
         t: : list[torch.Tensor], len = n_param
             i'th element is a 1d torch.Tensor of shape (n_t_i) whose j'th element specifies the 
             time of the j'th frame in the FOM solution for the i'th combination of parameter 
-            values.
+            values. We assume the values in the j'th element are in increasing order and unique.
 
         U : list[list[torch.Tensor]], len = n_param
             i'th element is a n_IC element list whose j'th element is a torch.Tensor of shape 
@@ -1593,7 +1562,7 @@ class BayesianGLaSDI:
         # Other setup.        
         t_Grid_rollout                  : list[torch.Tensor]        = [];   # n_train element list whose i'th element is 1d array of times for rollout solve.
         n_rollout_ICs                   : list[int]                 = [];   # n_train element list whose i'th element specifies how many frames we should simulate forward.
-        U_Target_Rollout_Trajectory   : list[list[torch.Tensor]]  = [];   # n_train element list whose i'th element is n_IC element list whose j'th element is a torch.Tensor of shape (n_rollout_ICs[i], n_rollout_steps[i], physics.Frame_Shape) holding target trajectories when we rollout the IC's for the j'th time derivative/i'th combination of parameters. 
+        U_Target_Rollout_Trajectory     : list[list[torch.Tensor]]  = [];   # n_train element list whose i'th element is n_IC element list whose j'th element is a torch.Tensor of shape (n_rollout_ICs[i], n_rollout_steps[i], physics.Frame_Shape) holding target trajectories when we rollout the IC's for the j'th time derivative/i'th combination of parameters. 
 
 
         # -----------------------------------------------------------------------------------------
@@ -1626,7 +1595,8 @@ class BayesianGLaSDI:
             # Now define the rollout time grid for the i'th combination of parameter values.
             t_Grid_rollout.append(torch.linspace(start = t_0_i, end = t_rollout_final_i, steps = num_before_rollout_final_i));
 
-            # Now figure out how many times occur less than t_rollout_final_i from t_final_i.
+            # Now figure out how many times occur less than t_rollout_i from t_final_i. If 
+            # a time value satisifes this, then the corresponding frame is rollable.
             n_rollout_ICs_i : int = 0;
             for j in range(n_t_i):
                 if(t_i[j] + t_rollout_i > t_final_i):
@@ -1661,43 +1631,10 @@ class BayesianGLaSDI:
                 # use the i'th combination of parameter values.
                 U_Train_ij  : numpy.ndarray = U_Train_i[j].detach().cpu().numpy();  # shape = (n_t(i), Physics.Frame_Shape)
 
-                # `make_interp_spline` requires:
-                # - x strictly increasing (no duplicates)
-                # - len(x) > k
-                # Adaptive time stepping (or I/O artifacts) can violate this, so we sanitize x and
-                # fall back to a safe linear interpolator if needed.
-                t_unique, unique_idx = numpy.unique(t_Train_i, return_index=True);
-                y_unique = U_Train_ij[unique_idx, ...];
-                if t_unique.size < 2:
-                    raise RuntimeError("Not enough unique time points for rollout interpolation (n_unique=%d)" % t_unique.size);
-
-                # Ensure increasing order (numpy.unique returns sorted t_unique, but indices are to
-                # the original unsorted array; re-order y_unique to match sorted t_unique).
-                sort_idx = numpy.argsort(t_unique);
-                t_unique = t_unique[sort_idx];
-                y_unique = y_unique[sort_idx, ...];
-
-                # Choose spline order that is feasible; otherwise use linear interpolation.
-                k_eff = min(int(self.rollout_spline_order), int(t_unique.size - 1));
-                try:
-                    if k_eff >= 2:
-                        U_Train_ij_interp = interpolate.make_interp_spline(x=t_unique, y=y_unique, k=k_eff);
-                        interp_kind = "spline(k=%d)" % k_eff;
-                    else:
-                        raise ValueError("k too small for spline")
-                except Exception as e:
-                    # Linear fallback (still fine since our query times are within bounds).
-                    U_Train_ij_interp = interpolate.interp1d(
-                        x=t_unique,
-                        y=y_unique,
-                        kind="linear",
-                        axis=0,
-                        bounds_error=False,
-                        fill_value=(y_unique[0, ...], y_unique[-1, ...]),
-                        assume_sorted=True,
-                    );
-                    interp_kind = "linear"
-                    LOGGER.debug("Rollout interpolation fallback (%s) for param %d, IC-deriv %d: %s" % (interp_kind, i, j, str(e)));
+                # Interpolate the time series for the j'th derivative of the FOM solution when we 
+                # use the i'th combination of parameter values.
+                U_Train_ij          : numpy.ndarray = U_Train_i[j].detach().numpy();        # shape = (n_t(i), Physics.Frame_Shape)
+                U_Train_ij_interp                   = interpolate.make_interp_spline(x = t_Train_i, y = U_Train_ij, k = self.rollout_spline_order);
 
                 U_Target_Rollout_Trajectory_ij : numpy.ndarray = numpy.empty((n_rollout_ICs_i, n_rollout_steps_i) + tuple(self.physics.Frame_Shape), dtype = numpy.float32);
                 for k in range(n_rollout_ICs_i):
@@ -1709,8 +1646,6 @@ class BayesianGLaSDI:
                     target_times = numpy.clip(target_times, t_unique[0], t_unique[-1])
                     U_Target_Rollout_Trajectory_ij[k, ...] = U_Train_ij_interp(target_times).astype(numpy.float32, copy=False);
 
-                # Evaluate the interpolation at the final rollout times for the i'th combination of
-                # parameter values.
                 U_Target_Rollout_Trajectory_i.append(torch.tensor(U_Target_Rollout_Trajectory_ij, dtype = torch.float32, device = self.device));
             U_Target_Rollout_Trajectory.append(U_Target_Rollout_Trajectory_i);
     
@@ -1736,7 +1671,7 @@ class BayesianGLaSDI:
         t : list[torch.Tensor], len = n_param
             i'th element is a 1d torch.Tensor of shape (n_t_i) whose j'th element specifies the 
             time of the j'th frame in the FOM solution for the i'th combination of parameter 
-            values.
+            values. We assume the values in the j'th element are in increasing order and unique.
 
         p_IC_rollout : float
             A number between 0 and 1 specifying the ratio of the IC rollout time for a particular 
@@ -1946,7 +1881,7 @@ class BayesianGLaSDI:
             for j in range(self.n_IC):
                 # Each candidate can have a different number of time samples (adaptive stepping,
                 # truncated outputs, etc.), so allocate per-candidate.
-                LatentStates_i.append(numpy.empty([self.n_samples, len(t_Candidates[i]), n_z], dtype=numpy.float32));
+                LatentStates_i.append(numpy.empty([self.n_samples, len(t_Candidates[i]), n_z], dtype = numpy.float32));
             LatentStates.append(LatentStates_i);
         
         for i in range(n_candidates):
