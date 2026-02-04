@@ -6,9 +6,11 @@ import  numpy;
 import  warnings;
 from    sklearn.gaussian_process.kernels    import  ConstantKernel, RBF;
 from    sklearn.gaussian_process            import  GaussianProcessRegressor;
-from    sklearn.preprocessing               import  StandardScaler;
 from    sklearn.exceptions                  import  ConvergenceWarning;
 
+# Set up logging.
+import  logging;
+LOGGER = logging.getLogger(__name__);
 
 
 
@@ -62,31 +64,41 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
     assert X.shape[0]           == Y.shape[0],  "X.shape = %s, Y.shape = %s" % (str(X.shape), str(Y.shape));
 
     # Setup.
-    n_GPs   : int   = Y.shape[1];
+    n_GPs       : int   = Y.shape[1];
+    n_inputs    : int   = X.shape[1];
 
     # Scale inputs to improve conditioning of kernel hyperparameter optimization.
     # This is especially important when parameters have very different magnitudes
     # (e.g., ~1e-9 and ~1e-4), which can trigger many ConvergenceWarnings.
-    x_scaler = StandardScaler();
-    Xs: numpy.ndarray = x_scaler.fit_transform(X);
-
-    # Transpose Y so that each row corresponds to a particular coefficient. This allows us to 
-    # iterate over the GPs by iterating through the rows of Y.
-    Y = Y.T;
+    x_mean  : numpy.ndarray = numpy.mean(X, axis = 0);
+    x_std   : numpy.ndarray = numpy.std(X, axis = 0, ddof = 1);  # Use unbiased estimator
+    LOGGER.debug(f"Input scaling: X_mean = {x_mean}, X_std = {x_std}");
+    
+    # Protect against near-zero std in any input dimension
+    for idx in range(n_inputs):
+        if x_std[idx] < 1e-8:
+            LOGGER.warning(f"Input dimension {idx}: x_std = {x_std[idx]:.2e} is near-zero. Using x_std[{idx}] = 1.0.");
+            x_std[idx] = 1.0;
+    
+    Xs: numpy.ndarray = (X - x_mean) / x_std;
 
     # Initialize a list to hold the trained GP objects.
     gp_list : list[GaussianProcessRegressor] = [];
 
     # Fit the GPs
     for i in range(n_GPs):
-        targets_i   : numpy.ndarray     = Y[i, :];
+        # Fetch the i'th column of Y (target values for the i'th GP).
+        targets_i   : numpy.ndarray     = Y[:, i];
 
         # Scale targets per coefficient (each GP has its own target distribution).
-        y_mean: float = float(numpy.mean(targets_i));
-        y_std: float  = float(numpy.std(targets_i));
-        if y_std <= 0.0:
-            y_std = 1.0;
-        targets_i_s: numpy.ndarray = (targets_i - y_mean) / y_std;
+        ith_mean: float = float(numpy.mean(targets_i));
+        ith_std: float  = float(numpy.std(targets_i, ddof = 1));  # Use unbiased estimator
+        # Protect against both zero and near-zero std
+        LOGGER.debug(f"GP {i}: ith_mean = {ith_mean:.6e}, ith_std = {ith_std:.6e}, targets_i range = [{numpy.min(targets_i):.6e}, {numpy.max(targets_i):.6e}]");
+        if ith_std < 1e-8:  # Threshold for numerical safety
+            LOGGER.warning(f"GP coefficient {i}: ith_std = {ith_std:.2e} is near-zero. Using ith_std=1.0. This suggests latent dynamics are nearly constant!");
+            ith_std = 1.0;
+        targets_i_s: numpy.ndarray = (targets_i - ith_mean) / ith_std;
 
         # Make the kernel.
         # kernel = ConstantKernel() * Matern(length_scale_bounds = (0.01, 1e5), nu = 1.5)
@@ -98,20 +110,23 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
         # NOTE: n_restarts_optimizer can make fitting extremely slow and spammy on some HPC setups,
         # especially when length_scale hits its bound (ConvergenceWarning). We keep this small to
         # avoid the appearance of "hanging" during greedy sampling.
-        gp      = GaussianProcessRegressor(kernel = kernel, n_restarts_optimizer = 1, random_state = 1);
+        ith_gp      = GaussianProcessRegressor(kernel = kernel, n_restarts_optimizer = 1, random_state = 1);
 
-        # Fit it to the data (train), then add it to the list of trained GPs
+        # Fit it to the data (train).
         with warnings.catch_warnings():
             # This warning is common (length_scale near bound) and can print hundreds of times
             # across many coefficients/restarts. It is not fatal, so silence it.
             warnings.filterwarnings("ignore", category = ConvergenceWarning);
-            gp.fit(Xs, targets_i_s);
+            ith_gp.fit(Xs, targets_i_s);
 
         # Attach scaling so eval_gp/sample_coefs can use physical units.
-        gp._x_scaler = x_scaler;  # type: ignore[attr-defined]
-        gp._y_mean   = y_mean;    # type: ignore[attr-defined]
-        gp._y_std    = y_std;     # type: ignore[attr-defined]
-        gp_list.append(gp);
+        ith_gp._x_mean = x_mean;
+        ith_gp._x_std  = x_std;
+        ith_gp._y_mean = ith_mean;
+        ith_gp._y_std  = ith_std;
+        
+        # Add the trained GP to the list.
+        gp_list.append(ith_gp);
 
     # All done!
     return gp_list;
@@ -130,9 +145,10 @@ def eval_gp(gp_list : list[GaussianProcessRegressor], Inputs : numpy.ndarray) ->
 
     gp_list : list[GaussianProcessRegressor], len = n_GPs
        a list of trained GP regressor objects. The i'th element of this list is a GP regressor 
-       object whose domain includes the rows of Inputs.
+       object whose domain includes the rows of Inputs. These GPs should have a few additional 
+       attributes: _x_mean, _x_std, _y_mean, _y_std.
     
-    Inputs: numpy.ndarray, shape = (n_inputs, input_dim)
+    Inputs : numpy.ndarray, shape = (n_inputs, input_dim)
         We evaluate each Gaussian Process in gp_list at each row of Inputs. Thus, the i'th row
         represents the i'th input to the Gaussian Processes. Here, input_dim is the dimensionality 
         of the input space for the GPs) and n_inputs is the number of inputs at which we want to 
@@ -168,20 +184,30 @@ def eval_gp(gp_list : list[GaussianProcessRegressor], Inputs : numpy.ndarray) ->
     # Find the means and SDs of the posterior distribution for each GP evaluated at the
     # various inputs.
     for i in range(n_GPs):
-        gp = gp_list[i];
-        Xq: numpy.ndarray = Inputs;
-        if hasattr(gp, "_x_scaler"):
-            Xq = gp._x_scaler.transform(Inputs);  # type: ignore[attr-defined]
+        ith_gp = gp_list[i];
+        
+        # Scale inputs to match training data normalization.
+        if hasattr(ith_gp, "_x_mean") and hasattr(ith_gp, "_x_std"):
+            Scaled_Inputs = (Inputs - ith_gp._x_mean) / ith_gp._x_std;
+        else:
+            # No scaling attached; use inputs as-is (shouldn't happen if fit_gps was used).
+            LOGGER.warning(f"GP {i} missing _x_mean/_x_std attributes. Using unscaled inputs.");
+            Scaled_Inputs = Inputs; 
 
-        m_i, s_i = gp.predict(Xq, return_std = True);
+        ith_m_scaled, ith_s_scaled = ith_gp.predict(Scaled_Inputs, return_std = True);
 
-        # Undo target scaling if present.
-        if hasattr(gp, "_y_mean") and hasattr(gp, "_y_std"):
-            m_i = m_i * gp._y_std + gp._y_mean;  # type: ignore[attr-defined]
-            s_i = s_i * gp._y_std;               # type: ignore[attr-defined]
+        # Undo target scaling to return predictions in physical units.
+        if hasattr(ith_gp, "_y_mean") and hasattr(ith_gp, "_y_std"):
+            ith_m = ith_m_scaled * ith_gp._y_std + ith_gp._y_mean; 
+            ith_s = ith_s_scaled * ith_gp._y_std;
+        else:
+            # No scaling attached; use predictions as-is (shouldn't happen if fit_gps was used).
+            LOGGER.warning(f"GP {i} missing _y_mean/_y_std attributes. Using unscaled predictions.");
+            ith_m = ith_m_scaled;
+            ith_s = ith_s_scaled;               
 
-        pred_mean[:, i] = m_i;
-        pred_std[:, i]  = s_i;
+        pred_mean[:, i] = ith_m;
+        pred_std[:, i]  = ith_s;
 
     # All done!
     return pred_mean, pred_std;
@@ -234,7 +260,7 @@ def sample_coefs(   gp_list     : list[GaussianProcessRegressor],
 
     # Evaluate the predicted mean and std at the Input.
     pred_mean, pred_std = eval_gp(gp_list, Input.reshape(1, -1));
-    pred_mean   = pred_mean[0];
+    pred_mean   = pred_mean[0]; # Before reshape, pred_mean has shape (1, n_GPs). After reshape, it has shape (n_GPs,).
     pred_std    = pred_std[0];
 
     # Cycle through the samples and coefficients. For each sample of the k'th coefficient, we draw
