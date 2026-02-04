@@ -701,13 +701,17 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
             U_Pred_i        : numpy.ndarray     = numpy.empty([n_t_i, n_samples] + FOM_Frame_Shape, dtype = numpy.float32);
 
             # Decode the latent trajectory for each sample.
+            # CRITICAL: Must denormalize EACH sample before computing STD!
             for j in range(n_samples):
                 U_Pred_ij   : numpy.ndarray     = model.Decode(torch.Tensor(Zis_samples[i][0][:, j, :])).detach().numpy();
+                # Denormalize this sample if normalization is enabled
+                if use_denorm:
+                    U_Pred_ij = trainer.denormalize_np(U_Pred_ij, 0);
                 U_Pred_i[:, j, ...]             = U_Pred_ij;
         
-            # Compute the STD across the sample axis.
+            # Compute the STD across the sample axis (now in physical units if denormalized).
             STD_i0 = numpy.std(U_Pred_i, axis = 1);
-            STD[i][0]       = trainer.scale_std_np(STD_i0, 0) if use_denorm else STD_i0;
+            STD[i][0]       = STD_i0;  # Already in correct units
             max_STD[i, 0]   = STD[i][0].max();
         
     
@@ -757,16 +761,23 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
             V_Pred_i        : numpy.ndarray     = numpy.empty([n_t_i, n_samples] + FOM_Frame_Shape, dtype = numpy.float32);
 
             # Decode the latent trajectory for each sample.
+            # CRITICAL: Must denormalize EACH sample before computing STD!
             for j in range(n_samples):
                 U_Pred_ij   : list[torch.Tensor]    = model.Decode(torch.Tensor(Zis_samples[i][0][:, j, :]), torch.Tensor(Zis_samples[i][1][:, j, :]));
-                D_Pred_i[:, j, ...]                 = U_Pred_ij[0].detach().numpy();
-                V_Pred_i[:, j, ...]                 = U_Pred_ij[1].detach().numpy();
+                D_Pred_ij   : numpy.ndarray         = U_Pred_ij[0].detach().numpy();
+                V_Pred_ij   : numpy.ndarray         = U_Pred_ij[1].detach().numpy();
+                # Denormalize each sample if normalization is enabled
+                if use_denorm:
+                    D_Pred_ij = trainer.denormalize_np(D_Pred_ij, 0);
+                    V_Pred_ij = trainer.denormalize_np(V_Pred_ij, 1);
+                D_Pred_i[:, j, ...]                 = D_Pred_ij;
+                V_Pred_i[:, j, ...]                 = V_Pred_ij;
 
-            # Compute the STD across the sample axis.
+            # Compute the STD across the sample axis (now in physical units if denormalized).
             STD_D = numpy.std(D_Pred_i, axis = 1);
             STD_V = numpy.std(V_Pred_i, axis = 1);
-            STD[i][0]       = trainer.scale_std_np(STD_D, 0) if use_denorm else STD_D;
-            STD[i][1]       = trainer.scale_std_np(STD_V, 1) if use_denorm else STD_V;
+            STD[i][0]       = STD_D;  # Already in correct units
+            STD[i][1]       = STD_V;  # Already in correct units
 
             max_STD[i, 0]   = STD[i][0].max();  
             max_STD[i, 1]   = STD[i][1].max();  

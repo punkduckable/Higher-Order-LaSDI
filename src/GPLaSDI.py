@@ -624,6 +624,15 @@ class BayesianGLaSDI:
                     # parameter values. Here, n_t(i) is the number of time steps in the solution 
                     # for the i'th combination of parameter values. 
                     Z_i         : torch.Tensor  = model_device.Encode(U_i);
+                    
+                    # Log latent state statistics to diagnose potential autoencoder collapse
+                    if iter % 100 == 0 or iter == self.restart_iter:  # Log every 100 iters and first iter
+                        LOGGER.info("Epoch %d, Param %d: Z shape=%s, min=%.6e, max=%.6e, mean=%.6e, std=%.6e, device=%s" % (
+                            iter + 1, i, str(Z_i.shape), 
+                            float(Z_i.min().item()), float(Z_i.max().item()), 
+                            float(Z_i.mean().item()), float(Z_i.std().item()),
+                            str(Z_i.device)));
+                    
                     Latent_States.append([Z_i]);
                     U_Pred_i    : torch.Tensor  = model_device.Decode(Z_i);
 
@@ -730,6 +739,14 @@ class BayesianGLaSDI:
                                                                 t_Grid           = t_Train_device,
                                                                 input_coefs      = train_coefs_list,
                                                                 loss_type        = self.loss_types['LD']);
+
+                # Log coefficient statistics to diagnose constant dynamics issue
+                if iter % 100 == 0 or iter == self.restart_iter:  # Log every 100 iters and first iter
+                    LOGGER.info("Epoch %d: Coefs shape=%s, min=%.6e, max=%.6e, mean=%.6e, std=%.6e, abs_mean=%.6e" % (
+                        iter + 1, str(coefs.shape),
+                        float(coefs.min().item()), float(coefs.max().item()),
+                        float(coefs.mean().item()), float(coefs.std().item()),
+                        float(torch.abs(coefs).mean().item())));
 
                 # Append the LD and coefficint losses to loss_by_param.
                 for i in range(n_train):
@@ -978,6 +995,20 @@ class BayesianGLaSDI:
                     Z_i     : list[torch.Tensor]        = list(model_device.Encode(*U_Train_device[i]));
                     Z_D_i   : torch.Tensor              = Z_i[0];       # shape (n_t(i), n_z)
                     Z_V_i   : torch.Tensor              = Z_i[1];       # shape (n_t(i), n_z)
+                    
+                    # Log latent state statistics to diagnose potential autoencoder collapse
+                    if iter % 100 == 0 or iter == self.restart_iter:  # Log every 100 iters and first iter
+                        LOGGER.info("Epoch %d, Param %d: Z_D shape=%s, min=%.6e, max=%.6e, mean=%.6e, std=%.6e, device=%s" % (
+                            iter + 1, i, str(Z_D_i.shape), 
+                            float(Z_D_i.min().item()), float(Z_D_i.max().item()), 
+                            float(Z_D_i.mean().item()), float(Z_D_i.std().item()),
+                            str(Z_D_i.device)));
+                        LOGGER.info("Epoch %d, Param %d: Z_V shape=%s, min=%.6e, max=%.6e, mean=%.6e, std=%.6e, device=%s" % (
+                            iter + 1, i, str(Z_V_i.shape), 
+                            float(Z_V_i.min().item()), float(Z_V_i.max().item()), 
+                            float(Z_V_i.mean().item()), float(Z_V_i.std().item()),
+                            str(Z_V_i.device)));
+                    
                     Latent_States.append(Z_i);
 
                     U_Pred_i    : list[torch.Tensor]    = list(model_device.Decode(*Z_i));
@@ -1197,6 +1228,14 @@ class BayesianGLaSDI:
                                                             t_Grid           = t_Train_device,
                                                             input_coefs      = train_coefs_list,
                                                             loss_type        = self.loss_types['LD']);
+
+                # Log coefficient statistics to diagnose constant dynamics issue
+                if iter % 100 == 0 or iter == self.restart_iter:  # Log every 100 iters and first iter
+                    LOGGER.info("Epoch %d: Coefs shape=%s, min=%.6e, max=%.6e, mean=%.6e, std=%.6e, abs_mean=%.6e" % (
+                        iter + 1, str(coefs.shape),
+                        float(coefs.min().item()), float(coefs.max().item()),
+                        float(coefs.mean().item()), float(coefs.std().item()),
+                        float(torch.abs(coefs).mean().item())));
 
                 # Append the LD and coefficient losses to loss_by_param.
                 for i in range(n_train):
@@ -1510,22 +1549,16 @@ class BayesianGLaSDI:
                 info_str += ", max|c|: %.3f" % max_coef;
                 LOGGER.info(info_str);
 
-            # If there are fewer than 6 training examples, report the set of parameter combinations.
-            if n_train < 6:
-                param_string : str  = 'Param: ' + str(numpy.round(self.param_space.train_space[0, :], 4));
-                for i in range(1, n_train - 1):
-                    param_string    = param_string + ', ' + str(numpy.round(self.param_space.train_space[i, :], 4));
-                param_string        = param_string + ', ' + str(numpy.round(self.param_space.train_space[-1, :], 4));
-
-                LOGGER.debug(param_string);
-            # Otherwise, report the final 6 parameter combinations.
-            else:
-                param_string : str  = 'Param: ...';
-                for i in range(5):
-                    param_string    = param_string + ', ' + str(numpy.round(self.param_space.train_space[-6 + i, :], 4));
-                param_string        = param_string + ', ' + str(numpy.round(self.param_space.train_space[-1, :], 4));
+            # Report the set of parameter combinations using scientific notation.
+            def format_param(p: numpy.ndarray) -> str:
+                # Format parameter array in scientific notation.
+                return '[' + ', '.join(['%.2e' % val for val in p]) + ']';
             
-                LOGGER.debug(param_string);
+            param_string : str  = 'Param: ' + format_param(self.param_space.train_space[0, :]);
+            for i in range(1, n_train):
+                param_string    = param_string + ', ' + format_param(self.param_space.train_space[i, :]);
+
+            LOGGER.debug(param_string);
 
             self.timer.end("Report");
             
