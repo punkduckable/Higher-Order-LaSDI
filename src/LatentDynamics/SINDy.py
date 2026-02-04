@@ -250,9 +250,20 @@ class SINDy(LatentDynamics):
         else:
             dZdt                    = Derivative1_Order2_NonUniform(Z, t_Grid = t_Grid0);
 
+        # Log diagnostics to check for time scaling or derivative issues
+        LOGGER.debug("SINDy calibration: Z shape=%s, min=%.6e, max=%.6e, std=%.6e" % (
+            str(Z.shape), float(Z.min().item()), float(Z.max().item()), float(Z.std().item())));
+        LOGGER.debug("SINDy calibration: dZ/dt min=%.6e, max=%.6e, mean=%.6e, std=%.6e" % (
+            float(dZdt.min().item()), float(dZdt.max().item()), 
+            float(dZdt.mean().item()), float(dZdt.std().item())));
+        LOGGER.debug("SINDy calibration: t_Grid min=%.6e, max=%.6e, range=%.6e, mean_dt=%.6e" % (
+            float(t_Grid0.min().item()), float(t_Grid0.max().item()),
+            float((t_Grid0.max() - t_Grid0.min()).item()),
+            float((t_Grid0[1:] - t_Grid0[:-1]).mean().item()) if n_t > 1 else 0.0));
+
         # Concatenate a column of ones. This will correspond to a constant term in the latent 
-        # dynamics.
-        Z_1     : torch.Tensor  = torch.cat([torch.ones(n_t, 1), Z], dim = 1)
+        # dynamics. Ensure the ones tensor is on the same device as Z.
+        Z_1     : torch.Tensor  = torch.cat([torch.ones(n_t, 1, device = Z.device, dtype =Z .dtype), Z], dim = 1);
         
         if(len(input_coefs) == 0):
             # For each j, solve the least squares problem 
@@ -262,8 +273,13 @@ class SINDy(LatentDynamics):
             # j'th column holds the results for the j'th column of dZdt. Thus, coefs is a 2d tensor
             # with shape (Nl, n_z).
             coefs                   = torch.linalg.lstsq(Z_1, dZdt).solution
+            LOGGER.debug("SINDy calibration: Learned coefs min=%.6e, max=%.6e, mean=%.6e, abs_mean=%.6e" % (
+                float(coefs.min().item()), float(coefs.max().item()),
+                float(coefs.mean().item()), float(torch.abs(coefs).mean().item())));
         else:
             coefs   : torch.Tensor  = input_coefs[0].reshape(self.n_z + 1, self.n_z);
+            LOGGER.debug("SINDy calibration: Using input coefs min=%.6e, max=%.6e, mean=%.6e" % (
+                float(coefs.min().item()), float(coefs.max().item()), float(coefs.mean().item())));
 
         # Compute the losses.
         if(loss_type == "MSE"):
