@@ -30,6 +30,7 @@ def _scalar_anim(   data        : numpy.ndarray,
                     save_dir    : Path          = Path("."),
                     fps         : int           = 30,
                     dpi         : int           = 150,
+                    alpha       : float         = 0.5,
                     cmap        : str           = "viridis") -> Path:  # data shape (N_t, N_x)
     """
     Create an MP4 showing the evolution of a **scalar** field sampled on a point cloud in 
@@ -65,6 +66,9 @@ def _scalar_anim(   data        : numpy.ndarray,
     
     dpi : int, default 150
         Dots-per-inch for the figure canvas.
+    
+    alpha : float, default 0.5
+        Transparency of the markers.
     
     cmap : str, default ``'viridis'``
         Matplotlib colour-map used to encode the scalar amplitude.
@@ -127,6 +131,7 @@ def _scalar_anim(   data        : numpy.ndarray,
                             cmap        = cmap,     # what colormap we use
                             vmin        = vmin,     # lower bounds for color scaling
                             vmax        = vmax,     # upper bounds for color scaling
+                            alpha       = alpha,    # transparency of the markers
                             s           = 60);      # Area of the markers.
     else:
         scat = ax.scatter3D(X[0],                   # array of x coordinates for the triangulation
@@ -136,6 +141,7 @@ def _scalar_anim(   data        : numpy.ndarray,
                             cmap        = cmap,     # what colormap we use
                             vmin        = vmin,     # lower bounds for color scaling
                             vmax        = vmax,     # upper bounds for color scaling
+                            alpha       = alpha,    # transparency of the markers
                             s           = 20);      # Area of the markers.
    
     # Force equal aspect (2D) / box aspect (3D) if available.
