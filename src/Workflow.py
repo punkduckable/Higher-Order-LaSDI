@@ -369,10 +369,27 @@ def main():
                 prefix : str = "%s_Dt^%d_U_%s"  % (config["physics"]["type"], i, str(param_space.test_space[i_worst]));
 
             # Make the movie.
-            if hasattr(trainer, "has_normalization") and trainer.has_normalization():
+            # Check normalization status and apply denormalization appropriately.
+            has_norm = hasattr(trainer, "has_normalization") and trainer.has_normalization();
+            LOGGER.info(f"Animation for IC {i}: has_normalization = {has_norm}");
+            
+            if has_norm:
+                LOGGER.info(f"  U_True_worst[{i}] range before denorm: [{U_True_worst[i].min().item():.3e}, {U_True_worst[i].max().item():.3e}]");
+                LOGGER.info(f"  U_Pred_worst[{i}] range before denorm: [{U_Pred_worst[i].min().item():.3e}, {U_Pred_worst[i].max().item():.3e}]");
+                
+                # Both U_True_worst and U_Pred_worst should be in normalized units
                 U_true_np = trainer.denormalize_tensor(U_True_worst[i], i).detach().numpy();
                 U_pred_np = trainer.denormalize_tensor(U_Pred_worst[i], i).detach().numpy();
+                
+                LOGGER.info(f"  U_true_np range after denorm: [{U_true_np.min():.3e}, {U_true_np.max():.3e}]");
+                LOGGER.info(f"  U_pred_np range after denorm: [{U_pred_np.min():.3e}, {U_pred_np.max():.3e}]");
             else:
+                # WARNING: If normalization is disabled but data was normalized, this will show normalized values
+                LOGGER.warning(f"Normalization is disabled or not configured properly!");
+                LOGGER.warning(f"  If training data was normalized, animations will show NORMALIZED (not physical) units.");
+                LOGGER.warning(f"  U_True_worst[{i}] range: [{U_True_worst[i].min().item():.3e}, {U_True_worst[i].max().item():.3e}]");
+                LOGGER.warning(f"  U_Pred_worst[{i}] range: [{U_Pred_worst[i].min().item():.3e}, {U_Pred_worst[i].max().item():.3e}]");
+                
                 U_true_np = U_True_worst[i].detach().numpy();
                 U_pred_np = U_Pred_worst[i].detach().numpy();
 

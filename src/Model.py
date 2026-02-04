@@ -491,8 +491,14 @@ class Autoencoder(torch.nn.Module):
 
             # If the trainer uses normalization, normalize the IC before encoding.
             # (We do NOT store normalization stats on the model.)
-            if (trainer is not None) and hasattr(trainer, "has_normalization") and trainer.has_normalization():
+            has_norm = (trainer is not None) and hasattr(trainer, "has_normalization") and trainer.has_normalization();
+            if has_norm:
+                LOGGER.debug(f"  Normalizing IC for param {i}: range [{u0.min().item():.3e}, {u0.max().item():.3e}] (physical units)");
                 u0 = trainer.normalize_tensor(u0, 0);
+                LOGGER.debug(f"    After normalization: range [{u0.min().item():.3e}, {u0.max().item():.3e}]");
+            else:
+                LOGGER.warning(f"  No normalization applied to IC for param {i}! Range: [{u0.min().item():.3e}, {u0.max().item():.3e}]");
+                LOGGER.warning(f"    This may cause issues if the model was trained on normalized data.");
 
             # Encode the IC, then map the encoding to a numpy array.
             z0      : numpy.ndarray = self.Encode(u0).detach().numpy();
