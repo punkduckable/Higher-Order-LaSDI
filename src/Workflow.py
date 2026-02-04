@@ -480,7 +480,7 @@ def main():
 # Helper functions
 # -------------------------------------------------------------------------------------------------
 
-def count_parameters(   model          : torch.nn.Module, 
+def count_parameters(   model           : torch.nn.Module, 
                         latent_dynamics : LatentDynamics,
                         trainer         : BayesianGLaSDI) -> None:
     """
@@ -619,13 +619,13 @@ def step(trainer        : BayesianGLaSDI,
     elif (next_step is NextStep.PickSample):
         # Use greedy sampling to pick that sample. Note that if the training set is empty, this 
         # function does nothing.
-        result, next_step = Update_Train_Space(trainer, config);
+        result, next_step = Update_Train_Space(trainer);
 
 
     elif (next_step is NextStep.RunSample):
         # Generate the trajectories for all new testing and training parameters. Append these new
         # trajectories to trainer's U_Train and U_Test attributes.
-        result, next_step = Run_Samples(trainer, config);
+        result, next_step = Run_Samples(trainer);
         
         if(config["workflow"]["plot_train_rel_errors"] == True):
             trainSpace_RelativeErrors_Heatmap(  trainer     = trainer, 
