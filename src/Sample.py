@@ -180,7 +180,7 @@ def Run_Samples(trainer : BayesianGLaSDI) -> tuple[NextStep, Result]:
         for i in range(num_train_new):
             ith_train_param = new_train_params[i, :];
             # Check all test params at once: does this training param match any test param?
-            is_match = numpy.all(test_space == ith_train_param, axis=1);
+            is_match = numpy.all(test_space == ith_train_param, axis = 1);
             
             if numpy.any(is_match):
                 test_idx = numpy.where(is_match)[0][0];
@@ -209,9 +209,16 @@ def Run_Samples(trainer : BayesianGLaSDI) -> tuple[NextStep, Result]:
         # Build final lists in the correct order (matching new_train_params order).
         for i in range(num_train_new):
             if i in test_indices_map:
-                # Copy from test set.
-                new_U_Train.append(trainer.U_Test[test_indices_map[i]]);
-                new_t_Train.append(trainer.t_Test[test_indices_map[i]]);
+                # Copy from test set - create new list to avoid aliasing issues.
+                test_idx = test_indices_map[i];
+                new_U_Train.append([tensor.clone() for tensor in trainer.U_Test[test_idx]]);
+                new_t_Train.append(trainer.t_Test[test_idx].clone());
+                
+                # Log diagnostic info for the copied data
+                if hasattr(trainer, "has_normalization") and trainer.has_normalization():
+                    test_data = trainer.U_Test[test_idx][0].reshape(-1);
+                    LOGGER.debug("Copied training point from test[%d]: mean=%.6e, std=%.6e" % (
+                        test_idx, float(test_data.mean().item()), float(test_data.std().item())));
             else:
                 # Use generated solution.
                 new_U_Train.append(generated_U_dict[i]);
@@ -222,6 +229,80 @@ def Run_Samples(trainer : BayesianGLaSDI) -> tuple[NextStep, Result]:
         trainer.U_Train         = new_U_Train;
         trainer.t_Train         = new_t_Train;
     else:
+        # Log statistics before appending
+        LOGGER.info("Before appending %d new training points:" % len(new_U_Train));
+        if len(trainer.U_Train) > 0:
+            old_sample = trainer.U_Train[0][0].reshape(-1);
+            LOGGER.info("  Existing train[0]: mean=%.6e, std=%.6e, min=%.6e, max=%.6e" % (
+                float(old_sample.mean().item()), float(old_sample.std().item()),
+                float(old_sample.min().item()), float(old_sample.max().item())));
+        if len(new_U_Train) > 0:
+            new_sample = new_U_Train[0][0].reshape(-1);
+            LOGGER.info("  New train[0]: mean=%.6e, std=%.6e, min=%.6e, max=%.6e" % (
+                float(new_sample.mean().item()), float(new_sample.std().item()),
+                float(new_sample.min().item()), float(new_sample.max().item())));
+        
+        # CRITICAL FIX: Initialize coefficients for newly added training points!
+        # When greedy sampling adds a point from the test set, its test_coefs row may be zero/untrained.
+        # We compute physics-based least-squares coefficients by encoding the trajectory and using SINDy.
+        if hasattr(trainer, 'learnable_coefs') and trainer.learnable_coefs and len(new_U_Train) > 0:
+            import torch
+            n_train_old = len(trainer.U_Train);
+            LOGGER.info("Initializing coefficients for %d newly added training points using least-squares fit" % len(new_U_Train));
+            
+            # For each new training point, find its index in test_space and initialize its coefficients
+            new_indices_start = len(new_train_params) - len(new_U_Train);
+            for i, new_param in enumerate(new_train_params[new_indices_start:]):
+                # Find this parameter in test_space
+                test_idx = None;
+                for j in range(trainer.param_space.n_test()):
+                    if numpy.allclose(trainer.param_space.test_space[j, :], new_param, rtol=1e-12, atol=1e-14):
+                        test_idx = j;
+                        break;
+                
+                if test_idx is not None:
+                    # Check if coefficients are near zero (untrained)
+                    coef_norm = float(torch.norm(trainer.test_coefs[test_idx, :]).item());
+                    LOGGER.info("  New training point %d (test idx %d): coef norm = %.6e" % (i, test_idx, coef_norm));
+                    
+                    if coef_norm < 1e-6:
+                        LOGGER.warning("  Coefficients for new training point are near-zero! Computing least-squares fit...");
+                        
+                        # Encode the new trajectory to get latent states
+                        U_new_i = new_U_Train[i];  # List of tensors (one per IC)
+                        t_new_i = new_t_Train[i];  # Time grid tensor
+                        
+                        # Move model to CPU for encoding (calibrate expects CPU tensors)
+                        model_cpu = trainer.model.cpu();
+                        with torch.no_grad():
+                            # Encode trajectory (handle both single and multiple IC cases)
+                            if trainer.n_IC == 1:
+                                Z_new_i_encoded = model_cpu.Encode(U_new_i[0].cpu());
+                                Z_new_i_list = [Z_new_i_encoded];  # Wrap in list for n_IC=1
+                            else:
+                                # For multiple ICs (e.g., displacement + velocity in Autoencoder_Pair)
+                                # Encode returns a tuple/list of tensors, one per IC
+                                Z_new_i_tuple = model_cpu.Encode(*[u.cpu() for u in U_new_i]);
+                                Z_new_i_list = list(Z_new_i_tuple);  # Convert tuple to list
+                        
+                        # Prepare inputs for calibrate: expects list[list[tensor]] where inner list has n_IC elements
+                        Latent_States_list = [Z_new_i_list];  # list[list[tensor]], one param combination
+                        t_Grid_list = [t_new_i.cpu()];        # list[tensor], one time grid
+                        
+                        # Call calibrate with empty input_coefs to compute least-squares solution
+                        output_coefs, _, _ = trainer.latent_dynamics.calibrate(
+                                                Latent_States   = Latent_States_list,
+                                                t_Grid          = t_Grid_list,
+                                                input_coefs     = [],  # Empty list triggers least-squares computation
+                                                loss_type       = trainer.loss_types['LD']);
+                        
+                        # Extract the computed coefficients and assign to test_coefs
+                        with torch.no_grad():
+                            computed_coefs                      = output_coefs[0, :].to(trainer.device);  # Shape: (n_coefs,)
+                            trainer.test_coefs[test_idx, :]     = computed_coefs;
+                            new_norm                            = float(torch.norm(trainer.test_coefs[test_idx, :]).item());
+                            LOGGER.info("  Initialized coefficients from least-squares fit: norm = %.6e" % new_norm);
+
         trainer.U_Train         = trainer.U_Train + new_U_Train;
         trainer.t_Train         = trainer.t_Train + new_t_Train;
 
@@ -235,9 +316,43 @@ def Run_Samples(trainer : BayesianGLaSDI) -> tuple[NextStep, Result]:
     # store them on the trainer, then normalize both training and testing trajectories in-place.
     if hasattr(trainer, "normalize") and bool(trainer.normalize):
         if not (hasattr(trainer, "has_normalization") and trainer.has_normalization()):
-            trainer.set_normalization_stats_from_training();
+            LOGGER.info("Computing normalization statistics...");
+            # Log data stats BEFORE normalization for debugging
+            sample_data = trainer.U_Train[0][0].reshape(-1);
+            LOGGER.info("  Sample training point before normalization: mean=%.6e, std=%.6e, min=%.6e, max=%.6e" % (
+                float(sample_data.mean().item()), float(sample_data.std().item()),
+                float(sample_data.min().item()), float(sample_data.max().item())));
+            
+            # Use test set for normalization if available and training set is small
+            # This gives better global statistics that work for all points in parameter space
+            if len(trainer.U_Test) > 0 and len(trainer.U_Train) <= 4:
+                LOGGER.info("Using TEST set for normalization (training set is small: %d points)" % len(trainer.U_Train));
+                trainer.set_normalization_stats_from_test();
+            else:
+                LOGGER.info("Using TRAINING set for normalization (%d points)" % len(trainer.U_Train));
+                trainer.set_normalization_stats_from_training();
             trainer.normalize_U_inplace(trainer.U_Train);
             trainer.normalize_U_inplace(trainer.U_Test);
+            
+            # Log data stats AFTER normalization for verification
+            sample_data_norm = trainer.U_Train[0][0].reshape(-1);
+            LOGGER.info("  After normalization: mean=%.6e, std=%.6e, min=%.6e, max=%.6e" % (
+                float(sample_data_norm.mean().item()), float(sample_data_norm.std().item()),
+                float(sample_data_norm.min().item()), float(sample_data_norm.max().item())));
+        else:
+            LOGGER.info("Normalization stats already exist (computed from %d initial training points)" % len(trainer.U_Train));
+            LOGGER.info("  Using mean=%.6e, std=%.6e for IC 0" % (
+                float(trainer.data_mean[0].item()), float(trainer.data_std[0].item())));
+            # Check if newly added data has similar statistics
+            if len(trainer.U_Train) > 0:
+                last_train_data = trainer.U_Train[-1][0].reshape(-1);
+                LOGGER.info("  Last training point (normalized): mean=%.6e, std=%.6e, min=%.6e, max=%.6e" % (
+                    float(last_train_data.mean().item()), float(last_train_data.std().item()),
+                    float(last_train_data.min().item()), float(last_train_data.max().item())));
+                if abs(float(last_train_data.mean().item())) > 5.0:
+                    LOGGER.warning("  WARNING: Normalized data has large mean! This suggests normalization stats may not be appropriate for this data!");
+                if abs(float(last_train_data.std().item()) - 1.0) > 3.0:
+                    LOGGER.warning("  WARNING: Normalized data std is far from 1.0! This suggests normalization stats may not be appropriate for this data!");
 
 
     # ---------------------------------------------------------------------------------------------
