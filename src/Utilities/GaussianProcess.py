@@ -120,7 +120,7 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
         #                       Using 5 restarts for better kernel tuning and stability.
         ith_gp      = GaussianProcessRegressor(
                             kernel                  = kernel, 
-                            alpha                   = 1e-4,     # Add noise/uncertainty to predictions
+                            alpha                   = 1e-5,     # Add noise/uncertainty to predictions
                             n_restarts_optimizer    = 10,       # More restarts for better hyperparameters
                             random_state            = 1);
 
@@ -276,10 +276,13 @@ def sample_coefs(   gp_list     : list[GaussianProcessRegressor],
     pred_std    = pred_std[0];
 
     # Cycle through the samples and coefficients. For each sample of the k'th coefficient, we draw
-    # a sample from the normal distribution with mean pred_mean[k] and std pred_std[k].
+    # a sample from the normal distribution with mean pred_mean[k] and std pred_std[k]. Note that we 
+    # we clip the sample to be within 2 standard deviations of the mean to avoid outlying samples that 
+    # can lead to numerical instability.
     for s in range(n_samples):
         for k in range(n_GPs):
-            coef_samples[s, k] = numpy.random.normal(pred_mean[k], pred_std[k]);
-
+            sample = numpy.random.normal(pred_mean[k], pred_std[k]);
+            coef_samples[s, k] = numpy.clip(sample, pred_mean[k] - 2*pred_std[k], pred_mean[k] + 2*pred_std[k]);
+    
     # All done!
     return coef_samples;
