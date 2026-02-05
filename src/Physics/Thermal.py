@@ -36,7 +36,7 @@ class Thermal(Physics):
     the grid of parameter values. Thus, the IC function will protest if the user specifies 
     parameters outside of the grid.
     """
-    def __init__(self, config : dict, param_names : list[str], ms_to_s : bool = True) -> None:
+    def __init__(self, config : dict, param_names : list[str]) -> None:
         """
         Initialize a Thermal object.
 
@@ -51,16 +51,10 @@ class Thermal(Physics):
 
         param_names : list[str]
             A list of the parameter names. In this case, we expect "laser power" and "scan speed".
-
-        ms_to_s : bool, optional
-            The time values are, by default, in milliseconds. If ms_to_s is True, then we will convert 
-            them to seconds. This can help with long term predictions, since rolling out the solution 
-            for 2000 ms can lead to numerical instability if any of the coefficients are > 1.
         """
 
         # First, let's fetch the hdf5 directory.
         self.hdf5_dir : str  = config['Thermal']['hdf5_dir'];
-        self.ms_to_s  : bool = ms_to_s;
 
         # Set things we know.
         n_IC            : int   = 1;        # The heat equation has one time derivative.
@@ -306,11 +300,6 @@ class Thermal(Physics):
             assert time_shape[0] == nodet_shape[0], "time_shape = %s, nodet_shape = %s" % (str(time_shape), str(nodet_shape));
             time_values : numpy.ndarray = time_ds[:];
             LOGGER.info("Loaded time dataset with shape %s" % str(time_shape));
-
-            # If we are converting from milliseconds to seconds, we need to divide the time values by 1000.
-            if self.ms_to_s:
-                time_values = time_values / 1000.0;
-                LOGGER.info("Converted time values from milliseconds to seconds");
 
             # Convert the nodet dataset to a torch.Tensor.
             n_time_steps : int          = nodet_shape[0];
