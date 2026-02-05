@@ -4,7 +4,7 @@
 
 import  numpy;
 import  warnings;
-from    sklearn.gaussian_process.kernels    import  ConstantKernel, RBF;
+from    sklearn.gaussian_process.kernels    import  ConstantKernel, RBF, Matern;
 from    sklearn.gaussian_process            import  GaussianProcessRegressor;
 from    sklearn.exceptions                  import  ConvergenceWarning;
 
@@ -101,24 +101,27 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
         targets_i_s: numpy.ndarray = (targets_i - ith_mean) / ith_std;
 
         # Make the kernel.
-        # kernel = ConstantKernel() * Matern(length_scale_bounds = (0.01, 1e5), nu = 1.5)
+        # Option 1: Matern kernel (more stable for dynamics, less smooth)
         kernel  = ConstantKernel(constant_value = 1.0, constant_value_bounds = (1e-5, 1e6)) * \
-                  RBF(length_scale_bounds = (1e-3, 1e2));
+                  Matern(length_scale_bounds = (0.1, 1e3), nu = 1.5);
+        # Option 2: RBF kernel (smoother but can be less stable)
+        # kernel  = ConstantKernel(constant_value = 1.0, constant_value_bounds = (1e-5, 1e6)) * \
+        #           RBF(length_scale_bounds = (1e-3, 1e2));
 
         # Initialize the GP object.
         #
         # alpha: Adds noise to the diagonal of the kernel matrix (observation noise).
         #        Larger values = more uncertainty = less overfitting to training data.
         #        Typical range: 1e-10 (very confident) to 1e-3 (high uncertainty).
-        #        We use 1e-5 to give reasonable uncertainty for greedy sampling.
+        #        We use 1e-4 to give reasonable uncertainty for greedy sampling.
         #
         # n_restarts_optimizer: Number of random restarts for hyperparameter optimization.
         #                       More restarts = better hyperparameters but slower.
-        #                       Increased from 1 to 5 for better kernel tuning.
+        #                       Using 5 restarts for better kernel tuning and stability.
         ith_gp      = GaussianProcessRegressor(
                             kernel                  = kernel, 
                             alpha                   = 1e-4,     # Add noise/uncertainty to predictions
-                            n_restarts_optimizer    = 1,        # More restarts for better hyperparameters
+                            n_restarts_optimizer    = 10,       # More restarts for better hyperparameters
                             random_state            = 1);
 
         # Fit it to the data (train).
