@@ -179,7 +179,7 @@ class BayesianGLaSDI:
 
         # Set up the optimizer and loss function.
         LOGGER.info("Setting up the optimizer with a learning rate of %f" % (self.lr));
-        self.optimizer          : Optimizer = torch.optim.Adam(list(model.parameters()) + [self.test_coefs], lr = self.lr);
+        self.optimizer          : Optimizer = torch.optim.Adam(list(model.parameters()) + [self.test_coefs], lr = self.lr, weight_decay = 1.0e-5);
         self.MSE                            = torch.nn.MSELoss(reduction = 'mean');
         self.MAE                            = torch.nn.L1Loss(reduction = 'mean');
 
@@ -432,13 +432,17 @@ class BayesianGLaSDI:
         if(reset_optim == True): self._reset_optimizer();
 
 
+
         # -------------------------------------------------------------------------------------
         # Setup. 
 
         # Fetch parameters. Note that p_rollout and p_IC_rollout can be negative.
+        # IMPORTANT: Calculate rollout proportions using epochs within CURRENT round (not accumulated restart_iter).
+        # This ensures rollout starts small after each greedy sampling and gradually increases.
         n_train             : int               = self.param_space.n_train();
-        p_rollout           : float             = min(0.75, self.p_rollout_init + self.dp_per_update*(self.restart_iter//self.rollout_update_freq));
-        p_IC_rollout        : float             = min(1.0, self.p_IC_rollout_init + self.IC_dp_per_update*(self.restart_iter//self.IC_rollout_update_freq));
+        epochs_in_round     : int               = 0;  # Will be updated each iteration
+        p_rollout           : float             = min(0.75, self.p_rollout_init + self.dp_per_update*(epochs_in_round//self.rollout_update_freq));
+        p_IC_rollout        : float             = min(1.0, self.p_IC_rollout_init + self.IC_dp_per_update*(epochs_in_round//self.IC_rollout_update_freq));
         best_loss           : float             = numpy.inf;                    # Stores the lowest loss we get in this round of training.
 
         # Map everything to self's device.
@@ -536,16 +540,38 @@ class BayesianGLaSDI:
             LOGGER.debug("=" * 80);
             LOGGER.debug("Starting training iteration %d/%d" % (iter + 1, next_iter));
 
+
+            # -------------------------------------------------------------------------------------
+            # Warmup the learning rate for the first few epochs after greedy sampling.
+            # NOTE: epochs_in_round will be recalculated later for rollout updates.
+
+            warmup_epochs       : int = 20;
+            epochs_in_round     : int = iter - self.restart_iter;  # Progress within current training round
+            if epochs_in_round < warmup_epochs:
+                # Reduce LR for warmup period
+                warmup_scale = 0.1 + 0.9 * (float(epochs_in_round) / float(warmup_epochs));
+                for param_group in self.optimizer.param_groups:
+                    param_group['lr'] = self.lr * warmup_scale;
+                LOGGER.info("Warmup: LR scaled to %.6f (epoch %d/%d in round)" % (self.lr * warmup_scale, epochs_in_round, next_iter - self.restart_iter));
+            else:
+                # Restore full LR
+                for param_group in self.optimizer.param_groups:
+                    param_group['lr'] = self.lr;
+
+
+            # -------------------------------------------------------------------------------------
             # Check if we need to update p_rollout. If so, then we also need to update 
             # t_Grid_rollout, n_rollout_ICs, and U_Target_Rollout_Trajectory
-            if(self.loss_weights['rollout'] > 0 and iter > 0 and ((iter % self.rollout_update_freq) == 0)):
+            # NOTE: Use epochs_in_round (not iter) to reset rollout progression each training round
+            
+            if(self.loss_weights['rollout'] > 0 and epochs_in_round > 0 and ((epochs_in_round % self.rollout_update_freq) == 0)):
                 self.timer.start("Rollout Setup");
                 LOGGER.debug("Rollout Setup");
 
-                p_rollout  += self.dp_per_update;
-                p_rollout   = min(0.75, p_rollout);
+                # Recalculate p_rollout based on progress within current round
+                p_rollout   = min(0.75, self.p_rollout_init + self.dp_per_update*(epochs_in_round//self.rollout_update_freq));
 
-                LOGGER.info("p_rollout is now %f (increased %f)" % (p_rollout, self.dp_per_update));
+                LOGGER.info("p_rollout is now %f (epoch %d/%d in current round)" % (p_rollout, epochs_in_round, next_iter - self.restart_iter));
 
                 if(p_rollout > 0):
                     t_Grid_rollout, n_rollout_ICs, U_Target_Rollout_Trajectory = self._rollout_setup(
@@ -556,14 +582,18 @@ class BayesianGLaSDI:
                 LOGGER.debug("Rollout Setup complete");
                 self.timer.end("Rollout Setup");
 
+
+            # -------------------------------------------------------------------------------------
             # Check if we need to update IC rollout parameters
-            if(self.loss_weights['IC_rollout'] > 0 and iter > 0 and ((iter % self.IC_rollout_update_freq) == 0)):
+            # NOTE: Use epochs_in_round (not iter) to reset IC rollout progression each training round
+
+            if(self.loss_weights['IC_rollout'] > 0 and epochs_in_round > 0 and ((epochs_in_round % self.IC_rollout_update_freq) == 0)):
                 self.timer.start("IC Rollout Setup");
 
-                p_IC_rollout  += self.IC_dp_per_update;
-                p_IC_rollout   = min(1.0, p_IC_rollout);
+                # Recalculate p_IC_rollout based on progress within current round
+                p_IC_rollout   = min(1.0, self.p_IC_rollout_init + self.IC_dp_per_update*(epochs_in_round//self.IC_rollout_update_freq));
 
-                LOGGER.info("p_IC_rollout is now %f (increased %f)" % (p_IC_rollout, self.IC_dp_per_update));
+                LOGGER.info("p_IC_rollout is now %f (epoch %d/%d in current round)" % (p_IC_rollout, epochs_in_round, next_iter - self.restart_iter));
 
                 # Setup IC rollout time grids and targets
                 if(p_IC_rollout > 0):
@@ -572,7 +602,10 @@ class BayesianGLaSDI:
                 
                 self.timer.end("IC Rollout Setup"); 
 
+
+            # -------------------------------------------------------------------------------------
             # Zero gradients.
+            
             self.optimizer.zero_grad();
             LOGGER.debug("Zeroed gradients for iteration %d" % (iter + 1));
 
@@ -1502,14 +1535,22 @@ class BayesianGLaSDI:
 
             # Check if we hit a new minimum loss. If so, make a checkpoint, record the loss and 
             # the iteration number. 
+            # NOTE: Skip checkpointing during warmup period to avoid saving "lucky" early epochs
+            # that benefit from distribution shift before model has adapted.
+            checkpoint_warmup_epochs : int = 10;
+            
             if loss.item() < best_loss:
-                LOGGER.info("Got a new lowest loss (%f) on epoch %d" % (loss.item(), iter + 1));
-                torch.save(model_device.cpu().state_dict(), self.path_checkpoint + '/' + 'checkpoint.pt');
-                
-                # Update the best set of parameters. 
-                self.best_coefs     = coefs_detached.copy();       # Shape = (n_train, n_coefs).
-                self.best_epoch     = iter;
-                best_loss           = loss.item();
+                if epochs_in_round >= checkpoint_warmup_epochs:
+                    LOGGER.info("Got a new lowest loss (%f) on epoch %d" % (loss.item(), iter + 1));
+                    torch.save(model_device.cpu().state_dict(), self.path_checkpoint + '/' + 'checkpoint.pt');
+                    
+                    # Update the best set of parameters. 
+                    self.best_coefs     = coefs_detached.copy();       # Shape = (n_train, n_coefs).
+                    self.best_epoch     = iter;
+                    best_loss           = loss.item();
+                else:
+                    LOGGER.debug("Skipping checkpoint during warmup period (epoch %d/%d in round, warmup ends at %d)" % 
+                               (epochs_in_round, next_iter - self.restart_iter, checkpoint_warmup_epochs));
 
             self.timer.end("Backwards Pass");
             
