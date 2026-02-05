@@ -102,15 +102,24 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
 
         # Make the kernel.
         # kernel = ConstantKernel() * Matern(length_scale_bounds = (0.01, 1e5), nu = 1.5)
-        kernel  = ConstantKernel(constant_value = 1.0, constant_value_bounds = (1e-6, 1e8)) * \
-                  RBF(length_scale_bounds = (1e-6, 1e3));
+        kernel  = ConstantKernel(constant_value = 1.0, constant_value_bounds = (1e-5, 1e6)) * \
+                  RBF(length_scale_bounds = (1e-3, 1e2));
 
         # Initialize the GP object.
         #
-        # NOTE: n_restarts_optimizer can make fitting extremely slow and spammy on some HPC setups,
-        # especially when length_scale hits its bound (ConvergenceWarning). We keep this small to
-        # avoid the appearance of "hanging" during greedy sampling.
-        ith_gp      = GaussianProcessRegressor(kernel = kernel, n_restarts_optimizer = 1, random_state = 1);
+        # alpha: Adds noise to the diagonal of the kernel matrix (observation noise).
+        #        Larger values = more uncertainty = less overfitting to training data.
+        #        Typical range: 1e-10 (very confident) to 1e-3 (high uncertainty).
+        #        We use 1e-5 to give reasonable uncertainty for greedy sampling.
+        #
+        # n_restarts_optimizer: Number of random restarts for hyperparameter optimization.
+        #                       More restarts = better hyperparameters but slower.
+        #                       Increased from 1 to 5 for better kernel tuning.
+        ith_gp      = GaussianProcessRegressor(
+                            kernel                  = kernel, 
+                            alpha                   = 1e-4,     # Add noise/uncertainty to predictions
+                            n_restarts_optimizer    = 1,        # More restarts for better hyperparameters
+                            random_state            = 1);
 
         # Fit it to the data (train).
         with warnings.catch_warnings():

@@ -230,7 +230,9 @@ class SINDy(LatentDynamics):
                 loss_coef_list.append(loss_coef_i[0]);
             
             # Package everything to return!
-            return torch.stack(output_coefs_list), loss_sindy_list, loss_coef_list;
+            # Use cat instead of stack since each output_coefs already has shape (1, n_coefs)
+            # cat along dim=0 gives (n_param, n_coefs) as expected
+            return torch.cat(output_coefs_list, dim=0), loss_sindy_list, loss_coef_list;
             
 
         # -----------------------------------------------------------------------------------------
@@ -290,7 +292,7 @@ class SINDy(LatentDynamics):
 
         # Prepare coefs and the losses to return. Note that we flatten the coefficient matrix.
         # Note: output of lstsq is not contiguous in memory.
-        output_coefs   : torch.Tensor  = coefs.flatten()
+        output_coefs   : torch.Tensor  = coefs.reshape(1, -1);
         return output_coefs, [loss_sindy], [loss_coef]
 
 
