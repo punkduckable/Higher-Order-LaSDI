@@ -251,8 +251,9 @@ def Run_Samples(trainer : BayesianGLaSDI) -> tuple[NextStep, Result]:
             LOGGER.info("Initializing coefficients for %d newly added training points using least-squares fit" % len(new_U_Train));
             
             # For each new training point, find its index in test_space and initialize its coefficients
-            new_indices_start = len(new_train_params) - len(new_U_Train);
-            for i, new_param in enumerate(new_train_params[new_indices_start:]):
+            for i in range(len(new_U_Train)):
+                new_param = new_train_params[i];
+                
                 # Find this parameter in test_space
                 test_idx = None;
                 for j in range(trainer.param_space.n_test()):
@@ -261,47 +262,44 @@ def Run_Samples(trainer : BayesianGLaSDI) -> tuple[NextStep, Result]:
                         break;
                 
                 if test_idx is not None:
-                    # Check if coefficients are near zero (untrained)
-                    coef_norm = float(torch.norm(trainer.test_coefs[test_idx, :]).item());
-                    LOGGER.info("  New training point %d (test idx %d): coef norm = %.6e" % (i, test_idx, coef_norm));
+                    # New coefficients will be untrained, so we should intialize them using least-squares fit.
+                    U_new_i = new_U_Train[i];  # List of tensors (one per IC)
+                    t_new_i = new_t_Train[i];  # Time grid tensor
                     
-                    if coef_norm < 1e-6:
-                        LOGGER.warning("  Coefficients for new training point are near-zero! Computing least-squares fit...");
-                        
-                        # Encode the new trajectory to get latent states
-                        U_new_i = new_U_Train[i];  # List of tensors (one per IC)
-                        t_new_i = new_t_Train[i];  # Time grid tensor
-                        
-                        # Move model to CPU for encoding (calibrate expects CPU tensors)
-                        model_cpu = trainer.model.cpu();
-                        with torch.no_grad():
-                            # Encode trajectory (handle both single and multiple IC cases)
-                            if trainer.n_IC == 1:
-                                Z_new_i_encoded = model_cpu.Encode(U_new_i[0].cpu());
-                                Z_new_i_list = [Z_new_i_encoded];  # Wrap in list for n_IC=1
-                            else:
-                                # For multiple ICs (e.g., displacement + velocity in Autoencoder_Pair)
-                                # Encode returns a tuple/list of tensors, one per IC
-                                Z_new_i_tuple = model_cpu.Encode(*[u.cpu() for u in U_new_i]);
-                                Z_new_i_list = list(Z_new_i_tuple);  # Convert tuple to list
-                        
-                        # Prepare inputs for calibrate: expects list[list[tensor]] where inner list has n_IC elements
-                        Latent_States_list = [Z_new_i_list];  # list[list[tensor]], one param combination
-                        t_Grid_list = [t_new_i.cpu()];        # list[tensor], one time grid
-                        
-                        # Call calibrate with empty input_coefs to compute least-squares solution
-                        output_coefs, _, _ = trainer.latent_dynamics.calibrate(
-                                                Latent_States   = Latent_States_list,
-                                                t_Grid          = t_Grid_list,
-                                                input_coefs     = [],  # Empty list triggers least-squares computation
-                                                loss_type       = trainer.loss_types['LD']);
-                        
-                        # Extract the computed coefficients and assign to test_coefs
-                        with torch.no_grad():
-                            computed_coefs                      = output_coefs[0, :].to(trainer.device);  # Shape: (n_coefs,)
-                            trainer.test_coefs[test_idx, :]     = computed_coefs;
-                            new_norm                            = float(torch.norm(trainer.test_coefs[test_idx, :]).item());
-                            LOGGER.info("  Initialized coefficients from least-squares fit: norm = %.6e" % new_norm);
+                    # Move model to CPU for encoding (calibrate expects CPU tensors)
+                    original_device = next(trainer.model.parameters()).device;
+                    model_cpu = trainer.model.cpu();
+                    with torch.no_grad():
+                        # Encode trajectory (handle both single and multiple IC cases)
+                        if trainer.n_IC == 1:
+                            Z_new_i_encoded = model_cpu.Encode(U_new_i[0].cpu());
+                            Z_new_i_list = [Z_new_i_encoded];  # Wrap in list for n_IC=1
+                        else:
+                            # For multiple ICs (e.g., displacement + velocity in Autoencoder_Pair)
+                            # Encode returns a tuple/list of tensors, one per IC
+                            Z_new_i_tuple = model_cpu.Encode(*[u.cpu() for u in U_new_i]);
+                            Z_new_i_list = list(Z_new_i_tuple);  # Convert tuple to list
+                    
+                    # Move model back to original device
+                    trainer.model.to(original_device);
+                    
+                    # Prepare inputs for calibrate: expects list[list[tensor]] where inner list has n_IC elements
+                    Latent_States_list = [Z_new_i_list];  # list[list[tensor]], one param combination
+                    t_Grid_list = [t_new_i.cpu()];        # list[tensor], one time grid
+                    
+                    # Call calibrate with empty input_coefs to compute least-squares solution
+                    output_coefs, _, _ = trainer.latent_dynamics.calibrate(
+                                            Latent_States   = Latent_States_list,
+                                            t_Grid          = t_Grid_list,
+                                            input_coefs     = [],  # Empty list triggers least-squares computation
+                                            loss_type       = trainer.loss_types['LD']);
+                    
+                    # Extract the computed coefficients and assign to test_coefs
+                    with torch.no_grad():
+                        computed_coefs                      = output_coefs[0, :].to(trainer.device);  # Shape: (n_coefs,)
+                        trainer.test_coefs[test_idx, :]     = computed_coefs;
+                        coef_norm                            = float(torch.norm(trainer.test_coefs[test_idx, :]).item());
+                        LOGGER.info("  New training point %d (test idx %d): initialized coefficients from least-squares fit: coef norm = %.6e" % (i, test_idx, coef_norm));
 
         trainer.U_Train         = trainer.U_Train + new_U_Train;
         trainer.t_Train         = trainer.t_Train + new_t_Train;
