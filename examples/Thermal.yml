@@ -1,7 +1,7 @@
 lasdi:
   type:                     gplasdi
   gplasdi:
-    lr:                     0.001
+    lr:                     0.0005
     n_samples:              20
 
     # If true, compute a single global mean/std from TRAINING data only, and normalize
@@ -10,25 +10,28 @@ lasdi:
 
     # Note that t_rollout is capped at 0.75 to ensure there are some frames to simulate forward.
     p_rollout_init:         0.01
-    rollout_update_freq:    10
+    rollout_update_freq:    20
     dp_per_update:          0.01
     randomized_rollout:     true    # If true, then the duration is randomized for each IC, with p_rollout acting as a maximum. Otherwise, everything is rolled out by p_rollout.
     rollout_spline_order:   1
 
     p_IC_rollout_init:      0.01
-    IC_rollout_update_freq: 100
+    IC_rollout_update_freq: 20
     IC_dp_per_update:       0.01
 
-    max_iter:               2000
-    n_iter:                 500
-    max_greedy_iter:        2000
+    max_iter:               3000
+    n_iter:                 1000
+    max_greedy_iter:        3000
+
+    lr_warmup:              20    # How many epochs to warmup the learning rate for after greedy sampling.
+    checkpoint_warmup:      20    # How many epochs to checkpoint the model after after greedy sampling.
 
     loss_weights:
       recon:                1.0
       LD:                   1.0
-      rollout:              0.1
-      IC_rollout:           0.0
-      coef:                 0.1
+      rollout:              0.5
+      IC_rollout:           0.5
+      coef:                 1.0
 
       chain_rule:           1.0
       consistency:          1.0
@@ -36,10 +39,8 @@ lasdi:
     loss_types:
       recon:                "MSE"
       LD:                   "MSE"
-      rollout:              "MSE"
-      IC_rollout:           "MSE"
-      chain_rule:           "MSE"
-      consistency:          "MSE"
+      rollout:              "MAE"
+      IC_rollout:           "MAE"
 
     learnable_coefs:        true
   
@@ -64,7 +65,7 @@ model:
   ae:
     hidden_widths:          [1000, 300, 80]
     activations:            ["ReLU", "ReLU", "ReLU"]
-    latent_dimension:       20
+    latent_dimension:       10
 
 latent_dynamics:
   type:                     sindy

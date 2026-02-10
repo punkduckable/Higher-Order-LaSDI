@@ -147,6 +147,8 @@ class BayesianGLaSDI:
         self.p_IC_rollout_init      : float     = gplasdi_config['p_IC_rollout_init'];      # The proportion of the simulation we simulate forward when computing the IC rollout loss.
         self.IC_rollout_update_freq : float     = gplasdi_config['IC_rollout_update_freq']; # We increase p_IC_rollout after this many iterations.
         self.IC_dp_per_update       : float     = gplasdi_config['IC_dp_per_update'];       # We increase p_IC_rollout by this much each time we increase it.
+        self.lr_warmup              : int       = gplasdi_config['lr_warmup'];              # We warmup the learning rate for this many epochs after greedy sampling.
+        self.checkpoint_warmup      : int       = gplasdi_config['checkpoint_warmup'];      # We checkpoint the model after this many epochs.
         self.n_iter                 : int       = gplasdi_config['n_iter'];                 # Number of iterations for one train and greedy sampling
         self.max_iter               : int       = gplasdi_config['max_iter'];               # We stop training if restart_iter goes above this number. 
         self.max_greedy_iter        : int       = gplasdi_config['max_greedy_iter'];        # We stop performing greedy sampling if restart_iter goes above this number.
@@ -545,11 +547,10 @@ class BayesianGLaSDI:
             # Warmup the learning rate for the first few epochs after greedy sampling.
             # NOTE: epochs_in_round will be recalculated later for rollout updates.
 
-            warmup_epochs       : int = 20;
             epochs_in_round     : int = iter - self.restart_iter;  # Progress within current training round
-            if epochs_in_round < warmup_epochs:
+            if self.lr_warmup > 0 and epochs_in_round < self.lr_warmup:
                 # Reduce LR for warmup period
-                warmup_scale = 0.1 + 0.9 * (float(epochs_in_round) / float(warmup_epochs));
+                warmup_scale = 0.1 + 0.9 * (float(epochs_in_round) / float(self.lr_warmup));
                 for param_group in self.optimizer.param_groups:
                     param_group['lr'] = self.lr * warmup_scale;
                 LOGGER.info("Warmup: LR scaled to %.6f (epoch %d/%d in round)" % (self.lr * warmup_scale, epochs_in_round, next_iter - self.restart_iter));
@@ -1537,12 +1538,12 @@ class BayesianGLaSDI:
             # the iteration number. 
             # NOTE: Skip checkpointing during warmup period to avoid saving "lucky" early epochs
             # that benefit from distribution shift before model has adapted.
-            checkpoint_warmup_epochs : int = 10;
             
             if loss.item() < best_loss:
-                if epochs_in_round >= checkpoint_warmup_epochs:
+                if epochs_in_round >= self.checkpoint_warmup:
                     LOGGER.info("Got a new lowest loss (%f) on epoch %d" % (loss.item(), iter + 1));
                     torch.save(model_device.cpu().state_dict(), self.path_checkpoint + '/' + 'checkpoint.pt');
+                    model_device.to(device);  # Move model back to original device after saving
                     
                     # Update the best set of parameters. 
                     self.best_coefs     = coefs_detached.copy();       # Shape = (n_train, n_coefs).
@@ -1550,7 +1551,7 @@ class BayesianGLaSDI:
                     best_loss           = loss.item();
                 else:
                     LOGGER.debug("Skipping checkpoint during warmup period (epoch %d/%d in round, warmup ends at %d)" % 
-                               (epochs_in_round, next_iter - self.restart_iter, checkpoint_warmup_epochs));
+                               (epochs_in_round, next_iter - self.restart_iter, self.checkpoint_warmup));
 
             self.timer.end("Backwards Pass");
             
