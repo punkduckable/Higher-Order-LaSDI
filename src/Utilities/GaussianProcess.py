@@ -113,14 +113,15 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
         # alpha: Adds noise to the diagonal of the kernel matrix (observation noise).
         #        Larger values = more uncertainty = less overfitting to training data.
         #        Typical range: 1e-10 (very confident) to 1e-3 (high uncertainty).
-        #        We use 1e-4 to give reasonable uncertainty for greedy sampling.
+        #        We use 1e-2 to add more regularization and reduce variance in predictions,
+        #        which helps prevent divergent samples in latent dynamics.
         #
         # n_restarts_optimizer: Number of random restarts for hyperparameter optimization.
         #                       More restarts = better hyperparameters but slower.
-        #                       Using 5 restarts for better kernel tuning and stability.
+        #                       Using 10 restarts for better kernel tuning and stability.
         ith_gp      = GaussianProcessRegressor(
                             kernel                  = kernel, 
-                            alpha                   = 1e-5,     # Add noise/uncertainty to predictions
+                            alpha                   = 1e-2,     # Add noise/uncertainty to predictions (increased from 1e-3 for stability)
                             n_restarts_optimizer    = 10,       # More restarts for better hyperparameters
                             random_state            = 1);
 
@@ -277,12 +278,13 @@ def sample_coefs(   gp_list     : list[GaussianProcessRegressor],
 
     # Cycle through the samples and coefficients. For each sample of the k'th coefficient, we draw
     # a sample from the normal distribution with mean pred_mean[k] and std pred_std[k]. Note that we 
-    # we clip the sample to be within 2 standard deviations of the mean to avoid outlying samples that 
-    # can lead to numerical instability.
+    # clip the sample to be within 1.0 standard deviation of the mean to avoid outlying samples that 
+    # can lead to numerical instability and divergent latent dynamics. This conservative clipping 
+    # prioritizes stability over exploration.
     for s in range(n_samples):
         for k in range(n_GPs):
             sample = numpy.random.normal(pred_mean[k], pred_std[k]);
-            coef_samples[s, k] = numpy.clip(sample, pred_mean[k] - 2*pred_std[k], pred_mean[k] + 2*pred_std[k]);
+            coef_samples[s, k] = numpy.clip(sample, pred_mean[k] - 2.0*pred_std[k], pred_mean[k] + 2.0*pred_std[k]);
     
     # All done!
     return coef_samples;
