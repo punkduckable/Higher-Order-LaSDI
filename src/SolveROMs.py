@@ -252,32 +252,11 @@ def sample_roms(model           : torch.nn.Module,
     Z0      : list[list[numpy.ndarray]] = model.latent_initial_conditions(param_grid, physics, trainer = trainer);
 
 
-    # Now, for each combination of parameters, draw n_samples samples from the posterior
-    # distributions for each coefficient at that combination of parameters. We store these samples 
-    # in an n_param element list whose k'th element is a (n_sample, n_coef) array whose i, j 
-    # element stores the i'th sample from the posterior distribution for the j'th coefficient at 
-    # the k'th combination of parameter values.
-    LOGGER.debug("Sampling coefficients from the GP posterior distributions");
-    coefs_by_parameter  : list[numpy.ndarray]       = [sample_coefs(gp_list = gp_list, Input = param_grid[i, :], n_samples = n_samples) for i in range(n_param)];
-
-    # Reorganize the coef samples into an n_samples element list whose i'th element is an 
-    # array of shape (n_param, n_coef) whose j, k element holds the i'th sample of the k'th 
-    # coefficient when we sample from the posterior distribution evaluated at the j'th combination
-    # of parameter values.
-    coefs_by_samples    : list[numpy.ndarray]   = [];
-    for k in range(n_samples):
-        coefs_by_samples.append(numpy.empty((n_param, n_coef), dtype = numpy.float32));
-    
-    for i in range(n_param):
-        for k in range(n_samples):
-            coefs_by_samples[k][i, :] = coefs_by_parameter[i][k, :];
-
-
     # Setup a list to hold the simulated dynamics. There are n_param parameters. For each 
     # combination of parameter values, we have n_IC initial conditions. For each IC, we 
     # have n_samples simulations, each of which has n_t_i frames, each of which has n_z components
     # Thus, we need a n_param element list whose i'th element is a n_IC element list whose 
-    # j'th element is a 3d array of shape n_samples, n_t_i, n_z.
+    # j'th element is a 3d array of shape (n_t_i, n_samples, n_z).
     LatentStates : list[list[numpy.ndarray]] = [];
     for i in range(n_param):
         LatentStates_i  : list[numpy.ndarray]   = [];
@@ -288,21 +267,89 @@ def sample_roms(model           : torch.nn.Module,
         LatentStates.append(LatentStates_i);
 
 
-    # Simulate each set of dynamics forward in time. We generate this one sample at a time. For 
-    # each sample, we use the k'th set of coefficients. There is one set of coefficients per 
-    # sample. For each sample, we use the same ICs and the same t_Grid.
-    LOGGER.info("Generating latent trajectories for %d samples of the coefficients." % n_samples);
-    for k in range(n_samples):
-        # This yields an n_param element list whose i'th element is an n_IC element list whose
-        # j'th element is an numpy.ndarray of shape (n_t_i, 1, n_z). We store this in the 
-        # (:, k, :) elements of LatentStates[i][j]
-        LatentStates_kth_sample : list[list[numpy.ndarray]] = latent_dynamics.simulate( coefs   = coefs_by_samples[k], 
-                                                                                        IC      = Z0,
-                                                                                        t_Grid  = t_Grid_np);
+    # Process each parameter combination independently. For each parameter, we sample n_samples
+    # coefficient sets, simulate the dynamics, and keep only non-divergent samples. If any diverge,
+    # we resample only those that diverged. This is more efficient than the old approach which
+    # resampled all parameters if any single parameter diverged.
+    #
+    # NOTE: We check for divergent samples (latent states that grow unreasonably large) and 
+    # resample if needed. This prevents a single divergent sample from breaking the STD calculation.
+    LOGGER.info("Generating latent trajectories for %d samples across %d parameter combinations." % (n_samples, n_param));
+    divergence_threshold  : float = 1e4;   # If any latent component exceeds this, the sample is divergent
+    max_resample_attempts : int   = 100;   # Maximum times to resample a single sample before giving up
     
-        for i in range(n_param):
+    for i in range(n_param):
+        LOGGER.debug(f"Processing parameter combination {i+1}/{n_param}");
+        
+        # Track which samples are valid (non-divergent) for this parameter
+        valid_samples       : list[int]                 = [];  # Indices of samples that are non-divergent
+        sample_trajectories : list[list[numpy.ndarray]] = [];  # Store trajectories for valid samples
+        
+        total_resample_attempts : int = 0;
+        
+        # Keep sampling until we have n_samples valid (non-divergent) trajectories
+        while len(valid_samples) < n_samples:
+            n_needed = n_samples - len(valid_samples);
+            
+            # Check if we've exceeded total resampling budget
+            if total_resample_attempts > max_resample_attempts:
+                LOGGER.error(
+                    f"Parameter {i}: Failed to generate {n_needed} non-divergent samples after "
+                    f"{max_resample_attempts} total resampling attempts. Using divergent samples. "
+                    f"This suggests:\n"
+                    f"  - Model hasn't converged yet (train longer)\n"
+                    f"  - GP variance is too high (increase alpha in GaussianProcess.py)\n"
+                    f"  - Latent dynamics are fundamentally unstable at this parameter value"
+                );
+
+                # Generate the remaining samples even if they might diverge
+                n_needed_coefs = sample_coefs(gp_list = gp_list, Input = param_grid[i, :], n_samples = n_needed);
+                for sample_idx in range(n_needed):
+                    coef_sample = n_needed_coefs[sample_idx, :].reshape(1, -1);
+                    Z0_i = [Z0[i][j] for j in range(n_IC)];
+                    traj = latent_dynamics.simulate(coefs = coef_sample, IC = [Z0_i], t_Grid = [t_Grid_np[i]]);
+                    sample_trajectories.append(traj[0]);  # traj[0] is the trajectory for the i-th parameter
+                break;
+            
+            # Sample n_needed coefficient sets for this parameter
+            coef_samples = sample_coefs(gp_list = gp_list, Input = param_grid[i, :], n_samples = n_needed);
+            
+            # Simulate each coefficient set individually and check for divergence
+            for sample_idx in range(n_needed):
+                total_resample_attempts += 1;
+                
+                # Extract this sample's coefficients (reshape to (1, n_coef) for simulate())
+                coef_sample = coef_samples[sample_idx, :].reshape(1, -1);
+                
+                # Get IC for this parameter (list of n_IC arrays, each shape (1, n_z))
+                Z0_i = [Z0[i][j] for j in range(n_IC)];
+                
+                # Simulate: returns list[list[array]], outer list has 1 element (1 param), 
+                # inner list has n_IC elements
+                traj = latent_dynamics.simulate(coefs = coef_sample, IC = [Z0_i], t_Grid = [t_Grid_np[i]]);
+                
+                # Check if this trajectory diverged (check all ICs for this parameter)
+                is_divergent = False;
+                for j in range(n_IC):
+                    max_magnitude = numpy.max(numpy.abs(traj[0][j]));  # traj[0] = first (only) param
+                    if max_magnitude > divergence_threshold or not numpy.isfinite(max_magnitude):
+                        is_divergent = True;
+                        LOGGER.warning(
+                            f"Parameter {i}, sample {len(valid_samples)+1}/{n_samples}: diverged "
+                            f"(max magnitude: {max_magnitude:.2e} at IC {j}). Resampling."
+                        );
+                        break;
+                
+                # If non-divergent, keep it
+                if not is_divergent:
+                    valid_samples.append(len(valid_samples));
+                    sample_trajectories.append(traj[0]);  # traj[0] is list of n_IC trajectories
+                    
+        # Now store all valid samples for this parameter in LatentStates
+        for sample_idx in range(n_samples):
             for j in range(n_IC):
-                LatentStates[i][j][:, k, :] = LatentStates_kth_sample[i][j][:, 0, :];
+                # sample_trajectories[sample_idx][j] has shape (n_t_i, 1, n_z)
+                LatentStates[i][j][:, sample_idx, :] = sample_trajectories[sample_idx][j][:, 0, :];
 
     # All done!
     return LatentStates;
@@ -423,6 +470,11 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
             U_pred_i_std    : numpy.ndarray = U_Pred_i.std(0);
 
             # Now compute the maximum standard deviation across frames/FOM components.
+            # Handle inf/nan values gracefully by replacing them with a large but finite value
+            if not numpy.all(numpy.isfinite(U_pred_i_std)):
+                LOGGER.warning(f"Parameter {i}: STD contains inf/nan values. This suggests divergent samples escaped detection. Replacing with 1e10.");
+                U_pred_i_std = numpy.nan_to_num(U_pred_i_std, nan=0.0, posinf=1e10, neginf=1e10);
+            
             max_std_i       : numpy.float32 = U_pred_i_std.max();
 
             # If this is bigger than the biggest std we have seen so far, update the maximum.
@@ -467,6 +519,11 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
             D_Pred_i_std    : numpy.ndarray = D_Pred_i.std(0);
 
             # Now compute the maximum standard deviation across frames/FOM components.
+            # Handle inf/nan values gracefully by replacing them with a large but finite value
+            if not numpy.all(numpy.isfinite(D_Pred_i_std)):
+                LOGGER.warning(f"Parameter {i}: STD contains inf/nan values. This suggests divergent samples escaped detection. Replacing with 1e10.");
+                D_Pred_i_std = numpy.nan_to_num(D_Pred_i_std, nan=0.0, posinf=1e10, neginf=1e10);
+            
             max_std_i       : numpy.float32 = D_Pred_i_std.max();
 
             # If this is bigger than the biggest std we have seen so far, update the maximum.
