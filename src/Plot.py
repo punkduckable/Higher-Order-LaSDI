@@ -329,8 +329,19 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     # the i'th value of p1 and j'th value of p2
     im = ax.imshow(values.T, cmap = cmap);
     fig.colorbar(im, ax = ax, fraction = 0.04);
-    ax.set_xticks(numpy.arange(0, n1, 2), labels = numpy.round(p1_grid[::2], 2));
-    ax.set_yticks(numpy.arange(0, n2, 2), labels = numpy.round(p2_grid[::2], 2));
+    
+    # Format tick labels with scientific notation for small values
+    def format_tick_label(val):
+        """Format tick labels: use scientific notation if |val| < 0.01 or |val| > 1000, else use 2 decimals."""
+        if val == 0.0:
+            return '0.0';
+        elif abs(val) < 0.01 or abs(val) > 1000:
+            return f'{val:.2e}';
+        else:
+            return f'{val:.2f}';
+    
+    ax.set_xticks(numpy.arange(0, n1, 2), labels = [format_tick_label(val) for val in p1_grid[::2]]);
+    ax.set_yticks(numpy.arange(0, n2, 2), labels = [format_tick_label(val) for val in p2_grid[::2]]);
 
     # Add the value itself (as text) to the center of each "pixel".
     LOGGER.debug("Adding values to the center of each pixel");
@@ -369,9 +380,13 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     # ---------------------------------------------------------------------------------------------
     # Finalize the plot!
 
-    # Set plot lables and plot!
-    ax.set_xlabel(param_names[0], fontsize = 15);
-    ax.set_ylabel(param_names[1], fontsize = 15, rotation = 0);
+    # Set plot labels and plot!
+    # Position x-axis label at the right of the axis
+    ax.set_xlabel(param_names[0], fontsize = 15, loc='right');
+    
+    # Position y-axis label at the top-left (horizontal), avoiding overlap with tick labels
+    ax.set_ylabel(param_names[1], fontsize = 15, rotation = 0, loc='top', labelpad=10);
+    
     ax.set_title(title, fontsize = 25);
 
     # Save the figure under Higher-Order-LaSDI/Figures (independent of CWD).
@@ -619,8 +634,8 @@ def trainSpace_RelativeErrors_Heatmap(trainer        : 'BayesianGLaSDI',
         full_title          : str = title + '\n' + f'Parameters: {param_names_tuple}' if title else f'Train Space Relative Errors\nParameters: {param_names_tuple}';
         
         # Set plot labels and title
-        ax.set_xlabel('Train trajectory (j)', fontsize = 12);
-        ax.set_ylabel('Train trajectory (i)', fontsize = 12);
+        ax.set_xlabel('Train trajectory (j)', fontsize = 12, loc='right');
+        ax.set_ylabel('Train trajectory (i)', fontsize = 12, rotation = 0, loc='top', labelpad=10);
         ax.set_title("D^%d U Relative Errors" % d + '\n' + full_title, fontsize = 15);
         
         # Adjust layout to prevent label cutoff
