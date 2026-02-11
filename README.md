@@ -1,120 +1,382 @@
 # Higher-Order LaSDI
 
-Higher-Order LaSDI provides tools for building reduced-order models from full order simulations using latent-space dynamics identification. The library supports physics that require multiple time derivatives (for example displacement and velocity) and it can handle time series with either uniform or non-uniform time grids. Latent dynamics models such as SINDy or damped-spring systems are provided and new models can be added easily.
+Higher-Order LaSDI provides tools for building reduced-order models (ROMs) from full-order simulations using latent-space dynamics identification with Gaussian Process-based greedy sampling. The library supports physics that require multiple time derivatives (e.g., displacement and velocity for second-order systems) and handles time series with either uniform or non-uniform time grids. Latent dynamics models such as SINDy and damped-spring systems are provided, and new models can be added easily.
 
+## Key Features
 
+- **Gaussian Process-based Greedy Sampling**: Adaptive parameter space exploration using GP uncertainty quantification
+- **Higher-Order Dynamics**: Native support for systems requiring multiple time derivatives
+- **Flexible Time Grids**: Handles both uniform and non-uniform temporal discretizations with automatic finite difference scheme selection
+- **Multiple Loss Functions**: Reconstruction, latent dynamics, rollout, IC rollout, chain rule, and consistency losses with configurable weights
+- **Autoencoder Architectures**: Standard autoencoder and paired autoencoder for higher-order systems
+- **Rich Activation Functions**: Support for 20+ activation functions including sine, ReLU, tanh, GELU, and more
+- **Visualization Tools**: Automated plotting of latent trajectories, error heatmaps, and solution animations
 
 ## Getting Started
 
-For a command line workflow use `src/Workflow.py` together with a YAML configuration file. Example configurations live in `examples/*.yml`. The following command trains on the Klein-Gordon equation
+For a command-line workflow, use `src/Workflow.py` together with a YAML configuration file. Example configurations are provided in `examples/*.yml`. 
+
+### Basic Usage
 
 ```bash
 python src/Workflow.py --config examples/KleinGordon.yml
 ```
 
-`Workflow.py` orchestrates data generation, training via the `GPLaSDI` class and evaluation of the learned model.
+This command will:
+1. Generate or load training data from the physics solver
+2. Train the autoencoder and latent dynamics using GPLaSDI
+3. Perform greedy sampling to adaptively select new training points
+4. Evaluate the learned model on test data
+5. Generate plots and error metrics
 
+### Workflow Components
 
+`Workflow.py` orchestrates the following pipeline:
+- **Data Generation**: Calls physics solvers to generate training trajectories
+- **Training**: Uses the `BayesianGLaSDI` class to train autoencoders and latent dynamics
+- **Greedy Sampling**: Fits Gaussian Processes to latent dynamics coefficients and selects new training points based on GP uncertainty
+- **Evaluation**: Computes rollout errors, relative errors, and standard deviations
+- **Visualization**: Generates latent trajectory plots, error heatmaps, and solution animations
 
-## Dependencies
+## Available Examples
 
-The code has been tested with the following packages:
+The `examples/` directory contains configuration files for various physics problems:
 
-- Python (3.10)
-- numpy (1.26.4)
-- pytorch (2.5.1)
-- scikit-learn (1.5.2)
-- pyyaml (6.0.2)
-- jupyter (1.0.0)
-- scipy (1.14.1)
-- matplotlib (3.9.2)
-- seaborn (0.13.2)
-- ffmpeg (1.4)
-- mfem (4.7.0.1)
-- cmake (3.28.1)
-- mpi4py (4.0.3)
+| Example | Physics Type | Order | Grid Type |
+|---------|-------------|-------|-----------|
+| `Explicit.yml` | Custom explicit solver | 1st | Uniform |
+| `Burgers.yml` | Burgers equation | 1st | Uniform |
+| `Burgers2D.yml` | 2D Burgers equation | 1st | Uniform |
+| `Thermal.yml` | Thermal diffusion (HDF5) | 1st | Uniform |
+| `Advection.yml` | Advection equation (PyMFEM) | 1st | Uniform |
+| `WaveEquation.yml` | Wave equation (PyMFEM) | 2nd | Uniform |
+| `KleinGordon.yml` | Klein-Gordon equation (PyMFEM) | 2nd | Uniform |
+| `Telegraphers.yml` | Telegraphers equation (PyMFEM) | 2nd | Uniform |
+| `NonlinearElasticity.yml` | Nonlinear elasticity (PyMFEM) | 2nd | Uniform |
 
-Note 1: To generate animations of the true FOM solution, learned FOM solution, and the error between them, you need to install ffmpeg.
-To do this, run "conda install -c conda-forge ffmpeg" inside of your conda environment. 
-
-Note 2: To run the non-linear elasticity example you will also need `PyMFEM` with parallel support. 
-See the subsection below for details. 
-
-
-
-## Installing `PyMFEM`
-
-`PyMFEM` can be a little difficult to get running. 
-However, most of the examples in this library were built using it. 
-Some of the most common problems (in my experience) in building PyMFEM stem from package inconsistencies.
-Below is a tutorial on how to install PyMFEM in a way that (hopefully) avoids most of these common issues.
-
-First, create a new conda environment to install PyMFEM:
-
-$$\begin{aligned}
-&\text{conda create --name=PyMFEM python=3.10} \\
-&\text{conda activate PyLASDI} 
-\end{aligned}$$
-
-Next, clone the PyMFEM repository (below is the SSH version) and checkout the version 4.7.0.1 release: 
-
-$$\begin{aligned}
-&\text{git clone git@github.com:mfem/PyMFEM.git} \\
-&\text{cd ./PyMFEM/} \\
-&\text{git checkout v\_4.7.0.1}
-\end{aligned}$$
-
-Next, install the package's dependencies. This will probably install the wrong version of a few packages; we we will fix those issues next. 
-
-$$\text{pip install -r requirements.txt}$$
-
-PyMFEM (at least version 4.7.0.1) is not compatible with cmake 4.0 and beyond. Thus, we need to install an earlier version of cmake:
-
-$$\begin{aligned}
-&\text{pip uninstall cmake} \\
-&\text{pip install cmake==3.28} 
-\end{aligned}$$
-
-Next, you need to install MPI to get MFEM running in parallel. On a mac (with homebrew), you can do the following:
-
-$$\text{brew install openmpi}$$
-
-Once you have MPI installed, you need to add the mpi4py package to your environment to enable MPI in python code: 
-
-$$\text{pip install mpi4py==4.0.3}$$
-
-With all of this preparation work done, you should now be able to install PyMFEM using the following command:
-
-$$\text{python setup.py install -v --user --with-parallel --with-gslib --CC=gcc --CXX=g++ --MPICC=mpicc --MPICXX=mpic++ --with-lapack}$$
-
-
-
-
+**Note**: PyMFEM examples require PyMFEM installation (see below).
 
 ## Repository Layout
 
-- `src/Physics` – physics models and the base [`Physics`](src/Physics/Physics.py) class. Concrete solvers such as Burgers, Advection and NonlinearElasticity subclass this and implement `initial_condition` and `solve`.
-- `src/LatentDynamics` – latent space dynamics models. [`LatentDynamics`](src/LatentDynamics/LatentDynamics.py) defines the interface (`calibrate` and `simulate`). Implementations include [`SINDy`](src/LatentDynamics/SINDy.py) and [`DampedSpring`](src/LatentDynamics/DampedSpring.py).
-- `src/GPLaSDI.py` – the main training loop encapsulated by the `GPLaSDI` class. It couples the physics, model and latent dynamics and supports non-uniform time grids by switching finite-difference formulas based on the `Uniform_t_Grid` flag.
-- `src/Model.py` – neural network autoencoders (`Autoencoder` and `Autoencoder_Pair`) used to encode full order states.
-- `src/ParameterSpace.py` – utilities for defining training and testing parameter grids.
-- `src/Workflow.py` – command line driver that loads configuration files, initializes all components and runs training.
-- `examples/` – configuration files for the various examples. 
-- `src/Utilities` – finite difference and ODE solvers for both uniform and non-uniform grids.
+### Core Components
 
+- **`src/Workflow.py`** – Main command-line driver that loads configuration files, initializes components, and runs the training pipeline
+- **`src/GPLaSDI.py`** – The `BayesianGLaSDI` class implements the main training loop with GP-based greedy sampling
+- **`src/Initialize.py`** – Factory functions for initializing trainers, models, physics solvers, and latent dynamics from config files
+- **`src/Model.py`** – Neural network architectures:
+  - `MultiLayerPerceptron`: Flexible MLP with customizable activations
+  - `Autoencoder`: Standard autoencoder for first-order systems
+  - `Autoencoder_Pair`: Paired autoencoder for higher-order systems (encodes multiple derivatives)
+- **`src/ParameterSpace.py`** – Parameter space management, grid generation, and train/test split utilities
+- **`src/SolveROMs.py`** – ROM simulation functions:
+  - `average_rom()`: Simulate using GP mean predictions
+  - `sample_roms()`: Simulate using samples from GP posteriors
+  - Error computation and uncertainty quantification
+- **`src/Sample.py`** – Greedy sampling logic and training space updates
+- **`src/Enums.py`** – Enumerations for workflow states (`NextStep`, `Result`)
 
-## Non-uniform Time Grids
+### Physics Solvers
 
-Physics objects expose a `Uniform_t_Grid` attribute which determines how derivatives are computed. When set to `False` higher-order schemes are replaced with non-uniform versions as shown in [`GPLaSDI`](src/GPLaSDI.py) where `Derivative1_Order2_NonUniform` is used when necessary.
+- **`src/Physics/Physics.py`** – Base `Physics` class defining the interface
+- **Built-in Python Solvers**:
+  - `Burgers.py` – 1D Burgers equation
+  - `Burgers2D.py` – 2D Burgers equation
+  - `BurgersSecondOrder.py` – Second-order Burgers formulation
+  - `Explicit.py` / `ExplicitSecondOrder.py` – Custom explicit solvers
+  - `Thermal.py` – Thermal diffusion (loads from HDF5 files)
+- **PyMFEM-based Solvers** (in `src/Physics/PyMFEM/`):
+  - `advection.py` – Advection equation
+  - `wave_equation.py` – Wave equation (2nd order)
+  - `klein_gordon.py` – Klein-Gordon equation (2nd order)
+  - `telegraphers.py` – Telegraphers equation (2nd order)
+  - `nonlinear_elasticity.py` – Nonlinear elasticity (2nd order)
 
+### Latent Dynamics
 
+- **`src/LatentDynamics/LatentDynamics.py`** – Base `LatentDynamics` class
+- **`src/LatentDynamics/SINDy.py`** – Sparse Identification of Nonlinear Dynamics
+  - Uses polynomial library (currently order ≤ 1)
+  - Supports learnable coefficients or least-squares fitting
+- **`src/LatentDynamics/DampedSpring.py`** – Physics-informed damped spring dynamics
+
+### Utilities
+
+- **`src/Utilities/GaussianProcess.py`** – GP training and prediction:
+  - `fit_gps()`: Fit GPs to latent dynamics coefficients
+  - `eval_gp()`: Evaluate GP mean and standard deviation
+  - `sample_coefs()`: Sample from GP posteriors
+  - Automatic input/output scaling for numerical stability
+  - Configurable kernels (Matern, RBF)
+- **`src/Utilities/FiniteDifference.py`** – Derivative approximations:
+  - Order 2 and Order 4 schemes for uniform grids
+  - Order 2 non-uniform grid schemes
+  - First and second derivatives
+- **`src/Utilities/FirstOrderSolvers.py`** – ODE solvers for first-order systems:
+  - RK1 (Euler), RK2, RK4 methods
+- **`src/Utilities/SecondOrderSolvers.py`** – ODE solvers for second-order systems:
+  - RK1, RK2, RK4 methods for second-order ODEs
+- **`src/Utilities/Logging.py`** – Logging utilities and dictionary logging
+- **`src/Utilities/Timing.py`** – `Timer` class for performance profiling
+- **`src/Utilities/MoveOptimizer.py`** – Utilities for moving optimizers between devices (CPU/GPU)
+
+### Visualization
+
+- **`src/Plot.py`** – Plotting functions:
+  - `Plot_Latent_Trajectories()`: Visualize latent space dynamics with GP uncertainty
+  - `Plot_Heatmap2d()`: 2D parameter space heatmaps
+  - `trainSpace_RelativeErrors_Heatmap()`: Error visualization for training parameters
+- **`src/Animate.py`** – Animation generation:
+  - `make_solution_movies()`: Create MP4 animations of solutions
+  - `_scalar_anim()`: Animations for scalar fields on 2D/3D point clouds
+  - `_vector_anim()`: Animations for vector fields
+  - Requires `ffmpeg`
+
+## Configuration Files
+
+Configuration files are YAML-based and specify:
+
+### LaSDI Settings (`lasdi`)
+- Trainer type (currently `gplasdi`)
+- Learning rate, number of GP samples
+- Normalization settings
+- Rollout parameters (initial probability, update frequency)
+- Training iterations and greedy sampling iterations
+- Loss weights: `recon`, `LD`, `rollout`, `IC_rollout`, `coef`, `chain_rule`, `consistency`
+- Loss types: `MSE` or `MAE`
+- Learnable coefficients flag
+
+### Workflow Settings (`workflow`)
+- Restart capability (load from checkpoint)
+- Plotting options
+
+### Parameter Space (`parameter_space`)
+- Parameter definitions (uniform, list, or file-based)
+- Test space configuration (grid, random, or file-based)
+
+### Model Architecture (`model`)
+- Model type: `ae` (Autoencoder) or `pair` (Autoencoder_Pair)
+- Hidden layer widths
+- Activation functions
+- Latent dimension
+
+### Latent Dynamics (`latent_dynamics`)
+- Type: `sindy` or `spring`
+- Coefficient norm order
+
+### Physics (`physics`)
+- Physics type (must match a key in `physics_dict`)
+- Physics-specific parameters (grid sizes, time steps, domain bounds, etc.)
+
+## Dependencies
+
+### Core Dependencies
+
+Tested with the following versions:
+
+- Python (3.10)
+- numpy (1.26.4)
+- torch (2.5.1)
+- scikit-learn (1.5.2)
+- pyyaml (6.0.2)
+- scipy (1.14.1)
+- matplotlib (3.9.2)
+- seaborn (0.13.2)
+
+### Optional Dependencies
+
+**For animations:**
+- ffmpeg (1.4)
+- Install via: `conda install -c conda-forge ffmpeg`
+
+**For HDF5 data loading (Thermal example):**
+- hdf5 (1.14.5)
+- h5py (3.14.0)
+
+**For PyMFEM examples:**
+- mfem (4.7.0.1)
+- cmake (3.28.1)
+- mpi4py (4.0.3)
+- See installation instructions below
+
+**For Jupyter notebooks (testing/development):**
+- jupyter (1.0.0)
+
+## Installing PyMFEM
+
+PyMFEM can be challenging to install. Below is a step-by-step guide to avoid common issues.
+
+### 1. Create a Conda Environment
+
+```bash
+conda create --name=PyMFEM python=3.10
+conda activate PyMFEM
+```
+
+### 2. Clone and Checkout PyMFEM
+
+```bash
+git clone git@github.com:mfem/PyMFEM.git
+cd ./PyMFEM/
+git checkout v4.7.0.1
+```
+
+### 3. Install Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 4. Fix CMake Version
+
+PyMFEM v4.7.0.1 requires cmake < 4.0:
+
+```bash
+pip uninstall cmake
+pip install cmake==3.28
+```
+
+### 5. Install MPI
+
+**On macOS with Homebrew:**
+```bash
+brew install openmpi
+```
+
+**On Linux:**
+```bash
+# Ubuntu/Debian
+sudo apt-get install openmpi-bin libopenmpi-dev
+
+# CentOS/RHEL
+sudo yum install openmpi openmpi-devel
+```
+
+### 6. Install mpi4py
+
+```bash
+pip install mpi4py==4.0.3
+```
+
+### 7. Build PyMFEM
+
+```bash
+python setup.py install -v --user --with-parallel --with-gslib \
+  --CC=gcc --CXX=g++ --MPICC=mpicc --MPICXX=mpic++ --with-lapack
+```
+
+**Note**: On some systems you may need to adjust compiler names (e.g., `gcc-11`, `g++-11`).
+
+## Non-Uniform Time Grids
+
+Physics objects expose a `Uniform_t_Grid` attribute which determines derivative computation:
+- When `True`: Uses higher-order finite difference schemes (Order 4 when available)
+- When `False`: Uses non-uniform grid schemes (currently Order 2)
+
+The `BayesianGLaSDI` class automatically selects the appropriate finite difference method based on this flag. See `Derivative1_Order2_NonUniform` in `src/Utilities/FiniteDifference.py` for non-uniform grid implementation.
 
 ## Extending the Code
 
 New applications can be implemented by deriving from the appropriate base classes:
 
-- **Physics** – subclass `Physics` and implement `initial_condition` and `solve` methods to interface with your full order solver. You need to add any new `Physics` subclasses to the `physics_dict` dictionary in `Initialize.py` before you can use start using them/referencing them in a configuration file.
-- **LatentDynamics** – subclass `LatentDynamics` and implement `calibrate` and `simulate` methods to define your latent ODE model. You need to add any new `LatentDynamics` subclasses to the `ld_dict` dictionary in `Initialize.py` before you can start using them/referencing them in a configuration file.
-- **Model** – extend one of the models in `Model.py` or add a new `torch.nn.Module` that provides `Encode`, `Decode` and `latent_initial_conditions` methods. You need to add any new `Model` subclasses to the `model_dict` and `model_load_dict` dictionaries in `Initialize.py` before you can start using them/referencing them in a configuration file.
+### Adding a New Physics Solver
 
-Register your classes in `src/Initialize.py` so that configuration files can reference them. Example YAML files and the existing subclasses serve as templates for new problems.
+1. **Create a subclass** of `Physics` in `src/Physics/YourSolver.py`
+2. **Implement required methods**:
+   - `__init__(self, config, param_names)`: Initialize solver parameters
+   - `initial_condition(self, param)`: Generate initial conditions for given parameters
+   - `solve(self, param, t_grid)`: Solve and return solution trajectory
+3. **Register in `Initialize.py`**:
+   ```python
+   physics_dict = {
+       ...
+       'YourSolver': YourSolver,
+   }
+   ```
+4. **Create config file** in `examples/YourSolver.yml`
+
+### Adding a New Latent Dynamics Model
+
+1. **Create a subclass** of `LatentDynamics` in `src/LatentDynamics/YourModel.py`
+2. **Implement required methods**:
+   - `__init__(self, n_z, coef_norm_order, Uniform_t_Grid)`: Initialize model
+   - `calibrate(self, Latent_States, loss_type, t_Grid, input_coefs)`: Compute/update coefficients
+   - `simulate(self, Coefs, IC, t_Grid, n_steps)`: Simulate forward in time
+3. **Register in `Initialize.py`**:
+   ```python
+   ld_dict = {
+       ...
+       'yourmodel': YourModel,
+   }
+   ```
+
+### Adding a New Model Architecture
+
+1. **Create a subclass** of `torch.nn.Module` in `src/Model.py`
+2. **Implement required methods**:
+   - `Encode(self, U)`: Encode full-order state to latent space
+   - `Decode(self, Z)`: Decode latent state to full-order space
+   - `latent_initial_conditions(self, U_IC)`: Extract latent initial conditions
+3. **Register in `Initialize.py`**:
+   ```python
+   model_dict = {
+       ...
+       'yourmodel': YourModel,
+   }
+   model_load_dict = {
+       ...
+       'yourmodel': load_YourModel,
+   }
+   ```
+
+## Testing and Development
+
+The `Test/` directory contains Jupyter notebooks for testing and validating components:
+- `FiniteDifference.ipynb` – Finite difference scheme validation
+- `FirstOrderSolvers.ipynb` – First-order ODE solver tests
+- `SecondOrderSolvers.ipynb` – Second-order ODE solver tests
+- `DeriveFiniteDifference.ipynb` – Derivation of finite difference formulas
+
+## Output and Results
+
+Training produces several outputs:
+
+### Saved Files
+- **Checkpoint**: `checkpoint/checkpoint.pt` – Model weights and training state
+- **Results**: `results/*.pkl` – Training metrics and losses by parameter
+- **Figures**: `Figures/*.png` – Latent trajectory plots, error heatmaps
+- **Animations**: `Figures/*.mp4` – Solution animations (if generated)
+
+### Logging
+- Real-time logging to console and `output.txt`
+- Loss tracking per parameter combination
+- GP fitting statistics
+- Timing information for performance profiling
+
+## GPU Support
+
+The code automatically detects and uses CUDA if available. To force CPU usage:
+
+```python
+# In your config or code
+device = 'cpu'
+```
+
+GPU training can provide significant speedups, especially for large autoencoders.
+
+## Citation
+
+If you use this code in your research, please cite the relevant LaSDI papers:
+
+[Add citation information here]
+
+## Contributing
+
+Contributions are welcome! Please follow the existing code structure and add tests for new features.
+
+## License
+
+[Add license information here]
+
+## Acknowledgments
+
+This work was performed under the auspices of the U.S. Department of Energy by Lawrence Livermore National Laboratory under Contract DE-AC52-07NA27344 (LLNL-CODE-xxxxxx).

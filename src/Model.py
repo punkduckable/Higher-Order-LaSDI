@@ -29,7 +29,6 @@ act_dict = {'elu'           : torch.nn.functional.elu,
             'hardswish'     : torch.nn.functional.hardswish,
             'leakyReLU'     : torch.nn.functional.leaky_relu,
             'logsigmoid'    : torch.nn.functional.logsigmoid,
-            'prelu'         : torch.nn.functional.prelu,
             'relu'          : torch.nn.functional.relu,
             'relu6'         : torch.nn.functional.relu6,
             'rrelu'         : torch.nn.functional.rrelu,
@@ -312,6 +311,10 @@ class Autoencoder(torch.nn.Module):
         self.activations    : list[str] = activations;
         self.reshape_shape  : list[int] = reshape_shape;
         LOGGER.info("Initializing an Autoencoder with latent space dimension %d" % self.n_z);
+        LOGGER.info("  Reshape shape: %s" % str(reshape_shape));
+        LOGGER.info("  Widths: %s" % str(widths));
+        LOGGER.info("  Activations: %s" % str(activations));
+
 
         # Build the encoder, decoder.
         LOGGER.info("Initializing the encoder...");
@@ -431,7 +434,8 @@ class Autoencoder(torch.nn.Module):
 
     def latent_initial_conditions(  self,
                                     param_grid     : numpy.ndarray, 
-                                    physics        : Physics) -> list[list[numpy.ndarray]]:
+                                    physics        : Physics,
+                                    trainer        = None) -> list[list[numpy.ndarray]]:
         """
         This function maps a set of initial conditions for the FOM to initial conditions for the 
         latent space dynamics. Specifically, we take in a set of possible parameter values. For 
@@ -484,6 +488,17 @@ class Autoencoder(torch.nn.Module):
             # Fetch the IC for the i'th set of parameters. Then map it to a tensor.
             u0_np   : numpy.ndarray = physics.initial_condition(param_grid[i])[0];
             u0      : torch.Tensor  = torch.Tensor(u0_np).reshape((1,) + u0_np.shape);
+
+            # If the trainer uses normalization, normalize the IC before encoding.
+            # (We do NOT store normalization stats on the model.)
+            has_norm = (trainer is not None) and hasattr(trainer, "has_normalization") and trainer.has_normalization();
+            if has_norm:
+                LOGGER.debug(f"  Normalizing IC for param {i}: range [{u0.min().item():.3e}, {u0.max().item():.3e}] (physical units)");
+                u0 = trainer.normalize_tensor(u0, 0);
+                LOGGER.debug(f"    After normalization: range [{u0.min().item():.3e}, {u0.max().item():.3e}]");
+            else:
+                LOGGER.warning(f"  No normalization applied to IC for param {i}! Range: [{u0.min().item():.3e}, {u0.max().item():.3e}]");
+                LOGGER.warning(f"    This may cause issues if the model was trained on normalized data.");
 
             # Encode the IC, then map the encoding to a numpy array.
             z0      : numpy.ndarray = self.Encode(u0).detach().numpy();
@@ -627,7 +642,7 @@ class Autoencoder_Pair(torch.nn.Module):
 
         # Call the super class initializer.
         super().__init__();
-        LOGGER.info("Initializing an Autoencoder_Pair...");
+        LOGGER.info("Initializing an Autoencoder_Pair");
 
         # In general, the FOM solution may be vector valued and have multiple spatial dimensions. 
         # We need to know the shape of each FOM frame. 
@@ -816,7 +831,8 @@ class Autoencoder_Pair(torch.nn.Module):
 
     def latent_initial_conditions(  self,
                                     param_grid     : numpy.ndarray, 
-                                    physics        : Physics) -> list[list[numpy.ndarray]]:
+                                    physics        : Physics,
+                                    trainer        = None) -> list[list[numpy.ndarray]]:
         """
         This function maps a set of initial conditions for the FOM to initial conditions for the 
         latent space dynamics. Specifically, we take in a set of possible parameter values. For 
@@ -874,6 +890,11 @@ class Autoencoder_Pair(torch.nn.Module):
             # Map the ICs to a tensor.
             u0      : torch.Tensor          = torch.Tensor(u0_np).reshape((1,) + u0_np.shape);
             v0      : torch.Tensor          = torch.Tensor(v0_np).reshape((1,) + v0_np.shape);
+
+            # If the trainer uses normalization, normalize ICs before encoding.
+            if (trainer is not None) and hasattr(trainer, "has_normalization") and trainer.has_normalization():
+                u0 = trainer.normalize_tensor(u0, 0);
+                v0 = trainer.normalize_tensor(v0, 1);
 
             # Encode the IC, then map the encoding to a numpy array.
             z0_t, Dz0_t = self.Encode(  Displacement_Frames = u0, 

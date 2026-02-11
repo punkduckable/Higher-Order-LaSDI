@@ -4,20 +4,27 @@ lasdi:
     lr:                     0.001
     n_samples:              20
 
+    # If true, compute a single global mean/std from TRAINING data only, and normalize
+    # all training/testing trajectories using these values.
+    normalize:              false
+
     # Note that t_rollout is capped at 0.75 to ensure there are some frames to simulate forward.
     p_rollout_init:         0.01
-    rollout_update_freq:    100
+    rollout_update_freq:    20
     dp_per_update:          0.01
     randomized_rollout:     True    # If true, then the duration is randomized for each IC, with p_rollout acting as a maximum. Otherwise, everything is rolled out by p_rollout.
     rollout_spline_order:   1
 
     p_IC_rollout_init:      0.01
-    IC_rollout_update_freq: 100
+    IC_rollout_update_freq: 20
     IC_dp_per_update:       0.01
 
     max_iter:               36000
     n_iter:                 6000
     max_greedy_iter:        36000
+
+    lr_warmup:              20    # How many epochs to warmup the learning rate for after greedy sampling.
+    checkpoint_warmup:      20    # How many epochs to checkpoint the model after after greedy sampling.
 
     loss_weights:
       recon:                1.0

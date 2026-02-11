@@ -112,10 +112,10 @@ class Explicit(Physics):
         """
 
         # Checks.
-        assert(isinstance(param, numpy.ndarray));
-        assert(self.X_Positions is not None);
-        assert(len(param.shape) == 1);
-        assert(param.shape[0]   == self.n_p);
+        assert isinstance(param, numpy.ndarray), "type(param) = %s" % str(type(param));
+        assert self.X_Positions is not None,     "self.X_Positions is None";
+        assert len(param.shape) == 1,            "len(param.shape) = %d" % len(param.shape);
+        assert param.shape[0]   == self.n_p,     "param.shape = %s, self.n_p = %d" % (str(param.shape), self.n_p);
 
         # Fetch the parameter values.
         A   : float             = param[self.A_idx];
@@ -161,10 +161,10 @@ class Explicit(Physics):
             solution (the time value associated with U[i, :]).
         """
        
-        assert(isinstance(param, numpy.ndarray));
-        assert(self.X_Positions is not None);
-        assert(len(param.shape) == 1);
-        assert(param.shape[0]   == self.n_p);
+        assert isinstance(param, numpy.ndarray), "type(param) = %s" % str(type(param));
+        assert self.X_Positions is not None,     "self.X_Positions is None";
+        assert len(param.shape) == 1,            "len(param.shape) = %d" % len(param.shape);
+        assert param.shape[0]   == self.n_p,     "param.shape = %s, self.n_p = %d" % (str(param.shape), self.n_p);
 
         # Fetch the parameter values.
         A   : float             = param[self.A_idx];

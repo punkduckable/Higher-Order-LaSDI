@@ -2,12 +2,17 @@
 # Import and Setup
 # -------------------------------------------------------------------------------------------------
 
-import  os;
-import  sys;
-physics_path    : str   = os.path.join(os.path.curdir, "Physics");
-ld_path         : str   = os.path.join(os.path.curdir, "LatentDynamics");
-sys.path.append(physics_path);
-sys.path.append(ld_path);
+import os;
+import sys;
+from pathlib import Path;
+
+# Resolve paths relative to the project root (Higher-Order-LaSDI/), independent of CWD.
+_SRC_DIR: Path = Path(__file__).resolve().parent;          # Higher-Order-LaSDI/src
+_PROJECT_DIR: Path = _SRC_DIR.parent;                     # Higher-Order-LaSDI
+_PHYSICS_DIR: Path = _SRC_DIR / "Physics";
+_LD_DIR: Path = _SRC_DIR / "LatentDynamics";
+sys.path.append(str(_PHYSICS_DIR));
+sys.path.append(str(_LD_DIR));
 
 import  logging;
 
@@ -56,6 +61,7 @@ def Plot_Latent_Trajectories(physics         : Physics,
                              U_True          : list[list[torch.Tensor]],
                              t_Grid          : list[torch.Tensor],
                              file_prefix     : str,
+                             trainer         = None,
                              figsize         : tuple[int]    = (15, 13)) -> None:
     """
     This function plots the latent trajectories of the latent dynamics model for a combination of 
@@ -115,37 +121,37 @@ def Plot_Latent_Trajectories(physics         : Physics,
     """ 
 
     # Checks
-    assert(isinstance(physics, Physics));
-    assert(isinstance(model, torch.nn.Module));
-    assert(isinstance(latent_dynamics, LatentDynamics));
-    assert(isinstance(gp_list, list));
-    assert(len(gp_list)     == latent_dynamics.n_coefs);
+    assert isinstance(physics, Physics),                "type(physics) = %s" % type(physics);
+    assert isinstance(model, torch.nn.Module),          "type(model) = %s" % type(model);
+    assert isinstance(latent_dynamics, LatentDynamics), "type(latent_dynamics) = %s" % type(latent_dynamics);
+    assert isinstance(gp_list, list),                   "type(gp_list) = %s" % type(gp_list);
+    assert len(gp_list)     == latent_dynamics.n_coefs, "len(gp_list) = %d != latent_dynamics.n_coefs = %d" % (len(gp_list), latent_dynamics.n_coefs);
     for i in range(latent_dynamics.n_coefs):
-        assert(isinstance(gp_list[i], GaussianProcessRegressor));
+        assert isinstance(gp_list[i], GaussianProcessRegressor), "type(gp_list[%d]) = %s" % (i, type(gp_list[i]));
 
-    assert(isinstance(param_grid, numpy.ndarray));
-    assert(param_grid.ndim     == 2);
-    assert(param_grid.shape[1] == physics.n_p);
+    assert isinstance(param_grid, numpy.ndarray),        "type(param_grid) = %s" % type(param_grid);
+    assert param_grid.ndim     == 2,                     "param_grid.ndim = %d != 2" % param_grid.ndim;
+    assert param_grid.shape[1] == physics.n_p,           "param_grid.shape = %s != physics.n_p = %d" % (str(param_grid.shape), physics.n_p);
     n_param : int = param_grid.shape[0];
 
-    assert(isinstance(n_samples, int));
-    assert(isinstance(U_True, list));
-    assert(isinstance(t_Grid, list));
-    assert(len(t_Grid)      == n_param);
-    assert(len(U_True)      == n_param);
+    assert isinstance(n_samples, int),                  "type(n_samples) = %s" % type(n_samples);
+    assert isinstance(U_True, list),                    "type(U_True) = %s" % type(U_True);
+    assert isinstance(t_Grid, list),                    "type(t_Grid) = %s" % type(t_Grid);
+    assert len(t_Grid)      == n_param,                 "len(t_Grid) = %d != n_param = %d" % (len(t_Grid), n_param);
+    assert len(U_True)      == n_param,                 "len(U_True) = %d != n_param = %d" % (len(U_True), n_param);
     for i in range(n_param):
-        assert(isinstance(U_True[i], list));
-        assert(len(U_True[i])  == physics.n_IC);
-        assert(isinstance(t_Grid[i], torch.Tensor));
-        assert(t_Grid[i].ndim     == 1);
+        assert isinstance(U_True[i], list),             "type(U_True[%d]) = %s" % (i, type(U_True[i]));
+        assert len(U_True[i])  == physics.n_IC,         "len(U_True[%d]) = %d != physics.n_IC = %d" % (i, len(U_True[i]), physics.n_IC);
+        assert isinstance(t_Grid[i], torch.Tensor),     "type(t_Grid[%d]) = %s" % (i, type(t_Grid[i]));
+        assert t_Grid[i].ndim     == 1,                 "t_Grid[%d].ndim = %d != 1" % (i, t_Grid[i].ndim);
         n_t_i : int = t_Grid[i].shape[0];   # number of time steps for the i'th combination of parameter values.
         for j in range(physics.n_IC):
-            assert(isinstance(U_True[i][j], torch.Tensor));
-            assert(U_True[i][j].ndim >= 2);
-            assert(U_True[i][j].shape[0]    == n_t_i);
+            assert isinstance(U_True[i][j], torch.Tensor),  "type(U_True[%d][%d]) = %s" % (i, j, type(U_True[i][j]));
+            assert U_True[i][j].ndim >= 2,                  "U_True[%d][%d].ndim = %d < 2" % (i, j, U_True[i][j].ndim);
+            assert U_True[i][j].shape[0]    == n_t_i,       "U_True[%d][%d].shape[0] = %d != n_t_i = %d" % (i, j, U_True[i][j].shape[0], n_t_i);
 
-    assert(isinstance(figsize, tuple));
-    assert(len(figsize)     == 2);
+    assert isinstance(figsize, tuple), "type(figsize) = %s" % type(figsize);
+    assert len(figsize)     == 2,       "len(figsize) = %d != 2" % len(figsize);
 
 
     # ---------------------------------------------------------------------------------------------
@@ -162,7 +168,8 @@ def Plot_Latent_Trajectories(physics         : Physics,
                                                                     gp_list         = gp_list, 
                                                                     param_grid      = param_grid,
                                                                     t_Grid          = t_Grid,
-                                                                    n_samples       = n_samples);
+                                                                    n_samples       = n_samples,
+                                                                    trainer         = trainer);
     
     # Now encode the FOM trajectories. Store these in an n_param element list whose i'th element
     # is an n_IC element list whose j'th element is a numpy array of shape (n_t(i), n_z) holding
@@ -189,6 +196,8 @@ def Plot_Latent_Trajectories(physics         : Physics,
     # Set up the subplots.
     LOGGER.info("Making latent trajectory plots for %d combinations of parameter values" % n_param);
     for i in range(n_param):
+        # Time grid for this parameter combination (used as x-axis).
+        t_np: numpy.ndarray = t_Grid[i].detach().cpu().numpy();
         for j in range(physics.n_IC):
             # Set up the plot for this combination of parameter values.
             plt.figure(figsize = figsize);
@@ -196,11 +205,11 @@ def Plot_Latent_Trajectories(physics         : Physics,
             # Plot the predicted latent trajectories
             for s in range(n_samples):
                 for k in range(latent_dynamics.n_z):
-                    plt.plot(Predicted_Latent_Trajectories[i][j][:, s, k], 'C' + str(k), linewidth = 1, alpha = 0.3);
+                    plt.plot(t_np, Predicted_Latent_Trajectories[i][j][:, s, k], 'C' + str(k), linewidth = 1, alpha = 0.3);
 
             # Plot each component of the latent trajectories
             for k in range(latent_dynamics.n_z):
-                plt.plot(True_Latent_Trajectories[i][j][:, k], 'C' + str(k), linewidth = 3, alpha = 0.75);
+                plt.plot(t_np, True_Latent_Trajectories[i][j][:, k], 'C' + str(k), linewidth = 3, alpha = 0.75);
             
             # Determine the title and save file name.
             if(j == 0):
@@ -218,8 +227,10 @@ def Plot_Latent_Trajectories(physics         : Physics,
             plt.ylabel(r'$z$');
             plt.title(title);
 
-            # Save the figure.
-            save_file_path : str = os.path.join(os.path.join(os.path.pardir, "Figures"), save_file_name);
+            # Save the figure under Higher-Order-LaSDI/Figures (independent of CWD).
+            figures_dir: Path = _PROJECT_DIR / "Figures";
+            figures_dir.mkdir(parents=True, exist_ok=True);
+            save_file_path: str = str(figures_dir / save_file_name);
             plt.savefig(save_file_path);
 
             # Show the plot for this IC and combination of parameter values.
@@ -289,11 +300,11 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     p2_grid : numpy.ndarray     = param_space.test_meshgrid[1][0, :];
     n1      : int               = p1_grid.shape[0];
     n2      : int               = p2_grid.shape[0];
-    assert(values.shape[0]  == n1);
-    assert(values.shape[1]  == n2);
+    assert values.shape[0]  == n1, "values.shape[0] = %d != n1 = %d" % (values.shape[0], n1);
+    assert values.shape[1]  == n2, "values.shape[1] = %d != n2 = %d" % (values.shape[1], n2);
 
-    assert(isinstance(figsize, tuple));
-    assert(len(figsize)     == 2);
+    assert isinstance(figsize, tuple), "type(figsize) = %s" % type(figsize);
+    assert len(figsize)     == 2,      "len(figsize) = %d != 2" % len(figsize);
     
     # Setup.
     n_train         : int           = param_space.n_train();
@@ -318,8 +329,19 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     # the i'th value of p1 and j'th value of p2
     im = ax.imshow(values.T, cmap = cmap);
     fig.colorbar(im, ax = ax, fraction = 0.04);
-    ax.set_xticks(numpy.arange(0, n1, 2), labels = numpy.round(p1_grid[::2], 2));
-    ax.set_yticks(numpy.arange(0, n2, 2), labels = numpy.round(p2_grid[::2], 2));
+    
+    # Format tick labels with scientific notation for small values
+    def format_tick_label(val):
+        """Format tick labels: use scientific notation if |val| < 0.01 or |val| > 1000, else use 2 decimals."""
+        if val == 0.0:
+            return '0.0';
+        elif abs(val) < 0.01 or abs(val) > 1000:
+            return f'{val:.2e}';
+        else:
+            return f'{val:.2f}';
+    
+    ax.set_xticks(numpy.arange(0, n1, 2), labels = [format_tick_label(val) for val in p1_grid[::2]]);
+    ax.set_yticks(numpy.arange(0, n2, 2), labels = [format_tick_label(val) for val in p2_grid[::2]]);
 
     # Add the value itself (as text) to the center of each "pixel".
     LOGGER.debug("Adding values to the center of each pixel");
@@ -358,13 +380,19 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     # ---------------------------------------------------------------------------------------------
     # Finalize the plot!
 
-    # Set plot lables and plot!
-    ax.set_xlabel(param_names[0], fontsize = 15);
-    ax.set_ylabel(param_names[1], fontsize = 15, rotation = 0);
+    # Set plot labels and plot!
+    # Position x-axis label at the right of the axis
+    ax.set_xlabel(param_names[0], fontsize = 15, loc='right');
+    
+    # Position y-axis label at the top-left (horizontal), avoiding overlap with tick labels
+    ax.set_ylabel(param_names[1], fontsize = 15, rotation = 0, loc='top', labelpad=10);
+    
     ax.set_title(title, fontsize = 25);
 
-    # Save the figure.
-    save_file_path : str = os.path.join(os.path.join(os.path.pardir, "Figures"), save_file_name);
+    # Save the figure under Higher-Order-LaSDI/Figures (independent of CWD).
+    figures_dir: Path = _PROJECT_DIR / "Figures";
+    figures_dir.mkdir(parents=True, exist_ok=True);
+    save_file_path: str = str(figures_dir / save_file_name);
     fig.savefig(save_file_path);
     
     # Show the plot and then return!
@@ -425,6 +453,7 @@ def trainSpace_RelativeErrors_Heatmap(trainer        : 'BayesianGLaSDI',
     assert isinstance(param_space, ParameterSpace), "type(param_space) = %s" % type(param_space);
     assert hasattr(trainer, 'U_Train'),             "trainer has no U_Train attribute";
     assert isinstance(trainer.U_Train, list),       "type(trainer.U_Train) = %s" % type(trainer.U_Train);
+    assert hasattr(trainer, 't_Train'),             "trainer has no t_Train attribute (needed to interpolate)";
     assert isinstance(figsize, tuple),              "type(figsize) = %s" % type(figsize);
     assert len(figsize) == 2,                       "len(figsize) = %d" % len(figsize);
 
@@ -440,24 +469,115 @@ def trainSpace_RelativeErrors_Heatmap(trainer        : 'BayesianGLaSDI',
     
     # ---------------------------------------------------------------------------------------------
     # Compute the relative errors between all pairs of train trajectories
+
+    def _interp_U_to_time_grid(
+        t_src: torch.Tensor,
+        U_src: torch.Tensor,
+        t_tgt: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Linearly interpolate U_src(t_src) onto t_tgt.
+
+        Returns:
+            U_interp: Tensor of shape (n_eval, ...) corresponding to U_src interpolated at the
+                subset of t_tgt that lies within [min(t_src), max(t_src)].
+            mask: boolean mask of shape (t_tgt.shape[0],) indicating which t_tgt points were used.
+
+        Notes:
+            - No extrapolation: we only evaluate on the overlapping time interval.
+            - Works for U_src with arbitrary spatial dimensions; time must be dim 0.
+        """
+        assert t_src.ndim == 1, "t_src must be 1D";
+        assert t_tgt.ndim == 1, "t_tgt must be 1D";
+        assert U_src.shape[0] == t_src.shape[0], "U_src.shape[0] must match t_src.shape[0]";
+
+        # Work on CPU for predictable behavior.
+        t_src_c = t_src.detach().cpu();
+        U_src_c = U_src.detach().cpu();
+        t_tgt_c = t_tgt.detach().cpu();
+
+        # Ensure t_src is sorted (required for searchsorted).
+        if t_src_c.shape[0] >= 2 and not bool(torch.all(t_src_c[1:] >= t_src_c[:-1])):
+            order = torch.argsort(t_src_c);
+            t_src_c = t_src_c[order];
+            U_src_c = U_src_c[order];
+
+        # Figure out which time points in t_tgt are within the source time interval.
+        mask = (t_tgt_c >= t_src_c[0]) & (t_tgt_c <= t_src_c[-1]);
+        t_eval = t_tgt_c[mask];
+
+        # If no overlap, return an empty tensor and mask.
+        if t_eval.numel() == 0:
+            return U_src_c[:0], mask;
+
+        # Flatten spatial dims so we can interpolate all components in parallel.
+        U_src_flat = U_src_c.reshape(U_src_c.shape[0], -1);  # (n_src, n_feat)
+
+        # For each time value in t_eval, find the index of the time value in t_src 
+        # that is just <= the time value in t_eval. Specifically, the i'th element
+        # of hi is the index j such that t_src_c[j - 1] < t_eval[i] <= t_src_c[j].
+        hi_src = torch.searchsorted(t_src_c, t_eval, right = False);  # shape = (n_eval,)
+        hi_src = torch.clamp(hi_src, 1, t_src_c.shape[0] - 1);            # clamp to avoid out of bounds errors.
+        lo_src = hi_src - 1;
+
+        # Find the time step sizes in t_src.
+        t0_src = t_src_c[lo_src];    # i'th element holds the time value just before the i'th time value in t_eval.
+        t1_src = t_src_c[hi_src];    # i'th element holds the time value just after the i'th time value in t_eval.
+        dt_src = (t1_src - t0_src);
+  
+        # The i'th element of t_eval occurs somewhere between t0[i] and t1[i]. 
+        # We compute 'w', whose i'th element is the proportion of the way from t0[i] to t1[i]
+        # where t_eval[i] lives. We guard against any repeated time values (dt==0) by falling 
+        # back to left value.
+        dt_safe = torch.where(dt_src == 0, torch.ones_like(dt_src), dt_src);
+        w = ((t_eval - t0_src) / dt_safe).unsqueeze(1);  # (n_eval, 1)
+
+        # Use 'w' to compute the linear interpolation of U_src_flat[lo[i]] and U_src_flat[hi[i]] 
+        # to get the i'th element of U_interp.
+        U0_src = U_src_flat[lo_src];
+        U1_src = U_src_flat[hi_src];
+        U_src_interp_flat = U0_src + w * (U1_src - U0_src);  # (n_eval, n_feat)
+
+        U_src_interp = U_src_interp_flat.reshape(t_eval.shape[0], *U_src_c.shape[1:]);
+        return U_src_interp, mask;
+    
     
     # Initialize the relative error matrix
     n_IC            : int           = trainer.n_IC;
     relative_errors : numpy.ndarray = numpy.zeros((n_IC, n_train, n_train));
     
-    # Compute relative errors for all pairs (i, j)
+    # Compute relative errors for all pairs (i, j). 
     for d in range(n_IC):
         for i in range(n_train):
-            # Flatten all tensors in U_Train[i] into a single vector
-            Uk_i_flat : torch.Tensor = trainer.U_Train[i][d];
+            Ui : torch.Tensor = trainer.U_Train[i][d];
+            ti : torch.Tensor = trainer.t_Train[i];
             
             for j in range(n_train):
-                # Flatten all tensors in U_Train[j] into a single vector
-                Uk_j_flat : torch.Tensor = trainer.U_Train[j][d];
-                
-                # Compute the relative error: ||U_i - U_j||_2 / ||U_j||_2
-                numerator   : float = torch.norm(Uk_i_flat - Uk_j_flat, p = 2).item();
-                denominator : float = torch.norm(Uk_j_flat, p = 2).item();
+                Uj : torch.Tensor = trainer.U_Train[j][d];
+                tj : torch.Tensor = trainer.t_Train[j];
+
+                # Sanity checks: spatial dimensions must match to compare trajectories.
+                assert Ui.shape[1:] == Uj.shape[1:], \
+                    "Shape mismatch for U_Train[%d][%d] %s vs U_Train[%d][%d] %s" % (
+                        i, d, str(tuple(Ui.shape)), j, d, str(tuple(Uj.shape))
+                    );
+
+                # Interpolate Ui(t) onto tj. Only evaluate on overlapping time interval (no extrapolation).
+                Ui_interp, mask = _interp_U_to_time_grid(t_src = ti, U_src = Ui, t_tgt = tj);
+
+                # Use the same subset of tj for the "true" trajectory Uj (to match time locations).
+                Uj_eval = Uj.detach().cpu()[mask];
+
+                # If no overlap in time, mark as invalid.
+                if Ui_interp.shape[0] == 0:
+                    relative_errors[d, i, j] = -1.0;
+                    continue;
+
+                # Flatten and compute the relative error: ||Ui(tj) - Uj(tj)||_2 / ||Uj(tj)||_2
+                diff = (Ui_interp - Uj_eval).reshape(-1);
+                base = Uj_eval.reshape(-1);
+                numerator   : float = torch.norm(diff, p = 2).item();
+                denominator : float = torch.norm(base, p = 2).item();
                 
                 if denominator > 0:
                     relative_errors[d, i, j] = 100*(numerator / denominator);
@@ -471,11 +591,12 @@ def trainSpace_RelativeErrors_Heatmap(trainer        : 'BayesianGLaSDI',
     # Get the train parameter combinations
     train_params : numpy.ndarray = param_space.train_space;  # shape = (n_train, n_p)
     
-    # Create labels as tuples of parameter values
+    # Create labels as tuples of parameter values (scientific notation so small values don't round to 0.0)
     param_labels : list[str] = [];
     for i in range(n_train):
-        param_tuple : tuple = tuple(numpy.round(train_params[i, :], 2));
-        param_labels.append(str(param_tuple));
+        parts: list[str] = [numpy.format_float_scientific(float(v), precision = 2, unique = False, trim = 'k')
+                            for v in train_params[i, :]];
+        param_labels.append("(" + ", ".join(parts) + ")");
     
     
     # ---------------------------------------------------------------------------------------------
@@ -513,15 +634,17 @@ def trainSpace_RelativeErrors_Heatmap(trainer        : 'BayesianGLaSDI',
         full_title          : str = title + '\n' + f'Parameters: {param_names_tuple}' if title else f'Train Space Relative Errors\nParameters: {param_names_tuple}';
         
         # Set plot labels and title
-        ax.set_xlabel('Train trajectory (j)', fontsize = 12);
-        ax.set_ylabel('Train trajectory (i)', fontsize = 12);
+        ax.set_xlabel('Train trajectory (j)', fontsize = 12, loc='right');
+        ax.set_ylabel('Train trajectory (i)', fontsize = 12, rotation = 0, loc='top', labelpad=10);
         ax.set_title("D^%d U Relative Errors" % d + '\n' + full_title, fontsize = 15);
         
         # Adjust layout to prevent label cutoff
         plt.tight_layout();
         
-        # Save the figure
-        save_file_path : str = os.path.join(os.path.join(os.path.pardir, "Figures"), file_prefix + ("_D^%d U_" % d) + "TrainSpaceRelativeErrorHeatmap.png");
+        # Save the figure under Higher-Order-LaSDI/Figures (independent of CWD).
+        figures_dir: Path = _PROJECT_DIR / "Figures";
+        figures_dir.mkdir(parents=True, exist_ok=True);
+        save_file_path: str = str(figures_dir / (file_prefix + ("_D^%d U_" % d) + "TrainSpaceRelativeErrorHeatmap.png"));
         fig.savefig(save_file_path, dpi = 150, bbox_inches = 'tight');
         LOGGER.info("Saved heatmap to %s" % save_file_path);
     

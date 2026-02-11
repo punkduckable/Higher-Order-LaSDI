@@ -65,7 +65,7 @@ def get_1dspace_from_list(param_dict : dict) -> tuple[int, numpy.ndarray]:
 
 
 
-def create_uniform_1dspace(param_dict : dict) -> tuple[int, numpy.ndarray]:
+def get_1dspace_uniform(param_dict : dict) -> tuple[int, numpy.ndarray]:
     """
     This function generates the parameter range (set of possible parameter values) for a parameter 
     that uses the uniform type test space. That is, "test_space_type" should be a key for the 
@@ -125,9 +125,95 @@ def create_uniform_1dspace(param_dict : dict) -> tuple[int, numpy.ndarray]:
 
 
 
+def get_1dspace_from_file(param_dict : dict) -> tuple[int, numpy.ndarray]:
+    """
+    This function generates the parameter range (set of possible parameter values) for a parameter 
+    that uses the metadata_file type test space. That is, "test_space_type" should be a key for the 
+    parameter dictionary and the corresponding value should be "file". 
+
+    The param_dic should also have a "file" key whose value is the path to a metadata file 
+    that contains the possible parameter values. The metadata file should have a header that looks 
+    like this: 
+
+        PARAMETERS
+        <parameter 1 name>: <x1>, <x2>, .... , <xN>
+        <parameter 2 name>: <y1>, <y2>, .... , <yM>
+        ...
+        <parameter K name>: <z1>, <z2>, .... , <zP>
+
+    here, N, M, and P are the number of possible values for the first, second, and K'th parameter, 
+    respectively, while <x1>, <x2>, .... , <xN> are the possible values for the first parameter, 
+    <y1>, <y2>, .... , <yM> are the possible values for the second parameter, and <z1>, <z2>, 
+    .... , <zP> are the possible values for the K'th parameter.
+
+    One of the parameter names should match the name of the parameter in param_dict.
+    
+
+
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+
+    param_dict : dict 
+        A dictionary housing the parameters name and the path to the metadata file holding the 
+        parameter's values.
+
+
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    n_values, paramRange
+
+    n_values : int
+        the length of paramRange (see below).
+    
+    paramRange : numpy.ndarray, shape = (n_param)
+        ith value is the i'th value of the parameter.
+    """
+
+    assert isinstance(param_dict, dict), "param_dict must be a dictionary. Type is %s" % str(type(param_dict));
+    assert 'name' in param_dict, "param_dict must have a 'name' key. Keys are %s" % str(param_dict.keys());
+    assert 'test_space_type' in param_dict, "param_dict must have a 'test_space_type' key. Keys are %s" % str(param_dict.keys());
+    assert param_dict['test_space_type'] == 'file', "param_dict['test_space_type'] must be 'file'. Value is %s" % param_dict['test_space_type'];
+    assert 'file' in param_dict, "param_dict must have a 'file' key. Keys are %s" % str(param_dict.keys());
+    assert isinstance(param_dict['file'], str), "param_dict['file'] must be a string. Type is %s" % str(type(param_dict['file']));
+
+    # First, fetch the parameter's name
+    param_name : str = param_dict['name'];
+
+    # Next, open the metadata file housing the parameter values.
+    metadata_file_path : str = param_dict['file'];
+    with open(metadata_file_path, 'r') as metadata_file:
+        # Skip the first line, which should just say "PARAMETERS".
+        _ = metadata_file.readline();
+    
+        # Parse the next lines, each which should be of the form "<parameter name>: <x1>, <x2>, .... , <xN>".
+        while(True):
+            line : str = metadata_file.readline();
+            
+            # Split by the ':' character. If we only get one part, then we have passed through 
+            # all parameters without finding the one we're looking for... raise an error.
+            parts : list[str] = line.split(':');
+            if(len(parts) == 1):
+                raise ValueError("Parameter %s not found in metadata file %s" % (param_name, metadata_file_path));
+            
+            # Extract the parameter name and check if it matches the one we're looking for. If it 
+            # does, then we can extract the parameter values and return them.
+            if(parts[0].strip() == param_name):
+                param_values : list[str] = parts[1].strip().split(',');
+                param_values : list[float] = [float(value) for value in param_values];
+                paramRange : numpy.ndarray = numpy.array(param_values);
+                return len(param_values), paramRange;
+            else:
+                continue;
+
+
+
 # A macro that allows us to switch function we use to generate generate a parameter's range. 
-getParam1DSpace : dict[str, Callable]    = {'list'       : get_1dspace_from_list,
-                                            'uniform'    : create_uniform_1dspace};
+Get_Param_Range : dict[str, Callable]    = {'list'          : get_1dspace_from_list,
+                                            'uniform'       : get_1dspace_uniform, 
+                                            'file'          : get_1dspace_from_file };
 
 
 
@@ -321,7 +407,7 @@ class ParameterSpace:
             param   : dict  = self.param_list[i];
 
             # Fetch the set of possible parameter values (paramRange) + the size of this set (n_values)
-            n_values, paramRange  = getParam1DSpace[param['test_space_type']](param);
+            n_values, paramRange  = Get_Param_Range[param['test_space_type']](param);
 
             # Determine the min, max value of this parameter.
             self.param_list[i]['min']   = numpy.min(paramRange);
@@ -453,7 +539,7 @@ class ParameterSpace:
         """
 
         # Make sure param has n_p components/can be appended to the set of training parameters.
-        assert(self.train_space.shape[1] == param_values.size);
+        assert self.train_space.shape[1] == param_values.size, "self.train_space.shape[1] = %d != param_values.size = %d" % (self.train_space.shape[1], param_values.size);
 
         # Add the new parameter to the training space by appending it as a new row to 
         # self.train_space
@@ -569,9 +655,9 @@ class ParameterSpace:
         self.n_init_train       : int                   = dict_['n_init_train'];
 
         # Run checks
-        assert(self.n_init_train            == dict_['n_init_train']);
-        assert(self.train_space.shape[1]    == self.n_p);
-        assert(self.test_space.shape[1]     == self.n_p);
+        assert self.n_init_train            == dict_['n_init_train'], "self.n_init_train = %d != dict_['n_init_train'] = %d" % (self.n_init_train, dict_['n_init_train']);
+        assert self.train_space.shape[1]    == self.n_p,          "self.train_space.shape[1] = %d != self.n_p = %d" % (self.train_space.shape[1], self.n_p);
+        assert self.test_space.shape[1]     == self.n_p,          "self.test_space.shape[1] = %d != self.n_p = %d" % (self.test_space.shape[1], self.n_p);
 
         # All done!
         return;

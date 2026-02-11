@@ -59,10 +59,10 @@ class Burgers(Physics):
         """
 
         # Checks
-        assert(isinstance(param_names, list));
-        assert(len(param_names) == 2);
-        assert('a' in param_names);
-        assert('w' in param_names);
+        assert isinstance(param_names, list), "type(param_names) = %s" % str(type(param_names));
+        assert len(param_names) == 2,         "len(param_names) = %d" % len(param_names);
+        assert 'a' in param_names,            "param_names = %s" % str(param_names);
+        assert 'w' in param_names,            "param_names = %s" % str(param_names);
 
         # Make sure the config dictionary is actually for Burgers' equation.
         assert('Burgers' in config);
@@ -72,7 +72,7 @@ class Burgers(Physics):
         self.x_min          : float     = config['Burgers']['x_min'];                   # Minimum value of the spatial variable in the problem domain
         self.x_max          : float     = config['Burgers']['x_max'];                   # Maximum value of the spatial variable in the problem domain
         self.dx             : float     = (self.x_max - self.x_min) / (self.n_x - 1);   # Spacing between grid points along the spatial axis.
-        assert(self.dx > 0.);
+        assert self.dx > 0.,          "self.dx = %s, self.dx must be positive" % self.dx;
 
         # Call the super class initializer.
         super().__init__(config         = config, 
@@ -128,10 +128,10 @@ class Burgers(Physics):
         """
 
         # Checks.
-        assert(isinstance(param, numpy.ndarray));
-        assert(self.X_Positions is not None);
-        assert(len(param.shape) == 1);
-        assert(param.shape[0]   == self.n_p);
+        assert isinstance(param, numpy.ndarray), "type(param) = %s" % str(type(param));
+        assert self.X_Positions is not None,     "self.X_Positions is None";
+        assert len(param.shape) == 1,            "len(param.shape) = %d" % len(param.shape);
+        assert param.shape[0]   == self.n_p,     "param.shape = %s, self.n_p = %d" % (str(param.shape), self.n_p);
         
     
         # Fetch the parameter values.
@@ -194,9 +194,9 @@ class Burgers(Physics):
             solution (the time value associated with U[i, ...]).
         """
 
-        assert(isinstance(param, numpy.ndarray));
-        assert(len(param.shape) == 1);
-        assert(param.shape[0]   == self.n_p);
+        assert isinstance(param, numpy.ndarray), "type(param) = %s" % str(type(param));
+        assert len(param.shape) == 1,            "len(param.shape) = %d" % len(param.shape);
+        assert param.shape[0]   == self.n_p,     "param.shape = %s, self.n_p = %d" % (str(param.shape), self.n_p);
         
 
         # Fetch the initial condition.

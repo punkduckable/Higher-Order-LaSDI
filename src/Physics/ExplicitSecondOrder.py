@@ -43,10 +43,10 @@ class Explicit(Physics):
         """
 
         # Checks.
-        assert(isinstance(param_names, list));
-        assert(len(param_names) == 2);
-        assert('A' in param_names);
-        assert('w' in param_names);
+        assert isinstance(param_names, list),   "type(param_names) = %s" % str(type(param_names));
+        assert len(param_names) == 2,           "len(param_names) = %d" % len(param_names);
+        assert 'A' in param_names,              "param_names = %s" % str(param_names);
+        assert 'w' in param_names,              "param_names = %s" % str(param_names);
 
         # Make sure the config dictionary is actually for the Explicit physics model.
         assert('Explicit' in config);
@@ -119,10 +119,10 @@ class Explicit(Physics):
         """
 
         # Checks.
-        assert(isinstance(param, numpy.ndarray));
-        assert(self.X_Positions is not None);
-        assert(len(param.shape) == 1);
-        assert(param.shape[0]   == self.n_p);
+        assert isinstance(param, numpy.ndarray), "type(param) = %s" % str(type(param));
+        assert self.X_Positions is not None,     "self.X_Positions is None";
+        assert len(param.shape) == 1,            "len(param.shape) = %d" % len(param.shape);
+        assert param.shape[0]   == self.n_p,     "param.shape = %s, self.n_p = %d" % (str(param.shape), self.n_p);
 
         # Fetch the parameter values.
         A   : float             = param[self.A_idx];
@@ -170,10 +170,10 @@ class Explicit(Physics):
             solution (the time value associated with X[0, i, ...]).
         """
        
-        assert(isinstance(param, numpy.ndarray));
-        assert(self.X_Positions is not None);
-        assert(len(param.shape) == 1);
-        assert(param.shape[0]   == self.n_p);
+        assert isinstance(param, numpy.ndarray), "type(param) = %s" % str(type(param));
+        assert self.X_Positions is not None,     "self.X_Positions is None";
+        assert len(param.shape) == 1,            "len(param.shape) = %d" % len(param.shape);
+        assert param.shape[0]   == self.n_p,     "param.shape = %s, self.n_p = %d" % (str(param.shape), self.n_p);
 
         # Fetch the parameter values.
         A   : float             = param[self.A_idx];

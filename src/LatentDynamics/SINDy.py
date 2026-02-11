@@ -148,19 +148,17 @@ class SINDy(LatentDynamics):
 
         output_coefs, loss_sindy, loss_coef. 
         
-        output_coefs : torch.Tensor, shape = (n_train, n_coef)
-            A matrix of shape (n_train, n_coef), where n_train is the number of parameter 
-            combinations in the training set and n_coef is the number of coefficients in the latent 
-            dynamics. The i,j entry of this array holds the value of the j'th coefficient when we 
-            use the i'th combination of parameter values.
+        output_coefs : torch.Tensor, shape = (n_param, n_coef)
+            A matrix of shape (n_param, n_coef). The i,j entry of this array holds the value of 
+            the j'th coefficient when we use the i'th combination of parameter values.
 
-        loss_sindy : torch.Tensor, shape = []
-            A 0-dimensional tensor whose lone element holds the sum of the SINDy losses across the 
-            set of combinations of parameters in the training set. 
+        loss_sindy : list[torch.Tensor], len = n_param
+            The i'th element of this list is a 0-dimensional tensor whose lone element holds the 
+            sum of the SINDy losses from the i'th combination of parameter values. 
 
-        loss_coef : torch.Tensor, shape = [] 
-            A 0-dimensional tensor whose lone element holds the sum of the L1 norms of the 
-            coefficients across the set of combinations of parameters in the training set.
+        loss_coef : list[torch.Tensor], len = n_param
+            The i'th element of this list is a 0-dimensional tensor whose lone element holds the sum 
+            of the L1 norms of the coefficients from the i'th combination of parameter values.
         """
 
         # Run checks.
@@ -203,8 +201,8 @@ class SINDy(LatentDynamics):
             output_coefs_list : list[torch.Tensor] = [];
 
             # Compute the losses, coefficients for each combination of parameter values.
-            loss_sindy  = torch.zeros(1, dtype = torch.float32);
-            loss_coef   = torch.zeros(1, dtype = torch.float32);
+            loss_sindy_list  : list[torch.Tensor] = [];
+            loss_coef_list   : list[torch.Tensor] = [];
             for i in range(n_param):
                 """"
                 Get the optimal SINDy coefficients for the i'th combination of parameter values. 
@@ -215,22 +213,26 @@ class SINDy(LatentDynamics):
                 Note that Result a 3 element tuple.
                 """
                 if(len(input_coefs) == 0):
-                    result : tuple[torch.Tensor, torch.Tensor, torch.Tensor]    = self.calibrate(   Latent_States = [Latent_States[i]], 
-                                                                                                    t_Grid        = [t_Grid[i]],
-                                                                                                    loss_type     = loss_type);
+                    output_coefs, loss_sindy_i, loss_coef_i = self.calibrate(   
+                                                                    Latent_States = [Latent_States[i]], 
+                                                                    t_Grid        = [t_Grid[i]],
+                                                                    loss_type     = loss_type);
                 else:
-                    result                      = self.calibrate(Latent_States  = [Latent_States[i]], 
-                                                                  t_Grid        = [t_Grid[i]],
-                                                                  input_coefs   = [input_coefs[i]],
-                                                                  loss_type     = loss_type);
+                    output_coefs, loss_sindy_i, loss_coef_i = self.calibrate(
+                                                                    Latent_States = [Latent_States[i]], 
+                                                                    t_Grid        = [t_Grid[i]],
+                                                                    input_coefs   = [input_coefs[i]],
+                                                                    loss_type     = loss_type);
 
                 # Package the results from this combination of parameter values.
-                output_coefs_list.append(result[0]);
-                loss_sindy  = loss_sindy + result[1];
-                loss_coef   = loss_coef + result[2];
+                output_coefs_list.append(output_coefs);
+                loss_sindy_list.append(loss_sindy_i[0]);
+                loss_coef_list.append(loss_coef_i[0]);
             
             # Package everything to return!
-            return torch.stack(output_coefs_list), loss_sindy, loss_coef;
+            # Use cat instead of stack since each output_coefs already has shape (1, n_coefs)
+            # cat along dim=0 gives (n_param, n_coefs) as expected
+            return torch.cat(output_coefs_list, dim=0), loss_sindy_list, loss_coef_list;
             
 
         # -----------------------------------------------------------------------------------------
@@ -250,9 +252,20 @@ class SINDy(LatentDynamics):
         else:
             dZdt                    = Derivative1_Order2_NonUniform(Z, t_Grid = t_Grid0);
 
+        # Log diagnostics to check for time scaling or derivative issues
+        LOGGER.debug("SINDy calibration: Z shape=%s, min=%.6e, max=%.6e, std=%.6e" % (
+            str(Z.shape), float(Z.min().item()), float(Z.max().item()), float(Z.std().item())));
+        LOGGER.debug("SINDy calibration: dZ/dt min=%.6e, max=%.6e, mean=%.6e, std=%.6e" % (
+            float(dZdt.min().item()), float(dZdt.max().item()), 
+            float(dZdt.mean().item()), float(dZdt.std().item())));
+        LOGGER.debug("SINDy calibration: t_Grid min=%.6e, max=%.6e, range=%.6e, mean_dt=%.6e" % (
+            float(t_Grid0.min().item()), float(t_Grid0.max().item()),
+            float((t_Grid0.max() - t_Grid0.min()).item()),
+            float((t_Grid0[1:] - t_Grid0[:-1]).mean().item()) if n_t > 1 else 0.0));
+
         # Concatenate a column of ones. This will correspond to a constant term in the latent 
-        # dynamics.
-        Z_1     : torch.Tensor  = torch.cat([torch.ones(n_t, 1), Z], dim = 1)
+        # dynamics. Ensure the ones tensor is on the same device as Z.
+        Z_1     : torch.Tensor  = torch.cat([torch.ones(n_t, 1, device = Z.device, dtype =Z .dtype), Z], dim = 1);
         
         if(len(input_coefs) == 0):
             # For each j, solve the least squares problem 
@@ -262,21 +275,25 @@ class SINDy(LatentDynamics):
             # j'th column holds the results for the j'th column of dZdt. Thus, coefs is a 2d tensor
             # with shape (Nl, n_z).
             coefs                   = torch.linalg.lstsq(Z_1, dZdt).solution
+            LOGGER.debug("SINDy calibration: Learned coefs min=%.6e, max=%.6e, mean=%.6e, abs_mean=%.6e" % (
+                float(coefs.min().item()), float(coefs.max().item()),
+                float(coefs.mean().item()), float(torch.abs(coefs).mean().item())));
         else:
             coefs   : torch.Tensor  = input_coefs[0].reshape(self.n_z + 1, self.n_z);
+            LOGGER.debug("SINDy calibration: Using input coefs min=%.6e, max=%.6e, mean=%.6e" % (
+                float(coefs.min().item()), float(coefs.max().item()), float(coefs.mean().item())));
 
         # Compute the losses.
         if(loss_type == "MSE"):
             loss_sindy = self.MSE(dZdt, Z_1 @ coefs);
         elif(loss_type == "MAE"):
             loss_sindy = self.MAE(dZdt, Z_1 @ coefs);
-        # NOTE(kevin): by default, this will be L1 norm.
         loss_coef = torch.norm(coefs, self.coef_norm_order)
 
         # Prepare coefs and the losses to return. Note that we flatten the coefficient matrix.
         # Note: output of lstsq is not contiguous in memory.
-        output_coefs   : torch.Tensor  = coefs.flatten()
-        return output_coefs, loss_sindy, loss_coef
+        output_coefs   : torch.Tensor  = coefs.reshape(1, -1);
+        return output_coefs, [loss_sindy], [loss_coef]
 
 
 

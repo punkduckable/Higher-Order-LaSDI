@@ -64,10 +64,10 @@ class KleinGordon(Physics):
         """
 
         # Run checks
-        assert(isinstance(param_names, list));
-        assert(len(param_names) == 2);
-        assert('w' in param_names);
-        assert('m' in param_names);
+        assert isinstance(param_names, list), "type(param_names) = %s" % str(type(param_names));
+        assert len(param_names) == 2,         "len(param_names) = %d, param_names = %s" % (len(param_names), str(param_names));
+        assert 'w' in param_names,            "param_names = %s" % str(param_names);
+        assert 'm' in param_names,            "param_names = %s" % str(param_names);
         assert('KleinGordon' in config);
 
         # Run a short simulation to determine the frame shape and positions.
@@ -125,10 +125,10 @@ class KleinGordon(Physics):
         """
 
         # Checks
-        assert(isinstance(param, numpy.ndarray));
-        assert(len(param.shape) == 1);
-        assert(param.shape[0]   == self.n_p);
-        assert(self.X_Positions is not None);
+        assert isinstance(param, numpy.ndarray), "type(param) = %s" % str(type(param));
+        assert len(param.shape) == 1,            "len(param.shape) = %d" % len(param.shape);
+        assert param.shape[0]   == self.n_p,     "param.shape = %s, self.n_p = %d" % (str(param.shape), self.n_p);
+        assert self.X_Positions is not None,     "self.X_Positions is None";
 
         # Fetch the parameters.
         w : float = param[self.w_idx];
@@ -177,9 +177,9 @@ class KleinGordon(Physics):
             A one dimensional tensor of the corresponding times.
         """
 
-        assert(isinstance(param, numpy.ndarray));
-        assert(len(param.shape) == 1);
-        assert(param.shape[0]   == self.n_p);
+        assert isinstance(param, numpy.ndarray), "type(param) = %s" % str(type(param));
+        assert len(param.shape) == 1,            "len(param.shape) = %d" % len(param.shape);
+        assert param.shape[0]   == self.n_p,     "param.shape = %s, self.n_p = %d" % (str(param.shape), self.n_p);
 
         # Set up the t_Grid.
         n_t     : int           = self.config['KleinGordon']['n_t'];

@@ -88,7 +88,7 @@ class LatentDynamics:
                     Latent_States   : list[list[torch.Tensor]], 
                     loss_type       : str,
                     t_Grid          : list[torch.Tensor], 
-                    input_coefs     : list[torch.Tensor] = []) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+                    input_coefs     : list[torch.Tensor] = []) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor]]:
         """
         The user must implement this class on any latent dynamics sub-class. Each latent dynamics 
         object should implement a parameterized model for the dynamics in the latent space. A 
@@ -124,9 +124,8 @@ class LatentDynamics:
         input_coefs : list[torch.Tensor], len = n_param, optional
             The i'th element of this list is a 1d tensor of shape (n_coefs) holding the 
             coefficients for the i'th combination of parameter values. If input_coefs is empty, 
-            input_coefs is empty, then we will learn the coefficients using Least Squares. If 
-            input_coefs is not empty, then we will use the provided coefficients to compute the 
-            loss.
+            then we will learn the coefficients using Least Squares. If input_coefs is not empty, 
+            then we will use the provided coefficients to compute the loss.
 
         
         -------------------------------------------------------------------------------------------
@@ -135,19 +134,17 @@ class LatentDynamics:
 
         coefs, loss_sindy, loss_coef. 
         
-        coefs : torch.Tensor, shape = n_train, n_coef
-            Here, n_train is the number of parameter combinations in the training set and n_coef 
-            is the number of coefficients in the latent dynamics. The i,j entry of this array 
-            holds the value of the j'th coefficient when we use the i'th combination of parameter 
-            values.
+        coefs : torch.Tensor, shape = (n_param, n_coef)
+            A matrix of shape (n_param, n_coef). The i,j entry of this array holds the value of 
+            the j'th coefficient when we use the i'th combination of parameter values.
 
-        loss_sindy : torch.Tensor, shape = [] 
-            A 0-dimensional tensor whose lone element holds holds the sum of the SINDy losses 
-            across the set of combinations of parameters in the training set. 
+        loss_sindy : list[torch.Tensor], len = n_param
+            The i'th element of this list is a 0-dimensional tensor whose lone element holds the 
+            sum of the SINDy losses from the i'th combination of parameter values. 
 
-        loss_coef : torch.Tensor, shape = []
-            A 0-dimensional tensor whose lone element holds the sum of the L1 norms of the 
-            coefficients across the set of combinations of parameters in the training set.
+        loss_coef : list[torch.Tensor], len = n_param
+            The i'th element of this list is a 0-dimensional tensor whose lone element holds the sum 
+            of the L1 norms of the coefficients from the i'th combination of parameter values.
         """
 
         raise RuntimeError('Abstract function LatentDynamics.calibrate!');

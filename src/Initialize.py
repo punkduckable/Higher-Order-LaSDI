@@ -26,12 +26,13 @@ from    ParameterSpace      import  ParameterSpace;
 from    GPLaSDI             import  BayesianGLaSDI;
 from    Model               import  Autoencoder, load_Autoencoder, Autoencoder_Pair, load_Autoencoder_Pair;
 from    Physics             import  Physics;
-from    NonlinearElasticity import  NonlinearElasticity;
-from    Advection           import  Advection;
-from    WaveEquation        import  WaveEquation;
-from    KleinGordon         import  KleinGordon;
-from    Telegraphers        import  Telegraphers;
+#from    NonlinearElasticity import  NonlinearElasticity;
+#from    Advection           import  Advection;
+#from    WaveEquation        import  WaveEquation;
+#from    KleinGordon         import  KleinGordon;
+#from    Telegraphers        import  Telegraphers;
 from    Burgers2D           import  Burgers2D;
+from    Thermal             import  Thermal;
 
 # Set up logger.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
@@ -54,11 +55,14 @@ physics_dict    =  {'Burgers'               : Burgers.Burgers,
                     'Burgers2D'             : Burgers2D,
                     'Explicit'              : Explicit.Explicit,
                     'ExplicitSecondOrder'   : ExplicitSecondOrder.Explicit,
+                    'Thermal'               : Thermal};
+"""
                     'Advection'             : Advection,
                     'NonlinearElasticity'   : NonlinearElasticity,
                     'WaveEquation'          : WaveEquation,
                     "KleinGordon"           : KleinGordon,
                     "Telegraphers"          : Telegraphers};
+"""
 
 
 
@@ -163,7 +167,7 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Bayesia
 
     # Initialize the trainer object. If we are using a restart file, then load the 
     # trainer from that file.
-    trainer                 = trainer_dict[trainer_type](physics, model, latent_dynamics, param_space, config['lasdi'][trainer_type]);
+    trainer                 = trainer_dict[trainer_type](physics, model, latent_dynamics, param_space, config);
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
         trainer.load(restart_dict['trainer']);
 

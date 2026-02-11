@@ -10,6 +10,7 @@ import  numpy;
 import  matplotlib.pyplot           as      plt;
 from    matplotlib.animation        import  FuncAnimation, FFMpegWriter;
 from    matplotlib.colors           import  LinearSegmentedColormap;
+from    mpl_toolkits.mplot3d        import  Axes3D;  # noqa: F401 (registers 3D projection)
 
 # Set up logging.
 import  logging;
@@ -29,10 +30,11 @@ def _scalar_anim(   data        : numpy.ndarray,
                     save_dir    : Path          = Path("."),
                     fps         : int           = 30,
                     dpi         : int           = 150,
+                    alpha       : float         = 0.5,
                     cmap        : str           = "viridis") -> Path:  # data shape (N_t, N_x)
     """
-    Create an MP4 showing the evolution of a **scalar** field sampled on a
-    point cloud.
+    Create an MP4 showing the evolution of a **scalar** field sampled on a point cloud in 
+    2d or 3d domain.
 
 
 
@@ -50,10 +52,10 @@ def _scalar_anim(   data        : numpy.ndarray,
     fname : str
         File name (without directory) of the resulting movie.
     
-    X : ndarray, shape (2, N_x), optional
-        Sensor coordinates.
+    X : ndarray, shape (2, N_x) or (3, N_x)
+        Sensor coordinates. Can be a 2d or 3d array.
     
-    T : ndarray, shape (N_t,), optional
+    T : ndarray, shape (N_t,)
         Time stamps. 
     
     save_dir : pathlib.Path, default ``Path('.')``
@@ -64,6 +66,9 @@ def _scalar_anim(   data        : numpy.ndarray,
     
     dpi : int, default 150
         Dots-per-inch for the figure canvas.
+    
+    alpha : float, default 0.5
+        Transparency of the markers.
     
     cmap : str, default ``'viridis'``
         Matplotlib colour-map used to encode the scalar amplitude.
@@ -78,6 +83,7 @@ def _scalar_anim(   data        : numpy.ndarray,
         Absolute path of the saved MP4.
 
     
+
     -------------------------------------------------------------------------------------------
     Notes
     -------------------------------------------------------------------------------------------
@@ -87,18 +93,6 @@ def _scalar_anim(   data        : numpy.ndarray,
     installation must be on ``$PATH``.
     * Colours are normalised globally (``vmin``, ``vmax`` from *all* frames)
     so that colour is comparable across time.
-    """
-    
-    """
-    data : numpy.ndarray, shape = (N_t, N_x)
-        An array whose i,j element holds the value we want to plot at the j'th position in the
-        i'th frame.
-
-    title : str
-        The title for the movie we make
-    
-    fname : str
-        The name of the file where we want to save the animation.
     """
 
     # Checks
@@ -110,7 +104,7 @@ def _scalar_anim(   data        : numpy.ndarray,
     assert len(T.shape) == 1,               "T.shape = %s" % str(T.shape);
     assert data.shape[0] == T.shape[0],     "data.shape = %s, T.shape = %s" % (str(data.shape), str(T.shape));
     assert data.shape[1] == X.shape[1],     "data.shape = %s, X.shape = %s" % (str(data.shape), str(X.shape));
-    assert X.shape[0] == 2,                 "X.shape = %s" % str(X.shape);
+    assert X.shape[0] in (2, 3),            "X.shape = %s" % str(X.shape);
     assert T.shape[0] == data.shape[0],     "T.shape = %s, data.shape = %s" % (str(T.shape), str(data.shape));
 
     # Setup.
@@ -118,20 +112,44 @@ def _scalar_anim(   data        : numpy.ndarray,
     vmin                = data.min();
     vmax                = data.max();
 
-    # Create a new figure and a single subplot (axes) object
-    fig, ax = plt.subplots();
+    # Ensure output directory exists.
+    save_dir = Path(save_dir);
+    save_dir.mkdir(parents = True, exist_ok = True);
+
+    # Create a new figure/axes object (2D or 3D depending on X).
+    if(X.shape[0] == 2):
+        fig, ax = plt.subplots();
+    else:
+        fig = plt.figure();
+        ax = fig.add_subplot(111, projection = "3d");
 
     # Plot the initial frame of the data as a filled triangular contour plot
-    scat = ax.scatter(  X[0],                   # array of x coordinates for the triangulation
-                        X[1],                   # array of y coordinates for the triangulation
-                        c           = data[0],  # data values at those (x,y) positions for the first time slice
-                        cmap        = cmap,     # what colormap we use
-                        vmin        = vmin,     # lower bounds for color scaling
-                        vmax        = vmax,     # upper bounds for color scaling
-                        s           = 60);      # Area of the markers.
-
-    # Force the x and y axes to have equal scaling (so a unit in x equals a unit in y)
-    ax.set_aspect("equal");
+    if(X.shape[0] == 2):
+        scat = ax.scatter(  X[0],                   # array of x coordinates for the triangulation
+                            X[1],                   # array of y coordinates for the triangulation
+                            c           = data[0],  # data values at those (x,y) positions for the first time slice
+                            cmap        = cmap,     # what colormap we use
+                            vmin        = vmin,     # lower bounds for color scaling
+                            vmax        = vmax,     # upper bounds for color scaling
+                            alpha       = alpha,    # transparency of the markers
+                            s           = 60);      # Area of the markers.
+    else:
+        scat = ax.scatter3D(X[0],                   # array of x coordinates for the triangulation
+                            X[1],                   # array of y coordinates for the triangulation
+                            X[2],                   # array of z coordinates for the triangulation
+                            c           = data[0],  # data values at those (x,y,z) positions for the first time slice
+                            cmap        = cmap,     # what colormap we use
+                            vmin        = vmin,     # lower bounds for color scaling
+                            vmax        = vmax,     # upper bounds for color scaling
+                            alpha       = alpha,    # transparency of the markers
+                            s           = 20);      # Area of the markers.
+   
+    # Force equal aspect (2D) / box aspect (3D) if available.
+    if X.shape[0] == 2:
+        ax.set_aspect("equal");
+    else:
+        if hasattr(ax, "set_box_aspect"):
+            ax.set_box_aspect((1, 1, 1));
 
     # Add a colorbar to the figure, linked to the contour collection `scat`
     cb = fig.colorbar(scat, ax = ax);
@@ -164,18 +182,14 @@ def _scalar_anim(   data        : numpy.ndarray,
     ani = FuncAnimation(fig,                # the Figure object to animate
                         update,             # the function that draws each frame
                         frames  = N_t,      # total number of frames (N_t)
-                        blit    = True,     # whether to use blitting for faster animation (only redraws changed parts)
+                        blit    = (X.shape[0] == 2),  # blitting is unreliable for 3D artists
                         repeat  = False);   # whether the animation should loop when it reaches the end
 
-    # Build the full output path by joining the directory and filename
-    out_path = os.path.join(save_dir, fname);
-
-    # For debugging, print the path strings
-    print(out_path);
-    print(save_dir / fname);
+    # Build the full output path.
+    out_path = save_dir / fname;
 
     # Save the animation to a file using ffmpeg
-    ani.save(   out_path,
+    ani.save(   str(out_path),
                 writer      =   FFMpegWriter(   fps = fps,              # frames per second
                                                 codec = "libx264"));    # video codec (libx264 for H.264)
 
@@ -206,8 +220,9 @@ def _vector_anim(   data        : numpy.ndarray,
     Arguments
     -------------------------------------------------------------------------------------------
 
-    data : ndarray, shape (N_t, 2, N_x)
-        Vector values (``u, v`` components) for every time step and sensor.
+    data : ndarray, shape (N_t, 2, N_x) or (N_t, 3, N_x)
+        Vector values (``u, v`` components if 2d, or ``u, v, w`` components if 3d) for every 
+        time step and sensor.
     
     title : str
         Text for the figure title & colour-bar label.
@@ -215,10 +230,10 @@ def _vector_anim(   data        : numpy.ndarray,
     fname : str
         File name (without directory) of the resulting movie.
     
-    X : ndarray, shape (2, N_x), optional
-        Sensor coordinates. 
+    X : ndarray, shape (2, N_x) or (3, N_x)
+        Sensor coordinates. Can be a 2d or 3d array.
     
-    T : ndarray, shape (N_t,), optional
+    T : ndarray, shape (N_t,)
         Time stamps.
     
     save_dir : pathlib.Path, default ``Path('.')``
@@ -260,33 +275,54 @@ def _vector_anim(   data        : numpy.ndarray,
     assert len(data.shape) == 3,            "data.shape = %s" % str(data.shape);
     assert len(X.shape) == 2,               "X.shape = %s" % str(X.shape);
     assert len(T.shape) == 1,               "T.shape = %s" % str(T.shape);
-    assert data.shape[1] == 2,              "data.shape = %s" % str(data.shape);
-    assert X.shape[0] == 2,                 "X.shape = %s" % str(X.shape);
+    assert data.shape[1] in (2, 3),              "data.shape = %s" % str(data.shape);
+    assert X.shape[0] in (2, 3),            "X.shape = %s" % str(X.shape);
     assert data.shape[0] == T.shape[0],     "data.shape = %s, T.shape = %s" % (str(data.shape), str(T.shape));
     assert data.shape[2] == X.shape[1],     "data.shape = %s, X.shape = %s" % (str(data.shape), str(X.shape));
 
     # Setup.
+    save_dir = Path(save_dir);
+    save_dir.mkdir(parents = True, exist_ok = True);
+
     N_t         : int   = T.shape[0];
     magnitudes          = numpy.linalg.norm(data, axis = 1);
-    vmin                = data.min();
-    vmax                = data.max();
+    vmin                = magnitudes.min();
+    vmax                = magnitudes.max();
 
     # Make a quiver plot using the data
-    fig, ax = plt.subplots();
+    if X.shape[0] == 2:
+        fig, ax = plt.subplots();
+    else:
+        # 3D vector-field animation is not robustly supported by the current update logic.
+        # (Matplotlib 3D quiver objects do not support q.set_UVC like 2D quiver does.)
+        raise NotImplementedError("3D vector-field animation is not supported. X.shape = %s" % str(X.shape));
 
     # Create a new figure and a single subplot (axes) object
-    q = ax.quiver(  X[0],                           # 1D array of x-coordinates for arrow bases
-                    X[1],                           # 1D array of y-coordinates for arrow bases
-                    data[0, 0, :],                  # 1D array of x-components of vectors at frame 0
-                    data[0, 1, :],                  # 1D array of y-components of vectors at frame 0
-                    magnitudes[0],                  # scalar values used to color each arrow by its length
-                    cmap            = cmap,         # colormap mapping magnitudes → colors
-                    clim            = (vmin, vmax), # set color limits
-                    angles          = "xy",         # interpret U/V in Cartesian coords
-                    scale_units     = "xy",         # scale arrow lengths in data units
-                    scale           = 1.0,          # no additional scaling
-                    width           = 0.007);       # arrow shaft width
-    
+    if(X.shape[0] == 2):
+        q = ax.quiver(  X[0],                           # 1D array of x-coordinates for arrow bases
+                        X[1],                           # 1D array of y-coordinates for arrow bases
+                        data[0, 0, :],                  # 1D array of x-components of vectors at frame 0
+                        data[0, 1, :],                  # 1D array of y-components of vectors at frame 0
+                        magnitudes[0],                  # scalar values used to color each arrow by its length
+                        cmap            = cmap,         # colormap mapping magnitudes → colors
+                        clim            = (vmin, vmax), # set color limits
+                        angles          = "xy",         # interpret U/V in Cartesian coords
+                        scale_units     = "xy",         # scale arrow lengths in data units
+                        scale           = 1.0,          # no additional scaling
+                        width           = 0.007);       # arrow shaft width
+    else: # 3d
+        q = ax.quiver(  X[0],                           # 1D array of x-coordinates for arrow bases
+                        X[1],                           # 1D array of y-coordinates for arrow bases
+                        X[2],                           # 1D array of z-coordinates for arrow bases
+                        data[0, 0, :],                  # 1D array of x-components of vectors at frame 0
+                        data[0, 1, :],                  # 1D array of y-components of vectors at frame 0
+                        data[0, 2, :],                  # 1D array of z-components of vectors at frame 0
+                        magnitudes[0],                  # scalar values used to color each arrow by its length
+                        cmap            = cmap,         # colormap mapping magnitudes → colors
+                        clim            = (vmin, vmax), # set color limits
+                        scale           = 1.0,          # no additional scaling
+                        width           = 0.007);       # arrow shaft width
+
     # Keep x and y axes at the same scale so arrows aren’t distorted
     ax.set_aspect("equal");
 
@@ -305,7 +341,10 @@ def _vector_anim(   data        : numpy.ndarray,
         """
         
         # Update the quiver vectors and their color values
-        q.set_UVC(data[frame, 0, :], data[frame, 1, :], magnitudes[frame]);
+        if(X.shape[0] == 2):
+            q.set_UVC(data[frame, 0, :], data[frame, 1, :], magnitudes[frame]);
+        else: # 3d
+            q.set_UVC(data[frame, 0, :], data[frame, 1, :], data[frame, 2, :], magnitudes[frame]);
         
         # Update the title with the new time
         time_text.set_text(f"{title}\n$t$ = {T[frame]:.3f}");
@@ -321,7 +360,7 @@ def _vector_anim(   data        : numpy.ndarray,
     
     # Construct output filepath and save the animation using ffmpeg
     out_path = save_dir / fname;
-    ani.save(out_path, writer = FFMpegWriter(fps = fps, codec = "libx264"));
+    ani.save(str(out_path), writer = FFMpegWriter(fps = fps, codec = "libx264"));
 
     # Close the figure to free memory
     plt.close(fig);
@@ -339,27 +378,26 @@ def make_solution_movies(   U_True          : numpy.ndarray,
                             U_Pred          : numpy.ndarray,
                             X               : numpy.ndarray,
                             T               : numpy.ndarray,
-                            save_dir        : str | Path    = "../Figures/",
+                            save_dir        : str | Path | None  = None,
                             fname_prefix    : str           = "solution",
                             fps             : int           = 30,
                             dpi             : int           = 150,
                             cmap            : str           = "viridis") -> tuple[Path, Path, Path]:
     """
     Create three movies visualising a spatio-temporal solution: the true field, the predicted 
-    field, and their difference.
-
+    field, and their difference. The solution can be a scalar or vector field in a 2d or 3d domain.
     
     -----------------------------------------------------------------------------------------------
     Parameters
     -----------------------------------------------------------------------------------------------
 
-    U_True, U_Pred : numpy.ndarray, shape = (N_t, 1, N_x) or (N_t, 2, N_x)
+    U_True, U_Pred : numpy.ndarray, shape = (N_t, 1, N_x), (N_t, 2, N_x), or (N_t, 3, N_x)
         Arrays of shape holding the true and predicted signal, respectively. If they have shape 
-        (N_t, 1, N_x) then the solution should be a scalar field. If it is 2 then the solution 
-        should be a 2-D vector field. 
+        (N_t, 1, N_x) then the solution should be a scalar field. If it is 2 or 3 then the 
+        solution should be a 2-D or 3-D vector field, respectively. 
 
-    X : numpy.ndarray, shape = (2, N_x)
-        Each column gives the (x, y) coordinates of a sensor point.
+    X : numpy.ndarray, shape = (2, N_x) or (3, N_x)
+        Each column gives the (x, y) (2D) or (x, y, z) (3d) coordinates of a sensor point.
     
     T : numpy.ndarray, shape = (N_t)
         i'th element holds the value of the i'th time step.
@@ -407,19 +445,27 @@ def make_solution_movies(   U_True          : numpy.ndarray,
     assert isinstance(U_Pred, numpy.ndarray),   "type(U_Pred) = %s" % str(type(U_Pred));
     assert isinstance(X, numpy.ndarray),        "type(X) = %s" % str(type(X));
     assert isinstance(T, numpy.ndarray),        "type(T) = %s" % str(type(T));
+    # Accept scalar fields as either (N_t, N_x) or (N_t, 1, N_x).
+    if len(U_True.shape) == 2:
+        U_True = U_True[:, None, :];
+    if len(U_Pred.shape) == 2:
+        U_Pred = U_Pred[:, None, :];
     assert len(U_True.shape) == 3,              "U_True.shape = %s" % str(U_True.shape);
     assert len(U_Pred.shape) == 3,              "U_Pred.shape = %s" % str(U_Pred.shape);
     assert len(X.shape) == 2,                   "X.shape = %s" % str(X.shape);
     assert len(T.shape) == 1,                   "T.shape = %s" % str(T.shape);
     assert U_True.shape == U_Pred.shape,        "U_True.shape = %s, U_Pred.shape = %s" % (str(U_True.shape), str(U_Pred.shape));
-    assert X.shape[0] == 2,                     "X.shape = %s" % str(X.shape);
+    assert X.shape[0] in (2, 3),                "X.shape = %s" % str(X.shape);
     assert T.shape[0] == U_True.shape[0],       "T.shape = %s, U_True.shape = %s" % (str(T.shape), str(U_True.shape));
     assert X.shape[1] == U_True.shape[2],       "X.shape = %s, U_True.shape = %s" % (str(X.shape), str(U_True.shape));
     
     N_t, n_comp, N_x = U_True.shape;
-    assert n_comp in (1, 2),                    "n_comp = %s" % n_comp;
+    assert n_comp in (1, 2, 3),                 "n_comp = %s" % n_comp;
     
-    # Make sure the save directory exists.
+    # Default save directory: <Higher-Order-LaSDI>/Figures (independent of CWD).
+    if save_dir is None:
+        project_dir = Path(__file__).resolve().parent.parent;
+        save_dir = project_dir / "Figures";
     save_dir = Path(save_dir).expanduser().resolve();
     save_dir.mkdir(parents = True, exist_ok = True);
 
@@ -465,7 +511,7 @@ def make_solution_movies(   U_True          : numpy.ndarray,
                                 X           = X,
                                 T           = T);
     
-    else:  # 2 components: vector field  >:(   B)    >:U
+    else:  # 2 or 3 components: vector field
         LOGGER.info("Making vector field movie for %s" % fname_prefix);
         t_path = _vector_anim(  data        = U_True, 
                                 title       = "True vector field", 
