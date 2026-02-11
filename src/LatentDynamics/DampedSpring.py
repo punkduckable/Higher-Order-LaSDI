@@ -101,7 +101,8 @@ class DampedSpring(LatentDynamics):
                   Latent_States : list[torch.Tensor],
                   loss_type     : str,
                   t_Grid        : list[torch.Tensor],
-                  input_coefs   : list[torch.Tensor] = []) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor]]:
+                  input_coefs   : list[torch.Tensor] = [],
+                  params        : numpy.ndarray | None = None) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor]]:
         r"""
         For each combination of parameter values, this function computes the optimal K, C, and b 
         coefficients in the sequence of latent states for that combination of parameter values.
@@ -143,6 +144,10 @@ class DampedSpring(LatentDynamics):
             coefficients for the i'th combination of parameter values. If input_coefs is empty, 
             then we will learn the coefficients using Least Squares. If input_coefs is not empty, 
             then we will use the provided coefficients to compute the loss.
+        
+        params: numpy.ndarray, shape = (n_param, n_p), optional
+            The i'th row holds the i'th combination of parameter values. This class doesn't use 
+            parameters, so it ignores this argument. Default is None.
 
 
         -------------------------------------------------------------------------------------------
@@ -208,16 +213,21 @@ class DampedSpring(LatentDynamics):
             output_coefs_list : list[torch.Tensor] = [];
             
             for i in range(n_param):
+                # Extract params for this iteration (handle None case)
+                params_i = None if params is None else params[i, :].reshape(1, -1);
+                
                 # Calibrate on the i'th combination of parameter values.
                 if(len(input_coefs) == 0):
                     output_coefs, loss_sindy_i, loss_coef_i = self.calibrate(  Latent_States = [Latent_States[i]], 
                                                                                                 t_Grid        = [t_Grid[i]],
-                                                                                                loss_type     = loss_type);
+                                                                                                loss_type     = loss_type,
+                                                                                                params        = params_i);
                 else:
                     output_coefs, loss_sindy_i, loss_coef_i = self.calibrate(  Latent_States = [Latent_States[i]], 
                                                                                                 t_Grid        = [t_Grid[i]],
                                                                                                 input_coefs   = [input_coefs[i]],
-                                                                                                loss_type     = loss_type);
+                                                                                                loss_type     = loss_type,
+                                                                                                params        = params_i);
 
                 # Package the results from this combination of parameter values.
                 output_coefs_list.append(output_coefs);
@@ -315,7 +325,8 @@ class DampedSpring(LatentDynamics):
     def simulate(   self,
                     coefs   : numpy.ndarray             | torch.Tensor, 
                     IC      : list[list[numpy.ndarray   | torch.Tensor]],
-                    t_Grid  : list[numpy.ndarray        | torch.Tensor]) -> list[list[numpy.ndarray | torch.Tensor]]:
+                    t_Grid  : list[numpy.ndarray        | torch.Tensor],
+                    params  : numpy.ndarray | None = None) -> list[list[numpy.ndarray | torch.Tensor]]:
         r"""
         Time integrates the latent dynamics from multiple initial conditions for each combination
         of coefficients in coefs. 
@@ -349,6 +360,10 @@ class DampedSpring(LatentDynamics):
         
             In the latter case, the j'th entry should specify the j'th time value at which we solve 
             for each latent state when we use the i'th combination of parameter values.
+
+        params: numpy.ndarray, shape = (n_param, n_p), optional
+            The i'th row holds the i'th combination of parameter values. This class doesn't use 
+            parameters, so it ignores this argument. Default is None.
 
 
         -------------------------------------------------------------------------------------------
@@ -400,13 +415,15 @@ class DampedSpring(LatentDynamics):
                 ith_coefs   : numpy.ndarray             | torch.Tensor      = coefs[i, :].reshape(1, -1);
                 ith_IC      : list[list[numpy.ndarray   | torch.Tensor]]    = [IC[i]];
                 ith_t_Grid  : list[numpy.ndarray        | torch.Tensor]     = [t_Grid[i]];
+                ith_params  = None if params is None else params[i, :].reshape(1, -1);
 
                 # Call this function using them. This should return a 2 element holding the 
                 # displacement and velocity of the solution for the i'th combination of 
                 # parameter values.
                 ith_Results : list[numpy.ndarray | torch.Tensor]    = self.simulate(coefs   = ith_coefs, 
                                                                                     IC      = ith_IC, 
-                                                                                    t_Grid  = ith_t_Grid)[0];
+                                                                                    t_Grid  = ith_t_Grid, 
+                                                                                    params  = ith_params)[0];
 
                 # Add these results to Z.
                 Z.append(ith_Results);

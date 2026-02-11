@@ -286,13 +286,15 @@ def Run_Samples(trainer : BayesianGLaSDI) -> tuple[NextStep, Result]:
                     # Prepare inputs for calibrate: expects list[list[tensor]] where inner list has n_IC elements
                     Latent_States_list = [Z_new_i_list];  # list[list[tensor]], one param combination
                     t_Grid_list = [t_new_i.cpu()];        # list[tensor], one time grid
+                    params_array = new_param.reshape(1, -1);  # Shape: (1, n_p)
                     
                     # Call calibrate with empty input_coefs to compute least-squares solution
                     output_coefs, _, _ = trainer.latent_dynamics.calibrate(
                                             Latent_States   = Latent_States_list,
                                             t_Grid          = t_Grid_list,
                                             input_coefs     = [],  # Empty list triggers least-squares computation
-                                            loss_type       = trainer.loss_types['LD']);
+                                            loss_type       = trainer.loss_types['LD'],
+                                            params          = params_array);
                     
                     # Extract the computed coefficients and assign to test_coefs
                     with torch.no_grad():

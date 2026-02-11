@@ -136,7 +136,8 @@ def average_rom(model           : torch.nn.Module,
     LOGGER.info("simulating initial conditions for %d combinations of parameters forward in time" % n_param);
     Zis : list[list[numpy.ndarray]] = latent_dynamics.simulate( coefs   = post_mean, 
                                                                 IC      = Z0, 
-                                                                t_Grid  = t_Grid);
+                                                                t_Grid  = t_Grid,
+                                                                params  = param_grid);
     
     # At this point, Zis[i][j] has shape (n_t_i, 1, n_z). We remove the extra dimension.
     for i in range(n_param):
@@ -307,7 +308,11 @@ def sample_roms(model           : torch.nn.Module,
                 for sample_idx in range(n_needed):
                     coef_sample = n_needed_coefs[sample_idx, :].reshape(1, -1);
                     Z0_i = [Z0[i][j] for j in range(n_IC)];
-                    traj = latent_dynamics.simulate(coefs = coef_sample, IC = [Z0_i], t_Grid = [t_Grid_np[i]]);
+                    traj = latent_dynamics.simulate( 
+                                            coefs   = coef_sample, 
+                                            IC      = [Z0_i], 
+                                            t_Grid  = [t_Grid_np[i]], 
+                                            params  = param_grid[i, :].reshape(1, -1));
                     sample_trajectories.append(traj[0]);  # traj[0] is the trajectory for the i-th parameter
                 break;
             
@@ -326,7 +331,11 @@ def sample_roms(model           : torch.nn.Module,
                 
                 # Simulate: returns list[list[array]], outer list has 1 element (1 param), 
                 # inner list has n_IC elements
-                traj = latent_dynamics.simulate(coefs = coef_sample, IC = [Z0_i], t_Grid = [t_Grid_np[i]]);
+                traj = latent_dynamics.simulate( 
+                                        coefs   = coef_sample, 
+                                        IC      = [Z0_i], 
+                                        t_Grid  = [t_Grid_np[i]], 
+                                        params  = param_grid[i, :].reshape(1, -1));
                 
                 # Check if this trajectory diverged (check all ICs for this parameter)
                 is_divergent = False;
@@ -763,7 +772,7 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
                 U_Pred_i[:, j, ...]             = U_Pred_ij;
         
             # Compute the STD across the sample axis.
-            STD_i0 = numpy.std(U_Pred_i, axis = 1);
+            STD_i0          = numpy.std(U_Pred_i, axis = 1);
             STD[i][0]       = trainer.scale_std_np(STD_i0, 0) if use_denorm else STD_i0;
             max_STD[i, 0]   = STD[i][0].max();
         

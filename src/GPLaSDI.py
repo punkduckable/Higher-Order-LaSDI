@@ -200,9 +200,9 @@ class BayesianGLaSDI:
         LOGGER.info("Results directory: %s" % self.path_results);
 
         # Set up variables to aide checkpointing
-        self.best_coefs     = None;
-        self.best_epoch     = -1;
-        self.restart_iter   = 0;                # Iteration number at the end of the last training period
+        self.best_train_coefs   = None;
+        self.best_epoch         = -1;
+        self.restart_iter       = 0;                # Iteration number at the end of the last training period
         
         # All done!
         return;
@@ -759,22 +759,23 @@ class BayesianGLaSDI:
 
                 # Compute the latent dynamics and coefficient losses. Also fetch the current latent
                 # dynamics coefficients for each training point. The latter is stored in a 2d array 
-                # called "coefs" of shape (n_train, n_coefs), where n_train = number of training 
-                # combinations of parameters and n_coefs denotes the number of coefficients in the 
-                # latent dynamics model. 
-                coefs, loss_LD_list, loss_coef_list = self.latent_dynamics.calibrate(
+                # called "train_coefs" of shape (n_train, n_coefs), where n_train = number of 
+                # training combinations of parameters and n_coefs denotes the number of 
+                # coefficients in the latent dynamics model. 
+                train_coefs, loss_LD_list, loss_coef_list = self.latent_dynamics.calibrate(
                                                                 Latent_States    = Latent_States, 
                                                                 t_Grid           = t_Train_device,
                                                                 input_coefs      = train_coefs_list,
-                                                                loss_type        = self.loss_types['LD']);
+                                                                loss_type        = self.loss_types['LD'],
+                                                                params           = self.param_space.train_space);
 
                 # Log coefficient statistics to diagnose constant dynamics issue
                 if iter % 100 == 0 or iter == self.restart_iter:  # Log every 100 iters and first iter
                     LOGGER.info("Epoch %d: Coefs shape=%s, min=%.6e, max=%.6e, mean=%.6e, std=%.6e, abs_mean=%.6e" % (
-                        iter + 1, str(coefs.shape),
-                        float(coefs.min().item()), float(coefs.max().item()),
-                        float(coefs.mean().item()), float(coefs.std().item()),
-                        float(torch.abs(coefs).mean().item())));
+                        iter + 1, str(train_coefs.shape),
+                        float(train_coefs.min().item()), float(train_coefs.max().item()),
+                        float(train_coefs.mean().item()), float(train_coefs.std().item()),
+                        float(torch.abs(train_coefs).mean().item())));
 
                 # Append the LD and coefficint losses to loss_by_param.
                 for i in range(n_train):
@@ -812,9 +813,10 @@ class BayesianGLaSDI:
                     # irreverent. The simulate function exploits this by solving one big IVP for each 
                     # combination of parameter values, rather than n(i) smaller ones.                         
                     ROM_Predicted_Rollout_Trajectories  : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(  
-                                                                                            coefs   = coefs, 
+                                                                                            coefs   = train_coefs, 
                                                                                             IC      = ROM_Rollout_ICs, 
-                                                                                            t_Grid  = t_Grid_rollout);            
+                                                                                            t_Grid  = t_Grid_rollout,
+                                                                                            params  = self.param_space.train_space);            
 
                     # Now cycle through the training examples.
                     for i in range(n_train):
@@ -901,12 +903,13 @@ class BayesianGLaSDI:
                         Z_IC_i = model_device.Encode(U_IC_i);
                         
                         # Get the coefficients for this combination of parameters
-                        coef_i            : torch.Tensor              = coefs[i, :].reshape(1, -1);
+                        train_coef_i            : torch.Tensor              = train_coefs[i, :].reshape(1, -1);
                         
                         # Simulate the latent dynamics forward in time
-                        Z_IC_Rollout_i    : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(  coefs   = coef_i, 
+                        Z_IC_Rollout_i    : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(  coefs   = train_coef_i, 
                                                                                                         IC      = [[Z_IC_i]], 
-                                                                                                        t_Grid  = [t_Grid_IC_rollout[i]]);
+                                                                                                        t_Grid  = [t_Grid_IC_rollout[i]], 
+                                                                                                        params  = param_i.reshape(1, -1));
                         
                         # Extract the predicted trajectory, remove the singleton dimension
                         Z_IC_Predict_i    : torch.Tensor              = Z_IC_Rollout_i[0][0].squeeze(1);    # shape = (n_t_IC_rollout[i], n_z)
@@ -1248,22 +1251,23 @@ class BayesianGLaSDI:
 
                 # Compute the latent dynamics and coefficient losses. Also fetch the current latent
                 # dynamics coefficients for each training point. The latter is stored in a 2d array 
-                # called "coefs" of shape (n_train, n_coefs), where n_train = number of training 
+                # called "train_coefs" of shape (n_train, n_coefs), where n_train = number of training 
                 # parameter parameters and n_coefs denotes the number of coefficients in the latent
                 # dynamics model. 
-                coefs, loss_LD_list, loss_coef_list   = self.latent_dynamics.calibrate(   
+                train_coefs, loss_LD_list, loss_coef_list   = self.latent_dynamics.calibrate(   
                                                             Latent_States    = Latent_States, 
                                                             t_Grid           = t_Train_device,
                                                             input_coefs      = train_coefs_list,
-                                                            loss_type        = self.loss_types['LD']);
+                                                            loss_type        = self.loss_types['LD'],
+                                                            params           = self.param_space.train_space);
 
                 # Log coefficient statistics to diagnose constant dynamics issue
                 if iter % 100 == 0 or iter == self.restart_iter:  # Log every 100 iters and first iter
                     LOGGER.info("Epoch %d: Coefs shape=%s, min=%.6e, max=%.6e, mean=%.6e, std=%.6e, abs_mean=%.6e" % (
-                        iter + 1, str(coefs.shape),
-                        float(coefs.min().item()), float(coefs.max().item()),
-                        float(coefs.mean().item()), float(coefs.std().item()),
-                        float(torch.abs(coefs).mean().item())));
+                        iter + 1, str(train_coefs.shape),
+                        float(train_coefs.min().item()), float(train_coefs.max().item()),
+                        float(train_coefs.mean().item()), float(train_coefs.std().item()),
+                        float(torch.abs(train_coefs).mean().item())));
 
                 # Append the LD and coefficient losses to loss_by_param.
                 for i in range(n_train):
@@ -1301,9 +1305,10 @@ class BayesianGLaSDI:
                     # irreverent. The simulate function exploits this by solving one big IVP for each 
                     # combination of parameter values, rather than n(i) smaller ones. 
                     ROM_Predict_Rollout_Trajectory  : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(
-                                                                                                coefs   = coefs, 
+                                                                                                coefs   = train_coefs, 
                                                                                                 IC      = ROM_Rollout_ICs, 
-                                                                                                t_Grid  = t_Grid_rollout);            
+                                                                                                t_Grid  = t_Grid_rollout,
+                                                                                                params  = self.param_space.train_space);            
 
                     # Now cycle through the training examples.
                     for i in range(n_train):
@@ -1420,12 +1425,13 @@ class BayesianGLaSDI:
                         Z_D_IC_i, Z_V_IC_i = model_device.Encode(D_IC_i, V_IC_i);
                         
                         # Get the coefficients for this combination of parameters
-                        coef_i            : torch.Tensor              = coefs[i, :].reshape(1, -1);
+                        train_coef_i            : torch.Tensor              = train_coefs[i, :].reshape(1, -1);
                         
                         # Simulate the latent dynamics forward in time
-                        Z_IC_Rollout_i    : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(  coefs   = coef_i, 
+                        Z_IC_Rollout_i    : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(  coefs   = train_coef_i, 
                                                                                                         IC      = [[Z_D_IC_i, Z_V_IC_i]], 
-                                                                                                        t_Grid  = [t_Grid_IC_rollout[i]]);
+                                                                                                        t_Grid  = [t_Grid_IC_rollout[i]], 
+                                                                                                        params  = param_i.reshape(1, -1));
                         
                         # Extract the predicted trajectory
                         Z_D_IC_Predict_i  : torch.Tensor              = Z_IC_Rollout_i[0][0];  # shape = (n_t_IC_rollout[i], 1, n_z)
@@ -1515,8 +1521,8 @@ class BayesianGLaSDI:
             # Convert coefs to numpy and find the maximum element.
             # Store a detached copy for reporting (needed after backprop), but keep original for gradient flow
             with torch.no_grad():
-                coefs_detached  : numpy.ndarray = coefs.detach().cpu().numpy();                # Shape = (n_train, n_coefs).
-                max_coef        : numpy.float32 = numpy.abs(coefs_detached).max();
+                train_coefs_detached    : numpy.ndarray = train_coefs.detach().cpu().numpy();                # Shape = (n_train, n_coefs).
+                max_train_coef          : numpy.float32 = numpy.abs(train_coefs_detached).max();
 
 
 
@@ -1546,9 +1552,9 @@ class BayesianGLaSDI:
                     model_device.to(device);  # Move model back to original device after saving
                     
                     # Update the best set of parameters. 
-                    self.best_coefs     = coefs_detached.copy();       # Shape = (n_train, n_coefs).
-                    self.best_epoch     = iter;
-                    best_loss           = loss.item();
+                    self.best_train_coefs   = train_coefs_detached.copy();     # Shape = (n_train, n_coefs).
+                    self.best_epoch         = iter;
+                    best_loss               = loss.item();
                 else:
                     LOGGER.debug("Skipping checkpoint during warmup period (epoch %d/%d in round, warmup ends at %d)" % 
                                (epochs_in_round, next_iter - self.restart_iter, self.checkpoint_warmup));
@@ -1626,7 +1632,7 @@ class BayesianGLaSDI:
 
         # Recover the model + coefficients which attained the lowest loss from this round of 
         # training.
-        assert(self.best_coefs is not None);
+        assert(self.best_train_coefs is not None);
         LOGGER.info("Model attained it's best performance on epoch %d. Replacing model with the checkpoint from that epoch" % self.best_epoch);
         state_dict  = torch.load(self.path_checkpoint + '/' + 'checkpoint.pt', map_location = 'cpu');
         self.model.load_state_dict(state_dict);
@@ -1991,17 +1997,17 @@ class BayesianGLaSDI:
         """
 
         self.timer.start("new_sample");
-        assert len(self.U_Test)             >  0,                           "len(self.U_Test) = %d" % len(self.U_Test);
-        assert len(self.U_Test)             == self.param_space.n_test(),   "len(self.U_Test) = %d, self.param_space.n_test() = %d" % (len(self.U_Test), self.param_space.n_test());
-        assert self.best_coefs is not None,                                 "best_coefs is None (did training run and checkpoint succeed?)";
-        assert self.best_coefs.shape[0]     == self.param_space.n_train(),  "self.best_coefs.shape[0] = %d, self.param_space.n_train() = %d" % (self.best_coefs.shape[0], self.param_space.n_train());
+        assert len(self.U_Test)             >  0,                                   "len(self.U_Test) = %d" % len(self.U_Test);
+        assert len(self.U_Test)             == self.param_space.n_test(),           "len(self.U_Test) = %d, self.param_space.n_test() = %d" % (len(self.U_Test), self.param_space.n_test());
+        assert self.best_train_coefs is not None,                                   "best_train_coefs is None (did training run and checkpoint succeed?)";
+        assert self.best_train_coefs.shape[0]     == self.param_space.n_train(),    "self.best_train_coefs.shape[0] = %d, self.param_space.n_train() = %d" % (self.best_train_coefs.shape[0], self.param_space.n_train());
 
-        coefs : numpy.ndarray = self.best_coefs;                        # Shape = (n_train, n_coefs).
+        train_coefs : numpy.ndarray = self.best_train_coefs;                        # Shape = (n_train, n_coefs).
         LOGGER.info('\n~~~~~~~ Finding New Point ~~~~~~~');
 
         # Move the model to the cpu (this is where all the GP stuff happens) and load the model 
         # from the last checkpoint. This should be the one that obtained the best loss so far. 
-        # Remember that coefs should specify the coefficients from that iteration. 
+        # Remember that train_coefs should specify the coefficients from that iteration. 
         model       : torch.nn.Module   = self.model.cpu();
         n_test      : int               = self.param_space.n_test();
         n_train     : int               = self.param_space.n_train();
@@ -2046,15 +2052,15 @@ class BayesianGLaSDI:
         # Log coefficient statistics before fitting GPs (this is critical for debugging!)
         LOGGER.info("Coefficient statistics for GP fitting:");
         LOGGER.info("  Training parameters shape: %s" % str(self.param_space.train_space.shape));
-        LOGGER.info("  Coefficients shape: %s" % str(coefs.shape));
-        for coef_idx in range(min(5, coefs.shape[1])):  # Log first 5 coefficients
-            coef_vals = coefs[:, coef_idx];
+        LOGGER.info("  Coefficients shape: %s" % str(train_coefs.shape));
+        for coef_idx in range(min(5, train_coefs.shape[1])):  # Log first 5 coefficients
+            coef_vals = train_coefs[:, coef_idx];
             LOGGER.info("  Coef %d: mean=%.6e, std=%.6e, min=%.6e, max=%.6e, range=%.6e" % (
                 coef_idx, numpy.mean(coef_vals), numpy.std(coef_vals), 
                 numpy.min(coef_vals), numpy.max(coef_vals), numpy.max(coef_vals) - numpy.min(coef_vals)));
         
         # Train the GPs on the training data, get one GP per latent space coefficient.
-        gp_list : list[GaussianProcessRegressor] = fit_gps(self.param_space.train_space, coefs);
+        gp_list : list[GaussianProcessRegressor] = fit_gps(self.param_space.train_space, train_coefs);
 
         # For each combination of parameter values in the candidate set, for each coefficient, 
         # draw a set of samples from the posterior distribution for that coefficient evaluated at
@@ -2108,7 +2114,8 @@ class BayesianGLaSDI:
             for j in range(self.n_samples):
                 LatentState_ij : list[list[numpy.ndarray]] = self.latent_dynamics.simulate( coefs   = coef_samples[i][j:(j + 1), :], 
                                                                                             IC      = [Z0[i]], 
-                                                                                            t_Grid  = [t_Grid]);
+                                                                                            t_Grid  = [t_Grid], 
+                                                                                            params  = candidate_parameters[i, :].reshape(1, -1));
                 for k in range(self.n_IC):
                     LatentStates[i][k][j, :, :] = LatentState_ij[0][k][:, 0, :];
 
@@ -2143,7 +2150,7 @@ class BayesianGLaSDI:
                  'U_Test'                   : self.U_Test,
                  't_Train'                  : self.t_Train,
                  't_Test'                   : self.t_Test,
-                 'best_coefs'               : self.best_coefs,                      # Shape = (n_train, n_coefs).
+                 'best_coefs'               : self.best_train_coefs,                # Shape = (n_train, n_coefs).
                  'max_iter'                 : self.max_iter, 
                  'restart_iter'             : self.restart_iter, 
                  'timer'                    : self.timer.export(), 
@@ -2182,15 +2189,15 @@ class BayesianGLaSDI:
         """
 
         # Extract instance variables from dict_.
-        self.U_Train        : list[list[torch.Tensor]]  = dict_['U_Train'];             # len = n_train, i'th element is an n_IC element list.  
-        self.U_Test         : list[list[torch.Tensor]]  = dict_['U_Test'];              # len = n_test, i'th element is an n_IC element list.
+        self.U_Train            : list[list[torch.Tensor]]  = dict_['U_Train'];             # len = n_train, i'th element is an n_IC element list.  
+        self.U_Test             : list[list[torch.Tensor]]  = dict_['U_Test'];              # len = n_test, i'th element is an n_IC element list.
 
-        self.t_Train        : list[torch.Tensor]        = dict_['t_Train'];             # len = n_train.
-        self.t_Test         : list[torch.Tensor]        = dict_['t_Test'];              # len = n_test.
+        self.t_Train            : list[torch.Tensor]        = dict_['t_Train'];             # len = n_train.
+        self.t_Test             : list[torch.Tensor]        = dict_['t_Test'];              # len = n_test.
 
-        self.best_coefs     : numpy.ndarray             = dict_['best_coefs'];          # Shape = (n_train, n_coefs).
-        self.best_epoch     : int                       = dict_['restart_iter'];        # The current model has the best loss so far.
-        self.restart_iter   : int                       = dict_['restart_iter'];
+        self.best_train_coefs   : numpy.ndarray             = dict_['best_coefs'];          # Shape = (n_train, n_coefs).
+        self.best_epoch         : int                       = dict_['restart_iter'];        # The current model has the best loss so far.
+        self.restart_iter       : int                       = dict_['restart_iter'];
 
         # Restore normalization stats (if present).
         self.normalize = bool(dict_.get('normalize', False));
