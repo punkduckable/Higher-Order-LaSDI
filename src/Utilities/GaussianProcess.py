@@ -101,10 +101,10 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
         targets_i_s: numpy.ndarray = (targets_i - ith_mean) / ith_std;
 
         # Make the kernel.
-        # Option 1: Matern kernel (more stable for dynamics, less smooth)
+        # Option 1: Matern kernel
         kernel  = ConstantKernel(constant_value = 1.0, constant_value_bounds = (1e-5, 1e6)) * \
-                  Matern(length_scale_bounds = (0.1, 1e3), nu = 1.5);
-        # Option 2: RBF kernel (smoother but can be less stable)
+                  Matern(length_scale_bounds = (1.0, 1e3), nu = 1.5);
+        # Option 2: RBF kernel
         # kernel  = ConstantKernel(constant_value = 1.0, constant_value_bounds = (1e-5, 1e6)) * \
         #           RBF(length_scale_bounds = (1e-3, 1e2));
 
