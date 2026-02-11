@@ -1576,7 +1576,7 @@ class BayesianGLaSDI:
                 if(self.loss_weights['IC_rollout'] > 0):    info_str += ", IC Roll FOM: %3.6f, IC Roll ROM: %3.6f"  % (loss_IC_rollout_FOM.item(), loss_IC_rollout_ROM.item());
                 if(self.loss_weights['LD'] > 0):            info_str += ", LD: %3.6f"                               % loss_LD.item();
                 if(self.loss_weights['coef'] > 0):          info_str += ", Coef: %3.6f"                             % loss_coef.item();
-                info_str += ", max|c|: %.3f" % max_coef;
+                info_str += ", max|c|: %.3f" % max_train_coef;
                 LOGGER.info(info_str);
             
             else:  # is_autoencoder_pair
@@ -1588,7 +1588,7 @@ class BayesianGLaSDI:
                 if(self.loss_weights['IC_rollout'] > 0):    info_str += ", IC Roll D: %3.6f, IC Roll V: %3.6f, IC Roll ZD: %3.6f, IC Roll ZV: %3.6f"    % (loss_IC_rollout_D.item(),  loss_IC_rollout_V.item(),   loss_IC_rollout_Z_D.item(), loss_IC_rollout_Z_V.item());
                 if(self.loss_weights['LD'] > 0):            info_str += ", LD: %3.6f"                                                                   % loss_LD.item();
                 if(self.loss_weights['coef'] > 0):          info_str += ", Coef: %3.6f"                                                                 % loss_coef.item();
-                info_str += ", max|c|: %.3f" % max_coef;
+                info_str += ", max|c|: %.3f" % max_train_coef;
                 LOGGER.info(info_str);
 
             # Report the set of parameter combinations using scientific notation.

@@ -21,6 +21,7 @@ import  Explicit;
 import  ExplicitSecondOrder;
 from    LatentDynamics      import  LatentDynamics;
 from    SINDy               import  SINDy;
+from    SwitchSINDy         import  SwitchSINDy;
 from    DampedSpring        import  DampedSpring;
 from    ParameterSpace      import  ParameterSpace;
 from    GPLaSDI             import  BayesianGLaSDI;
@@ -49,7 +50,8 @@ model_load_dict =  {'ae'                    : load_Autoencoder,
                     'pair'                  : load_Autoencoder_Pair,
                     'autoencoder_pair'      : load_Autoencoder_Pair};
 ld_dict         =  {'sindy'                 : SINDy, 
-                    'spring'                : DampedSpring};
+                    'spring'                : DampedSpring,
+                    'switch'                : SwitchSINDy};
 physics_dict    =  {'Burgers'               : Burgers.Burgers,
                     'BurgersSecondOrder'    : BurgersSecondOrder.Burgers,
                     'Burgers2D'             : Burgers2D,
@@ -159,9 +161,16 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Bayesia
     ld_type                 = config['latent_dynamics']['type'];
     assert(ld_type in config['latent_dynamics']);
     assert(ld_type in ld_dict);
-    latent_dynamics         = ld_dict[ld_type]( n_z             = model.n_z, 
-                                                coef_norm_order = config['latent_dynamics']['coef_norm_order'],
-                                                Uniform_t_Grid  = physics.Uniform_t_Grid);
+    if(ld_type == "switch"):
+        latent_dynamics         = ld_dict[ld_type]( n_z             = model.n_z, 
+                                                    coef_norm_order = config['latent_dynamics']['coef_norm_order'],
+                                                    Uniform_t_Grid  = physics.Uniform_t_Grid,
+                                                    switch_time     = physics.switch_time);
+    else:
+        latent_dynamics         = ld_dict[ld_type]( n_z             = model.n_z, 
+                                                    coef_norm_order = config['latent_dynamics']['coef_norm_order'],
+                                                    Uniform_t_Grid  = physics.Uniform_t_Grid);
+    
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
         latent_dynamics.load(restart_dict['latent_dynamics']);
 

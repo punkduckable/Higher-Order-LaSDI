@@ -162,7 +162,7 @@ def main():
     model.cpu();
 
     # Get a GP for each coefficient in the latent dynamics.
-    gp_list         : list[GaussianProcessRegressor]    = fit_gps(param_space.train_space, trainer.best_coefs);
+    gp_list         : list[GaussianProcessRegressor]    = fit_gps(param_space.train_space, trainer.best_train_coefs);
     
     # Compute the relative error between the FOM solution and its prediction when we rollout the 
     # IC using the model.
