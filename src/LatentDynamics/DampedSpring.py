@@ -101,8 +101,8 @@ class DampedSpring(LatentDynamics):
                   Latent_States : list[torch.Tensor],
                   loss_type     : str,
                   t_Grid        : list[torch.Tensor],
-                  input_coefs   : list[torch.Tensor] = [],
-                  params        : numpy.ndarray | None = None) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor]]:
+                  params        : numpy.ndarray | None = None,
+                  input_coefs   : list[torch.Tensor] = []) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor]]:
         r"""
         For each combination of parameter values, this function computes the optimal K, C, and b 
         coefficients in the sequence of latent states for that combination of parameter values.
