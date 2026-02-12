@@ -186,8 +186,17 @@ class Thermal(Physics):
 
                     # Store the first entry of the nodet dataset.
                     self.IC_array[power_idx, speed_idx, :] = nodet_ds[0, :];
-            
-        # Everything is now set up!
+        
+        # Finally, we need to set up the "switch_time" function. This function will return the time 
+        # at which the laser power and scan speed switch. Currently, this is just when the laser 
+        # hits the end of the track (which has a fixed length of 0.1). Thus, given the scan speed, 
+        # the switch time is just (track length) / (scan speed).
+        # Note: param will have shape (1, 2), with the two entries corresponding to (laser_power, 
+        # scan_speed). We need to extract the scan speed (second parameter, index 1).
+        track_length : float = 0.1;
+        self.switch_time = lambda param : track_length / param[0, 1];
+
+        # All done!
         return;
                 
 
