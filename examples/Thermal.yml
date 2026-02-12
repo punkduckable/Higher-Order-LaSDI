@@ -1,7 +1,7 @@
 lasdi:
   type:                     gplasdi
   gplasdi:
-    lr:                     0.0005
+    lr:                     0.0003
     n_samples:              20
 
     # If true, compute a single global mean/std from TRAINING data only, and normalize
@@ -19,19 +19,19 @@ lasdi:
     IC_rollout_update_freq: 10
     IC_dp_per_update:       0.01
 
-    max_iter:               3000
-    n_iter:                 1500
-    max_greedy_iter:        3000
+    max_iter:               4000
+    n_iter:                 2000
+    max_greedy_iter:        4000
 
     lr_warmup:              40    # How many epochs to warmup the learning rate for after greedy sampling.
     checkpoint_warmup:      40    # How many epochs to checkpoint the model after after greedy sampling.
 
     loss_weights:
-      recon:                1.0
+      recon:                1.5
       LD:                   100.0
-      rollout:              1.0
+      rollout:              1.5
       IC_rollout:           1.0
-      coef:                 0.1
+      coef:                 0.2
 
       chain_rule:           1.0
       consistency:          1.0
@@ -63,14 +63,14 @@ parameter_space:
 model:
   type:                     ae
   ae:
-    hidden_widths:          [1000, 300, 80]
-    activations:            ["elu", "elu", "tanh"]
-    latent_dimension:       10
+    hidden_widths:          [1200, 600, 200, 60]
+    activations:            ["elu", "elu", "elu", "tanh"]
+    latent_dimension:       7
 
 latent_dynamics:
-  type:                     sindy
+  type:                     switch
   coef_norm_order:          fro
-  sindy:
+  switch:
 
 physics:
   type:                     Thermal
