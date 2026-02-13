@@ -116,14 +116,14 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
         # alpha: Adds noise to the diagonal of the kernel matrix (observation noise).
         #        Larger values = more uncertainty = less overfitting to training data.
         #        Typical range: 1e-10 (very confident) to 1e-3 (high uncertainty).
-        #        Using 7e-4 as a sweet spot: visible but controlled variance in predictions.
+        #        Using 1e-3 for moderate uncertainty in predictions.
         #
         # n_restarts_optimizer: Number of random restarts for hyperparameter optimization.
         #                       More restarts = better hyperparameters but slower.
         #                       Using 10 restarts for better kernel tuning and stability.
         ith_gp      = GaussianProcessRegressor(
                             kernel                  = kernel, 
-                            alpha                   = 7e-4,     # Fine-tuned for moderate, controlled uncertainty
+                            alpha                   = 1e-3,     # Fine-tuned for moderate, controlled uncertainty
                             n_restarts_optimizer    = 10,       # More restarts for better hyperparameters
                             random_state            = 1);
 
@@ -297,13 +297,13 @@ def sample_coefs(   gp_list     : list[GaussianProcessRegressor],
     # Cycle through the samples and coefficients. For each sample of the k'th coefficient, we draw
     # a sample from the normal distribution with mean pred_mean[k] and std pred_std[k]. Note that 
     # we clip the sample to avoid outlying samples that can lead to numerical instability and 
-    # divergent latent dynamics. Clipping to +/- 1.5 sigma (87% confidence interval) balances 
+    # divergent latent dynamics. Clipping to +/- 2.0 sigma (96% confidence interval) balances 
     # exploration with stability.
     for s in range(n_samples):
         for k in range(n_GPs):
             sample = numpy.random.normal(pred_mean[k], pred_std[k]);
-            # Clip to +/- 1.5 std for moderate diversity while maintaining stability
-            coef_samples[s, k] = numpy.clip(sample, pred_mean[k] - 1.5*pred_std[k], pred_mean[k] + 1.5*pred_std[k]);
+            # Clip to +/- 1.7 std for good diversity while maintaining stability
+            coef_samples[s, k] = numpy.clip(sample, pred_mean[k] - 2.0*pred_std[k], pred_mean[k] + 2.0*pred_std[k]);
     
     # All done!
     return coef_samples;
