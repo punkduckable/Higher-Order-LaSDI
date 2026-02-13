@@ -1536,6 +1536,17 @@ class BayesianGLaSDI:
             #  Run back propagation and update the model parameters. 
             # Note: optimizer.zero_grad() is already called at the start of the iteration (line 373)
             loss.backward();
+            
+            # Clip gradients to prevent explosion during latent dynamics rollout.
+            # Using max_norm=15.0 as a safety net against extreme outliers (50+) while allowing
+            # normal large gradients (10-20) that arise from long rollouts and high LD loss weight.
+            # This only clips during severe instabilities while allowing normal training dynamics.
+            grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=15.0);
+            
+            # Log if gradient clipping activates (indicates potential instability)
+            if grad_norm > 15.0:
+                LOGGER.warning("Gradient norm %.2f exceeded threshold, clipped to 15.0 (iter %d)" % (grad_norm, iter + 1));
+            
             LOGGER.debug("Backward Pass - backward() complete, calling optimizer.step()");
             self.optimizer.step();
             LOGGER.debug("Backward Pass - complete (iteration %d)" % (iter + 1));
