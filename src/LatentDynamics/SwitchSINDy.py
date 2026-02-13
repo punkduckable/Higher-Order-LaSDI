@@ -73,7 +73,11 @@ class SwitchSINDy(LatentDynamics):
             specific parameter value). The value of this setting determines which finite difference 
             method we use to compute time derivatives. 
 
-            
+        switch_time: callable
+            A function that takes a numpy.ndarray of parameter values and returns a float 
+            specifying the switch time for the specified parameter values.
+        
+
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
