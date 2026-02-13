@@ -478,13 +478,17 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
             # coefficient posterior distributions).
             U_pred_i_std    : numpy.ndarray = U_Pred_i.std(0);
 
-            # Now compute the maximum standard deviation across frames/FOM components.
             # Handle inf/nan values gracefully by replacing them with a large but finite value
             if not numpy.all(numpy.isfinite(U_pred_i_std)):
                 LOGGER.warning(f"Parameter {i}: STD contains inf/nan values. This suggests divergent samples escaped detection. Replacing with 1e10.");
                 U_pred_i_std = numpy.nan_to_num(U_pred_i_std, nan=0.0, posinf=1e10, neginf=1e10);
             
-            max_std_i       : numpy.float32 = U_pred_i_std.max();
+            # Compute the maximum standard deviation using a more robust metric:
+            # 1. Average std across spatial nodes for each time step → shape (n_t,)
+            # 2. Take max across time steps → scalar
+            # This prevents single outlier nodes from dominating the metric.
+            U_pred_i_std_spatial_avg : numpy.ndarray = U_pred_i_std.mean(axis=tuple(range(1, U_pred_i_std.ndim)));  # Average over all spatial dimensions
+            max_std_i                : numpy.float32 = U_pred_i_std_spatial_avg.max();  # Max over time only
 
             # If this is bigger than the biggest std we have seen so far, update the maximum.
             if max_std_i > max_std:
@@ -527,13 +531,17 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
             # (one for each sample of the coefficient posterior distributions).
             D_Pred_i_std    : numpy.ndarray = D_Pred_i.std(0);
 
-            # Now compute the maximum standard deviation across frames/FOM components.
             # Handle inf/nan values gracefully by replacing them with a large but finite value
             if not numpy.all(numpy.isfinite(D_Pred_i_std)):
                 LOGGER.warning(f"Parameter {i}: STD contains inf/nan values. This suggests divergent samples escaped detection. Replacing with 1e10.");
                 D_Pred_i_std = numpy.nan_to_num(D_Pred_i_std, nan=0.0, posinf=1e10, neginf=1e10);
             
-            max_std_i       : numpy.float32 = D_Pred_i_std.max();
+            # Compute the maximum standard deviation using a more robust metric:
+            # 1. Average std across spatial nodes for each time step → shape (n_t,)
+            # 2. Take max across time steps → scalar
+            # This prevents single outlier nodes from dominating the metric.
+            D_pred_i_std_spatial_avg : numpy.ndarray = D_Pred_i_std.mean(axis=tuple(range(1, D_Pred_i_std.ndim)));  # Average over all spatial dimensions
+            max_std_i                : numpy.float32 = D_pred_i_std_spatial_avg.max();  # Max over time only
 
             # If this is bigger than the biggest std we have seen so far, update the maximum.
             if max_std_i > max_std:
@@ -774,7 +782,11 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
             # Compute the STD across the sample axis.
             STD_i0          = numpy.std(U_Pred_i, axis = 1);
             STD[i][0]       = trainer.scale_std_np(STD_i0, 0) if use_denorm else STD_i0;
-            max_STD[i, 0]   = STD[i][0].max();
+            
+            # Compute max STD using robust metric: average across spatial dimensions, then max over time
+            # This prevents single outlier nodes from dominating the metric.
+            STD_i0_spatial_avg : numpy.ndarray = STD[i][0].mean(axis=tuple(range(1, STD[i][0].ndim)));  # Average over spatial dims
+            max_STD[i, 0]      : numpy.float32 = STD_i0_spatial_avg.max();  # Max over time only
         
     
 
@@ -834,8 +846,12 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
             STD[i][0]       = trainer.scale_std_np(STD_D, 0) if use_denorm else STD_D;
             STD[i][1]       = trainer.scale_std_np(STD_V, 1) if use_denorm else STD_V;
 
-            max_STD[i, 0]   = STD[i][0].max();  
-            max_STD[i, 1]   = STD[i][1].max();  
+            # Compute max STD using robust metric: average across spatial dimensions, then max over time
+            # This prevents single outlier nodes from dominating the metric.
+            STD_D_spatial_avg : numpy.ndarray = STD[i][0].mean(axis=tuple(range(1, STD[i][0].ndim)));  # Average over spatial dims
+            STD_V_spatial_avg : numpy.ndarray = STD[i][1].mean(axis=tuple(range(1, STD[i][1].ndim)));  # Average over spatial dims
+            max_STD[i, 0]     : numpy.float32 = STD_D_spatial_avg.max();  # Max over time only
+            max_STD[i, 1]     : numpy.float32 = STD_V_spatial_avg.max();  # Max over time only  
 
 
     # All done!
