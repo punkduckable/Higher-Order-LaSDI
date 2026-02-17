@@ -197,9 +197,10 @@ def main():
 
 
     # Plot the relative error between the trajectories for the final training set.
-    trainSpace_RelativeErrors_Heatmap(  trainer     = trainer, 
-                                        param_space = trainer.param_space, 
-                                        file_prefix = config["physics"]["type"]);
+    if(config['workflow']['plot_train_rel_errors'] == True):
+        trainSpace_RelativeErrors_Heatmap(  trainer     = trainer, 
+                                            param_space = trainer.param_space, 
+                                            file_prefix = config["physics"]["type"]);
 
 
 
