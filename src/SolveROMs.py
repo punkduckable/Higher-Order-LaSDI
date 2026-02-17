@@ -483,12 +483,8 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
                 LOGGER.warning(f"Parameter {i}: STD contains inf/nan values. This suggests divergent samples escaped detection. Replacing with 1e10.");
                 U_pred_i_std = numpy.nan_to_num(U_pred_i_std, nan=0.0, posinf=1e10, neginf=1e10);
             
-            # Compute the maximum standard deviation using a more robust metric:
-            # 1. Average std across spatial nodes for each time step → shape (n_t,)
-            # 2. Take max across time steps → scalar
-            # This prevents single outlier nodes from dominating the metric.
-            U_pred_i_std_spatial_avg : numpy.ndarray = U_pred_i_std.mean(axis=tuple(range(1, U_pred_i_std.ndim)));  # Average over all spatial dimensions
-            max_std_i                : numpy.float32 = U_pred_i_std_spatial_avg.max();  # Max over time only
+            # Compute the maximum standard deviation 
+            max_std_i                : numpy.float32 = U_pred_i_std.max();
 
             # If this is bigger than the biggest std we have seen so far, update the maximum.
             if max_std_i > max_std:
@@ -536,12 +532,8 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
                 LOGGER.warning(f"Parameter {i}: STD contains inf/nan values. This suggests divergent samples escaped detection. Replacing with 1e10.");
                 D_Pred_i_std = numpy.nan_to_num(D_Pred_i_std, nan=0.0, posinf=1e10, neginf=1e10);
             
-            # Compute the maximum standard deviation using a more robust metric:
-            # 1. Average std across spatial nodes for each time step → shape (n_t,)
-            # 2. Take max across time steps → scalar
-            # This prevents single outlier nodes from dominating the metric.
-            D_pred_i_std_spatial_avg : numpy.ndarray = D_Pred_i_std.mean(axis=tuple(range(1, D_Pred_i_std.ndim)));  # Average over all spatial dimensions
-            max_std_i                : numpy.float32 = D_pred_i_std_spatial_avg.max();  # Max over time only
+            # Compute the maximum standard deviation.
+            max_std_i                : numpy.float32 = D_Pred_i_std.max();
 
             # If this is bigger than the biggest std we have seen so far, update the maximum.
             if max_std_i > max_std:
