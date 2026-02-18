@@ -1,23 +1,26 @@
 lasdi:
   type:                     gplasdi
   gplasdi:
-    lr:                     0.0005
-    gradient_clip:          15.0      # Maximum allowable gradient magnitude; will rescale gradientsif exceeded.
+    lr:                     0.001
+    gradient_clip:          150.0     # Long ODE rollouts produce legitimate gradients of 100-130; clipping at 25 discards 80% of the signal.
     n_samples:              20
 
     # If true, compute a single global mean/std from TRAINING data only, and normalize
     # all training/testing trajectories using these values.
     normalize:              true
 
-    # Note that t_rollout is capped at 0.5 to ensure there are some frames to simulate forward.
+    # p_rollout grows from p_rollout_init by dp_per_update every rollout_update_freq epochs, capped at max_p_rollout.
     p_rollout_init:         0.01
     rollout_update_freq:    10
     dp_per_update:          0.005
     rollout_spline_order:   1
+    n_rollout_targets:      4         # Number of random target times sampled per rollable frame per epoch for the rollout loss.
 
     p_IC_rollout_init:      0.01
     IC_rollout_update_freq: 10
-    IC_dp_per_update:       0.005
+    IC_dp_per_update:       0.005     # was 0.005: at 0.005 the IC rollout reaches 100% (501 steps) by epoch 1980, creating enormous backprop chains. At 0.002 it caps at ~41% (205 steps) after 2000 epochs.
+    max_p_rollout:          0.5       # Cap p_rollout at 50% (prevents long-horizon rollout losses from swamping reconstruction).
+    max_p_IC_rollout:       0.5       # Cap IC rollout at 50% so it never simulates the full trajectory (avoids 501-step backprop chains).
 
     max_iter:               4000
     n_iter:                 2000
@@ -28,20 +31,20 @@ lasdi:
     loss_weights:
       recon:                1.0
       LD:                   1.0
-      rollout:              0.5
-      IC_rollout:           0.5
-      coef:                 0.01
+      rollout:              0.25
+      IC_rollout:           0.1
+      coef:                 1.0
 
       chain_rule:           1.0
       consistency:          1.0
 
     loss_types:
-      recon:                "MAE"
-      LD:                   "MAE"
-      rollout:              "MAE"
-      IC_rollout:           "MAE"
-      chain_rule:           "MAE"
-      consistency:          "MAE"
+      recon:                "MSE"
+      LD:                   "MSE"
+      rollout:              "MSE"
+      IC_rollout:           "MSE"
+      chain_rule:           "MSE"
+      consistency:          "MSE"
 
     learnable_coefs:        true
   
@@ -78,6 +81,7 @@ model:
 latent_dynamics:
   type:                     sindy
   coef_norm_order:          fro
+  lstsq_reg:                0.1
   spring:
   sindy:
 
