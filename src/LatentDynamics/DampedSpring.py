@@ -33,7 +33,8 @@ class DampedSpring(LatentDynamics):
     def __init__(   self, 
                     n_z             :   int, 
                     coef_norm_order :   str | float, 
-                    Uniform_t_Grid  :   bool) -> None:
+                    Uniform_t_Grid  :   bool,
+                    lstsq_reg       :   float = 1.0) -> None:
         r"""
         Initializes a DampedSpring object. This is a subclass of the LatentDynamics class which 
         implements the following latent dynamics
@@ -67,6 +68,12 @@ class DampedSpring(LatentDynamics):
             specific parameter value). The value of this setting determines which finite difference 
             method we use to compute time derivatives. 
 
+        lstsq_reg : float, optional (default 1.0)
+            Ridge-regression regularization strength used when fitting coefficients from scratch
+            (i.e., when no input_coefs are supplied to calibrate). Replaces plain lstsq with the
+            Tikhonov-regularized normal equations  (A^T A + λI) c = A^T b  where A = [Z_D, Z_V, 1]
+            and b = d²Z/dt². Setting lstsq_reg = 0 falls back to plain least squares.
+
             
         -------------------------------------------------------------------------------------------
         Returns
@@ -80,9 +87,11 @@ class DampedSpring(LatentDynamics):
         super().__init__(   n_z             = n_z,
                             coef_norm_order = coef_norm_order,
                             Uniform_t_Grid  = Uniform_t_Grid);
-        LOGGER.info("Initializing a SINDY object with n_z = %d, coef_norm_order = %s, Uniform_t_Grid = %s" % (  self.n_z, 
+        self.lstsq_reg : float = lstsq_reg;
+        LOGGER.info("Initializing a SINDY object with n_z = %d, coef_norm_order = %s, Uniform_t_Grid = %s, lstsq_reg = %s" % (  self.n_z, 
                                                                                                                 str(self.coef_norm_order), 
-                                                                                                                str(self.Uniform_t_Grid)));        
+                                                                                                                str(self.Uniform_t_Grid),
+                                                                                                                str(self.lstsq_reg)));        
         
         # Set n_coefs and n_IC.
         # Because K and C are n_z x n_z matrices, and b is in \mathbb{R}^n_z, there are 
@@ -277,13 +286,17 @@ class DampedSpring(LatentDynamics):
         # Set up coefs (either using Least Squares or using the provided coefficients).
 
         if(len(input_coefs) == 0):
-            # For each j, solve the least squares problem 
-            #   min{ || d2Z_dt2[:, j] - Z_1 E(j)|| : E(j) \in \mathbb{R}^(n_z*(2*n_z + 1)) }
-            # We store the resulting solutions in a matrix, coefs, whose j'th column holds the 
-            # results for the j'th column of Z_V. Thus, coefs is a 2d tensor with shape 
-            # (2*n_z + 1, n_z).
-            coefs   : torch.Tensor  = torch.linalg.lstsq(ZD_ZV_1, d2Z_dt2).solution;                            # shape = (2*n_z + 1, n_z)
-        
+            # Solve for coefficients via Tikhonov-regularized least squares (ridge regression).
+            # Normal equations:  (A^T A + λ I) c = A^T b  where A = ZD_ZV_1, b = d2Z_dt2.
+            # Setting lstsq_reg = 0 falls back to plain least squares (no regularization).
+            n_lib   : int           = ZD_ZV_1.shape[1];    # 2*n_z + 1
+            rhs     : torch.Tensor  = ZD_ZV_1.T @ d2Z_dt2; # shape = (2*n_z + 1, n_z)
+            if self.lstsq_reg > 0.0:
+                gram    : torch.Tensor  = ZD_ZV_1.T @ ZD_ZV_1 + self.lstsq_reg * torch.eye(n_lib, device = ZD_ZV_1.device, dtype = ZD_ZV_1.dtype);
+                coefs   : torch.Tensor  = torch.linalg.solve(gram, rhs);                                         # shape = (2*n_z + 1, n_z)
+            else:
+                coefs   : torch.Tensor  = torch.linalg.lstsq(ZD_ZV_1, d2Z_dt2).solution;                        # shape = (2*n_z + 1, n_z)
+
             # Now compute the loss.
             LD_RHS  : torch.Tensor  = torch.matmul(ZD_ZV_1, coefs);
 

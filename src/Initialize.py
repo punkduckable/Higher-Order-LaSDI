@@ -165,11 +165,13 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Bayesia
         latent_dynamics         = ld_dict[ld_type]( n_z             = model.n_z, 
                                                     coef_norm_order = config['latent_dynamics']['coef_norm_order'],
                                                     Uniform_t_Grid  = physics.Uniform_t_Grid,
-                                                    switch_time     = physics.switch_time);
+                                                    switch_time     = physics.switch_time,
+                                                    lstsq_reg       = config['latent_dynamics'].get('lstsq_reg', 1.0));
     else:
         latent_dynamics         = ld_dict[ld_type]( n_z             = model.n_z, 
                                                     coef_norm_order = config['latent_dynamics']['coef_norm_order'],
-                                                    Uniform_t_Grid  = physics.Uniform_t_Grid);
+                                                    Uniform_t_Grid  = physics.Uniform_t_Grid,
+                                                    lstsq_reg       = config['latent_dynamics'].get('lstsq_reg', 1.0));
     
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
         latent_dynamics.load(restart_dict['latent_dynamics']);

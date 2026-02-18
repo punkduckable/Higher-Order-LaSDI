@@ -32,7 +32,8 @@ class SINDy(LatentDynamics):
     def __init__(   self, 
                     n_z             : int,
                     coef_norm_order : str | float,
-                    Uniform_t_Grid  : bool) -> None:
+                    Uniform_t_Grid  : bool,
+                    lstsq_reg       : float = 1.0) -> None:
         r"""
         Initializes a SINDy object. This is a subclass of the LatentDynamics class which uses the 
         SINDy algorithm as its model for the ODE governing the latent state. Specifically, we 
@@ -67,6 +68,21 @@ class SINDy(LatentDynamics):
             specific parameter value). The value of this setting determines which finite difference 
             method we use to compute time derivatives. 
 
+        lstsq_reg : float, optional (default 1.0)
+            Ridge-regression regularization strength used when fitting SINDy coefficients from
+            scratch (i.e., when no input_coefs are supplied to calibrate). The least-squares
+            problem is replaced by the Tikhonov-regularized normal equations:
+
+                (Z^T Z + lstsq_reg * I) c = Z^T dZ/dt
+
+            Plain least-squares (lstsq_reg = 0) can produce arbitrarily large coefficients when
+            the Gram matrix Z^T Z is ill-conditioned, which commonly happens for newly-added
+            greedy-sampling training points whose latent trajectory hasn't been seen by the encoder
+            before. Setting lstsq_reg > 0 bounds ||c|| <= ||Z^T dZ/dt|| / lstsq_reg and prevents
+            the coefficient explosion that would otherwise blow up the training loss on the next
+            round. A value of 1.0 is a reasonable starting point; increase it (e.g., 10 or 100)
+            if you still see large initial coefficients for new training points.
+
             
         -------------------------------------------------------------------------------------------
         Returns
@@ -80,9 +96,11 @@ class SINDy(LatentDynamics):
         super().__init__(n_z                = n_z, 
                          coef_norm_order    = coef_norm_order, 
                          Uniform_t_Grid     = Uniform_t_Grid);
-        LOGGER.info("Initializing a SINDY object with n_z = %d, coef_norm_order = %s, Uniform_t_Grid = %s" % (  self.n_z, 
+        self.lstsq_reg : float = lstsq_reg;
+        LOGGER.info("Initializing a SINDY object with n_z = %d, coef_norm_order = %s, Uniform_t_Grid = %s, lstsq_reg = %s" % (  self.n_z, 
                                                                                                                 str(self.coef_norm_order), 
-                                                                                                                str(self.Uniform_t_Grid)));
+                                                                                                                str(self.Uniform_t_Grid),
+                                                                                                                str(self.lstsq_reg)));
 
         # Set n_IC and n_coefs.
         # We only allow library terms of order <= 1. If we let z(t) \in \mathbb{R}^{n_z} denote the 
@@ -276,15 +294,25 @@ class SINDy(LatentDynamics):
         Z_1     : torch.Tensor  = torch.cat([torch.ones(n_t, 1, device = Z.device, dtype =Z .dtype), Z], dim = 1);
         
         if(len(input_coefs) == 0):
-            # For each j, solve the least squares problem 
-            #   min{ || dZdt[:, j] - Z_1 c_j|| : C_j \in \mathbb{R}ˆNl }
-            # where Nl is the number of library terms (in this case, just n_z + 1, since we only allow
-            # constant and linear terms). We store the resulting solutions in a matrix, coefs, whose 
-            # j'th column holds the results for the j'th column of dZdt. Thus, coefs is a 2d tensor
-            # with shape (Nl, n_z).
-            coefs                   = torch.linalg.lstsq(Z_1, dZdt).solution
-            LOGGER.debug("SINDy calibration: Learned coefs min=%.6e, max=%.6e, mean=%.6e, abs_mean=%.6e" % (
-                float(coefs.min().item()), float(coefs.max().item()),
+            # Solve for SINDy coefficients using Tikhonov-regularized least squares (ridge
+            # regression).  Plain lstsq can return coefficients with magnitude in the hundreds
+            # when the Gram matrix Z_1^T Z_1 is ill-conditioned, which is common for newly-added
+            # greedy-sampling training points whose latent trajectory is unfamiliar to the encoder.
+            # Ridge regression caps ||coefs|| <= ||Z_1^T dZdt|| / lstsq_reg and is equivalent to
+            # the standard (unregularized) lstsq when lstsq_reg = 0.
+            #
+            # Normal equations:  (Z_1^T Z_1 + λ I) c = Z_1^T dZdt
+            #   where  λ = self.lstsq_reg
+            n_lib   : int           = Z_1.shape[1];    # number of library terms (n_z + 1)
+            rhs     : torch.Tensor  = Z_1.T @ dZdt;    # shape (n_lib, n_z)
+            if self.lstsq_reg > 0.0:
+                gram    : torch.Tensor  = Z_1.T @ Z_1 + self.lstsq_reg * torch.eye(n_lib, device = Z_1.device, dtype = Z_1.dtype);
+                coefs   : torch.Tensor  = torch.linalg.solve(gram, rhs);
+            else:
+                # lstsq_reg == 0: fall back to plain least squares (no regularization).
+                coefs   : torch.Tensor  = torch.linalg.lstsq(Z_1, dZdt).solution;
+            LOGGER.debug("SINDy calibration: Learned coefs (lstsq_reg=%.2e) min=%.6e, max=%.6e, mean=%.6e, abs_mean=%.6e" % (
+                self.lstsq_reg, float(coefs.min().item()), float(coefs.max().item()),
                 float(coefs.mean().item()), float(torch.abs(coefs).mean().item())));
         else:
             coefs   : torch.Tensor  = input_coefs[0].reshape(self.n_z + 1, self.n_z);
