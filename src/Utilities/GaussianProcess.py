@@ -103,10 +103,10 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
         # Make the kernel.
         # Option 1: Matern kernel (recommended for smooth but non-infinitely-differentiable functions)
         # Length scales tuned for normalized parameter space (mean = 0, std = 1).
-        # For a 5x5 grid, typical distances are O(1), so length scales of 0.2-5 give smooth interpolation.
-        # nu=2.5 provides twice differentiable functions (smoother than nu=1.5).
+        # For a 5x5 grid, typical distances are O(1), so length scales of 0.5-5 give smooth interpolation.
+        # Increased minimum to 0.5 to prevent overfitting to local patterns.
         kernel  = ConstantKernel(constant_value = 1.0, constant_value_bounds = (1e-3, 1e3)) * \
-                  Matern(length_scale_bounds = (0.2, 5.0), nu = 2.5);
+                  Matern(length_scale = 1.0, length_scale_bounds = (1.0, 1e3), nu = 2.5);
         # Option 2: RBF kernel (for infinitely smooth functions)
         # kernel  = ConstantKernel(constant_value = 1.0, constant_value_bounds = (1e-3, 1e3)) * \
         #           RBF(length_scale_bounds = (0.1, 10.0));
@@ -116,14 +116,14 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
         # alpha: Adds noise to the diagonal of the kernel matrix (observation noise).
         #        Larger values = more uncertainty = less overfitting to training data.
         #        Typical range: 1e-10 (very confident) to 1e-3 (high uncertainty).
-        #        Using 1e-3 for moderate uncertainty in predictions.
+        #        Using 4e-4 for tighter, more stable predictions to prevent divergent dynamics.
         #
         # n_restarts_optimizer: Number of random restarts for hyperparameter optimization.
         #                       More restarts = better hyperparameters but slower.
         #                       Using 10 restarts for better kernel tuning and stability.
         ith_gp      = GaussianProcessRegressor(
                             kernel                  = kernel, 
-                            alpha                   = 1e-3,     # Fine-tuned for moderate, controlled uncertainty
+                            alpha                   = 4e-4,     # Tighter uncertainty to prevent divergent coefficients
                             n_restarts_optimizer    = 10,       # More restarts for better hyperparameters
                             random_state            = 1);
 
@@ -297,13 +297,13 @@ def sample_coefs(   gp_list     : list[GaussianProcessRegressor],
     # Cycle through the samples and coefficients. For each sample of the k'th coefficient, we draw
     # a sample from the normal distribution with mean pred_mean[k] and std pred_std[k]. Note that 
     # we clip the sample to avoid outlying samples that can lead to numerical instability and 
-    # divergent latent dynamics. Clipping to +/- 2.0 sigma (96% confidence interval) balances 
-    # exploration with stability.
+    # divergent latent dynamics. Clipping to +/- 1.5 sigma (87% confidence interval) prioritizes 
+    # stability over exploration to prevent divergent predictions.
     for s in range(n_samples):
         for k in range(n_GPs):
             sample = numpy.random.normal(pred_mean[k], pred_std[k]);
-            # Clip to +/- 1.7 std for good diversity while maintaining stability
-            coef_samples[s, k] = numpy.clip(sample, pred_mean[k] - 2.0*pred_std[k], pred_mean[k] + 2.0*pred_std[k]);
+            # Clip to +/- 1.5 std to prevent divergent dynamics
+            coef_samples[s, k] = numpy.clip(sample, pred_mean[k] - 1.5*pred_std[k], pred_mean[k] + 1.5*pred_std[k]);
     
     # All done!
     return coef_samples;
