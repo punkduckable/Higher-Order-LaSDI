@@ -13,13 +13,13 @@ lasdi:
     p_rollout_init:         0.01
     rollout_update_freq:    10
     dp_per_update:          0.01
+    max_p_rollout:          0.75      # Maximum proportion of the time window used for rollout loss.
     rollout_spline_order:   1
     n_rollout_targets:      3         # Number of random target times sampled per rollable frame per epoch for the rollout loss.
 
     p_IC_rollout_init:      0.01
     IC_rollout_update_freq: 10
     IC_dp_per_update:       0.01
-    max_p_rollout:          0.75      # Maximum proportion of the time window used for rollout loss.
     max_p_IC_rollout:       1.0       # Maximum proportion of the time window used for IC rollout loss.
 
     max_iter:               4000
