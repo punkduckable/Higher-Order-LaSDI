@@ -163,19 +163,6 @@ def _scalar_anim(   data        : numpy.ndarray,
                                 alpha       = alpha,    # transparency of the markers
                                 s           = 20);      # Area of the markers.
        
-        # Force equal aspect (2D) / equal data scale (3D) if available.
-        if X.shape[0] == 2:
-            ax.set_aspect("equal");
-        else:
-            # Use data ranges so 1 unit on x/y/z uses the same number of pixels. Note that 
-            # "numpy.ptp(data)" returns the range of the data, which is the difference 
-            # between the maximum and minimum values. Thus, "numpy.ptp(X[i])" returns 
-            # the range of the i-th coordinate.
-            dx = float(numpy.ptp(X[0])) or 1.0;
-            dy = float(numpy.ptp(X[1])) or 1.0;
-            dz = float(numpy.ptp(data)) or 1.0;
-            ax.set_box_aspect((dx, dy, dz));
-
         # Add a colorbar to the figure, linked to the contour collection `scat`
         cb = fig.colorbar(scat, ax = ax);
 
@@ -349,9 +336,6 @@ def _vector_anim(   data        : numpy.ndarray,
                             clim            = (vmin, vmax), # set color limits
                             scale           = 1.0,          # no additional scaling
                             width           = 0.007);       # arrow shaft width
-
-        # Keep x and y axes at the same scale so arrows aren't distorted
-        ax.set_aspect("equal");
 
         # Add and label a colorbar for the magnitudes
         cb = fig.colorbar(q, ax = ax);
@@ -657,7 +641,6 @@ def Animate_2D_Grid_Scalar( U           : numpy.ndarray,
     ax.set_xlabel("x");
     ax.set_ylabel("y", rotation = 0, labelpad = 10);
     title_text = ax.set_title(f"2D Burgers (true)\n$t$ = {T[0]:.3f}");
-    ax.set_aspect('equal');
 
     # Define the update function for the animation.
     def update(frame: int):
