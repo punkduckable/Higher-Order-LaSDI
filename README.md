@@ -11,6 +11,7 @@ Higher-Order LaSDI provides tools for building reduced-order models (ROMs) from 
 - **Autoencoder Architectures**: Standard autoencoder and paired autoencoder for higher-order systems
 - **Rich Activation Functions**: Support for 20+ activation functions including sine, ReLU, tanh, GELU, and more
 - **Visualization Tools**: Automated plotting of latent trajectories, error heatmaps, and solution animations
+- **Training stability & diagnostics**: Gradient clipping (config: `lasdi.gplasdi.gradient_clip`) to prevent exploding gradients, and per-parameter loss logging to `results/*_loss_by_param.pkl` for post-hoc analysis
 
 ## Getting Started
 
@@ -182,11 +183,57 @@ Tested with the following versions:
 - matplotlib (3.9.2)
 - seaborn (0.13.2)
 
+
+### Installing with venv (recommended)
+
+Create the virtual environment in a `venv/` subdirectory of `Higher-Order-LaSDI/`:
+
+```bash
+cd Higher-Order-LaSDI
+python3 -m venv venv
+source venv/bin/activate
+
+python -m pip install --upgrade pip setuptools wheel
+
+# Core deps (tested versions; relax pins if needed)
+python -m pip install \
+  numpy==1.26.4 \
+  scipy==1.14.1 \
+  scikit-learn==1.5.2 \
+  pyyaml==6.0.2 \
+  matplotlib==3.9.2 \
+  seaborn==0.13.2 \
+
+# PyTorch (pick the right wheel for your platform/CUDA)
+python -m pip install torch==2.5.1
+```
+
+Add optional dependencies to the same venv:
+
+```bash
+# HDF5 data loading (Thermal example)
+python -m pip install h5py==3.14.0
+
+# PyMFEM prerequisites (see full PyMFEM build steps below)
+python -m pip install cmake==3.28.1 mpi4py==4.0.3
+
+# Jupyter for error diagnostics
+python -m pip install jupyter==1.0.0
+```
+
+
+
+Deactivate with:
+
+```bash
+deactivate
+```
+
 ### Optional Dependencies
 
 **For animations:**
 - ffmpeg (1.4)
-- Install via: `conda install -c conda-forge ffmpeg`
+- Install via your system package manager/module (e.g., `apt-get install ffmpeg`, `brew install ffmpeg`, or `module load ffmpeg`)
 
 **For HDF5 data loading (Thermal example):**
 - hdf5 (1.14.5)
@@ -198,18 +245,23 @@ Tested with the following versions:
 - mpi4py (4.0.3)
 - See installation instructions below
 
-**For Jupyter notebooks (testing/development):**
+**For Jupyter notebooks (error diagnostics):**
 - jupyter (1.0.0)
 
 ## Installing PyMFEM
 
 PyMFEM can be challenging to install. Below is a step-by-step guide to avoid common issues.
 
-### 1. Create a Conda Environment
+### 1. Create/Activate a venv (project-local)
+
+PyMFEM should be installed into the same `Higher-Order-LaSDI/venv` created above.
 
 ```bash
-conda create --name=PyMFEM python=3.10
-conda activate PyMFEM
+cd Higher-Order-LaSDI
+# If you haven't created the venv yet:
+python3 -m venv venv
+source venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
 ```
 
 ### 2. Clone and Checkout PyMFEM
@@ -260,7 +312,7 @@ pip install mpi4py==4.0.3
 ### 7. Build PyMFEM
 
 ```bash
-python setup.py install -v --user --with-parallel --with-gslib \
+python setup.py install -v --with-parallel --with-gslib \
   --CC=gcc --CXX=g++ --MPICC=mpicc --MPICXX=mpic++ --with-lapack
 ```
 
@@ -342,9 +394,48 @@ Training produces several outputs:
 
 ### Saved Files
 - **Checkpoint**: `checkpoint/checkpoint.pt` – Model weights and training state
-- **Results**: `results/*.pkl` – Training metrics and losses by parameter
+- **Results**: `results/<physics_type>_loss_by_param.pkl` – Per-epoch loss curves (per training parameter + totals)
 - **Figures**: `Figures/*.png` – Latent trajectory plots, error heatmaps
 - **Animations**: `Figures/*.mp4` – Solution animations (if generated)
+
+### Gradient clipping
+
+To prevent exploding gradients during training, `BayesianGLaSDI` applies global gradient-norm clipping via `torch.nn.utils.clip_grad_norm_` (threshold: `lasdi.gplasdi.gradient_clip`, default: `15.0`). When clipping activates, a warning is logged.
+
+### Per-parameter loss logging (`*_loss_by_param.pkl`)
+
+During training, `src/GPLaSDI.py` writes a pickle file:
+
+- Path: `results/<physics_type>_loss_by_param.pkl` (where `<physics_type>` is `config['physics']['type']`)
+- Type: nested Python dictionaries
+
+Structure:
+
+- `loss_by_param[loss_name][param_tuple] -> {'epochs': [...], 'losses': [...]}`
+- `param_tuple` is a tuple of training parameter values (in the same order as the parameter space)
+- Each `loss_name` also contains a `'total'` entry, which is the loss summed across all training parameters for that epoch.
+
+Common `loss_name` keys include:
+- `recon`, `LD`, `coef`, `rollout_ROM`, `rollout_FOM`, `IC_rollout_ROM`, `IC_rollout_FOM`, and `total`
+- For paired autoencoders, additional keys such as `recon_D`, `recon_V`, `consistency_Z`, `consistency_U`, `chain_rule_U`, `chain_rule_Z`, `rollout_*_D/V`, and `IC_rollout_*` are also logged.
+
+Reading the file:
+
+```python
+import pickle
+
+with open("results/Burgers_loss_by_param.pkl", "rb") as f:
+    loss_by_param = pickle.load(f)
+
+# Total reconstruction loss curve
+epochs = loss_by_param["recon"]["total"]["epochs"]
+losses = loss_by_param["recon"]["total"]["losses"]
+
+# Per-parameter reconstruction curve (example param tuple)
+# loss_by_param["recon"][(0.1, 0.2)] -> {'epochs': [...], 'losses': [...]}
+```
+
+For a ready-made parser/plotter, see the repo-root notebook `Analyze_Parameter_Losses.ipynb`, which loads `*_loss_by_param.pkl` and produces per-parameter loss plots.
 
 ### Logging
 - Real-time logging to console and `output.txt`

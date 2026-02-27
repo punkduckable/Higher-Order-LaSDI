@@ -123,7 +123,7 @@ def main():
     count_parameters(model, latent_dynamics, trainer);
 
     # Start running steps.
-    result, next_step = step(trainer, next_step, config, use_restart);
+    result, next_step = step(trainer, next_step, config);
 
     # Report the result
     if (  result is Result.Fail):
@@ -162,7 +162,7 @@ def main():
     model.cpu();
 
     # Get a GP for each coefficient in the latent dynamics.
-    gp_list         : list[GaussianProcessRegressor]    = fit_gps(param_space.train_space, trainer.best_coefs);
+    gp_list         : list[GaussianProcessRegressor]    = fit_gps(param_space.train_space, trainer.best_train_coefs);
     
     # Compute the relative error between the FOM solution and its prediction when we rollout the 
     # IC using the model.
@@ -197,9 +197,10 @@ def main():
 
 
     # Plot the relative error between the trajectories for the final training set.
-    trainSpace_RelativeErrors_Heatmap(  trainer     = trainer, 
-                                        param_space = trainer.param_space, 
-                                        file_prefix = config["physics"]["type"]);
+    if(config['workflow']['plot_train_rel_errors'] == True):
+        trainSpace_RelativeErrors_Heatmap(  trainer     = trainer, 
+                                            param_space = trainer.param_space, 
+                                            file_prefix = config["physics"]["type"]);
 
 
 
@@ -543,12 +544,15 @@ def count_parameters(   model           : torch.nn.Module,
 
 def step(trainer        : BayesianGLaSDI, 
          next_step      : NextStep, 
-         config         : dict, 
-         use_restart    : bool = False) -> tuple[Result, NextStep]:
+         config         : dict) -> tuple[Result, NextStep]:
     """
-    This function runs the next step of the training procedure. Depending on what we have done, 
-    that next step could be training, picking new samples, generating FOM solutions, or 
-    collecting samples. 
+    Runs the next step of the training procedure and recursively continues until the workflow is
+    complete or encounters a failure. The full cycle is:
+
+        RunSample → Train → PickSample → RunSample → Train → PickSample → ... → Complete
+
+    When loading from a restart, pass in the `next_step` saved in the restart file; this function
+    will pick up exactly where the previous run left off and run to completion.
 
     
     -----------------------------------------------------------------------------------------------
@@ -560,16 +564,12 @@ def step(trainer        : BayesianGLaSDI,
         the settings.
 
     next_step : NextStep
-        specifies what the next step is. 
+        The step to execute first. When restarting, this should be loaded from the restart file.
 
     config : dict
         This should be a dictionary that we loaded from a .yml file. It should house all the 
         settings we expect to use to generate the data and train the models.
 
-    use_restart : bool
-         if True, we return after a single step.
-
-    
 
     -----------------------------------------------------------------------------------------------
     Returns
@@ -578,10 +578,10 @@ def step(trainer        : BayesianGLaSDI,
     result, next_step
     
     result : Result
-        indicates what happened during the current step
+        Result.Complete when training finishes normally, Result.Fail on error.
 
     next_step : NextStep
-        Indicates what we should do next. 
+        The step that would come next (informational; the workflow has already stopped). 
     """
 
 
@@ -642,17 +642,13 @@ def step(trainer        : BayesianGLaSDI,
     # Wrap up
     # ---------------------------------------------------------------------------------------------
 
-    # If fail or complete, break the loop regardless of use_restart.
+    # If fail or complete, break the loop.
     if ((result is Result.Fail) or (result is Result.Complete)):
-        return result, next_step;
-
-    # If we're doing a single-step restart run, return after one step.
-    if use_restart == True:
         return result, next_step;
         
     # Continue the workflow.
     LOGGER.info("Next step is: %s" % next_step);
-    result, next_step = step(trainer, next_step, config, use_restart = use_restart);
+    result, next_step = step(trainer, next_step, config);
 
     # All done!
     return result, next_step;

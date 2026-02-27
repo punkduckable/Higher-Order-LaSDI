@@ -7,8 +7,10 @@ from    pathlib                     import  Path;
 import  os;
 
 import  numpy;
+import  matplotlib;
 import  matplotlib.pyplot           as      plt;
 from    matplotlib.animation        import  FuncAnimation, FFMpegWriter;
+from    contextlib                  import  contextmanager;
 from    matplotlib.colors           import  LinearSegmentedColormap;
 from    mpl_toolkits.mplot3d        import  Axes3D;  # noqa: F401 (registers 3D projection)
 
@@ -21,6 +23,21 @@ LOGGER = logging.getLogger(__name__);
 # ---------------------------------------------------------------------------------------------
 # internal helpers 
 # ---------------------------------------------------------------------------------------------
+
+@contextmanager
+def _agg_backend():
+    """Temporarily switch to the non-interactive Agg backend for file rendering.
+
+    Restores the original backend on exit, so interactive plots elsewhere in the
+    process are unaffected.  Using Agg avoids the Tcl/Tk ``delayed_destroy`` error
+    that occurs when matplotlib's TkAgg backend is used on headless compute nodes.
+    """
+    original = matplotlib.get_backend();
+    plt.switch_backend("Agg");
+    try:
+        yield;
+    finally:
+        plt.switch_backend(original);
 
 def _scalar_anim(   data        : numpy.ndarray,
                     title       : str,
@@ -107,94 +124,89 @@ def _scalar_anim(   data        : numpy.ndarray,
     assert X.shape[0] in (2, 3),            "X.shape = %s" % str(X.shape);
     assert T.shape[0] == data.shape[0],     "T.shape = %s, data.shape = %s" % (str(T.shape), str(data.shape));
 
-    # Setup.
-    N_t         : int   = T.shape[0];
-    vmin                = data.min();
-    vmax                = data.max();
+    with _agg_backend():
 
-    # Ensure output directory exists.
-    save_dir = Path(save_dir);
-    save_dir.mkdir(parents = True, exist_ok = True);
+        # Setup.
+        N_t         : int   = T.shape[0];
+        vmin                = data.min();
+        vmax                = data.max();
 
-    # Create a new figure/axes object (2D or 3D depending on X).
-    if(X.shape[0] == 2):
-        fig, ax = plt.subplots();
-    else:
-        fig = plt.figure();
-        ax = fig.add_subplot(111, projection = "3d");
+        # Ensure output directory exists.
+        save_dir = Path(save_dir);
+        save_dir.mkdir(parents = True, exist_ok = True);
 
-    # Plot the initial frame of the data as a filled triangular contour plot
-    if(X.shape[0] == 2):
-        scat = ax.scatter(  X[0],                   # array of x coordinates for the triangulation
-                            X[1],                   # array of y coordinates for the triangulation
-                            c           = data[0],  # data values at those (x,y) positions for the first time slice
-                            cmap        = cmap,     # what colormap we use
-                            vmin        = vmin,     # lower bounds for color scaling
-                            vmax        = vmax,     # upper bounds for color scaling
-                            alpha       = alpha,    # transparency of the markers
-                            s           = 60);      # Area of the markers.
-    else:
-        scat = ax.scatter3D(X[0],                   # array of x coordinates for the triangulation
-                            X[1],                   # array of y coordinates for the triangulation
-                            X[2],                   # array of z coordinates for the triangulation
-                            c           = data[0],  # data values at those (x,y,z) positions for the first time slice
-                            cmap        = cmap,     # what colormap we use
-                            vmin        = vmin,     # lower bounds for color scaling
-                            vmax        = vmax,     # upper bounds for color scaling
-                            alpha       = alpha,    # transparency of the markers
-                            s           = 20);      # Area of the markers.
-   
-    # Force equal aspect (2D) / box aspect (3D) if available.
-    if X.shape[0] == 2:
-        ax.set_aspect("equal");
-    else:
-        if hasattr(ax, "set_box_aspect"):
-            ax.set_box_aspect((1, 1, 1));
+        # Create a new figure/axes object (2D or 3D depending on X).
+        if(X.shape[0] == 2):
+            fig, ax = plt.subplots();
+        else:
+            fig = plt.figure();
+            ax = fig.add_subplot(111, projection = "3d");
 
-    # Add a colorbar to the figure, linked to the contour collection `scat`
-    cb = fig.colorbar(scat, ax = ax);
+        # Plot the initial frame of the data as a filled triangular contour plot
+        if(X.shape[0] == 2):
+            scat = ax.scatter(  X[0],                   # array of x coordinates for the triangulation
+                                X[1],                   # array of y coordinates for the triangulation
+                                c           = data[0],  # data values at those (x,y) positions for the first time slice
+                                cmap        = cmap,     # what colormap we use
+                                vmin        = vmin,     # lower bounds for color scaling
+                                vmax        = vmax,     # upper bounds for color scaling
+                                alpha       = alpha,    # transparency of the markers
+                                s           = 60);      # Area of the markers.
+        else:
+            scat = ax.scatter3D(X[0],                   # array of x coordinates for the triangulation
+                                X[1],                   # array of y coordinates for the triangulation
+                                X[2],                   # array of z coordinates for the triangulation
+                                c           = data[0],  # data values at those (x,y,z) positions for the first time slice
+                                cmap        = cmap,     # what colormap we use
+                                vmin        = vmin,     # lower bounds for color scaling
+                                vmax        = vmax,     # upper bounds for color scaling
+                                alpha       = alpha,    # transparency of the markers
+                                s           = 20);      # Area of the markers.
+       
+        # Add a colorbar to the figure, linked to the contour collection `scat`
+        cb = fig.colorbar(scat, ax = ax);
 
-    # Label the colorbar, using the provided title (strip out any newlines)
-    cb.set_label(title.replace("\n", " "));
+        # Label the colorbar, using the provided title (strip out any newlines)
+        cb.set_label(title.replace("\n", " "));
 
-    # Set the initial title of the axes, including the time at T[0]
-    time_text = ax.set_title(f"{title}\n$t$ = {T[0]:.3f}");
+        # Set the initial title of the axes, including the time at T[0]
+        time_text = ax.set_title(f"{title}\n$t$ = {T[0]:.3f}");
 
-    def update(frame: int):
-        """
-        This function will be called for each frame of the animation.
-        - frame : the current frame index (0 <= frame < N_t)
-        Inside, we:
-        1. Update the contour data to the new time slice
-        2. Update the title to display the new time
-        3. Return the updated artists so FuncAnimation knows what to redraw
-        """
-        
-        # Replace the contour array with the new frame's data
-        scat.set_array(data[frame]);
-        
-        # Update the title text to show the current time
-        time_text.set_text(f"{title}\n$t$ = {T[frame]:.3f}");
-        
-        return scat, time_text;
+        def update(frame: int):
+            """
+            This function will be called for each frame of the animation.
+            - frame : the current frame index (0 <= frame < N_t)
+            Inside, we:
+            1. Update the contour data to the new time slice
+            2. Update the title to display the new time
+            3. Return the updated artists so FuncAnimation knows what to redraw
+            """
+            
+            # Replace the contour array with the new frame's data
+            scat.set_array(data[frame]);
+            
+            # Update the title text to show the current time
+            time_text.set_text(f"{title}\n$t$ = {T[frame]:.3f}");
+            
+            return scat, time_text;
 
-    # Create the animation
-    ani = FuncAnimation(fig,                # the Figure object to animate
-                        update,             # the function that draws each frame
-                        frames  = N_t,      # total number of frames (N_t)
-                        blit    = (X.shape[0] == 2),  # blitting is unreliable for 3D artists
-                        repeat  = False);   # whether the animation should loop when it reaches the end
+        # Create the animation
+        ani = FuncAnimation(fig,                # the Figure object to animate
+                            update,             # the function that draws each frame
+                            frames  = N_t,      # total number of frames (N_t)
+                            blit    = (X.shape[0] == 2),  # blitting is unreliable for 3D artists
+                            repeat  = False);   # whether the animation should loop when it reaches the end
 
-    # Build the full output path.
-    out_path = save_dir / fname;
+        # Build the full output path.
+        out_path = save_dir / fname;
 
-    # Save the animation to a file using ffmpeg
-    ani.save(   str(out_path),
-                writer      =   FFMpegWriter(   fps = fps,              # frames per second
-                                                codec = "libx264"));    # video codec (libx264 for H.264)
+        # Save the animation to a file using ffmpeg
+        ani.save(   str(out_path),
+                    writer      =   FFMpegWriter(   fps = fps,              # frames per second
+                                                    codec = "libx264"));    # video codec (libx264 for H.264)
 
-    # Close the figure to free up memory.
-    plt.close(fig);
+        # Close the figure to free up memory.
+        plt.close(fig);
 
     # Return the path to the saved animation file
     return out_path;
@@ -280,90 +292,89 @@ def _vector_anim(   data        : numpy.ndarray,
     assert data.shape[0] == T.shape[0],     "data.shape = %s, T.shape = %s" % (str(data.shape), str(T.shape));
     assert data.shape[2] == X.shape[1],     "data.shape = %s, X.shape = %s" % (str(data.shape), str(X.shape));
 
-    # Setup.
-    save_dir = Path(save_dir);
-    save_dir.mkdir(parents = True, exist_ok = True);
+    with _agg_backend():
 
-    N_t         : int   = T.shape[0];
-    magnitudes          = numpy.linalg.norm(data, axis = 1);
-    vmin                = magnitudes.min();
-    vmax                = magnitudes.max();
+        # Setup.
+        save_dir = Path(save_dir);
+        save_dir.mkdir(parents = True, exist_ok = True);
 
-    # Make a quiver plot using the data
-    if X.shape[0] == 2:
-        fig, ax = plt.subplots();
-    else:
-        # 3D vector-field animation is not robustly supported by the current update logic.
-        # (Matplotlib 3D quiver objects do not support q.set_UVC like 2D quiver does.)
-        raise NotImplementedError("3D vector-field animation is not supported. X.shape = %s" % str(X.shape));
+        N_t         : int   = T.shape[0];
+        magnitudes          = numpy.linalg.norm(data, axis = 1);
+        vmin                = magnitudes.min();
+        vmax                = magnitudes.max();
 
-    # Create a new figure and a single subplot (axes) object
-    if(X.shape[0] == 2):
-        q = ax.quiver(  X[0],                           # 1D array of x-coordinates for arrow bases
-                        X[1],                           # 1D array of y-coordinates for arrow bases
-                        data[0, 0, :],                  # 1D array of x-components of vectors at frame 0
-                        data[0, 1, :],                  # 1D array of y-components of vectors at frame 0
-                        magnitudes[0],                  # scalar values used to color each arrow by its length
-                        cmap            = cmap,         # colormap mapping magnitudes → colors
-                        clim            = (vmin, vmax), # set color limits
-                        angles          = "xy",         # interpret U/V in Cartesian coords
-                        scale_units     = "xy",         # scale arrow lengths in data units
-                        scale           = 1.0,          # no additional scaling
-                        width           = 0.007);       # arrow shaft width
-    else: # 3d
-        q = ax.quiver(  X[0],                           # 1D array of x-coordinates for arrow bases
-                        X[1],                           # 1D array of y-coordinates for arrow bases
-                        X[2],                           # 1D array of z-coordinates for arrow bases
-                        data[0, 0, :],                  # 1D array of x-components of vectors at frame 0
-                        data[0, 1, :],                  # 1D array of y-components of vectors at frame 0
-                        data[0, 2, :],                  # 1D array of z-components of vectors at frame 0
-                        magnitudes[0],                  # scalar values used to color each arrow by its length
-                        cmap            = cmap,         # colormap mapping magnitudes → colors
-                        clim            = (vmin, vmax), # set color limits
-                        scale           = 1.0,          # no additional scaling
-                        width           = 0.007);       # arrow shaft width
+        # Make a quiver plot using the data
+        if X.shape[0] == 2:
+            fig, ax = plt.subplots();
+        else:
+            # 3D vector-field animation is not robustly supported by the current update logic.
+            # (Matplotlib 3D quiver objects do not support q.set_UVC like 2D quiver does.)
+            raise NotImplementedError("3D vector-field animation is not supported. X.shape = %s" % str(X.shape));
 
-    # Keep x and y axes at the same scale so arrows aren’t distorted
-    ax.set_aspect("equal");
-
-    # Add and label a colorbar for the magnitudes
-    cb = fig.colorbar(q, ax = ax);
-    cb.set_label("|value|", rotation = 0);
-
-    # Set initial plot title including the time stamp for frame 0
-    time_text = ax.set_title(f"{title}\n$t$ = {T[0]:.3f}");
-
-    def update(frame: int):
-        """
-        Called once per frame by FuncAnimation.
-        - Updates arrow U, V components and colors for the given frame index.
-        - Updates the title text to reflect the current time.
-        """
-        
-        # Update the quiver vectors and their color values
+        # Create a new figure and a single subplot (axes) object
         if(X.shape[0] == 2):
-            q.set_UVC(data[frame, 0, :], data[frame, 1, :], magnitudes[frame]);
+            q = ax.quiver(  X[0],                           # 1D array of x-coordinates for arrow bases
+                            X[1],                           # 1D array of y-coordinates for arrow bases
+                            data[0, 0, :],                  # 1D array of x-components of vectors at frame 0
+                            data[0, 1, :],                  # 1D array of y-components of vectors at frame 0
+                            magnitudes[0],                  # scalar values used to color each arrow by its length
+                            cmap            = cmap,         # colormap mapping magnitudes → colors
+                            clim            = (vmin, vmax), # set color limits
+                            angles          = "xy",         # interpret U/V in Cartesian coords
+                            scale_units     = "xy",         # scale arrow lengths in data units
+                            scale           = 1.0,          # no additional scaling
+                            width           = 0.007);       # arrow shaft width
         else: # 3d
-            q.set_UVC(data[frame, 0, :], data[frame, 1, :], data[frame, 2, :], magnitudes[frame]);
-        
-        # Update the title with the new time
-        time_text.set_text(f"{title}\n$t$ = {T[frame]:.3f}");
-        
-        return q, time_text;
+            q = ax.quiver(  X[0],                           # 1D array of x-coordinates for arrow bases
+                            X[1],                           # 1D array of y-coordinates for arrow bases
+                            X[2],                           # 1D array of z-coordinates for arrow bases
+                            data[0, 0, :],                  # 1D array of x-components of vectors at frame 0
+                            data[0, 1, :],                  # 1D array of y-components of vectors at frame 0
+                            data[0, 2, :],                  # 1D array of z-components of vectors at frame 0
+                            magnitudes[0],                  # scalar values used to color each arrow by its length
+                            cmap            = cmap,         # colormap mapping magnitudes → colors
+                            clim            = (vmin, vmax), # set color limits
+                            scale           = 1.0,          # no additional scaling
+                            width           = 0.007);       # arrow shaft width
 
-    
-    ani = FuncAnimation(fig, 
-                        update, 
-                        frames  = N_t,      # total frames to animate
-                        blit    = False,    # redraw entire frame each update
-                        repeat  = False);   # do not loop
-    
-    # Construct output filepath and save the animation using ffmpeg
-    out_path = save_dir / fname;
-    ani.save(str(out_path), writer = FFMpegWriter(fps = fps, codec = "libx264"));
+        # Add and label a colorbar for the magnitudes
+        cb = fig.colorbar(q, ax = ax);
+        cb.set_label("|value|", rotation = 0);
 
-    # Close the figure to free memory
-    plt.close(fig);
+        # Set initial plot title including the time stamp for frame 0
+        time_text = ax.set_title(f"{title}\n$t$ = {T[0]:.3f}");
+
+        def update(frame: int):
+            """
+            Called once per frame by FuncAnimation.
+            - Updates arrow U, V components and colors for the given frame index.
+            - Updates the title text to reflect the current time.
+            """
+            
+            # Update the quiver vectors and their color values
+            if(X.shape[0] == 2):
+                q.set_UVC(data[frame, 0, :], data[frame, 1, :], magnitudes[frame]);
+            else: # 3d
+                q.set_UVC(data[frame, 0, :], data[frame, 1, :], data[frame, 2, :], magnitudes[frame]);
+            
+            # Update the title with the new time
+            time_text.set_text(f"{title}\n$t$ = {T[frame]:.3f}");
+            
+            return q, time_text;
+
+        
+        ani = FuncAnimation(fig, 
+                            update, 
+                            frames  = N_t,      # total frames to animate
+                            blit    = False,    # redraw entire frame each update
+                            repeat  = False);   # do not loop
+        
+        # Construct output filepath and save the animation using ffmpeg
+        out_path = save_dir / fname;
+        ani.save(str(out_path), writer = FFMpegWriter(fps = fps, codec = "libx264"));
+
+        # Close the figure to free memory
+        plt.close(fig);
 
     # Return the path to the saved animation file
     return out_path;
@@ -630,7 +641,6 @@ def Animate_2D_Grid_Scalar( U           : numpy.ndarray,
     ax.set_xlabel("x");
     ax.set_ylabel("y", rotation = 0, labelpad = 10);
     title_text = ax.set_title(f"2D Burgers (true)\n$t$ = {T[0]:.3f}");
-    ax.set_aspect('equal');
 
     # Define the update function for the animation.
     def update(frame: int):

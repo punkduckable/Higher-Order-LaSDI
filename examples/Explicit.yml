@@ -2,47 +2,49 @@ lasdi:
   type:                     gplasdi
   gplasdi:
     lr:                     0.001
+    gradient_clip:          100.0     # Long ODE rollouts produce legitimate gradients of 100-130; clipping at 25 discards 80% of the signal.
     n_samples:              20
 
     # If true, compute a single global mean/std from TRAINING data only, and normalize
     # all training/testing trajectories using these values.
     normalize:              true
 
-    # Note that t_rollout is capped at 0.75 to ensure there are some frames to simulate forward.
+    # p_rollout grows from p_rollout_init by dp_per_update every rollout_update_freq epochs, capped at max_p_rollout.
     p_rollout_init:         0.01
-    rollout_update_freq:    20
-    dp_per_update:          0.01
-    randomized_rollout:     true    # If true, then the duration is randomized for each IC, with p_rollout acting as a maximum. Otherwise, everything is rolled out by p_rollout.
+    rollout_update_freq:    10
+    dp_per_update:          0.005
+    max_p_rollout:          0.5 
     rollout_spline_order:   1
+    n_rollout_targets:      4         # Number of random target times sampled per rollable frame per epoch for the rollout loss.
 
     p_IC_rollout_init:      0.01
-    IC_rollout_update_freq: 20
+    IC_rollout_update_freq: 10
     IC_dp_per_update:       0.01
+    max_p_IC_rollout:       1.0  
 
-    max_iter:               8000
-    n_iter:                 4000
-    max_greedy_iter:        8000
+    max_iter:               4000
+    n_iter:                 2000
+    max_greedy_iter:        4000
 
-    lr_warmup:              20    # How many epochs to warmup the learning rate for after greedy sampling.
-    checkpoint_warmup:      20    # How many epochs to checkpoint the model after after greedy sampling.
+    warmup_epochs:          40    # number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmpup.
 
     loss_weights:
       recon:                1.0
-      LD:                   1.0
-      rollout:              1.0
-      IC_rollout:           1.0
-      coef:                 0.01
+      LD:                   10.0
+      rollout:              0.0
+      IC_rollout:           0.5
+      coef:                 0.0002
 
       chain_rule:           1.0
       consistency:          1.0
 
     loss_types:
-      recon:                "MAE"
-      LD:                   "MAE"
-      rollout:              "MAE"
-      IC_rollout:           "MAE"
-      chain_rule:           "MAE"
-      consistency:          "MAE"
+      recon:                "MSE"
+      LD:                   "MSE"
+      rollout:              "MSE"
+      IC_rollout:           "MSE"
+      chain_rule:           "MSE"
+      consistency:          "MSE"
 
     learnable_coefs:        true
   
@@ -79,6 +81,7 @@ model:
 latent_dynamics:
   type:                     sindy
   coef_norm_order:          fro
+  lstsq_reg:                0.1
   spring:
   sindy:
 

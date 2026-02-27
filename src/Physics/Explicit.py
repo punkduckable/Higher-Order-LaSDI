@@ -123,8 +123,8 @@ class Explicit(Physics):
 
         # Compute the initial condition and return!
         X           : numpy.ndarray = self.X_Positions;
-        x_coords    : torch.Tensor  = torch.tensor(X[0, :], dtype = torch.float32); 
-        y_coords    : torch.Tensor  = torch.tensor(X[1, :], dtype = torch.float32);
+        x_coords    : numpy.ndarray  = numpy.array(X[0, :], dtype = numpy.float32); 
+        y_coords    : numpy.ndarray  = numpy.array(X[1, :], dtype = numpy.float32);
         u0          : numpy.ndarray =  A*numpy.multiply(numpy.sin(2*x_coords)*numpy.cos(2*y_coords) + 0.2*numpy.cos(10*(x_coords + y_coords)), numpy.exp(-0.3*(x_coords*x_coords + y_coords*y_coords)));
         return [u0.reshape(1, -1)];
     

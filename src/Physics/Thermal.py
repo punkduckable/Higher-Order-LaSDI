@@ -64,6 +64,8 @@ class Thermal(Physics):
         # To get the frame shape and X_Positions, we need to load one of the simulation results. To
         # do this, we can just load any file in the hdf5 directory that ends with .h5.
         h5_files : list[str] = glob.glob(os.path.join(self.hdf5_dir, "*.h5"));
+        if len(h5_files) == 0:
+            raise RuntimeError(f"No .h5 files found in directory {self.hdf5_dir}");
         with h5py.File(h5_files[0], "r") as f:
             # Fetch the nodet dataset and its shape.
             nodet_ds : h5py.Dataset = f.get("nodet");
@@ -117,12 +119,23 @@ class Thermal(Physics):
             scan_speeds         : list[str]     = scan_speeds_line.split(":")[1].strip().split(",");   
             self.scan_speeds    : list[float]   = [float(speed) for speed in scan_speeds];
 
+        # Make sure all powers, scan speeds are positive.
+        for power in self.laser_powers:
+            if power <= 0:
+                raise ValueError(f"Laser power must be positive, got {power}");
+        for speed in self.scan_speeds:
+            if speed <= 0:
+                raise ValueError(f"Scan speed must be positive, got {speed}");
+
         """
-        Next, we need to fetch and store the initial conditions and file names. We will do this by 
-        determining the name of the file storing the data for each parameter combination. We 
-        will store these names, then store the first frame (IC) from each file's nodet dataset 
-        in a (n_laser_powers, n_scan_speeds, n_nodes) array whose i, j, k element holds the initial
-        temperature at the k'th node for the i'th laser power and j'th scan speed. 
+        Next, we need to fetch and store the initial conditions, file names, and track lengths. 
+        We will do this by determining the name of the file storing the data for each parameter 
+        combination. We will store these names, then store the first frame (IC) from each file's 
+        nodet dataset in a (n_laser_powers, n_scan_speeds, n_nodes) array whose i, j, k element 
+        holds the initial temperature at the k'th node for the i'th laser power and j'th scan 
+        speed. We will also store the track length for each parameter combination in a 
+        (n_laser_powers, n_scan_speeds) array whose i, j element holds the track length for the 
+        i'th laser power and j'th scan speed.
         
         To do this, we  need to know which file corresponds to each parameter value. We can do 
         this by reading the metadata file, whcih consist sof a header and a body. The body begins 
@@ -138,8 +151,9 @@ class Thermal(Physics):
         n_powers : int = len(self.laser_powers);
         n_speeds : int = len(self.scan_speeds);
         n_nodes  : int = self.X_Positions.shape[1];
-        self.IC_array   : numpy.ndarray = numpy.empty((n_powers, n_speeds, n_nodes), dtype = numpy.float32);
-        self.file_names : numpy.ndarray = numpy.empty((n_powers, n_speeds), dtype = object)
+        self.IC_array      : numpy.ndarray = numpy.empty((n_powers, n_speeds, n_nodes), dtype = numpy.float32);
+        self.file_names    : numpy.ndarray = numpy.empty((n_powers, n_speeds), dtype = object)
+        self.track_lengths : numpy.ndarray = numpy.empty((n_powers, n_speeds), dtype = numpy.float32);
 
         with open(os.path.join(self.hdf5_dir, "metadata.txt"), 'r') as metadata_file:
             # Cycle through the header. 
@@ -179,6 +193,15 @@ class Thermal(Physics):
                     if nodet_ds is None:
                         raise RuntimeError("Nodet dataset not found in file %s" % file_name);
                      
+                    # Extract the track length.
+                    track_length = f.get("track_length");
+                    if track_length is None:
+                        raise RuntimeError("Track length not found in file %s" % file_name);
+                    track_length_value = track_length[()];
+                    if track_length_value <= 0:
+                        raise ValueError(f"Track length must be positive in file {file_name}, got {track_length_value}")
+                    self.track_lengths[power_idx, speed_idx] = track_length_value;
+
                     # Make sure nodet_ds has shape (n_time_steps, n_nodes).
                     nodet_shape = nodet_ds.shape;
                     assert len(nodet_shape) == 2,       "len(nodet_shape) = %d" % len(nodet_shape);
@@ -186,8 +209,28 @@ class Thermal(Physics):
 
                     # Store the first entry of the nodet dataset.
                     self.IC_array[power_idx, speed_idx, :] = nodet_ds[0, :];
+        
+        # Finally, we need to set up the "switch_time" function. This function will return the time 
+        # at which the laser power and scan speed switch. This is just when the laser hits the end
+        # of the track, which happens after (track length) / (scan speed) seconds.
+        def switch_time(param : numpy.ndarray) -> float:
+            # Extract scalar values from the parameter array (shape is (1, n_p))
+            # Convert to float to ensure list.index() works correctly
+            param_power : float = float(param[0, 0]);
+            param_speed : float = float(param[0, 1]);
             
-        # Everything is now set up!
+            # Get the index for the laser power and scan speed.
+            power_idx : int = self.laser_powers.index(param_power);
+            speed_idx : int = self.scan_speeds.index(param_speed);
+
+            # Look up the track length for this parameter combination.
+            param_track_length : float = self.track_lengths[power_idx, speed_idx];
+
+            # Return the switch time.
+            return param_track_length / param_speed;
+        self.switch_time = switch_time;
+
+        # All done!
         return;
                 
 

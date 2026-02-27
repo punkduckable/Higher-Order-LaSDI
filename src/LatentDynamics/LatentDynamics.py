@@ -88,6 +88,7 @@ class LatentDynamics:
                     Latent_States   : list[list[torch.Tensor]], 
                     loss_type       : str,
                     t_Grid          : list[torch.Tensor], 
+                    params          : numpy.ndarray | None = None,
                     input_coefs     : list[torch.Tensor] = []) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor]]:
         """
         The user must implement this class on any latent dynamics sub-class. Each latent dynamics 
@@ -127,6 +128,11 @@ class LatentDynamics:
             then we will learn the coefficients using Least Squares. If input_coefs is not empty, 
             then we will use the provided coefficients to compute the loss.
 
+        params : numpy.ndarray, shape = (n_param, n_p), optional
+            The i'th row holds the i'th combination of parameter values. This can be used by latent 
+            dynamics models that depend explicitly on parameter values (e.g., for time-varying or 
+            parameterized forcing). Default is None for latent dynamics that don't use parameters.
+
         
         -------------------------------------------------------------------------------------------
         Returns
@@ -154,7 +160,8 @@ class LatentDynamics:
     def simulate(   self,
                     coefs   : numpy.ndarray             | torch.Tensor, 
                     IC      : list[list[numpy.ndarray   | torch.Tensor]],
-                    t_Grid  : list[numpy.ndarray        | torch.Tensor]) -> list[list[numpy.ndarray | torch.Tensor]]:
+                    t_Grid  : list[numpy.ndarray        | torch.Tensor],
+                    params  : numpy.ndarray | None = None) -> list[list[numpy.ndarray | torch.Tensor]]:
         """
         Time integrates the latent dynamics from multiple initial conditions for each combination
         of coefficients in coefs. 
@@ -189,7 +196,12 @@ class LatentDynamics:
             In the latter case, the j'th entry should specify the j'th time value at which we solve 
             for each latent state when we use the i'th combination of parameter values.
         
+        params : numpy.ndarray, shape = (n_param, n_p), optional
+            The i'th row holds the i'th combination of parameter values. This can be used by latent 
+            dynamics models that depend explicitly on parameter values (e.g., for time-varying or 
+            parameterized forcing). Default is None for latent dynamics that don't use parameters.
 
+     
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------        
