@@ -1,7 +1,7 @@
 lasdi:
   type:                     gplasdi
   gplasdi:
-    lr:                     0.0008
+    lr:                     0.001
     gradient_clip:          15.0      # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
     n_samples:              20
 
@@ -15,25 +15,25 @@ lasdi:
     dp_per_update:          0.01
     max_p_rollout:          0.75      # Maximum proportion of the time window used for rollout loss.
     rollout_spline_order:   1
-    n_rollout_targets:      3         # Number of random target times sampled per rollable frame per epoch for the rollout loss.
+    n_rollout_targets:      5         # Number of random target times sampled per rollable frame per epoch for the rollout loss.
 
     p_IC_rollout_init:      0.01
     IC_rollout_update_freq: 10
     IC_dp_per_update:       0.01
     max_p_IC_rollout:       1.0       # Maximum proportion of the time window used for IC rollout loss.
 
-    max_iter:               4000
+    max_iter:               8000
     n_iter:                 2000
-    max_greedy_iter:        4000
+    max_greedy_iter:        8000
 
     warmup_epochs:          40    # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
 
     loss_weights:
       recon:                1.0
       LD:                   100.0
-      rollout:              1.0
-      IC_rollout:           1.0
-      coef:                 1.0
+      rollout:              0.5
+      IC_rollout:           0.0
+      coef:                 0.02
 
       chain_rule:           1.0
       consistency:          1.0
@@ -55,10 +55,10 @@ parameter_space:
   parameters:
     - name:                 laser powers
       test_space_type:      file
-      file:                 /p/lustre1/robertrs/AI4NS/Generate_Data/5x5 dataset/metadata.txt
+      file:                 /p/lustre1/robertrs/AI4NS/Generate_Data/9x9 dataset/metadata.txt
     - name:                 scan speed
       test_space_type:      file
-      file:                 /p/lustre1/robertrs/AI4NS/Generate_Data/5x5 dataset/metadata.txt
+      file:                 /p/lustre1/robertrs/AI4NS/Generate_Data/9x9 dataset/metadata.txt
   test_space:
     type:                   grid
 
@@ -79,6 +79,6 @@ physics:
   type:                     Thermal
   
   Thermal:
-    hdf5_dir:               /p/lustre1/robertrs/AI4NS/Generate_Data/5x5 dataset/
+    hdf5_dir:               /p/lustre1/robertrs/AI4NS/Generate_Data/9x9 dataset/
 
 
