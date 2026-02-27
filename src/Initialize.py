@@ -2,13 +2,15 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-# Add LatentDynamics, Physics directories to the search path.
+# Add LatentDynamics, Physics, and Model directories to the search path.
 import  sys;
 import  os;
 LD_Path         : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
 Physics_Path    : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
+Model_Path      : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "Models"));
 sys.path.append(LD_Path); 
 sys.path.append(Physics_Path); 
+sys.path.append(Model_Path); 
 
 import  logging;
 
@@ -25,7 +27,8 @@ from    SwitchSINDy         import  SwitchSINDy;
 from    DampedSpring        import  DampedSpring;
 from    ParameterSpace      import  ParameterSpace;
 from    GPLaSDI             import  BayesianGLaSDI;
-from    Model               import  Autoencoder, load_Autoencoder, Autoencoder_Pair, load_Autoencoder_Pair;
+from    Autoencoder         import  Autoencoder, load_Autoencoder;
+from    Autoencoder_Pair    import  Autoencoder_Pair, load_Autoencoder_Pair;
 from    Physics             import  Physics;
 #from    NonlinearElasticity import  NonlinearElasticity;
 #from    Advection           import  Advection;

@@ -5,8 +5,8 @@
 # Add the main directory to the search path.
 import  os;
 import  sys;
-src_Path        : str   = os.path.dirname(os.path.abspath(os.path.pardir));
-util_Path       : str   = os.path.join(src_Path, os.path.join("src", "Utilities"));
+src_Path        : str   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)));
+util_Path       : str   = os.path.join(src_Path, "Utilities");
 sys.path.append(util_Path);
 
 import  numpy;

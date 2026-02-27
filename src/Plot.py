@@ -7,12 +7,12 @@ import sys;
 from pathlib import Path;
 
 # Resolve paths relative to the project root (Higher-Order-LaSDI/), independent of CWD.
-_SRC_DIR: Path = Path(__file__).resolve().parent;          # Higher-Order-LaSDI/src
-_PROJECT_DIR: Path = _SRC_DIR.parent;                     # Higher-Order-LaSDI
-_PHYSICS_DIR: Path = _SRC_DIR / "Physics";
-_LD_DIR: Path = _SRC_DIR / "LatentDynamics";
-sys.path.append(str(_PHYSICS_DIR));
-sys.path.append(str(_LD_DIR));
+Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
+LD_Path         : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
+Model_Path      : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Models"));
+sys.path.append(Physics_Path);
+sys.path.append(LD_Path);
+sys.path.append(Model_Path);
 
 import  logging;
 
@@ -24,7 +24,8 @@ from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
-from    Model                       import  Autoencoder, Autoencoder_Pair;
+from    Autoencoder                 import  Autoencoder;
+from    Autoencoder_Pair            import  Autoencoder_Pair;
 from    SolveROMs                   import  sample_roms;
 from    ParameterSpace              import  ParameterSpace;
 

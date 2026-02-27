@@ -6,9 +6,11 @@ import  sys;
 import  os;
 Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
 LD_Path         : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
+Model_Path      : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Models"));
 Utilities_Path  : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
 sys.path.append(Physics_Path);
 sys.path.append(LD_Path);
+sys.path.append(Model_Path);
 sys.path.append(Utilities_Path);
 
 import  torch;
@@ -18,7 +20,8 @@ from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 from    GaussianProcess             import  eval_gp, sample_coefs, fit_gps;
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
-from    Model                       import  Autoencoder, Autoencoder_Pair;
+from    Autoencoder                 import  Autoencoder;
+from    Autoencoder_Pair            import  Autoencoder_Pair;
 from    ParameterSpace              import  ParameterSpace;
 
 import  logging;
@@ -559,7 +562,7 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
                             U_Test          : list[list[torch.Tensor]],
                             n_samples       : int,
                             trainer         = None) -> tuple[numpy.ndarray, numpy.ndarray, list[list[numpy.ndarray]], list[list[numpy.ndarray]]]:
-    """
+    r"""
     This function computes the relative error and STD between the FOM solution and its 
     prediction when we rollout the FOM solution using the the ICs and mean of the posterior 
     distribution of the coefficients for each combination of parameter values.
