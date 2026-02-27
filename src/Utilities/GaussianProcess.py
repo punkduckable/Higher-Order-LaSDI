@@ -19,7 +19,7 @@ LOGGER = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegressor]:
-    """
+    r"""
     Trains a GP for each column of Y. If Y has shape n_train x n_GPs, then we train k GP 
     regressors. In this case, we assume that X has shape n_train x input_dim. Thus, the Input to 
     the GP is in \mathbb{R}^input_dim. For each k, we train a GP where the i'th row of X is the 
