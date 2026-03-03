@@ -29,6 +29,7 @@ from    ParameterSpace      import  ParameterSpace;
 from    GPLaSDI             import  BayesianGLaSDI;
 from    Autoencoder         import  Autoencoder, load_Autoencoder;
 from    Autoencoder_Pair    import  Autoencoder_Pair, load_Autoencoder_Pair;
+from    Conv_Autoencoder   import  Conv_Autoencoder, load_Conv_Autoencoder;
 from    Physics             import  Physics;
 #from    NonlinearElasticity import  NonlinearElasticity;
 #from    Advection           import  Advection;
@@ -47,11 +48,17 @@ trainer_dict    =  {'gplasdi'               : BayesianGLaSDI};
 model_dict      =  {'ae'                    : Autoencoder,
                     'autoencoder'           : Autoencoder,
                     'pair'                  : Autoencoder_Pair,
-                    'autoencoder_pair'      : Autoencoder_Pair};
+                    'autoencoder_pair'      : Autoencoder_Pair,
+                    'conv_ae'               : Conv_Autoencoder,
+                    'conv_autoencoder'      : Conv_Autoencoder,
+                    'cnn_ae'                : Conv_Autoencoder};
 model_load_dict =  {'ae'                    : load_Autoencoder,
                     'autoencoder'           : load_Autoencoder,
                     'pair'                  : load_Autoencoder_Pair,
-                    'autoencoder_pair'      : load_Autoencoder_Pair};
+                    'autoencoder_pair'      : load_Autoencoder_Pair,
+                    'conv_ae'               : load_Conv_Autoencoder,
+                    'conv_autoencoder'      : load_Conv_Autoencoder,
+                    'cnn_ae'                : load_Conv_Autoencoder};
 ld_dict         =  {'sindy'                 : SINDy, 
                     'spring'                : DampedSpring,
                     'switch'                : SwitchSINDy};
@@ -268,6 +275,60 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
                                                         reshape_shape   = Frame_Shape);
 
         # All done!
+        return model;
+
+
+    # Convolutional autoencoder case.
+    elif(model_type == "conv_ae" or model_type == "conv_autoencoder" or model_type == "cnn_ae"):
+        model_config        : dict              = config['model'][model_type];
+
+        # FC configuration (analogous to the AE's hidden_widths/activations).
+        hidden_widths_fc    : list[int]         = model_config.get('hidden_widths_fc', model_config.get('hidden_widths'));
+        n_z                 : int               = model_config['latent_dimension'];
+
+        # FC activations can either be a string or a list of strings.
+        n_hidden_layers     : int               = len(hidden_widths_fc);
+        act_cfg = model_config.get('activations_fc', model_config.get('activations'));
+        if(isinstance(act_cfg, str)):
+            activations_fc       : list[str]     = [act_cfg] * n_hidden_layers;
+        elif(isinstance(act_cfg, list)):
+            activations_fc       : list[str]     = act_cfg;
+            assert(len(activations_fc) == n_hidden_layers);
+        else:
+            raise ValueError("activations_fc must be a string or a list of strings.");
+
+        # Conv configuration.
+        conv_channels       : list[int]         = model_config['conv_channels'];
+        conv_kernel_sizes   = model_config.get('conv_kernel_sizes', 3);
+        conv_strides        = model_config.get('conv_strides', 2);
+        conv_paddings       = model_config.get('conv_paddings', 1);
+
+        # Per-layer conv activations. This can be a string (use same activation for all conv layers)
+        # or a list of strings of length len(conv_channels) - 1.
+        conv_act_cfg = model_config.get('conv_activations', model_config.get('conv_activation', 'relu'));
+        if(isinstance(conv_act_cfg, str)):
+            conv_activations : list[str] = [conv_act_cfg] * (len(conv_channels) - 1);
+        elif(isinstance(conv_act_cfg, list)):
+            conv_activations = conv_act_cfg;
+            assert(len(conv_activations) == len(conv_channels) - 1);
+        else:
+            raise ValueError("conv_activations must be a string or a list of strings.");
+
+        # Fetch Frame_Shape from physics (must be 3D for Conv3d).
+        Frame_Shape         : list[int]         = physics.Frame_Shape;
+        assert(len(Frame_Shape) == 3), "physics.Frame_Shape = %s; Conv_Autoencoder requires a 3D spatial shape" % str(Frame_Shape);
+
+        model           : torch.nn.Module       = model_dict[model_type](
+                                                        reshape_shape        = Frame_Shape,
+                                                        hidden_widths_fc     = hidden_widths_fc,
+                                                        activations_fc       = activations_fc,
+                                                        latent_dimension     = n_z,
+                                                        conv_channels        = conv_channels,
+                                                        conv_kernel_sizes    = conv_kernel_sizes,
+                                                        conv_strides         = conv_strides,
+                                                        conv_paddings        = conv_paddings,
+                                                        conv_activations    = conv_activations);
+
         return model;
 
     else:
