@@ -305,7 +305,7 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
 
         # Per-layer conv activations. This can be a string (use same activation for all conv layers)
         # or a list of strings of length len(conv_channels) - 1.
-        conv_act_cfg = model_config.get('conv_activations', model_config.get('conv_activation', 'relu'));
+        conv_act_cfg = model_config.get('conv_activations', 'relu');
         if(isinstance(conv_act_cfg, str)):
             conv_activations : list[str] = [conv_act_cfg] * (len(conv_channels) - 1);
         elif(isinstance(conv_act_cfg, list)):
@@ -327,7 +327,7 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
                                                         conv_kernel_sizes    = conv_kernel_sizes,
                                                         conv_strides         = conv_strides,
                                                         conv_paddings        = conv_paddings,
-                                                        conv_activations    = conv_activations);
+                                                        conv_activations     = conv_activations);
 
         return model;
 

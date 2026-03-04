@@ -16,7 +16,7 @@ import  torch;
 import  numpy;
 
 from    MLP         import  act_dict;
-from    Autoencoder import  Autoencoder
+from    Autoencoder import  Autoencoder, load_Autoencoder;
 from    Physics     import  Physics;
 
 # Set up logging.
