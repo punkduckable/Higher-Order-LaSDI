@@ -87,10 +87,10 @@ def _conv3d_out_shape(   in_shape    : tuple[int, int, int],
 
 
 # -------------------------------------------------------------------------------------------------
-# Conv_Autoencoder class
+# CNN_3D_Autoencoder class
 # -------------------------------------------------------------------------------------------------
 
-class Conv_Autoencoder(torch.nn.Module):
+class CNN_3D_Autoencoder(torch.nn.Module):
     def __init__(   self,
                     reshape_shape       : list[int],
                     hidden_widths_fc    : list[int],
@@ -217,7 +217,7 @@ class Conv_Autoencoder(torch.nn.Module):
         self.conv_strides       : list[tuple[int, int, int]] = _expand_3tuple_param(conv_strides,      self.n_conv_layers, "conv_strides");
         self.conv_paddings      : list[tuple[int, int, int]] = _expand_3tuple_param(conv_paddings,     self.n_conv_layers, "conv_paddings");
 
-        LOGGER.info("Initializing a Conv_Autoencoder with latent space dimension %d" % self.n_z);
+        LOGGER.info("Initializing a CNN_3D_Autoencoder with latent space dimension %d" % self.n_z);
         LOGGER.info("  Reshape shape:       %s" % str(self.reshape_shape));
         LOGGER.info("  Conv channels:       %s" % str(self.conv_channels));
         LOGGER.info("  Conv kernels:        %s" % str(self.conv_kernel_sizes));
@@ -500,12 +500,12 @@ class Conv_Autoencoder(torch.nn.Module):
 
 
 
-def load_Conv_Autoencoder(dict_ : dict) -> Conv_Autoencoder:
+def load_CNN_3D_Autoencoder(dict_ : dict) -> CNN_3D_Autoencoder:
     """
-    This function builds a Conv_Autoencoder object using the information in dict_.
+    This function builds a CNN_3D_Autoencoder object using the information in dict_.
     """
 
-    LOGGER.info("De-serializing a Conv_Autoencoder..." );
+    LOGGER.info("De-serializing a CNN_3D_Autoencoder..." );
 
     reshape_shape       : list[int]     = dict_['reshape_shape'];
     latent_dimension    : int           = dict_['latent_dimension'];
@@ -518,15 +518,15 @@ def load_Conv_Autoencoder(dict_ : dict) -> Conv_Autoencoder:
     conv_paddings                       = dict_['conv_paddings'];
     conv_activations    : list[str]     = dict_['conv_activations'];
 
-    model = Conv_Autoencoder( reshape_shape        = reshape_shape,
-                              hidden_widths_fc     = hidden_widths_fc,
-                              activations_fc       = activations_fc,
-                              latent_dimension     = latent_dimension,
-                              conv_channels        = conv_channels,
-                              conv_kernel_sizes    = conv_kernel_sizes,
-                              conv_strides         = conv_strides,
-                              conv_paddings        = conv_paddings,
-                              conv_activations     = conv_activations);
+    model = CNN_3D_Autoencoder( reshape_shape        = reshape_shape,
+                                hidden_widths_fc     = hidden_widths_fc,
+                                activations_fc       = activations_fc,
+                                latent_dimension     = latent_dimension,
+                                conv_channels        = conv_channels,
+                                conv_kernel_sizes    = conv_kernel_sizes,
+                                conv_strides         = conv_strides,
+                                conv_paddings        = conv_paddings,
+                                conv_activations     = conv_activations);
 
     model.encoder_convs.load_state_dict(dict_['encoder conv state']);
     model.decoder_convs.load_state_dict(dict_['decoder conv state']);

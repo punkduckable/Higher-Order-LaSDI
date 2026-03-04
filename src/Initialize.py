@@ -29,7 +29,7 @@ from    ParameterSpace      import  ParameterSpace;
 from    GPLaSDI             import  BayesianGLaSDI;
 from    Autoencoder         import  Autoencoder, load_Autoencoder;
 from    Autoencoder_Pair    import  Autoencoder_Pair, load_Autoencoder_Pair;
-from    Conv_Autoencoder   import  Conv_Autoencoder, load_Conv_Autoencoder;
+from    CNN_3D_Autoencoder  import  CNN_3D_Autoencoder, load_CNN_3D_Autoencoder;
 from    Physics             import  Physics;
 #from    NonlinearElasticity import  NonlinearElasticity;
 #from    Advection           import  Advection;
@@ -49,16 +49,16 @@ model_dict      =  {'ae'                    : Autoencoder,
                     'autoencoder'           : Autoencoder,
                     'pair'                  : Autoencoder_Pair,
                     'autoencoder_pair'      : Autoencoder_Pair,
-                    'conv_ae'               : Conv_Autoencoder,
-                    'conv_autoencoder'      : Conv_Autoencoder,
-                    'cnn_ae'                : Conv_Autoencoder};
+                    'cnn_3d'                : CNN_3D_Autoencoder,
+                    'cnn_3d_ae'             : CNN_3D_Autoencoder,
+                    'cnn_3d_autoencoder'    : CNN_3D_Autoencoder};
 model_load_dict =  {'ae'                    : load_Autoencoder,
                     'autoencoder'           : load_Autoencoder,
                     'pair'                  : load_Autoencoder_Pair,
                     'autoencoder_pair'      : load_Autoencoder_Pair,
-                    'conv_ae'               : load_Conv_Autoencoder,
-                    'conv_autoencoder'      : load_Conv_Autoencoder,
-                    'cnn_ae'                : load_Conv_Autoencoder};
+                    'cnn_3d'                : load_CNN_3D_Autoencoder,
+                    'cnn_3d_ae'             : load_CNN_3D_Autoencoder,
+                    'cnn_3d_autoencoder'    : load_CNN_3D_Autoencoder};
 ld_dict         =  {'sindy'                 : SINDy, 
                     'spring'                : DampedSpring,
                     'switch'                : SwitchSINDy};
