@@ -114,7 +114,9 @@ class CNN_3D_Autoencoder(torch.nn.Module):
 
         reshape_shape : list[int], len = 3
             Specifies the spatial shape (I, J, K) of each input frame. Inputs to Encode/forward
-            must have shape (n_Frames, I, J, K) or (n_Frames, C, I, J, K), where C = conv_channels[0].
+            can either  have shape (n_Frames, C, I, J, K) or (n_Frames, C, I*J*K), where 
+            C = conv_channels[0]. In the latter case, we reshape the input to have shape 
+            (n_Frames, C, I, J, K)
 
         hidden_widths_fc : list[int]
             A list of integers specifying the widths of the hidden fully-connected layers. The
@@ -140,7 +142,7 @@ class CNN_3D_Autoencoder(torch.nn.Module):
             i'th element specifies the activation function we apply after the i'th convolutional 
             layer. The decoder uses the reversed list.
 
-        conv_kernel_sizes, conv_strides, conv_paddings :
+        conv_kernel_sizes, conv_strides, conv_paddings:
             Convolution hyperparameters. Each can be:
                 - an int (used for all layers in all three dimensions),
                 - a length-3 sequence (used for all layers),
@@ -318,35 +320,6 @@ class CNN_3D_Autoencoder(torch.nn.Module):
 
 
 
-    def _ensure_5d(self, U : torch.Tensor) -> torch.Tensor:
-        """
-        Maps U to a (N, C, I, J, K) tensor for Conv3d processing.
-        """
-
-        assert isinstance(U, torch.Tensor), "type(U) = %s, must be torch.Tensor" % str(type(U));
-
-        # Allowed input shapes:
-        #   (N, I, J, K)              (assume C=1)
-        #   (N, C, I, J, K)
-        #   (N, I*J*K)                (flattened, assume C=1)
-        if(len(U.shape) == 2):
-            expected = int(numpy.prod(self.reshape_shape).item());
-            assert U.shape[1] == expected, "U.shape[1] = %d, expected %d (=prod(reshape_shape))" % (U.shape[1], expected);
-            U = U.view((U.shape[0],) + tuple(self.reshape_shape));
-
-        if(len(U.shape) == 4):
-            assert list(U.shape[1:]) == self.reshape_shape, "U.shape[1:] = %s, self.reshape_shape = %s" % (str(U.shape[1:]), str(self.reshape_shape));
-            assert self.conv_channels[0] == 1, "Got (N,I,J,K) input but conv_channels[0] = %d; provide (N,C,I,J,K) instead" % self.conv_channels[0];
-            U = U.unsqueeze(1);  # add channel dim
-
-        assert len(U.shape)         == 5,                       "U.shape = %s, expected 2D, 4D, or 5D tensor" % str(U.shape);
-        assert list(U.shape[-3:])   == self.reshape_shape,      "U.shape[-3:] = %s, self.reshape_shape = %s" % (str(U.shape[-3:]), str(self.reshape_shape));
-        assert U.shape[1]           == self.conv_channels[0],   "U.shape[1] = %d, conv_channels[0] = %d; must match" % (U.shape[1], self.conv_channels[0]);
-
-        return U;
-
-
-
     def Encode(self, U : torch.Tensor) -> torch.Tensor:
         """
         This function encodes a set of 3D frames.
@@ -356,8 +329,8 @@ class CNN_3D_Autoencoder(torch.nn.Module):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        U : torch.Tensor, shape = (n_Frames, I, J, K) or (n_Frames, C, I, J, K)
-            A tensor holding a batch of 3D inputs.
+        U : torch.Tensor, shape = (n_Frames, C, I, J, K) or (n_Frames, C, I*J*K)
+            A tensor holding a batch of inputs.
 
 
         -------------------------------------------------------------------------------------------
@@ -369,7 +342,20 @@ class CNN_3D_Autoencoder(torch.nn.Module):
         """
 
         # Ensure input is 5D.
-        U = self._ensure_5d(U);
+        assert isinstance(U, torch.Tensor), "type(U) = %s, must be torch.Tensor" % str(type(U));
+
+        # Allowed input shapes:
+        #   (N, C, I, J, K)
+        #   (N, C, I*J*K)                (flattened)
+        if(len(U.shape) == 3):
+            expected = int(numpy.prod(self.reshape_shape).item());
+            assert U.shape[-1]  == expected,                "U.shape[-1] = %d, expected %d (=prod(reshape_shape))" % (U.shape[-1], expected);
+            assert U.shape[1]   == self.conv_channels[0],   "U.shape[1] = %d, expected %d" % (U.shape[1], self.conv_channels[0]);
+            U = U.view((U.shape[0], U.shape[1]) + tuple(self.reshape_shape));
+
+        assert len(U.shape)         == 5,                       "U.shape = %s, expected 2D, 4D, or 5D tensor" % str(U.shape);
+        assert list(U.shape[-3:])   == self.reshape_shape,      "U.shape[-3:] = %s, self.reshape_shape = %s" % (str(U.shape[-3:]), str(self.reshape_shape));
+        assert U.shape[1]           == self.conv_channels[0],   "U.shape[1] = %d, conv_channels[0] = %d; must match" % (U.shape[1], self.conv_channels[0]);
 
         # Conv encoder.
         for i in range(self.n_conv_layers):
