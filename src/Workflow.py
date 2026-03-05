@@ -521,7 +521,7 @@ def count_parameters(   model           : torch.nn.Module,
     LOGGER.info("=" * 80);
     LOGGER.info("Model Parameter Summary");
     LOGGER.info("=" * 80);
-    LOGGER.info("Model (Autoencoder/Autoencoder_Pair):");
+    LOGGER.info("Model:");
     LOGGER.info("  Total parameters:      {:,}".format(total_params));
     LOGGER.info("  Trainable parameters:  {:,}".format(trainable_params));
     LOGGER.info("  Non-trainable:         {:,}".format(total_params - trainable_params));

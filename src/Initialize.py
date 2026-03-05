@@ -279,7 +279,7 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
 
 
     # Convolutional autoencoder case.
-    elif(model_type == "conv_ae" or model_type == "conv_autoencoder" or model_type == "cnn_ae"):
+    elif(model_type == "cnn_3d" or model_type == "cnn_3d_ae" or model_type == "cnn_3d_autoencoder"):
         model_config        : dict              = config['model'][model_type];
 
         # FC configuration (analogous to the AE's hidden_widths/activations).
@@ -316,10 +316,13 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
 
         # Fetch Frame_Shape from physics (must be 3D for Conv3d).
         Frame_Shape         : list[int]         = physics.Frame_Shape;
-        assert(len(Frame_Shape) == 3), "physics.Frame_Shape = %s; Conv_Autoencoder requires a 3D spatial shape" % str(Frame_Shape);
+        assert(len(Frame_Shape) == 4), "physics.Frame_Shape = %s; Conv_Autoencoder requires a 3D spatial shape" % str(Frame_Shape);
+        C               : int       = int(Frame_Shape[0]);
+        reshape_shape   : list[int] = [int(x) for x in Frame_Shape[1:]];
+        assert conv_channels[0] == C, "conv_chanels[0] = %d, but the data has %d channels. These must match" % (conv_channels[0], C);
 
         model           : torch.nn.Module       = model_dict[model_type](
-                                                        reshape_shape        = Frame_Shape,
+                                                        reshape_shape        = reshape_shape,
                                                         hidden_widths_fc     = hidden_widths_fc,
                                                         activations_fc       = activations_fc,
                                                         latent_dimension     = n_z,
