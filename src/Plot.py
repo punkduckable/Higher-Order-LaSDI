@@ -7,6 +7,7 @@ import sys;
 from pathlib import Path;
 
 # Resolve paths relative to the project root (Higher-Order-LaSDI/), independent of CWD.
+Figures_Path    : str   = os.path.join(os.path.abspath(os.path.dirname(os.path.dirname(__file__))), "Figures");
 Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
 LD_Path         : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
 Model_Path      : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Models"));
@@ -229,8 +230,8 @@ def Plot_Latent_Trajectories(physics         : Physics,
             plt.title(title);
 
             # Save the figure under Higher-Order-LaSDI/Figures (independent of CWD).
-            figures_dir: Path = _PROJECT_DIR / "Figures";
-            figures_dir.mkdir(parents=True, exist_ok=True);
+            figures_dir : Path = Path(Figures_Path);
+            figures_dir.mkdir(parents = True, exist_ok = True);
             save_file_path: str = str(figures_dir / save_file_name);
             plt.savefig(save_file_path);
 
@@ -391,7 +392,7 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     ax.set_title(title, fontsize = 25);
 
     # Save the figure under Higher-Order-LaSDI/Figures (independent of CWD).
-    figures_dir: Path = _PROJECT_DIR / "Figures";
+    figures_dir: Path = Path(Figures_Path);
     figures_dir.mkdir(parents=True, exist_ok=True);
     save_file_path: str = str(figures_dir / save_file_name);
     fig.savefig(save_file_path);
@@ -643,7 +644,7 @@ def trainSpace_RelativeErrors_Heatmap(trainer        : 'BayesianGLaSDI',
         plt.tight_layout();
         
         # Save the figure under Higher-Order-LaSDI/Figures (independent of CWD).
-        figures_dir: Path = _PROJECT_DIR / "Figures";
+        figures_dir: Path = Path(Figures_Path);
         figures_dir.mkdir(parents=True, exist_ok=True);
         save_file_path: str = str(figures_dir / (file_prefix + ("_D^%d U_" % d) + "TrainSpaceRelativeErrorHeatmap.png"));
         fig.savefig(save_file_path, dpi = 150, bbox_inches = 'tight');
