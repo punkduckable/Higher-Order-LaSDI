@@ -400,7 +400,7 @@ class CNN_3D_Autoencoder(torch.nn.Module):
 
         # Conv transpose decoder.
         for i in range(self.n_conv_layers):
-            U = self._decoder_conv_act_fns[i](self.decoder_convs[i](U));
+            U = self.decoder_convs[i](self._decoder_conv_act_fns[i](U));
 
         assert list(U.shape[-3:]) == self.reshape_shape, "Decoded output shape mismatch: got %s, expected (n_Frames, %s)" % (str(U.shape), str(self.reshape_shape));
         assert U.shape[1] == self.conv_channels[0], "Decoded channel mismatch: got %d, expected %d" % (U.shape[1], self.conv_channels[0]);
