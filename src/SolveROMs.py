@@ -22,6 +22,7 @@ from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
 from    Autoencoder                 import  Autoencoder;
 from    Autoencoder_Pair            import  Autoencoder_Pair;
+from    CNN_3D_Autoencoder          import  CNN_3D_Autoencoder
 from    ParameterSpace              import  ParameterSpace;
 
 import  logging;
@@ -453,7 +454,7 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
     max_std     : float     = 0.0;
     m_index     : int       = 0;
     
-    if(isinstance(model, Autoencoder)):
+    if(isinstance(model, Autoencoder) or isinstance(model, CNN_3D_Autoencoder)):
         assert n_IC == 1, "n_IC = %d, expected 1" % (n_IC);
 
         for i in range(n_param):
@@ -470,7 +471,12 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
             # Now decode the frames, one sample at a time.
             n_samples_i     : int           = Z_i.shape[0];
             n_t_i           : int           = Z_i.shape[1];
-            U_Pred_i        : numpy.ndarray = numpy.empty([n_samples_i, n_t_i] + model.reshape_shape, dtype = numpy.float32);
+            if isinstance(model, CNN_3D_Autoencoder):
+                fom_shape = [model.conv_channels[0]] + model.reshape_shape   # [C,I,J,K]
+            else:
+                fom_shape = model.reshape_shape
+
+            U_Pred_i = numpy.empty([n_samples_i, n_t_i] + fom_shape, dtype = numpy.float32)
             for j in range(n_samples_i):
                 U_Pred_i[j, ...] = model.Decode(Z_i[j, :, :]).detach().numpy();
 
@@ -484,7 +490,7 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
             # Handle inf/nan values gracefully by replacing them with a large but finite value
             if not numpy.all(numpy.isfinite(U_pred_i_std)):
                 LOGGER.warning(f"Parameter {i}: STD contains inf/nan values. This suggests divergent samples escaped detection. Replacing with 1e10.");
-                U_pred_i_std = numpy.nan_to_num(U_pred_i_std, nan=0.0, posinf=1e10, neginf=1e10);
+                U_pred_i_std = numpy.nan_to_num(U_pred_i_std, nan = 0.0, posinf = 1e10, neginf = 1e10);
             
             # Compute the maximum standard deviation 
             max_std_i                : numpy.float32 = U_pred_i_std.max();
@@ -734,7 +740,7 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
     # units. De-normalize here for meaningful physical errors/plots using the trainer.
     use_denorm: bool = (trainer is not None) and hasattr(trainer, "has_normalization") and trainer.has_normalization();
 
-    if(isinstance(model, Autoencoder)):
+    if(isinstance(model, Autoencoder) or isinstance(model, CNN_3D_Autoencoder)):
         for i in range(n_Test):
             # -------------------------------------------------------------------------------------
             # Relative Error
