@@ -379,11 +379,11 @@ def main():
                 LOGGER.info(f"  U_Pred_worst[{i}] range before denorm: [{U_Pred_worst[i].min().item():.3e}, {U_Pred_worst[i].max().item():.3e}]");
                 
                 # Both U_True_worst and U_Pred_worst should be in normalized units
-                U_true_np = trainer.denormalize_tensor(U_True_worst[i], i).detach().numpy();
-                U_pred_np = trainer.denormalize_tensor(U_Pred_worst[i], i).detach().numpy();
+                U_i_true_np = trainer.denormalize_tensor(U_True_worst[i], i).detach().numpy();
+                U_i_pred_np = trainer.denormalize_tensor(U_Pred_worst[i], i).detach().numpy();
                 
-                LOGGER.info(f"  U_true_np range after denorm: [{U_true_np.min():.3e}, {U_true_np.max():.3e}]");
-                LOGGER.info(f"  U_pred_np range after denorm: [{U_pred_np.min():.3e}, {U_pred_np.max():.3e}]");
+                LOGGER.info(f"  U_true_np range after denorm: [{U_i_true_np.min():.3e}, {U_i_true_np.max():.3e}]");
+                LOGGER.info(f"  U_pred_np range after denorm: [{U_i_pred_np.min():.3e}, {U_i_pred_np.max():.3e}]");
             else:
                 # WARNING: If normalization is disabled but data was normalized, this will show normalized values
                 LOGGER.warning(f"Normalization is disabled or not configured properly!");
@@ -391,11 +391,42 @@ def main():
                 LOGGER.warning(f"  U_True_worst[{i}] range: [{U_True_worst[i].min().item():.3e}, {U_True_worst[i].max().item():.3e}]");
                 LOGGER.warning(f"  U_Pred_worst[{i}] range: [{U_Pred_worst[i].min().item():.3e}, {U_Pred_worst[i].max().item():.3e}]");
                 
-                U_true_np = U_True_worst[i].detach().numpy();
-                U_pred_np = U_Pred_worst[i].detach().numpy();
+                U_i_true_np = U_True_worst[i].detach().numpy();
+                U_i_pred_np = U_Pred_worst[i].detach().numpy();
 
-            make_solution_movies(U_True         = U_true_np, 
-                                 U_Pred         = U_pred_np, 
+            # Flatten predictions so that they have shape (N_t, C, n_nodes) for make_solution_movies.
+            n_nodes : int   = int(physics.X_Positions.shape[1]);
+            n_t     : int   = int(t_worst.shape[0]);
+
+            def _flatten_for_movie(U: numpy.ndarray) -> numpy.ndarray:
+                assert U.shape[0] == n_t, \
+                    "U.shape = %s, U.shape[0] must be %d (number of time steps)" % (str(U.shape), n_t);
+
+                # Already flattened scalar field.
+                if U.ndim == 2:
+                    assert U.shape[1] == n_nodes, \
+                        "U.shape = %s, expected second dim to be n_nodes=%d" % (str(U.shape), n_nodes);
+                    return U[:, None, :];  # (n_t, 1, n_nodes)
+
+                # Already in (n_t, C, n_nodes) form.
+                if U.ndim == 3:
+                    assert U.shape[2] == n_nodes, \
+                        "U.shape = %s, expected last dim to be n_nodes=%d" % (str(U.shape), n_nodes);
+                    return U
+
+                # CNN / gridded case: (n_t, C, ...spatial...)
+                assert U.ndim >= 4, "U.shape = %s, expected at least 4D tensor for gridded data" % str(U.shape);
+                C = int(U.shape[1]);
+                spatial_prod = int(numpy.prod(U.shape[2:]));
+                assert spatial_prod == n_nodes, \
+                    "U.shape = %s; prod(U.shape[2:]) = %d, but n_nodes = %d" % (str(U.shape), spatial_prod, n_nodes);
+                return U.reshape(n_t, C, n_nodes);
+
+            U_i_true_np = _flatten_for_movie(U_i_true_np);
+            U_i_pred_np = _flatten_for_movie(U_i_pred_np);
+
+            make_solution_movies(U_True         = U_i_true_np, 
+                                 U_Pred         = U_i_pred_np, 
                                  X              = physics.X_Positions, 
                                  T              = t_worst.detach().numpy(),
                                  fname_prefix   = prefix);
