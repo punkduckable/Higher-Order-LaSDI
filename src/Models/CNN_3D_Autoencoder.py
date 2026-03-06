@@ -247,13 +247,13 @@ class CNN_3D_Autoencoder(torch.nn.Module):
             assert out_shape[0] > 0 and out_shape[1] > 0 and out_shape[2] > 0, \
                 "Conv layer %d produced invalid shape %s; check kernel/stride/padding vs reshape_shape" % (i, str(out_shape));
             self._encoder_shapes.append(out_shape);
+            LOGGER.info("Conv Layer %d has an output feature map: (C = %3d, D,H,W = %s )" % (i, self.conv_channels[i + 1], str(out_shape)));
 
         # Feature map shape at the output of the conv encoder.
         self._conv_latent_shape     : tuple[int, int, int] = self._encoder_shapes[-1];
         self._conv_latent_channels  : int = self.conv_channels[-1];
         self._flatten_dim           : int = int(self._conv_latent_channels * numpy.prod(self._conv_latent_shape).item());
-        LOGGER.info("  Conv encoder output feature map: (C=%d, D,H,W=%s) => flatten dim = %d" \
-                    % (self._conv_latent_channels, str(self._conv_latent_shape), self._flatten_dim));
+        LOGGER.info("Post-convolution flattened dimension is %d" % self._flatten_dim);
 
         # Build fully-connected encoder/decoder.
         widths_fc_encoder : list[int] = [self._flatten_dim] + self.hidden_widths_fc + [self.n_z];
