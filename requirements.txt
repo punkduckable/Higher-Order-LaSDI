@@ -1,0 +1,19 @@
+# Minimal pip requirements for Higher-Order-LaSDI (core workflow + Thermal example).
+#
+# Notes:
+# - PyTorch wheels are platform/CUDA-specific; install an appropriate torch build for your system.
+# - h5py may require an HDF5 library; depending on your platform this can come from wheels
+#   or from a system/module-provided HDF5.
+# - PyMFEM-based examples require additional non-pip/system deps (mfem, MPI, etc.) and are
+#   intentionally omitted here.
+
+numpy
+torch
+scipy
+scikit-learn
+pyyaml
+matplotlib
+h5py
+
+# Common tooling / diagnostics
+jupyter

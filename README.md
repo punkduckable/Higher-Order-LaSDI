@@ -155,13 +155,13 @@ Configuration files are YAML-based and specify:
 - Test space configuration (grid, random, or file-based)
 
 ### Model Architecture (`model`)
-- Model type: `ae` (Autoencoder) or `pair` (Autoencoder_Pair)
+- Model type: `ae` (Autoencoder), `pair` (Autoencoder_Pair), or `3d CNN` (CNN_3D).
 - Hidden layer widths
 - Activation functions
 - Latent dimension
 
 ### Latent Dynamics (`latent_dynamics`)
-- Type: `sindy` or `spring`
+- Type: `sindy`, `spring`, or `switch sindy`.
 - Coefficient norm order
 
 ### Physics (`physics`)
@@ -183,6 +183,8 @@ Tested with the following versions:
 - matplotlib (3.9.2)
 - seaborn (0.13.2)
 
+These pacakages are listed in the "requirements.txt" file
+
 
 ### Installing with venv (recommended)
 
@@ -194,8 +196,9 @@ python3 -m venv venv
 source venv/bin/activate
 
 python -m pip install --upgrade pip setuptools wheel
+python -m pip install -r requirements.txt 
 
-# Core deps (tested versions; relax pins if needed)
+# Alternatively, you can install the core dependencies with tested versions.
 python -m pip install \
   numpy==1.26.4 \
   scipy==1.14.1 \
@@ -236,7 +239,7 @@ deactivate
 - Install via your system package manager/module (e.g., `apt-get install ffmpeg`, `brew install ffmpeg`, or `module load ffmpeg`)
 
 **For HDF5 data loading (Thermal example):**
-- hdf5 (1.14.5)
+- hdf5 (the system HDF5 library, not a python pacakage; 1.14.5)
 - h5py (3.14.0)
 
 **For PyMFEM examples:**

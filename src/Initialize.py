@@ -2,13 +2,15 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-# Add LatentDynamics, Physics directories to the search path.
+# Add LatentDynamics, Physics, and Model directories to the search path.
 import  sys;
 import  os;
 LD_Path         : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
 Physics_Path    : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
+Model_Path      : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "Models"));
 sys.path.append(LD_Path); 
 sys.path.append(Physics_Path); 
+sys.path.append(Model_Path); 
 
 import  logging;
 
@@ -25,7 +27,9 @@ from    SwitchSINDy         import  SwitchSINDy;
 from    DampedSpring        import  DampedSpring;
 from    ParameterSpace      import  ParameterSpace;
 from    GPLaSDI             import  BayesianGLaSDI;
-from    Model               import  Autoencoder, load_Autoencoder, Autoencoder_Pair, load_Autoencoder_Pair;
+from    Autoencoder         import  Autoencoder, load_Autoencoder;
+from    Autoencoder_Pair    import  Autoencoder_Pair, load_Autoencoder_Pair;
+from    CNN_3D_Autoencoder  import  CNN_3D_Autoencoder, load_CNN_3D_Autoencoder;
 from    Physics             import  Physics;
 #from    NonlinearElasticity import  NonlinearElasticity;
 #from    Advection           import  Advection;
@@ -44,11 +48,17 @@ trainer_dict    =  {'gplasdi'               : BayesianGLaSDI};
 model_dict      =  {'ae'                    : Autoencoder,
                     'autoencoder'           : Autoencoder,
                     'pair'                  : Autoencoder_Pair,
-                    'autoencoder_pair'      : Autoencoder_Pair};
+                    'autoencoder_pair'      : Autoencoder_Pair,
+                    'cnn_3d'                : CNN_3D_Autoencoder,
+                    'cnn_3d_ae'             : CNN_3D_Autoencoder,
+                    'cnn_3d_autoencoder'    : CNN_3D_Autoencoder};
 model_load_dict =  {'ae'                    : load_Autoencoder,
                     'autoencoder'           : load_Autoencoder,
                     'pair'                  : load_Autoencoder_Pair,
-                    'autoencoder_pair'      : load_Autoencoder_Pair};
+                    'autoencoder_pair'      : load_Autoencoder_Pair,
+                    'cnn_3d'                : load_CNN_3D_Autoencoder,
+                    'cnn_3d_ae'             : load_CNN_3D_Autoencoder,
+                    'cnn_3d_autoencoder'    : load_CNN_3D_Autoencoder};
 ld_dict         =  {'sindy'                 : SINDy, 
                     'spring'                : DampedSpring,
                     'switch'                : SwitchSINDy};
@@ -265,6 +275,63 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
                                                         reshape_shape   = Frame_Shape);
 
         # All done!
+        return model;
+
+
+    # Convolutional autoencoder case.
+    elif(model_type == "cnn_3d" or model_type == "cnn_3d_ae" or model_type == "cnn_3d_autoencoder"):
+        model_config        : dict              = config['model'][model_type];
+
+        # FC configuration (analogous to the AE's hidden_widths/activations).
+        hidden_widths_fc    : list[int]         = model_config.get('hidden_widths_fc', model_config.get('hidden_widths'));
+        n_z                 : int               = model_config['latent_dimension'];
+
+        # FC activations can either be a string or a list of strings.
+        n_hidden_layers     : int               = len(hidden_widths_fc);
+        act_cfg = model_config.get('activations_fc', model_config.get('activations'));
+        if(isinstance(act_cfg, str)):
+            activations_fc       : list[str]     = [act_cfg] * n_hidden_layers;
+        elif(isinstance(act_cfg, list)):
+            activations_fc       : list[str]     = act_cfg;
+            assert(len(activations_fc) == n_hidden_layers);
+        else:
+            raise ValueError("activations_fc must be a string or a list of strings.");
+
+        # Conv configuration.
+        conv_channels       : list[int]         = model_config['conv_channels'];
+        conv_kernel_sizes   = model_config.get('conv_kernel_sizes', 3);
+        conv_strides        = model_config.get('conv_strides', 2);
+        conv_paddings       = model_config.get('conv_paddings', 1);
+
+        # Per-layer conv activations. This can be a string (use same activation for all conv layers)
+        # or a list of strings of length len(conv_channels) - 1.
+        conv_act_cfg = model_config.get('conv_activations', 'relu');
+        if(isinstance(conv_act_cfg, str)):
+            conv_activations : list[str] = [conv_act_cfg] * (len(conv_channels) - 1);
+        elif(isinstance(conv_act_cfg, list)):
+            conv_activations = conv_act_cfg;
+            assert(len(conv_activations) == len(conv_channels) - 1);
+        else:
+            raise ValueError("conv_activations must be a string or a list of strings.");
+
+        # Fetch Frame_Shape from physics (must be 3D for Conv3d).
+        Frame_Shape         : list[int]         = physics.Frame_Shape;
+        assert(len(Frame_Shape) == 4), "physics.Frame_Shape = %s; Conv_Autoencoder requires a 3D spatial shape" % str(Frame_Shape);
+        C               : int       = int(Frame_Shape[0]);
+        reshape_shape   : list[int] = [int(x) for x in Frame_Shape[1:]];
+        assert conv_channels[0] == C, "conv_chanels[0] = %d, but the data has %d channels. These must match" % (conv_channels[0], C);
+
+        model           : torch.nn.Module       = model_dict[model_type](
+                                                        reshape_shape        = reshape_shape,
+                                                        hidden_widths_fc     = hidden_widths_fc,
+                                                        activations_fc       = activations_fc,
+                                                        latent_dimension     = n_z,
+                                                        conv_channels        = conv_channels,
+                                                        conv_kernel_sizes    = conv_kernel_sizes,
+                                                        conv_strides         = conv_strides,
+                                                        conv_paddings        = conv_paddings,
+                                                        conv_activations     = conv_activations);
+
         return model;
 
     else:

@@ -15,6 +15,8 @@ from    Physics                         import  Physics;
 # Setup the logger
 LOGGER : logging.Logger = logging.getLogger(__name__);
 
+reshape_shape = (61, 16, 11);
+
 
 
 # -------------------------------------------------------------------------------------------------
@@ -54,6 +56,9 @@ class Thermal(Physics):
         """
 
         # First, let's fetch the hdf5 directory.
+        assert config['type'] == "Thermal",         "config['type'] = %s, should be Theramal" % config['type'];
+        assert 'Thermal' in config,                 "config must have a Thermal attribute";
+        assert 'hdf5_dir' in config['Thermal'],     "Thermal sub-dictionary must have an `hdf5_dir` attribute."
         self.hdf5_dir : str  = config['Thermal']['hdf5_dir'];
 
         # Set things we know.
@@ -71,12 +76,13 @@ class Thermal(Physics):
             nodet_ds : h5py.Dataset = f.get("nodet");
             if nodet_ds is None:
                 raise RuntimeError("Nodet dataset not found in file %s" % h5_files[0]);
-            nodet_shape = nodet_ds.shape;
+            nodet_shape         = nodet_ds.shape;
 
             # the shape should be (n_time_steps, n_nodes). We want n_nodes.
             assert len(nodet_shape) == 2, "len(nodet_shape) = %d" % len(nodet_shape);
             assert nodet_shape[1] > 0,    "nodet_shape = %s, nodet_shape[1] must be positive" % str(nodet_shape);
-            frame_shape : list[int] = [nodet_shape[1]];
+            n_nodes     : int       = nodet_shape[1];
+            frame_shape : list[int] = [n_nodes];
 
             # Now we can fetch the node coordinates, which should have shape (n_nodes, 3).
             nodes_coords_ds     = f.get("nodes_coords");
@@ -86,6 +92,19 @@ class Thermal(Physics):
             assert len(nodes_coords_shape) == 2,            "nodes_coords_shape = %s" % str(nodes_coords_shape);
             assert nodes_coords_shape[0] == frame_shape[0], "nodes_coords_shape = %s, frame_shape = %s" % (str(nodes_coords_shape), str(frame_shape));
             assert nodes_coords_shape[1] == 3,              "nodes_coords_shape = %s" % str(nodes_coords_shape);
+
+            # Check if we should use a CNN model.
+            assert 'use_cnn' in config['Thermal'],          "Theraml sub-dictionary must have an `use-cnn` attribute."
+            self.use_cnn : bool = config['Thermal']['use_cnn'];
+
+            if(self.use_cnn == True):
+                self.use_cnn    : bool          = True;
+                grid_shape      : numpy.ndarray = nodes_coords_ds.attrs["grid_shape"];
+                assert numpy.prod(grid_shape) == n_nodes,   "grid_shape = %s, product of elements is %d, but there are %d nodes." % (str(grid_shape), numpy.prod(grid_shape), n_nodes);
+                assert grid_shape.size == 3,                "grid_shape = %s, must have 3 elements." % str(grid_shape.shape);
+                for i in range(3):
+                    assert isinstance(grid_shape[i], numpy.integer),    "type(grid_shape[%d]) = %s, must be int" % (i, str(type(grid_shape[i])));
+                frame_shape : list[int] = [1, grid_shape[0], grid_shape[1], grid_shape[2]];
 
             # Convert to numpy array, then transpose it so that it has shape (3, n_nodes); this is the 
             # shape that the animate functions expect.
@@ -256,8 +275,8 @@ class Thermal(Physics):
         Returns
         -------------------------------------------------------------------------------------------
 
-        A single element list whose lone element holds a numpy array of shape (n_nodes) holding 
-        the initial condition corresponding to the requested laser power and scan speed.
+        A single element list whose lone element is a numpy array either of shape self.Frame_Shape 
+        holding the initial condition corresponding to the requested laser power and scan speed.
         """
 
         assert isinstance(param, numpy.ndarray), "type(param) = %s" % str(type(param));
@@ -273,7 +292,10 @@ class Thermal(Physics):
         # If so, fetch the corresponding initial condition.
         power_index : int = self.laser_powers.index(requested_laser_power);
         speed_index : int = self.scan_speeds.index(requested_scan_speed);
-        return [self.IC_array[power_index, speed_index, :]];
+        if(self.use_cnn == True):
+            return [self.IC_array[power_index, speed_index, :].reshape(tuple(self.Frame_Shape))];
+        else:
+            return [self.IC_array[power_index, speed_index, :]];
 
 
     
@@ -349,6 +371,10 @@ class Thermal(Physics):
             n_nodes      : int          = nodet_shape[1];
             X            : torch.Tensor = torch.Tensor(nodet_ds);          # shape = (n_time_steps, n_nodes)
             t_Grid       : torch.Tensor = torch.Tensor(time_values);       # shape = (n_time_steps,)
+        
+            # Reshape if using CNN.
+            if(self.use_cnn):
+                X = X.reshape((n_time_steps,) + tuple(self.Frame_Shape));
         
         # All done!
         return [X], t_Grid;

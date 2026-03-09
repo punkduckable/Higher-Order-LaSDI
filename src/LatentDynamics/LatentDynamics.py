@@ -33,7 +33,7 @@ class LatentDynamics:
                     n_z             : int,
                     coef_norm_order : str | float,  
                     Uniform_t_Grid  : bool) -> None:
-        """
+        r"""
         Initializes a LatentDynamics object. Each LatentDynamics object needs to have a 
         dimensionality (n_z), a number of time steps, a model for the latent space dynamics, and 
         set of coefficients for that model. The model should describe a set of ODEs in 

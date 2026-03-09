@@ -7,12 +7,13 @@ import sys;
 from pathlib import Path;
 
 # Resolve paths relative to the project root (Higher-Order-LaSDI/), independent of CWD.
-_SRC_DIR: Path = Path(__file__).resolve().parent;          # Higher-Order-LaSDI/src
-_PROJECT_DIR: Path = _SRC_DIR.parent;                     # Higher-Order-LaSDI
-_PHYSICS_DIR: Path = _SRC_DIR / "Physics";
-_LD_DIR: Path = _SRC_DIR / "LatentDynamics";
-sys.path.append(str(_PHYSICS_DIR));
-sys.path.append(str(_LD_DIR));
+Figures_Path    : str   = os.path.join(os.path.abspath(os.path.dirname(os.path.dirname(__file__))), "Figures");
+Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
+LD_Path         : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
+Model_Path      : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Models"));
+sys.path.append(Physics_Path);
+sys.path.append(LD_Path);
+sys.path.append(Model_Path);
 
 import  logging;
 
@@ -24,7 +25,8 @@ from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
-from    Model                       import  Autoencoder, Autoencoder_Pair;
+from    Autoencoder                 import  Autoencoder;
+from    Autoencoder_Pair            import  Autoencoder_Pair;
 from    SolveROMs                   import  sample_roms;
 from    ParameterSpace              import  ParameterSpace;
 
@@ -228,8 +230,8 @@ def Plot_Latent_Trajectories(physics         : Physics,
             plt.title(title);
 
             # Save the figure under Higher-Order-LaSDI/Figures (independent of CWD).
-            figures_dir: Path = _PROJECT_DIR / "Figures";
-            figures_dir.mkdir(parents=True, exist_ok=True);
+            figures_dir : Path = Path(Figures_Path);
+            figures_dir.mkdir(parents = True, exist_ok = True);
             save_file_path: str = str(figures_dir / save_file_name);
             plt.savefig(save_file_path);
 
@@ -390,7 +392,7 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     ax.set_title(title, fontsize = 25);
 
     # Save the figure under Higher-Order-LaSDI/Figures (independent of CWD).
-    figures_dir: Path = _PROJECT_DIR / "Figures";
+    figures_dir: Path = Path(Figures_Path);
     figures_dir.mkdir(parents=True, exist_ok=True);
     save_file_path: str = str(figures_dir / save_file_name);
     fig.savefig(save_file_path);
@@ -642,7 +644,7 @@ def trainSpace_RelativeErrors_Heatmap(trainer        : 'BayesianGLaSDI',
         plt.tight_layout();
         
         # Save the figure under Higher-Order-LaSDI/Figures (independent of CWD).
-        figures_dir: Path = _PROJECT_DIR / "Figures";
+        figures_dir: Path = Path(Figures_Path);
         figures_dir.mkdir(parents=True, exist_ok=True);
         save_file_path: str = str(figures_dir / (file_prefix + ("_D^%d U_" % d) + "TrainSpaceRelativeErrorHeatmap.png"));
         fig.savefig(save_file_path, dpi = 150, bbox_inches = 'tight');

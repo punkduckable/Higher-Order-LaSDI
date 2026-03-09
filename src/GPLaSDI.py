@@ -6,9 +6,11 @@ import  sys;
 import  os;
 Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
 LD_Path         : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
+Model_Path      : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Models"));
 Utils_Path      : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
 sys.path.append(Physics_Path);
 sys.path.append(LD_Path);
+sys.path.append(Model_Path);
 sys.path.append(Utils_Path);
 
 import  logging;
@@ -22,7 +24,8 @@ import  pickle;
 import  time;
 
 from    GaussianProcess             import  sample_coefs, fit_gps;
-from    Model                       import  Autoencoder, Autoencoder_Pair;
+from    Autoencoder                 import  Autoencoder;
+from    Autoencoder_Pair            import  Autoencoder_Pair;
 from    Timing                      import  Timer;
 from    ParameterSpace              import  ParameterSpace;
 from    Physics                     import  Physics;
