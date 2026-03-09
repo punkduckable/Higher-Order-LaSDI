@@ -155,13 +155,13 @@ Configuration files are YAML-based and specify:
 - Test space configuration (grid, random, or file-based)
 
 ### Model Architecture (`model`)
-- Model type: `ae` (Autoencoder) or `pair` (Autoencoder_Pair)
+- Model type: `ae` (Autoencoder), `pair` (Autoencoder_Pair), or `3d CNN` (CNN_3D).
 - Hidden layer widths
 - Activation functions
 - Latent dimension
 
 ### Latent Dynamics (`latent_dynamics`)
-- Type: `sindy` or `spring`
+- Type: `sindy`, `spring`, or `switch sindy`.
 - Coefficient norm order
 
 ### Physics (`physics`)
