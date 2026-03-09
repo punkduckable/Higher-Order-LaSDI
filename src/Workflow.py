@@ -25,9 +25,9 @@ from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 from    pathlib                     import  Path;
 
 import  SolveROMs;
-from    Enums                       import  NextStep, Result;
 from    ParameterSpace              import  ParameterSpace;
 from    Physics                     import  Physics;
+from    Enums                       import  NextStep;
 from    LatentDynamics              import  LatentDynamics;
 from    GPLaSDI                     import  BayesianGLaSDI;
 from    GaussianProcess             import  fit_gps, eval_gp;
@@ -52,6 +52,7 @@ parser.add_argument('--config',
                     required    = True,
                     type        = str,
                     help        = 'config file to run LasDI workflow.\n');
+
 
 
 
@@ -110,11 +111,9 @@ def main():
         # TODO(kevin): in long term, we should switch to hdf5 format.
         restart_dict    = numpy.load(restart_path, allow_pickle = True).item();
         next_step       = restart_dict['next_step'];
-        result          = restart_dict['result'];
     else:
         restart_dict    = {};
         next_step       = NextStep.RunSample;
-        result          = Result.Unexecuted;
     
     # Initialize the trainer.
     trainer, param_space, physics, model, latent_dynamics = Initialize_Trainer(config, restart_dict);
@@ -123,16 +122,10 @@ def main():
     count_parameters(model, latent_dynamics, trainer);
 
     # Start running steps.
-    result, next_step = step(trainer, next_step, config);
+    next_step = step(trainer, next_step, config);
 
-    # Report the result
-    if (  result is Result.Fail):
-        raise RuntimeError('Previous step has failed. Stopping the workflow.');
-    elif (result is Result.Success):
-        LOGGER.info("Previous step succeeded. Preparing for the next step.");
-        result = Result.Unexecuted;
-    elif (result is Result.Complete):
-        LOGGER.info("Workflow is finished.");
+    # Report the result of training.
+    LOGGER.info("Steps completed. Completed %d/%d training steps. The next step step succeeded. Preparing for the next step." % (trainer.restart_iter, trainer.max_iter));
 
 
 
@@ -149,7 +142,6 @@ def main():
             latent_dynamics     = latent_dynamics,
             trainer             = trainer,
             next_step           = next_step,
-            result              = result,
             restart_filename    = restart_filename);
 
 
@@ -508,6 +500,234 @@ def main():
 
 
 
+
+# -------------------------------------------------------------------------------------------------
+# Step
+# -------------------------------------------------------------------------------------------------
+
+def step(trainer        : BayesianGLaSDI, 
+         next_step      : NextStep, 
+         config         : dict) -> NextStep:
+    """
+    Runs the next step of the training procedure and recursively continues until the workflow is
+    complete or encounters a failure. The full cycle is:
+
+        RunSample → Train → PickSample → RunSample → Train → PickSample → ... → Complete
+
+    When loading from a restart, pass in the `next_step` saved in the restart file; this function
+    will pick up exactly where the previous run left off and run to completion.
+
+    
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+    
+    trainer : BayesianGLaSDI
+        A Trainer class object that we use when training the model for a particular instance of 
+        the settings.
+
+    next_step : NextStep
+        The step to execute first. When restarting, this should be loaded from the restart file.
+
+    config : dict
+        This should be a dictionary that we loaded from a .yml file. It should house all the 
+        settings we expect to use to generate the data and train the models.
+
+
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    next_step : NextStep
+        The step that would come next (informational; the workflow has already stopped). 
+    """
+
+
+    # ---------------------------------------------------------------------------------------------
+    # Run the next step 
+    # ---------------------------------------------------------------------------------------------
+
+    LOGGER.info("Running %s" % next_step);
+    if (next_step is NextStep.Train):
+        # If our next step is to train, then let's train! This will set trainer.restart_iter to 
+        # the iteration number of the last iterating training.
+        trainer.train();
+
+
+        # Next, check if the restart_iter falls below the "max_greedy_iter". The later is the last
+        # iteration at which we want to run greedy sampling. If the restart_iter is below the 
+        # max_greedy_iter, then we should pick a new sample (perform greedy sampling). Otherwise, 
+        # we should continue training.
+        if (trainer.restart_iter <= trainer.max_greedy_iter):
+            next_step = NextStep.PickSample;
+        else:
+            next_step = NextStep.Train;
+
+
+    elif (next_step is NextStep.PickSample):
+        # Use greedy sampling to pick that sample. Note that if the training set is empty, this 
+        # function does nothing.
+        next_step = Update_Train_Space(trainer);
+
+
+    elif (next_step is NextStep.RunSample):
+        # Generate the trajectories for all new testing and training parameters. Append these new
+        # trajectories to trainer's U_Train and U_Test attributes.
+        next_step = Run_Samples(trainer);
+        
+        if(config["workflow"]["plot_train_rel_errors"] == True):
+            trainSpace_RelativeErrors_Heatmap(  trainer     = trainer, 
+                                                param_space = trainer.param_space, 
+                                                file_prefix = "initial_" + config["physics"]["type"]);
+
+
+    else:
+        raise RuntimeError("Unknown next step!");
+    
+
+
+    # ---------------------------------------------------------------------------------------------
+    # Wrap up
+    # ---------------------------------------------------------------------------------------------
+
+    # Check if training has finished. Recall that a trainer object's restart_iter member holds the 
+    # iteration number of the last iteration in the last round of training. Likewise, its 
+    # "max_iter" member specifies the total number of iterations we want to train for. Thus, if 
+    # restart_iter goes above max_iter, then it is time to stop running steps. 
+    if(trainer.restart_iter >= trainer.max_iter):
+        return next_step;
+        
+    # Otherwise, continue the workflow.
+    LOGGER.info("Next step is: %s" % next_step);
+    next_step = step(trainer, next_step, config);
+
+    # All done!
+    return next_step;
+
+
+
+
+
+# -------------------------------------------------------------------------------------------------
+# Save
+# -------------------------------------------------------------------------------------------------
+
+def Save(   param_space         : ParameterSpace, 
+            config              : dict,
+            physics             : Physics, 
+            model               : torch.nn.Module, 
+            latent_dynamics     : LatentDynamics,
+            trainer             : BayesianGLaSDI, 
+            next_step           : NextStep, 
+            restart_filename    : str               = "") -> None:
+    """
+    This function saves a trained model, trainer, latent dynamics, etc. You should call this 
+    function after running the LASDI algorithm.
+
+
+    
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+
+    param_space : ParameterSpace 
+        holds the training and testing parameter combinations.
+    
+    config : dict
+        This should be a dictionary that we loaded from a .yml file. It should house all the 
+        settings we expect to use to generate the data and train the models.
+
+    physics : Physics
+        defines the FOM model. We can use it to fetch the initial conditions and FOM solution for
+        a particular combination of parameter values. physics, latent_dynamics, and model should 
+        have the same number of initial conditions.
+
+    model : torch.nn.Module
+        maps between the FOM and ROM spaces. physics, latent_dynamics, and model should have the 
+        same number of initial conditions.
+
+    latent_dynamics : LatentDynamics 
+        defines the dynamics in model's latent space. physics, latent_dynamics, and model should 
+        have the same number of initial conditions.
+
+    trainer : BayesianGLaSDI
+        trains model using physics to define the FOM, latent_dynamics to define the ROM, and 
+        model to connect them.
+
+    next_step : NextStep
+        An enumeration indicating the next step (should we continue training). This should 
+        have been returned by the final call to the step function.
+
+    restart_filename : str
+        If we loaded from a restart, then this is the name of the restart we loaded.
+        Otherwise, if we did not load from a restart, this should be an empty string.
+
+
+    
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    Nothing!
+    """
+
+    # Checks.
+    n_IC    : int   = latent_dynamics.n_IC;
+    assert model.n_IC       == n_IC, "model.n_IC = %d != n_IC = %d" % (model.n_IC, n_IC);
+    assert(physics.n_IC     == n_IC);
+
+
+    # Save restart (or final) file.
+    date        = time.localtime();
+    date_str    = "{month:02d}_{day:02d}_{year:04d}_{hour:02d}_{minute:02d}";
+    date_str    = date_str.format(month     = date.tm_mon, 
+                                  day       = date.tm_mday, 
+                                  year      = date.tm_year, 
+                                  hour      = date.tm_hour, 
+                                  minute    = date.tm_min);
+    
+    # Set up the restart filename.
+    if(len(restart_filename) > 0):
+        # Extract the non-extension portion of the restart filename.
+        restart_filename_no_ext : str = restart_filename.split('.')[0];
+
+        # now append the new date to the restart filename.
+        restart_filename = restart_filename_no_ext + '__' + date_str + '.npy';
+    else:
+        restart_filename : str = config["physics"]["type"] + '_' + date_str + '.npy';
+    
+    # Set up the restart path.
+    # Use an absolute results directory under the project root (Higher-Order-LaSDI/results),
+    # independent of the current working directory.
+    #
+    # Prefer trainer.path_results if available (keeps consistency with GPLaSDI).
+    from pathlib import Path;
+    if hasattr(trainer, "path_results"):
+        results_dir = Path(trainer.path_results);
+    else:
+        src_dir = Path(__file__).resolve().parent;
+        project_dir = src_dir.parent;
+        results_dir = project_dir / "results";
+    results_dir.mkdir(parents=True, exist_ok=True);
+    restart_path = str(results_dir / restart_filename);
+
+    # Build the restart save dictionary and then save it.
+    restart_dict = {'parameter_space'   : param_space.export(),
+                    'physics'           : physics.export(),
+                    'model'             : model.export(),
+                    'latent_dynamics'   : latent_dynamics.export(),
+                    'trainer'           : trainer.export(),
+                    'timestamp'         : date_str,
+                    'next_step'         : next_step};
+    numpy.save(restart_path, restart_dict);
+
+    # All done!
+    return;
+
+
+
+
+
 # -------------------------------------------------------------------------------------------------
 # Helper functions
 # -------------------------------------------------------------------------------------------------
@@ -571,239 +791,6 @@ def count_parameters(   model           : torch.nn.Module,
     LOGGER.info("=" * 80);
     
     return;
-
-
-def step(trainer        : BayesianGLaSDI, 
-         next_step      : NextStep, 
-         config         : dict) -> tuple[Result, NextStep]:
-    """
-    Runs the next step of the training procedure and recursively continues until the workflow is
-    complete or encounters a failure. The full cycle is:
-
-        RunSample → Train → PickSample → RunSample → Train → PickSample → ... → Complete
-
-    When loading from a restart, pass in the `next_step` saved in the restart file; this function
-    will pick up exactly where the previous run left off and run to completion.
-
-    
-    -----------------------------------------------------------------------------------------------
-    Arguments
-    -----------------------------------------------------------------------------------------------
-    
-    trainer : BayesianGLaSDI
-        A Trainer class object that we use when training the model for a particular instance of 
-        the settings.
-
-    next_step : NextStep
-        The step to execute first. When restarting, this should be loaded from the restart file.
-
-    config : dict
-        This should be a dictionary that we loaded from a .yml file. It should house all the 
-        settings we expect to use to generate the data and train the models.
-
-
-    -----------------------------------------------------------------------------------------------
-    Returns
-    -----------------------------------------------------------------------------------------------
-
-    result, next_step
-    
-    result : Result
-        Result.Complete when training finishes normally, Result.Fail on error.
-
-    next_step : NextStep
-        The step that would come next (informational; the workflow has already stopped). 
-    """
-
-
-    # ---------------------------------------------------------------------------------------------
-    # Run the next step 
-    # ---------------------------------------------------------------------------------------------
-
-    LOGGER.info("Running %s" % next_step);
-    if (next_step is NextStep.Train):
-        # If our next step is to train, then let's train! This will set trainer.restart_iter to 
-        # the iteration number of the last iterating training.
-        trainer.train();
-
-        # Check if we should stop running steps.
-        # Recall that a trainer object's restart_iter member holds the iteration number of the last
-        # iteration in the last round of training. Likewise, its "max_iter" member specifies the 
-        # total number of iterations we want to train for. Thus, if restart_iter goes above 
-        # max_iter, then it is time to stop running steps. Otherwise, we can mark the current step
-        # as a success and move onto the next one.
-        if (trainer.restart_iter >= trainer.max_iter):
-            result  = Result.Complete;
-        else:
-            result  = Result.Success;
-
-        # Next, check if the restart_iter falls below the "max_greedy_iter". The later is the last
-        # iteration at which we want to run greedy sampling. If the restart_iter is below the 
-        # max_greedy_iter, then we should pick a new sample (perform greedy sampling). Otherwise, 
-        # we should continue training.
-        if (trainer.restart_iter <= trainer.max_greedy_iter):
-            next_step = NextStep.PickSample;
-        else:
-            next_step = NextStep.Train;
-
-
-    elif (next_step is NextStep.PickSample):
-        # Use greedy sampling to pick that sample. Note that if the training set is empty, this 
-        # function does nothing.
-        result, next_step = Update_Train_Space(trainer);
-
-
-    elif (next_step is NextStep.RunSample):
-        # Generate the trajectories for all new testing and training parameters. Append these new
-        # trajectories to trainer's U_Train and U_Test attributes.
-        result, next_step = Run_Samples(trainer);
-        
-        if(config["workflow"]["plot_train_rel_errors"] == True):
-            trainSpace_RelativeErrors_Heatmap(  trainer     = trainer, 
-                                                param_space = trainer.param_space, 
-                                                file_prefix = "initial_" + config["physics"]["type"]);
-
-
-    else:
-        raise RuntimeError("Unknown next step!");
-    
-
-
-    # ---------------------------------------------------------------------------------------------
-    # Wrap up
-    # ---------------------------------------------------------------------------------------------
-
-    # If fail or complete, break the loop.
-    if ((result is Result.Fail) or (result is Result.Complete)):
-        return result, next_step;
-        
-    # Continue the workflow.
-    LOGGER.info("Next step is: %s" % next_step);
-    result, next_step = step(trainer, next_step, config);
-
-    # All done!
-    return result, next_step;
-
-
-
-def Save(   param_space         : ParameterSpace, 
-            config              : dict,
-            physics             : Physics, 
-            model               : torch.nn.Module, 
-            latent_dynamics     : LatentDynamics,
-            trainer             : BayesianGLaSDI, 
-            next_step           : NextStep, 
-            result              : Result,
-            restart_filename    : str               = "") -> None:
-    """
-    This function saves a trained model, trainer, latent dynamics, etc. You should call this 
-    function after running the LASDI algorithm.
-
-
-    
-    -----------------------------------------------------------------------------------------------
-    Arguments
-    -----------------------------------------------------------------------------------------------
-
-    param_space : ParameterSpace 
-        holds the training and testing parameter combinations.
-    
-    config : dict
-        This should be a dictionary that we loaded from a .yml file. It should house all the 
-        settings we expect to use to generate the data and train the models.
-
-    physics : Physics
-        defines the FOM model. We can use it to fetch the initial conditions and FOM solution for
-        a particular combination of parameter values. physics, latent_dynamics, and model should 
-        have the same number of initial conditions.
-
-    model : torch.nn.Module
-        maps between the FOM and ROM spaces. physics, latent_dynamics, and model should have the 
-        same number of initial conditions.
-
-    latent_dynamics : LatentDynamics 
-        defines the dynamics in model's latent space. physics, latent_dynamics, and model should 
-        have the same number of initial conditions.
-
-    trainer : BayesianGLaSDI
-        trains model using physics to define the FOM, latent_dynamics to define the ROM, and 
-        model to connect them.
-
-    next_step : NextStep
-        An enumeration indicating the next step (should we continue training). This should 
-        have been returned by the final call to the step function.
-
-    result : Result
-        An enumeration indicating the result of the last step of training. This should have
-        have been returned by the final call to the step function.
-
-    restart_filename : str
-        If we loaded from a restart, then this is the name of the restart we loaded.
-        Otherwise, if we did not load from a restart, this should be an empty string.
-
-
-    
-    -----------------------------------------------------------------------------------------------
-    Returns
-    -----------------------------------------------------------------------------------------------
-
-    Nothing!
-    """
-
-    # Checks.
-    n_IC    : int   = latent_dynamics.n_IC;
-    assert model.n_IC       == n_IC, "model.n_IC = %d != n_IC = %d" % (model.n_IC, n_IC);
-    assert(physics.n_IC     == n_IC);
-
-
-    # Save restart (or final) file.
-    date        = time.localtime();
-    date_str    = "{month:02d}_{day:02d}_{year:04d}_{hour:02d}_{minute:02d}";
-    date_str    = date_str.format(month     = date.tm_mon, 
-                                  day       = date.tm_mday, 
-                                  year      = date.tm_year, 
-                                  hour      = date.tm_hour, 
-                                  minute    = date.tm_min);
-    
-    # Set up the restart filename.
-    if(len(restart_filename) > 0):
-        # Extract the non-extension portion of the restart filename.
-        restart_filename_no_ext : str = restart_filename.split('.')[0];
-
-        # now append the new date to the restart filename.
-        restart_filename = restart_filename_no_ext + '__' + date_str + '.npy';
-    else:
-        restart_filename : str = config["physics"]["type"] + '_' + date_str + '.npy';
-    
-    # Set up the restart path.
-    # Use an absolute results directory under the project root (Higher-Order-LaSDI/results),
-    # independent of the current working directory.
-    #
-    # Prefer trainer.path_results if available (keeps consistency with GPLaSDI).
-    from pathlib import Path;
-    if hasattr(trainer, "path_results"):
-        results_dir = Path(trainer.path_results);
-    else:
-        src_dir = Path(__file__).resolve().parent;
-        project_dir = src_dir.parent;
-        results_dir = project_dir / "results";
-    results_dir.mkdir(parents=True, exist_ok=True);
-    restart_path = str(results_dir / restart_filename);
-
-    # Build the restart save dictionary and then save it.
-    restart_dict = {'parameter_space'   : param_space.export(),
-                    'physics'           : physics.export(),
-                    'model'             : model.export(),
-                    'latent_dynamics'   : latent_dynamics.export(),
-                    'trainer'           : trainer.export(),
-                    'timestamp'         : date_str,
-                    'next_step'         : next_step,
-                    'result'            : result};
-    numpy.save(restart_path, restart_dict);
-
-    # All done!
-    return;
-
 
 if __name__ == "__main__":
     main();

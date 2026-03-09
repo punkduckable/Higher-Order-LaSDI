@@ -7,7 +7,7 @@ import  logging;
 import  torch;
 import  numpy;
 
-from    Enums               import  NextStep, Result;  
+from    Enums               import  NextStep;  
 from    GPLaSDI             import  BayesianGLaSDI;
 
 
@@ -20,7 +20,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # Sampling functions
 # -------------------------------------------------------------------------------------------------
 
-def Update_Train_Space(trainer : BayesianGLaSDI) -> tuple[NextStep, Result]:
+def Update_Train_Space(trainer : BayesianGLaSDI) -> NextStep:
     """
     This function uses greedy sampling to update the trainer's train_space.
 
@@ -39,14 +39,9 @@ def Update_Train_Space(trainer : BayesianGLaSDI) -> tuple[NextStep, Result]:
     Returns
     -----------------------------------------------------------------------------------------------
 
-    NextStep.RunSample, Result.Success
-
     NextStep.RunSample : NextStep
         indicates that we have a new sample and need to generate the FOM solution using the 
         corresponding parameter values for the IC/physics. 
-    
-    Result.Success : Result 
-        indicates that we were able to pick a new sample without running into any problems. 
     """
 
     # Figure out if we need a new sample.
@@ -62,12 +57,10 @@ def Update_Train_Space(trainer : BayesianGLaSDI) -> tuple[NextStep, Result]:
 
     # Now that we know the new points we need to generate simulations for, we need to get ready to
     # actually run those simulations.
-    next_step, result = NextStep.RunSample, Result.Success;
-    return result, next_step;
+    return NextStep.RunSample;
 
 
-
-def Run_Samples(trainer : BayesianGLaSDI) -> tuple[NextStep, Result]:
+def Run_Samples(trainer : BayesianGLaSDI) -> NextStep:
     """
     This function updates trainer.U_Train and trainer.U_Test by adding solutions generated from 
     parameter combinations in trainer.param_space.train_space and trainer.param_space.test_space.
@@ -100,14 +93,9 @@ def Run_Samples(trainer : BayesianGLaSDI) -> tuple[NextStep, Result]:
     Returns
     -----------------------------------------------------------------------------------------------
 
-    NextStep.Train, Result.Success
-
     NextStep.Train : NextStep
         indicates that we have generated the FOM solution for the new training point and need to 
         resume training. 
-    
-    Result.Success : Result 
-        indicates that we were able to pick a new sample without running into any problems. 
     """
     
 
@@ -359,5 +347,4 @@ def Run_Samples(trainer : BayesianGLaSDI) -> tuple[NextStep, Result]:
     # Wrap up
 
     # We are now done. Since we now have the new FOM solutions, the next step is training.
-    next_step, result = NextStep.Train, Result.Success;
-    return result, next_step;
+    return NextStep.Train;

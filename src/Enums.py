@@ -5,9 +5,3 @@ class NextStep(Enum):
     PickSample      = 2;
     RunSample       = 3;
     CollectSample   = 4;
-
-class Result(Enum):
-    Unexecuted      = 1;
-    Success         = 2;
-    Fail            = 3;
-    Complete        = 4;
