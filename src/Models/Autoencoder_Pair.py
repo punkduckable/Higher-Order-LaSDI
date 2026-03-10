@@ -158,8 +158,8 @@ class Autoencoder_Pair(torch.nn.Module):
         assert list(Displacement_Frames.shape[1:])  ==  self.reshape_shape,             "list(Displacement_Frames.shape[1:]) = %s, self.reshape_shape = %s; must be equal" % (str(list(Displacement_Frames.shape[1:])), str(self.reshape_shape));
     
         # Encode the displacement frames.
-        Latent_Displacement : torch.Tensor = self.Displacement_Autoencoder.Encode( Displacement_Frames);
-        Latent_Velocity     : torch.Tensor = self.Velocity_Autoencoder.Encode(     Velocity_Frames);
+        Latent_Displacement : torch.Tensor = self.Displacement_Autoencoder.Encode( Displacement_Frames)[0];
+        Latent_Velocity     : torch.Tensor = self.Velocity_Autoencoder.Encode(     Velocity_Frames)[0];
 
         # All done!
         return Latent_Displacement, Latent_Velocity;
@@ -208,8 +208,8 @@ class Autoencoder_Pair(torch.nn.Module):
         assert Latent_Velocity.shape            == Latent_Displacement.shape,   "Latent_Velocity.shape = %s, Latent_Displacement.shape = %s; must be equal" % (str(Latent_Displacement.shape), str(Latent_Velocity.shape));
 
         # Encode the displacement frames.
-        Reconstructed_Displacement  : torch.Tensor  = self.Displacement_Autoencoder.Decode( Latent_Displacement);
-        Reconstructed_Velocity      : torch.Tensor  = self.Velocity_Autoencoder.Decode(     Latent_Velocity);
+        Reconstructed_Displacement  : torch.Tensor  = self.Displacement_Autoencoder.Decode( Latent_Displacement)[0];
+        Reconstructed_Velocity      : torch.Tensor  = self.Velocity_Autoencoder.Decode(     Latent_Velocity)[0];
 
         # All done!
         return Reconstructed_Displacement, Reconstructed_Velocity;
@@ -336,7 +336,7 @@ class Autoencoder_Pair(torch.nn.Module):
 
             # Encode the IC, then map the encoding to a numpy array.
             z0_t, Dz0_t = self.Encode(  Displacement_Frames = u0, 
-                                    Velocity_Frames     = v0);
+                                        Velocity_Frames     = v0);
             z0      : numpy.ndarray = z0_t.detach().numpy();
             Dz0     : numpy.ndarray = Dz0_t.detach().numpy();
 

@@ -129,7 +129,7 @@ class Autoencoder(torch.nn.Module):
 
 
 
-    def Encode(self, U : torch.Tensor) -> torch.Tensor:
+    def Encode(self, U : torch.Tensor) -> tuple[torch.Tensor]:
         """
         This function encodes a set of displacement and velocity frames.
 
@@ -146,8 +146,9 @@ class Autoencoder(torch.nn.Module):
         Returns
         -------------------------------------------------------------------------------------------
 
-        Z : torch.Tensor, shape = (n_Frasmes, self.n_z)
-            i,j element holds the j'th component of the encoding of the i'th FOM frame.
+        Z : tuple[torch.Tensor], len = 1 
+            single element is a torch.Tensor of shape = (n_Frasmes, self.n_z) whose i,j element 
+            holds the j'th component of the encoding of the i'th FOM frame.
         """
 
         # Check that the inputs have the correct shape.
@@ -156,11 +157,11 @@ class Autoencoder(torch.nn.Module):
         assert list(U.shape[1:])    ==  self.reshape_shape,             "U.shape[1:] = %s, self.reshape_shape = %s" % (str(U.shape[1:]), str(self.reshape_shape));
     
         # Encode the frames!
-        return self.encoder(U);
+        return (self.encoder(U),);
 
 
 
-    def Decode(self, Z : torch.Tensor)-> torch.Tensor:
+    def Decode(self, Z : torch.Tensor) -> tuple[torch.Tensor]:
         """
         This function decodes a set of latent frames.
 
@@ -177,8 +178,9 @@ class Autoencoder(torch.nn.Module):
         Returns
         -------------------------------------------------------------------------------------------
 
-        R : torch.Tensor, shpe = (n_Frames,) + self.reshape_shape
-            R[i ...] represents the reconstruction of the i'th FOM frame.
+        R : tuple[torch.Tensor], len = 1
+            A single element tuple whose lone element is a torch.Tensor with shape = (n_Frames,) 
+            + self.reshape_shape. R[i ...] represents the reconstruction of the i'th FOM frame.
         """
 
         # Check that the input has the correct shape. 
@@ -190,7 +192,7 @@ class Autoencoder(torch.nn.Module):
 
 
 
-    def forward(self, U : torch.Tensor) -> torch.Tensor:
+    def forward(self, X : torch.Tensor) -> tuple[torch.Tensor]:
         """
         This function passes X through the encoder, producing a latent state, Z. It then passes 
         Z through the decoder; hopefully producing a vector that approximates X.
@@ -209,15 +211,16 @@ class Autoencoder(torch.nn.Module):
         Returns
         -------------------------------------------------------------------------------------------
 
-        Y : torch.Tensor, shape = X.shape
-            The image of X under the encoder and decoder. 
+        Y : tuple[torch.Tensor], len = 1
+            A single element tuple whose lone element is a torch.Tensor of shape = X.shape holding 
+            the image of X under the encoder and decoder. 
         """
 
         # Encoder the input
-        Z : torch.Tensor    = self.Encode(U);
+        Z : torch.Tensor            = self.Encode(X)[0];
 
         # Now decode z.
-        Y : torch.Tensor    = self.Decode(Z);
+        Y : tuple[torch.Tensor]     = self.Decode(Z);
 
         # All done! Hopefully Y \approx X.
         return Y;
@@ -293,7 +296,7 @@ class Autoencoder(torch.nn.Module):
                 LOGGER.warning(f"    This may cause issues if the model was trained on normalized data.");
 
             # Encode the IC, then map the encoding to a numpy array.
-            z0      : numpy.ndarray = self.Encode(u0).detach().numpy();
+            z0      : numpy.ndarray = self.Encode(u0)[0].detach().numpy();
 
             # Append the new IC to the list of latent ICs
             Z0.append([z0]);

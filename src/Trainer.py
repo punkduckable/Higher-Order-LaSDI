@@ -652,7 +652,7 @@ class Trainer:
                     # the FOM solution at time t_Grid[i][k] when we use the i'th combination of 
                     # parameter values. Here, n_t(i) is the number of time steps in the solution 
                     # for the i'th combination of parameter values. 
-                    Z_i         : torch.Tensor  = model_device.Encode(U_i);
+                    Z_i         : torch.Tensor  = model_device.Encode(U_i)[0];
                     
                     # Log latent state statistics to diagnose potential autoencoder collapse
                     if iter % 100 == 0 or iter == self.restart_iter:  # Log every 100 iters and first iter
@@ -663,7 +663,7 @@ class Trainer:
                             str(Z_i.device)));
                     
                     Latent_States.append([Z_i]);
-                    U_Pred_i    : torch.Tensor  = model_device.Decode(Z_i);
+                    U_Pred_i    : torch.Tensor  = model_device.Decode(Z_i)[0];
 
                     LOGGER.debug("Forward Pass (Autoencoder) - complete for parameter combination %d" % i);
                     self.timer.end("Forward Pass");
@@ -742,7 +742,7 @@ class Trainer:
 
                         # Encode all (n_rollout_ICs * n_rollout_targets) FOM targets in one batch.
                         # Result shape: (n_rollout_ICs[i] * n_rollout_targets, n_z).
-                        ROM_Rollout_Targets.append([model_device.Encode(*FOM_Rollout_Targets_i)]);
+                        ROM_Rollout_Targets.append([model_device.Encode(*FOM_Rollout_Targets_i)[0]]);
                     
                         LOGGER.debug("Rollout Setup (Autoencoder) - complete for parameter combination %d" % i);
                         self.timer.end("Rollout Setup");
@@ -855,7 +855,7 @@ class Trainer:
                         ROM_Rollout_Targets_i       : torch.Tensor = ROM_Rollout_Targets[i][0];    # shape = (n_rollout_ICs[i] * n_rollout_targets, n_z)
 
                         # Decode the latent predictions to get FOM predictions.
-                        FOM_Rollout_Predict_i       : torch.Tensor = model_device.Decode(ROM_Rollout_Predict_i_flat);
+                        FOM_Rollout_Predict_i       : torch.Tensor = model_device.Decode(ROM_Rollout_Predict_i_flat)[0];
                     
                         # Get the corresponding FOM targets.
                         FOM_Rollout_Target_i        : torch.Tensor = FOM_Rollout_Targets[i][0];    # shape = (n_rollout_ICs[i] * n_rollout_targets, *physics.Frame_Shape)
@@ -910,7 +910,7 @@ class Trainer:
                             U_IC_i = self.normalize_tensor(U_IC_i, 0);
                         
                         # Encode the FOM initial conditions
-                        Z_IC_i = model_device.Encode(U_IC_i);
+                        Z_IC_i : torch.Tensor = model_device.Encode(U_IC_i)[0];
                         
                         # Get the coefficients for this combination of parameters
                         train_coef_i            : torch.Tensor              = train_coefs[i, :].reshape(1, -1);
@@ -922,16 +922,16 @@ class Trainer:
                                                                                                         params  = param_i.reshape(1, -1));
                         
                         # Extract the predicted trajectory, remove the singleton dimension
-                        Z_IC_Predict_i    : torch.Tensor              = Z_IC_Rollout_i[0][0].squeeze(1);    # shape = (n_t_IC_rollout[i], n_z)
+                        Z_IC_Predict_i      : torch.Tensor              = Z_IC_Rollout_i[0][0].squeeze(1);    # shape = (n_t_IC_rollout[i], n_z)
 
                         # Decode the predicted trajectory to get FOM predictions
-                        U_IC_Predict_i = model_device.Decode(Z_IC_Predict_i);
+                        U_IC_Predict_i      : torch.Tensor              = model_device.Decode(Z_IC_Predict_i)[0];
                         
                         # Get the corresponding FOM targets
-                        U_IC_Target_i     : list[torch.Tensor]        = U_IC_Rollout_Targets[i][0];         # shape = (n_t_IC_rollout[i], physics.Frame_Shape)
+                        U_IC_Target_i       : list[torch.Tensor]        = U_IC_Rollout_Targets[i][0];         # shape = (n_t_IC_rollout[i], physics.Frame_Shape)
 
                         # Encode the FOM targets for latent space comparison
-                        Z_IC_Target_i = model_device.Encode(U_IC_Target_i);
+                        Z_IC_Target_i : torch.Tensor = model_device.Encode(U_IC_Target_i)[0];
 
                         # Compute differences once
                         diff_ROM = Z_IC_Target_i - Z_IC_Predict_i;
@@ -1158,7 +1158,7 @@ class Trainer:
                         # reverse mode AD) of inputs with v. It returns the result of the forward pass 
                         # and the associated jacobian-vector product. We only keep the latter.
                         d_dz_D_Pred__Z_V_i  : torch.Tensor  = torch.autograd.functional.jvp(
-                                                                    func    = lambda Z_D : model_device.Displacement_Autoencoder.Decode(Z_D), 
+                                                                    func    = lambda Z_D : model_device.Displacement_Autoencoder.Decode(Z_D)[0], 
                                                                     inputs  = Z_D_i, 
                                                                     v       = Z_V_i)[1];
                         
@@ -1178,7 +1178,7 @@ class Trainer:
                         #                   = (d/dX)\phi_E,D(D(t)) V(t)
                         # Here, \phi_E,D is the displacement portion of the encoder.
                         d_dx_Z_D__V         : torch.Tensor  = torch.autograd.functional.jvp(
-                                                                    func    = lambda D : model_device.Displacement_Autoencoder.Encode(D),
+                                                                    func    = lambda D : model_device.Displacement_Autoencoder.Encode(D)[0],
                                                                     inputs  = D_i, 
                                                                     v       = V_i)[1];
                         

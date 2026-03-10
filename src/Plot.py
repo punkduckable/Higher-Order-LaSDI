@@ -25,8 +25,6 @@ from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
-from    Autoencoder                 import  Autoencoder;
-from    Autoencoder_Pair            import  Autoencoder_Pair;
 from    SolveROMs                   import  sample_roms;
 from    ParameterSpace              import  ParameterSpace;
 from    Trainer                     import  Trainer;
@@ -180,15 +178,9 @@ def Plot_Latent_Trajectories(physics         : Physics,
     True_Latent_Trajectories : list[list[numpy.ndarray]] = [];          # len = n_param
     for i in range(n_param):
         ith_True_Latent_Trajectories : list[numpy.ndarray] = [];
-        ith_Encoding : torch.Tensor | tuple[torch.Tensor] = model.Encode(*U_True[i]);
-        if(isinstance(ith_Encoding, tuple)):
-            # If the encoding is a tuple, then we need to convert it to a list.
-            for j in range(len(ith_Encoding)):
+        ith_Encoding : tuple[torch.Tensor] = model.Encode(*U_True[i]);
+        for j in range(len(ith_Encoding)):
                 ith_True_Latent_Trajectories.append(ith_Encoding[j].detach().numpy());
-        elif(isinstance(ith_Encoding, torch.Tensor)):
-            ith_True_Latent_Trajectories.append(ith_Encoding.detach().numpy());
-        else:
-            raise ValueError("ith_Encoding is not a tuple or a torch.Tensor");
         
         True_Latent_Trajectories.append(ith_True_Latent_Trajectories);
         

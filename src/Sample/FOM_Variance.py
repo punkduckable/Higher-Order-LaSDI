@@ -93,12 +93,13 @@ def FOM_Variance(trainer : Trainer) -> NextStep:
     # Move the model to the cpu (this is where all the GP stuff happens) and load the model 
     # from the last checkpoint. This should be the one that obtained the best loss so far. 
     # Remember that train_coefs should specify the coefficients from that iteration. 
+    LOGGER.info("Sampling: Loading model from checkpoint.");
     model       : torch.nn.Module   = trainer.model.cpu();
     n_test      : int               = trainer.param_space.n_test();
     n_train     : int               = trainer.param_space.n_train();
     model.load_state_dict(torch.load(trainer.path_checkpoint + '/' + 'checkpoint.pt', map_location = 'cpu'));
 
-    # First, find the candidate parameters. This is the elements of the testing set that 
+    # First, find the candidate parameters. These are the elements of the testing set that 
     # are not already in the training set.
     candidate_parameters    : list[numpy.ndarray]   = [];
     t_Candidates            : list[torch.Tensor]    = [];
@@ -333,7 +334,7 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
 
             U_Pred_i = numpy.empty([n_samples_i, n_t_i] + fom_shape, dtype = numpy.float32)
             for j in range(n_samples_i):
-                U_Pred_i[j, ...] = model.Decode(Z_i[j, :, :]).detach().numpy();
+                U_Pred_i[j, ...] = model.Decode(Z_i[j, :, :])[0].detach().numpy();
 
             # Compute the standard deviation across the sample axis. This gives us an array of shape 
             # (n_t, n_FOM) whose i,j element holds the (sample) standard deviation of the j'th component 

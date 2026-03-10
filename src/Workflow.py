@@ -347,15 +347,7 @@ def main():
         Zi_mean     : list[torch.Tensor]    = [];
         for i in range(len(Zi_mean_np)):
             Zi_mean.append(torch.Tensor(Zi_mean_np[i]));
-        U_Pred_worst : tuple[torch.Tensor] | torch.Tensor    = model.Decode(*Zi_mean);             # length = n_IC
-
-        # Convert U_Pred to a list
-        if(isinstance(U_Pred_worst, tuple)):
-            U_Pred_worst = list(U_Pred_worst);
-        elif(isinstance(U_Pred_worst, torch.Tensor)):
-            U_Pred_worst = [U_Pred_worst];
-        else:
-            raise ValueError("U_Pred is not a tuple or a torch.Tensor");
+        U_Pred_worst : list[torch.Tensor]          = list(model.Decode(*Zi_mean));             # length = n_IC
 
         # Make a movie for each derivative of the solution.
         n_IC        : int                   = physics.n_IC;

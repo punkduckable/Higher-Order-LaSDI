@@ -557,7 +557,7 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
             # Relative Error
 
             # Decode the mean latent trajectories for each combination of parameter values.
-            U_Pred_Mean_i       : numpy.ndarray = model.Decode(torch.Tensor(Zis_mean[i][0])).detach().numpy();
+            U_Pred_Mean_i       : numpy.ndarray = model.Decode(torch.Tensor(Zis_mean[i][0]))[0].detach().numpy();
             if use_denorm:
                 U_Pred_Mean_i = trainer.denormalize_np(U_Pred_Mean_i, 0);
 
@@ -588,7 +588,7 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
 
             # Decode the latent trajectory for each sample.
             for j in range(n_samples):
-                U_Pred_ij   : numpy.ndarray     = model.Decode(torch.Tensor(Zis_samples[i][0][:, j, :])).detach().numpy();
+                U_Pred_ij   : numpy.ndarray     = model.Decode(torch.Tensor(Zis_samples[i][0][:, j, :]))[0].detach().numpy();
                 U_Pred_i[:, j, ...]             = U_Pred_ij;
         
             # Compute the STD across the sample axis.

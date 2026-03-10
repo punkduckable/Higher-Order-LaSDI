@@ -320,7 +320,7 @@ class CNN_3D_Autoencoder(torch.nn.Module):
 
 
 
-    def Encode(self, U : torch.Tensor) -> torch.Tensor:
+    def Encode(self, U : torch.Tensor) -> tuple[torch.Tensor]:
         """
         This function encodes a set of 3D frames.
 
@@ -337,8 +337,9 @@ class CNN_3D_Autoencoder(torch.nn.Module):
         Returns
         -------------------------------------------------------------------------------------------
 
-        Z : torch.Tensor, shape = (n_Frames, self.n_z)
-            Latent-space encodings of each frame.
+        Z : tuple[torch.Tensor], len = 1
+            A single element tuple whose lone element is a tensor of shape = (n_Frames, self.n_z)
+            holding the latent-space encodings of each frame.
         """
 
         # Ensure input is 5D.
@@ -364,11 +365,11 @@ class CNN_3D_Autoencoder(torch.nn.Module):
         # Flatten and FC encoder.
         U = U.reshape((U.shape[0], self._flatten_dim));
         Z : torch.Tensor = self.encoder_fc(U);
-        return Z;
+        return (Z,);
 
 
 
-    def Decode(self, Z : torch.Tensor) -> torch.Tensor:
+    def Decode(self, Z : torch.Tensor) -> tuple[torch.Tensor]:
         """
         This function decodes a set of latent frames.
 
@@ -385,8 +386,9 @@ class CNN_3D_Autoencoder(torch.nn.Module):
         Returns
         -------------------------------------------------------------------------------------------
 
-        R : torch.Tensor, shape = (n_Frames, C, I, J, K)
-            Reconstructed 3D frames; C = self.conv_channels[0].
+        R : tuple[torch.Tensor], len = 1
+            A single element tuple whose lone element is a Tensor of shape = (n_Frames, C, I, J, K)
+            holding the reconstructed 3D frames; C = self.conv_channels[0].
         """
 
         # Checks.
@@ -404,18 +406,36 @@ class CNN_3D_Autoencoder(torch.nn.Module):
 
         assert list(U.shape[-3:]) == self.reshape_shape, "Decoded output shape mismatch: got %s, expected (n_Frames, %s)" % (str(U.shape), str(self.reshape_shape));
         assert U.shape[1] == self.conv_channels[0], "Decoded channel mismatch: got %d, expected %d" % (U.shape[1], self.conv_channels[0]);
-        return U;
+        return (U,);
 
 
 
-    def forward(self, U : torch.Tensor) -> torch.Tensor:
+    def forward(self, X : torch.Tensor) -> tuple[torch.Tensor]:
         """
-        This function passes U through the encoder, producing Z. It then passes Z through the
-        decoder.
+        This function passes X through the encoder, producing a latent state, Z. It then passes 
+        Z through the decoder; hopefully producing a vector that approximates X.
+        
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        U : torch.Tensor, shape = (n_Frames,) + self.reshape_shape
+            A tensor holding a batch of inputs. We pass this tensor through the encoder + decoder 
+            and then return the result.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        Y : tuple[torch.Tensor], len = 1
+            A single element tuple whose lone element is a torch.Tensor of shape = X.shape holding 
+            the image of X under the encoder and decoder. 
         """
 
-        Z : torch.Tensor = self.Encode(U);
-        Y : torch.Tensor = self.Decode(Z);
+        Z : torch.Tensor        = self.Encode(X)[0];
+        Y : tuple[torch.Tensor] = self.Decode(Z);
         return Y;
 
 
@@ -453,7 +473,7 @@ class CNN_3D_Autoencoder(torch.nn.Module):
                 LOGGER.warning(f"  No normalization applied to IC for param {i}!");
 
             # Encode the IC, then map the encoding to a numpy array.
-            z0      : numpy.ndarray = self.Encode(u0).detach().numpy();
+            z0      : numpy.ndarray = self.Encode(u0)[0].detach().numpy();
 
             # Append the new IC to the list of latent ICs
             Z0.append([z0]);

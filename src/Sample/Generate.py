@@ -228,15 +228,9 @@ def Generate_Training_Data(trainer : Trainer) -> NextStep:
                     original_device = next(trainer.model.parameters()).device;
                     model_cpu = trainer.model.cpu();
                     with torch.no_grad():
-                        # Encode trajectory (handle both single and multiple IC cases)
-                        if trainer.n_IC == 1:
-                            Z_new_i_encoded = model_cpu.Encode(U_new_i[0].cpu());
-                            Z_new_i_list = [Z_new_i_encoded];  # Wrap in list for n_IC=1
-                        else:
-                            # For multiple ICs (e.g., displacement + velocity in Autoencoder_Pair)
-                            # Encode returns a tuple/list of tensors, one per IC
-                            Z_new_i_tuple = model_cpu.Encode(*[u.cpu() for u in U_new_i]);
-                            Z_new_i_list = list(Z_new_i_tuple);  # Convert tuple to list
+                        # Encode trajectory 
+                        Z_new_i_tuple = model_cpu.Encode(*[u.cpu() for u in U_new_i]);
+                        Z_new_i_list = list(Z_new_i_tuple);  # Convert tuple to list
                     
                     # Move model back to original device
                     trainer.model.to(original_device);
