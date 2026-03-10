@@ -20,9 +20,6 @@ from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 from    GaussianProcess             import  eval_gp, sample_coefs, fit_gps;
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
-from    Autoencoder                 import  Autoencoder;
-from    Autoencoder_Pair            import  Autoencoder_Pair;
-from    CNN_3D_Autoencoder          import  CNN_3D_Autoencoder;
 from    ParameterSpace              import  ParameterSpace;
 from    Trainer                     import  Trainer;
 
@@ -551,120 +548,77 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
     # units. De-normalize here for meaningful physical errors/plots using the trainer.
     use_denorm : bool = hasattr(trainer, "has_normalization") and trainer.has_normalization();
 
-    if(isinstance(model, Autoencoder) or isinstance(model, CNN_3D_Autoencoder)):
-        for i in range(n_Test):
-            # -------------------------------------------------------------------------------------
-            # Relative Error
+    for i in range(n_Test):
+        # -------------------------------------------------------------------------------------
+        # Relative Error
 
-            # Decode the mean latent trajectories for each combination of parameter values.
-            U_Pred_Mean_i       : numpy.ndarray = model.Decode(torch.Tensor(Zis_mean[i][0]))[0].detach().numpy();
+        # Convert latent trajectories to Tensors
+        Zis_mean_i : list[torch.Tensor] = [];
+        for j in range(n_IC):
+            Zis_mean_i.append(torch.Tensor(Zis_mean[i][j]));
+
+        # Decode the mean latent trajectories for each combination of parameter values.
+        U_Pred_Mean_i       : list[torch.Tensor] = list(model.Decode(*Zis_mean_i));
+
+        # Fetch the corresponding test predictions.
+        U_Test_i            : list[numpy.ndarray] = U_Test[i];
+        
+        # Set up a list to hold the STDs of the FOM solution.
+        U_Test_i_std    : list[float] = [];
+
+        # Convert to numpy and denormalize. Also populate U_Test_i_std.
+        for j in range(n_IC):
+            U_Pred_Mean_i[j]    = U_Pred_Mean_i[j].detach().numpy();    # (n_t_i, physics.Frame_Shape)
+            U_Test_i[j]         = U_Test_i[j].detach().numpy();         # (n_t_i, physics.Frame_Shape)
+            
             if use_denorm:
-                U_Pred_Mean_i = trainer.denormalize_np(U_Pred_Mean_i, 0);
+                U_Pred_Mean_i[j]    = trainer.denormalize_np(U_Pred_Mean_i[j], j);
+                U_Test_i[j]         = trainer.denormalize_np(U_Test_i[j], j);
+        
+            U_Test_i_std.append(numpy.std(U_Test_i[j]))
 
-            # Fetch the corresponding test predictions.
-            U_Test_i            : numpy.ndarray = U_Test[i][0].detach().numpy();                # (n_t_i, physics.Frame_Shape)
-            if use_denorm:
-                U_Test_i = trainer.denormalize_np(U_Test_i, 0);
-
-            # Compute the std of the components of the FOM solution.
-            U_Test_i_std   : float = numpy.std(U_Test_i);
-
-            # For each frame, compute the relative error between the true and predicted FOM solutions.
-            # We normalize the error by the std of the true solution.
-            n_t_i : int = U_Test_i.shape[0];
+        # For each frame, compute the relative error between the true and predicted FOM solutions.
+        # We normalize the error by the std of the true solution.
+        n_t_i : int = t_Test[i].shape[0];
+        for j in range(n_IC):
             for k in range(n_t_i):
-                Rel_Error[i][0][k] = numpy.mean(numpy.abs(U_Pred_Mean_i[k, ...] - U_Test_i[k, ...]))/U_Test_i_std;
-            
+                Rel_Error[i][j][k] = numpy.mean(numpy.abs(U_Pred_Mean_i[j][k, ...] - U_Test_i[j][k, ...]))/U_Test_i_std[j];
+        
             # Now compute the corresponding element of max_Rel_Error
-            max_Rel_Error[i, 0] = Rel_Error[i][0].max();
-        
-
-            # -------------------------------------------------------------------------------------
-            # Standard Deviation
-
-            # Set up an array to hold the decoding of latent trajectory.
-            FOM_Frame_Shape : list[int]         = physics.Frame_Shape;
-            U_Pred_i        : numpy.ndarray     = numpy.empty([n_t_i, n_samples] + FOM_Frame_Shape, dtype = numpy.float32);
-
-            # Decode the latent trajectory for each sample.
-            for j in range(n_samples):
-                U_Pred_ij   : numpy.ndarray     = model.Decode(torch.Tensor(Zis_samples[i][0][:, j, :]))[0].detach().numpy();
-                U_Pred_i[:, j, ...]             = U_Pred_ij;
-        
-            # Compute the STD across the sample axis.
-            STD_i0          = numpy.std(U_Pred_i, axis = 1);
-            STD[i][0]       = trainer.scale_std_np(STD_i0, 0) if use_denorm else STD_i0;
-            
-            # Compute max STD using robust metric: average across spatial dimensions, then max over time
-            # This prevents single outlier nodes from dominating the metric.
-            STD_i0_spatial_avg : numpy.ndarray = STD[i][0].mean(axis=tuple(range(1, STD[i][0].ndim)));  # Average over spatial dims
-            max_STD[i, 0]      : numpy.float32 = STD_i0_spatial_avg.max();  # Max over time only
-        
+            max_Rel_Error[i, j] = Rel_Error[i][j].max();
     
 
-    elif(isinstance(model, Autoencoder_Pair)):
-        for i in range(n_Test):
-            # -------------------------------------------------------------------------------------
-            # Relative Error
+        # -------------------------------------------------------------------------------------
+        # Standard Deviation
 
-            # Decode the mean latent trajectories for each combination of parameter values.
-            U_Pred_Mean_i       : list[torch.Tensor]    = model.Decode(torch.Tensor(Zis_mean[i][0]), torch.Tensor(Zis_mean[i][1]));
-            D_Pred_Mean_i       : numpy.ndarray         = U_Pred_Mean_i[0].detach().numpy();  # (n_t_i, physics.Frame_Shape)
-            V_Pred_Mean_i       : numpy.ndarray         = U_Pred_Mean_i[1].detach().numpy();  # (n_t_i, physics.Frame_Shape)
-            if use_denorm:
-                D_Pred_Mean_i = trainer.denormalize_np(D_Pred_Mean_i, 0);
-                V_Pred_Mean_i = trainer.denormalize_np(V_Pred_Mean_i, 1);
+        # Set up an array to hold the decoding of latent trajectory.
+        FOM_Frame_Shape : list[int]             = physics.Frame_Shape;
+        U_Pred_i        : list[numpy.ndarray]   = [];
+        for j in range(n_IC):
+            U_Pred_i.append(numpy.empty([n_t_i, n_samples] + FOM_Frame_Shape, dtype = numpy.float32));
 
-            # Fetch the corresponding test predictions.
-            D_Test_i            : numpy.ndarray         = U_Test[i][0].detach().numpy();       # (n_t_i, physics.Frame_Shape)
-            V_Test_i            : numpy.ndarray         = U_Test[i][1].detach().numpy();       # (n_t_i, physics.Frame_Shape)
-            if use_denorm:
-                D_Test_i = trainer.denormalize_np(D_Test_i, 0);
-                V_Test_i = trainer.denormalize_np(V_Test_i, 1);
+        # Decode the latent trajectory for each sample.
+        for j in range(n_samples):
+            Zis_sample_ij: list[torch.Tensor] = [];
+            for k in range(n_IC):
+                Zis_sample_ij.append(torch.Tensor(Zis_samples[i][k][:, j, :]));
+            U_Pred_ij   : tuple[torch.Tensor]     = model.Decode(*Zis_sample_ij);
             
-            # Compute the std of the components of the FOM solution.
-            D_Test_i_std        : float                 = numpy.std(D_Test_i);
-            V_Test_i_std        : float                 = numpy.std(V_Test_i);
-
-            # For each frame, compute the relative error between the true and predicted FOM solutions.
-            # We normalize the error by the std of the true solution.
-            n_t_i : int = D_Test_i.shape[0];
-            for k in range(n_t_i):
-                Rel_Error[i][0][k] = numpy.mean(numpy.abs(D_Pred_Mean_i[k, ...] - D_Test_i[k, ...]))/D_Test_i_std;
-                Rel_Error[i][1][k] = numpy.mean(numpy.abs(V_Pred_Mean_i[k, ...] - V_Test_i[k, ...]))/V_Test_i_std;
-
-            # Now compute the corresponding element of max_Rel_Error
-            max_Rel_Error[i, 0] = Rel_Error[i][0].max();
-            max_Rel_Error[i, 1] = Rel_Error[i][1].max();
-
-
-            # -------------------------------------------------------------------------------------
-            # Standard Deviation
-
-            # Set up an array to hold the decoding of latent trajectory.
-            FOM_Frame_Shape : list[int]         = physics.Frame_Shape;
-            D_Pred_i        : numpy.ndarray     = numpy.empty([n_t_i, n_samples] + FOM_Frame_Shape, dtype = numpy.float32);
-            V_Pred_i        : numpy.ndarray     = numpy.empty([n_t_i, n_samples] + FOM_Frame_Shape, dtype = numpy.float32);
-
-            # Decode the latent trajectory for each sample.
-            for j in range(n_samples):
-                U_Pred_ij   : list[torch.Tensor]    = model.Decode(torch.Tensor(Zis_samples[i][0][:, j, :]), torch.Tensor(Zis_samples[i][1][:, j, :]));
-                D_Pred_i[:, j, ...]                 = U_Pred_ij[0].detach().numpy();
-                V_Pred_i[:, j, ...]                 = U_Pred_ij[1].detach().numpy();
-
-            # Compute the STD across the sample axis.
-            STD_D = numpy.std(D_Pred_i, axis = 1);
-            STD_V = numpy.std(V_Pred_i, axis = 1);
-            STD[i][0]       = trainer.scale_std_np(STD_D, 0) if use_denorm else STD_D;
-            STD[i][1]       = trainer.scale_std_np(STD_V, 1) if use_denorm else STD_V;
-
+            # Detach, convert to numpy, and store in U_Pred_i.
+            for k in range(n_IC):
+                U_Pred_ijk_np = U_Pred_ij[k].detach().numpy();
+                U_Pred_i[k][:, j, ...]             = U_Pred_ijk_np;
+    
+        # Compute the STD across the sample axis.
+        for j in range(n_IC):
+            STD_ij          = numpy.std(U_Pred_i[j], axis = 1);
+            STD[i][j]       = trainer.scale_std_np(STD_ij, j) if use_denorm else STD_ij;
+        
             # Compute max STD using robust metric: average across spatial dimensions, then max over time
             # This prevents single outlier nodes from dominating the metric.
-            STD_D_spatial_avg : numpy.ndarray = STD[i][0].mean(axis=tuple(range(1, STD[i][0].ndim)));  # Average over spatial dims
-            STD_V_spatial_avg : numpy.ndarray = STD[i][1].mean(axis=tuple(range(1, STD[i][1].ndim)));  # Average over spatial dims
-            max_STD[i, 0]     : numpy.float32 = STD_D_spatial_avg.max();  # Max over time only
-            max_STD[i, 1]     : numpy.float32 = STD_V_spatial_avg.max();  # Max over time only  
-
+            STD_ij_spatial_avg : numpy.ndarray = STD[i][j].mean(axis = tuple(range(1, STD[i][j].ndim)));  # Average over spatial dims
+            max_STD[i, j]      : numpy.float32 = STD_ij_spatial_avg.max();  # Max over time only
+    
 
     # All done!
     return max_Rel_Error, max_STD, Rel_Error, STD;
