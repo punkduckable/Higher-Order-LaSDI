@@ -34,6 +34,7 @@ from    Trainer                     import  Trainer;
 from    GaussianProcess             import  fit_gps;
 from    Initialize                  import  Initialize_Trainer;
 from    FOM_Variance                import  FOM_Variance;
+from    FOM_Rollout                 import  FOM_Rollout;
 from    Generate                    import  Generate_Training_Data;
 from    Logging                     import  Initialize_Logger, Log_Dictionary;
 from    Plot                        import  Plot_Heatmap2d, Plot_Latent_Trajectories, trainSpace_RelativeErrors_Heatmap;
@@ -48,7 +49,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 
 # Set up Sample dictionary. 
 Sample_dict = { 'FOM_Variance'      : FOM_Variance, 
-                'FOM_Greedy'        : FOM_Variance };
+                'FOM_Rollout'       : FOM_Rollout};
 
 
 # Set up the command line arguments
