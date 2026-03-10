@@ -5,18 +5,24 @@
 # Add the Physics directory to the search path.
 import  sys;
 import  os;
-Physics_Path    : str  = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, "Physics"));
+src_Path        : str   = os.path.abspath(os.path.dirname(os.path.dirname(__file__)));
+Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, "Physics"));
 sys.path.append(Physics_Path);
 
 import  logging;
-from    typing      import  Callable, Sequence;
+from    typing          import  Callable, Sequence;
 
 import  torch;
 import  numpy;
 
-from    MLP         import  MultiLayerPerceptron, act_dict;
-from    Physics     import  Physics;
+from    typing          import  TYPE_CHECKING;
+if TYPE_CHECKING:
+    from    Trainer     import  Trainer;
+    from    Physics     import  Physics;
 
+
+from    EncoderDecoder  import  EncoderDecoder;
+from    MLP             import  MultiLayerPerceptron, act_dict;
 # Set up logging.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
@@ -90,7 +96,7 @@ def _conv3d_out_shape(   in_shape    : tuple[int, int, int],
 # CNN_3D_Autoencoder class
 # -------------------------------------------------------------------------------------------------
 
-class CNN_3D_Autoencoder(torch.nn.Module):
+class CNN_3D_Autoencoder(EncoderDecoder):
     def __init__(   self,
                     reshape_shape       : list[int],
                     hidden_widths_fc    : list[int],
@@ -200,10 +206,9 @@ class CNN_3D_Autoencoder(torch.nn.Module):
 
 
         # Run the superclass initializer.
-        super().__init__();
+        super().__init__(n_IC   = 1, n_z = latent_dimension);
 
         # Store information (for return purposes).
-        self.n_IC               : int           = 1;
         self.reshape_shape      : list[int]     = reshape_shape;
 
         self.conv_channels      : list[int]     = conv_channels;
@@ -212,7 +217,6 @@ class CNN_3D_Autoencoder(torch.nn.Module):
 
         self.hidden_widths_fc   : list[int]     = hidden_widths_fc;
         self.activations_fc     : list[str]     = activations_fc
-        self.n_z                : int           = latent_dimension;
 
         # Expand conv hyperparameters.
         self.conv_kernel_sizes  : list[tuple[int, int, int]] = _expand_3tuple_param(conv_kernel_sizes, self.n_conv_layers, "conv_kernel_sizes");
@@ -442,11 +446,45 @@ class CNN_3D_Autoencoder(torch.nn.Module):
 
     def latent_initial_conditions(  self,
                                     param_grid     : numpy.ndarray,
-                                    physics        : Physics,
-                                    trainer        = None) -> list[list[numpy.ndarray]]:
+                                    physics        : "Physics",
+                                    trainer        : "Trainer") -> list[list[numpy.ndarray]]:
         """
-        This function maps a set of initial conditions for the FOM to initial conditions for the
-        latent space dynamics. See Autoencoder.latent_initial_conditions.
+        This function maps a set of initial conditions for the FOM to initial conditions for the 
+        latent space dynamics. Specifically, we take in a set of possible parameter values. For 
+        each set of parameter values, we recover the FOM IC (from physics), then map this FOM IC 
+        to a latent space IC (by encoding it). We do this for each parameter combination and then 
+        return a list housing the latent space ICs.
+
+        
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        param_grid : numpy.ndarray, shape = (n_param, n_p)
+            i,j element of this array holds the value of the j'th parameter in the i'th combination 
+            of parameter values. Here, n_p is the number of parameters and n_param is the number
+            of combinations of parameter values.
+
+        physics : "Physics"
+            allows us to calculate the IC for each combination of parameter values. This physics 
+            object should have the same number of initial conditions as self.
+
+        trainer : "Trainer"
+            The trainer object used to train the EncoderDecoder.
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        Z0 : list[list[numpy.ndarray]], len = n_param
+            i'th element is an n_IC element list whose j'th element is an numpy.ndarray of shape 
+            (1, n_z) whose k'th element holds the k'th component of the encoding of the initial
+            condition for the j'th derivative of the latent dynamics corresponding to the i'th 
+            combination of parameter values.
+                
+            If we let (U0_i, V0_i) denote the initial FOM displacement and velocity for the i'th 
+            combination of parameter values, then the i'th element of the returned list is the list 
+            [self.encoder(U0_i, V0_i)[0], self.encoder(U0_i, V0_i)[1]].
         """
 
         # Checks.

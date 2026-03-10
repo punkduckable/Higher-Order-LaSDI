@@ -26,6 +26,7 @@ from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 from    pathlib                     import  Path;
 
 import  SolveROMs;
+from    EncoderDecoder              import  EncoderDecoder;
 from    ParameterSpace              import  ParameterSpace;
 from    Physics                     import  Physics;
 from    Enums                       import  NextStep;
@@ -123,10 +124,10 @@ def main():
         next_step       = NextStep.RunSample;
     
     # Initialize the trainer.
-    trainer, param_space, physics, model, latent_dynamics = Initialize_Trainer(config, restart_dict);
+    trainer, param_space, physics, encoder_decoder, latent_dynamics = Initialize_Trainer(config, restart_dict);
 
     # Calculate and print the number of parameters
-    count_parameters(model, latent_dynamics, trainer);
+    count_parameters(encoder_decoder, latent_dynamics, trainer);
 
     # Start running steps.
     next_step = step(trainer, next_step, config);
@@ -145,7 +146,7 @@ def main():
     Save(   param_space         = param_space,
             config              = config,
             physics             = physics,
-            model               = model, 
+            encoder_decoder     = encoder_decoder, 
             latent_dynamics     = latent_dynamics,
             trainer             = trainer,
             next_step           = next_step,
@@ -158,15 +159,15 @@ def main():
     # ---------------------------------------------------------------------------------------------
 
     # Set up gaussian processes. 
-    model.cpu();
+    encoder_decoder.cpu();
 
     # Get a GP for each coefficient in the latent dynamics.
     gp_list         : list[GaussianProcessRegressor]    = fit_gps(param_space.train_space, trainer.best_train_coefs);
     
     # Compute the relative error between the FOM solution and its prediction when we rollout the 
-    # IC using the model.
+    # IC using the encoder_decoder.
     Max_Rollout_Rel_Error, Max_STD, Rollout_Rel_Error, STD  = SolveROMs.Rollout_Error_and_STD(
-                                                                model           = model, 
+                                                                encoder_decoder = encoder_decoder, 
                                                                 physics         = physics,
                                                                 param_space     = param_space,
                                                                 latent_dynamics = latent_dynamics,
@@ -183,7 +184,7 @@ def main():
 
     # Plot the latent trajectories for the i_worst'th element of the test set.
     Plot_Latent_Trajectories(  physics         = physics,
-                               model           = model,
+                               encoder_decoder = encoder_decoder,
                                latent_dynamics = latent_dynamics,
                                gp_list         = gp_list,
                                param_grid      = param_space.test_space[i_worst, :].reshape(1, -1),
@@ -215,7 +216,7 @@ def main():
     for i in range(param_space.n_test()):
         # Reconstruct the FOM solution, store it in a list.
         LOGGER.debug("Reconstructing the FOM solution for parameter combination %d (%s)" % (i, str(param_space.test_space[i])));
-        ith_Reconstruction : torch.Tensor | tuple[torch.Tensor, torch.Tensor] = model(*trainer.U_Test[i]);
+        ith_Reconstruction : torch.Tensor | tuple[torch.Tensor, torch.Tensor] = encoder_decoder(*trainer.U_Test[i]);
         if(isinstance(ith_Reconstruction, tuple)):
             ith_Reconstruction = list(ith_Reconstruction);
         elif(isinstance(ith_Reconstruction, torch.Tensor)):
@@ -336,7 +337,7 @@ def main():
         param_worst    : numpy.ndarray         = param_space.test_space[i_worst, :].reshape(1, -1);
         t_worst        : torch.Tensor          = trainer.t_Test[i_worst];                          # shape = (n_t)
         U_True_worst   : list[torch.Tensor]    = trainer.U_Test[i_worst];                          # length = n_IC        
-        Zi_mean_np     : list[numpy.ndarray]   = average_rom(   model           = model,            # n_IC element list whose j'th element has shape (n_t(i), n_z)
+        Zi_mean_np     : list[numpy.ndarray]   = average_rom(   encoder_decoder = encoder_decoder, # n_IC element list whose j'th element has shape (n_t(i), n_z)
                                                                 physics         = physics, 
                                                                 latent_dynamics = latent_dynamics, 
                                                                 gp_list         = gp_list, 
@@ -348,7 +349,7 @@ def main():
         Zi_mean     : list[torch.Tensor]    = [];
         for i in range(len(Zi_mean_np)):
             Zi_mean.append(torch.Tensor(Zi_mean_np[i]));
-        U_Pred_worst : list[torch.Tensor]          = list(model.Decode(*Zi_mean));             # length = n_IC
+        U_Pred_worst : list[torch.Tensor]          = list(encoder_decoder.Decode(*Zi_mean));             # length = n_IC
 
         # Make a movie for each derivative of the solution.
         n_IC        : int                   = physics.n_IC;
@@ -452,9 +453,9 @@ def main():
         
 
         # Plot maximum (across the frames) relative error between a frame and the frame that the 
-        # model predicts when we rollout the IC for the corresponding combination of parameter 
-        # values. Do this for each combination of parameter values and derivative of the FOM 
-        # solution.
+        # encoder_decoder predicts when we rollout the IC for the corresponding combination of 
+        # parameter values. Do this for each combination of parameter values and derivative of 
+        # the FOM solution.
         for d in range(n_IC):
             if(d == 0):
                 title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| u_{\text{Rollout}}(t_k, x_j) - u_{\text{True}}(t_k, x_j) \right|} {\sigma_{i, j} \left( u_{\text{True}}(t_k, x_j) \right) }$';
@@ -522,15 +523,15 @@ def step(trainer        : Trainer,
     -----------------------------------------------------------------------------------------------
     
     trainer : Trainer
-        A Trainer class object that we use when training the model for a particular instance of 
-        the settings.
+        A Trainer class object that we use when training the encoder_decoder for a particular 
+        instance of the settings.
 
     next_step : NextStep
         The step to execute first. When restarting, this should be loaded from the restart file.
 
     config : dict
         This should be a dictionary that we loaded from a .yml file. It should house all the 
-        settings we expect to use to generate the data and train the models.
+        settings we expect to use to generate the data and train the encoder_decoder.
 
 
     -----------------------------------------------------------------------------------------------
@@ -614,14 +615,14 @@ def step(trainer        : Trainer,
 def Save(   param_space         : ParameterSpace, 
             config              : dict,
             physics             : Physics, 
-            model               : torch.nn.Module, 
+            encoder_decoder     : EncoderDecoder, 
             latent_dynamics     : LatentDynamics,
             trainer             : Trainer, 
             next_step           : NextStep, 
             restart_filename    : str               = "") -> None:
     """
-    This function saves a trained model, trainer, latent dynamics, etc. You should call this 
-    function after running the LASDI algorithm.
+    This function saves a trained encoder_decoder, trainer, latent dynamics, etc. You should call 
+    this function after running the LASDI algorithm.
 
 
     
@@ -634,24 +635,24 @@ def Save(   param_space         : ParameterSpace,
     
     config : dict
         This should be a dictionary that we loaded from a .yml file. It should house all the 
-        settings we expect to use to generate the data and train the models.
+        settings we expect to use to generate the data and train the encoder_decoder.
 
     physics : Physics
         defines the FOM model. We can use it to fetch the initial conditions and FOM solution for
-        a particular combination of parameter values. physics, latent_dynamics, and model should 
-        have the same number of initial conditions.
+        a particular combination of parameter values. physics, latent_dynamics, and encoder_decoder 
+        should have the same number of initial conditions.
 
-    model : torch.nn.Module
-        maps between the FOM and ROM spaces. physics, latent_dynamics, and model should have the 
-        same number of initial conditions.
+    encoder_decoder : EncoderDecoder
+        maps between the FOM and ROM spaces. physics, latent_dynamics, and encoder_decoder should 
+        have the same number of initial conditions.
 
     latent_dynamics : LatentDynamics 
-        defines the dynamics in model's latent space. physics, latent_dynamics, and model should 
-        have the same number of initial conditions.
+        defines the dynamics in encoder_decoder's latent space. physics, latent_dynamics, and 
+        encoder_decoder should have the same number of initial conditions.
 
     trainer : Trainer
-        trains model using physics to define the FOM, latent_dynamics to define the ROM, and 
-        model to connect them.
+        trains encoder_decoder using physics to define the FOM, latent_dynamics to define the ROM, 
+        and encoder_decoder to connect them.
 
     next_step : NextStep
         An enumeration indicating the next step (should we continue training). This should 
@@ -672,8 +673,8 @@ def Save(   param_space         : ParameterSpace,
 
     # Checks.
     n_IC    : int   = latent_dynamics.n_IC;
-    assert model.n_IC       == n_IC, "model.n_IC = %d != n_IC = %d" % (model.n_IC, n_IC);
-    assert(physics.n_IC     == n_IC);
+    assert encoder_decoder.n_IC     == n_IC, "encoder_decoder.n_IC = %d != n_IC = %d" % (encoder_decoder.n_IC, n_IC);
+    assert(physics.n_IC             == n_IC);
 
 
     # Save restart (or final) file.
@@ -711,7 +712,7 @@ def Save(   param_space         : ParameterSpace,
     # Build the restart save dictionary and then save it.
     restart_dict = {'parameter_space'   : param_space.export(),
                     'physics'           : physics.export(),
-                    'model'             : model.export(),
+                    'encoder_decoder'   : encoder_decoder.export(),
                     'latent_dynamics'   : latent_dynamics.export(),
                     'trainer'           : trainer.export(),
                     'timestamp'         : date_str,
@@ -729,31 +730,32 @@ def Save(   param_space         : ParameterSpace,
 # Helper functions
 # -------------------------------------------------------------------------------------------------
 
-def count_parameters(   model           : torch.nn.Module, 
+def count_parameters(   encoder_decoder : EncoderDecoder, 
                         latent_dynamics : LatentDynamics,
                         trainer         : Trainer) -> None:
     """
-    Calculate and print the number of parameters in the model, latent dynamics, and trainer.
+    Calculate and print the number of parameters in the encoder_decoder, latent dynamics, and 
+    trainer.
     
     -----------------------------------------------------------------------------------------------
     Arguments
     -----------------------------------------------------------------------------------------------
     
-    model : torch.nn.Module
-        The neural network model (autoencoder).
+    encoder_decoder : EncoderDocoder
+        The neural network encoder_decoder.
         
     latent_dynamics : LatentDynamics
-        The latent dynamics model.
+        The latent dynamics encoder_decoder.
         
     trainer : Trainer
         The trainer object which may contain learnable coefficients.
     """
     
-    # Count model parameters
-    total_params = 0;
-    trainable_params = 0;
+    # Count encoder_decoder parameters
+    total_params        = 0;
+    trainable_params    = 0;
     
-    for param in model.parameters():
+    for param in encoder_decoder.parameters():
         total_params += param.numel();
         if param.requires_grad:
             trainable_params += param.numel();
@@ -767,9 +769,9 @@ def count_parameters(   model           : torch.nn.Module,
     
     # Print summary
     LOGGER.info("=" * 80);
-    LOGGER.info("Model Parameter Summary");
+    LOGGER.info("EncoderDecoder Parameter Summary");
     LOGGER.info("=" * 80);
-    LOGGER.info("Model:");
+    LOGGER.info("EncoderDecoder:");
     LOGGER.info("  Total parameters:      {:,}".format(total_params));
     LOGGER.info("  Trainable parameters:  {:,}".format(trainable_params));
     LOGGER.info("  Non-trainable:         {:,}".format(total_params - trainable_params));

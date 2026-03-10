@@ -2,15 +2,15 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-# Add LatentDynamics, Physics, and Model directories to the search path.
+# Add LatentDynamics, Physics, and EncoderDecoder directories to the search path.
 import  sys;
 import  os;
-LD_Path         : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
-Physics_Path    : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
-Model_Path      : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "Models"));
+LD_Path             : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
+Physics_Path        : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
+EncoderDecoder_Path : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "EncoderDecoder"));
 sys.path.append(LD_Path); 
 sys.path.append(Physics_Path); 
-sys.path.append(Model_Path); 
+sys.path.append(EncoderDecoder_Path); 
 
 import  logging;
 
@@ -27,6 +27,7 @@ from    SwitchSINDy         import  SwitchSINDy;
 from    DampedSpring        import  DampedSpring;
 from    ParameterSpace      import  ParameterSpace;
 from    Trainer             import  Trainer;
+from    EncoderDecoder      import  EncoderDecoder;
 from    Autoencoder         import  Autoencoder, load_Autoencoder;
 from    Autoencoder_Pair    import  Autoencoder_Pair, load_Autoencoder_Pair;
 from    CNN_3D_Autoencoder  import  CNN_3D_Autoencoder, load_CNN_3D_Autoencoder;
@@ -44,35 +45,35 @@ LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
 # Set up the dictionaries; we use this to allow the code to call different classes, functions 
 # depending on the settings.
-model_dict      =  {'ae'                    : Autoencoder,
-                    'autoencoder'           : Autoencoder,
-                    'pair'                  : Autoencoder_Pair,
-                    'autoencoder_pair'      : Autoencoder_Pair,
-                    'cnn_3d'                : CNN_3D_Autoencoder,
-                    'cnn_3d_ae'             : CNN_3D_Autoencoder,
-                    'cnn_3d_autoencoder'    : CNN_3D_Autoencoder};
-model_load_dict =  {'ae'                    : load_Autoencoder,
-                    'autoencoder'           : load_Autoencoder,
-                    'pair'                  : load_Autoencoder_Pair,
-                    'autoencoder_pair'      : load_Autoencoder_Pair,
-                    'cnn_3d'                : load_CNN_3D_Autoencoder,
-                    'cnn_3d_ae'             : load_CNN_3D_Autoencoder,
-                    'cnn_3d_autoencoder'    : load_CNN_3D_Autoencoder};
-ld_dict         =  {'sindy'                 : SINDy, 
-                    'spring'                : DampedSpring,
-                    'switch'                : SwitchSINDy};
-physics_dict    =  {'Burgers'               : Burgers.Burgers,
-                    'BurgersSecondOrder'    : BurgersSecondOrder.Burgers,
-                    'Burgers2D'             : Burgers2D,
-                    'Explicit'              : Explicit.Explicit,
-                    'ExplicitSecondOrder'   : ExplicitSecondOrder.Explicit,
-                    'Thermal'               : Thermal};
+encoder_decoder_dict = {        'ae'                    : Autoencoder,
+                                'autoencoder'           : Autoencoder,
+                                'pair'                  : Autoencoder_Pair,
+                                'autoencoder_pair'      : Autoencoder_Pair,
+                                'cnn_3d'                : CNN_3D_Autoencoder,
+                                'cnn_3d_ae'             : CNN_3D_Autoencoder,
+                                'cnn_3d_autoencoder'    : CNN_3D_Autoencoder};
+encoder_decoder_load_dict = {   'ae'                    : load_Autoencoder,
+                                'autoencoder'           : load_Autoencoder,
+                                'pair'                  : load_Autoencoder_Pair,
+                                'autoencoder_pair'      : load_Autoencoder_Pair,
+                                'cnn_3d'                : load_CNN_3D_Autoencoder,
+                                'cnn_3d_ae'             : load_CNN_3D_Autoencoder,
+                                'cnn_3d_autoencoder'    : load_CNN_3D_Autoencoder};
+ld_dict = {                     'sindy'                 : SINDy, 
+                                'spring'                : DampedSpring,
+                                'switch'                : SwitchSINDy};
+physics_dict = {                'Burgers'               : Burgers.Burgers,
+                                'BurgersSecondOrder'    : BurgersSecondOrder.Burgers,
+                                'Burgers2D'             : Burgers2D,
+                                'Explicit'              : Explicit.Explicit,
+                                'ExplicitSecondOrder'   : ExplicitSecondOrder.Explicit,
+                                'Thermal'               : Thermal};
 """
-                    'Advection'             : Advection,
-                    'NonlinearElasticity'   : NonlinearElasticity,
-                    'WaveEquation'          : WaveEquation,
-                    "KleinGordon"           : KleinGordon,
-                    "Telegraphers"          : Telegraphers};
+                                'Advection'             : Advection,
+                                'NonlinearElasticity'   : NonlinearElasticity,
+                                'WaveEquation'          : WaveEquation,
+                                'KleinGordon'           : KleinGordon,
+                                'Telegraphers'          : Telegraphers};
 """
 
 
@@ -81,7 +82,7 @@ physics_dict    =  {'Burgers'               : Burgers.Burgers,
 # Initialization functions
 # -------------------------------------------------------------------------------------------------
 
-def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer, ParameterSpace, Physics, torch.nn.Module, LatentDynamics]:
+def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer, ParameterSpace, Physics, EncoderDecoder, LatentDynamics]:
     """
     Initialize a Trainer object with a latent space model and physics object according to config 
     file. 
@@ -94,9 +95,9 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer
 
     config: dict
         The dictionary that we loaded from a .yml file. It should house all the settings we expect 
-        to use to generate the data and train the models. We expect this dictionary to contain the 
-        following keys (if a key is within a dictionary that is specified by another key, then we 
-        tab the sub-key relative to the dictionary key): 
+        to use to generate the data and train the encoder_decoders. We expect this dictionary to 
+        contain the following keys (if a key is within a dictionary that is specified by another key, 
+        then we tab the sub-key relative to the dictionary key): 
             - physics           (used by "initialize_physics")
                 - type
             - latent_dynamics   (how we parameterize the latent dynamics; e.g. SINDy)
@@ -105,7 +106,7 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer
 
     restart_dict : dict, optional
         If provided, then we will use the settings in this dictionary to initialize the trainer, 
-        parameter space, physics, model, and latent dynamics. If not provided, then we will 
+        parameter space, physics, encoder_decoder, and latent dynamics. If not provided, then we will 
         initialize everything from scratch.
             
     
@@ -113,7 +114,7 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer
     Returns
     -----------------------------------------------------------------------------------------------
 
-    trainer, param_space, physics, model, latent_dynamics
+    trainer, param_space, physics, encoder_decoder, latent_dynamics
      
     trainer : Trainer
         Should have been initialized using the settings in config and is ready to begin training.
@@ -125,15 +126,15 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer
         Encodes the FOM model. It allows us to fetch the FOM solution and/or initial conditions 
         for a particular combination of parameters.
 
-    model : torch.nn.Module
-        The model we use to map between the FOM and ROM spaces. Specifically, the model can 
-        encode a snapshot/frame (measurement at a specific time) of the FOM solution to its 
-        corresponding ROM frame. It can also decode a ROM frame back to a FOM frame. The n_IC 
-        attribute of this object must match that of latent_dynamics.
+    encoder_decoder : EncoderDecoder
+        The encoder_decoder we use to map between the FOM and ROM spaces. Specifically, the 
+        encoder_decoder can encode a snapshot/frame (measurement at a specific time) of the FOM 
+        solution to its corresponding ROM frame. It can also decode a ROM frame back to a FOM
+        frame. The n_IC attribute of this object must match that of latent_dynamics.
 
     latent_dynamics : LatentDynamics
-        Defines the dynamical system in model's latent space. The n_IC attribute of this object 
-        must match the n_IC attribute of model.
+        Defines the dynamical system in encoder_decoder's latent space. The n_IC attribute of this 
+        object must match the n_IC attribute of encoder_decoder.
     """
 
     # Set up a ParameterSpace object. This will keep track of all parameter combinations we want
@@ -149,14 +150,14 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
         physics.load(restart_dict['physics']);
 
-    # Get the model (autoencoder). We try to learn dynamics that describe how the latent space of
-    # this model evolve over time. If we are using a restart file, then load the saved model 
-    # parameters from file.
+    # Get the encoder_decoder. We try to learn dynamics that describe how the latent space of
+    # this encoder_decoder evolve over time. If we are using a restart file, then load the saved 
+    # encoder_decoder parameters from file.
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
-        model_type : str    = config['model']['type'];
-        model               = model_load_dict[model_type](restart_dict['model']);
+        encoder_decoder_type : str    = config['EncoderDecoder']['type'];
+        encoder_decoder               = encoder_decoder_load_dict[encoder_decoder_type](restart_dict['EncoderDecoder']);
     else: 
-        model               = Initialize_Model(physics, config);
+        encoder_decoder               = Initialize_Encoder_Decoder(physics, config);
 
     # Initialize the latent dynamics model. If we are using a restart file, then load the saved
     # latent dynamics from this file. 
@@ -164,13 +165,13 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer
     assert(ld_type in config['latent_dynamics']);
     assert(ld_type in ld_dict);
     if(ld_type == "switch"):
-        latent_dynamics         = ld_dict[ld_type]( n_z             = model.n_z, 
+        latent_dynamics         = ld_dict[ld_type]( n_z             = encoder_decoder.n_z, 
                                                     coef_norm_order = config['latent_dynamics']['coef_norm_order'],
                                                     Uniform_t_Grid  = physics.Uniform_t_Grid,
                                                     switch_time     = physics.switch_time,
                                                     lstsq_reg       = config['latent_dynamics'].get('lstsq_reg', 1.0));
     else:
-        latent_dynamics         = ld_dict[ld_type]( n_z             = model.n_z, 
+        latent_dynamics         = ld_dict[ld_type]( n_z             = encoder_decoder.n_z, 
                                                     coef_norm_order = config['latent_dynamics']['coef_norm_order'],
                                                     Uniform_t_Grid  = physics.Uniform_t_Grid,
                                                     lstsq_reg       = config['latent_dynamics'].get('lstsq_reg', 1.0));
@@ -180,23 +181,23 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer
 
     # Initialize the trainer object. If we are using a restart file, then load the 
     # trainer from that file.
-    trainer                 = Trainer(physics, model, latent_dynamics, param_space, config);
+    trainer                 = Trainer(physics, encoder_decoder, latent_dynamics, param_space, config);
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
         trainer.load(restart_dict['trainer']);
 
-    # If we are loading from a restart file, make a checkpoint using the current model parameters.
+    # If we are loading from a restart file, make a checkpoint using the current encoder_decoder parameters.
     if (bool(restart_dict) == True): 
-        torch.save(model.cpu().state_dict(), trainer.path_checkpoint + '/' + 'checkpoint.pt');
+        torch.save(encoder_decoder.cpu().state_dict(), trainer.path_checkpoint + '/' + 'checkpoint.pt');
 
 
     # All done!
-    return trainer, param_space, physics, model, latent_dynamics;
+    return trainer, param_space, physics, encoder_decoder, latent_dynamics;
 
 
 
-def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
+def Initialize_Encoder_Decoder(physics : Physics, config : dict) -> EncoderDecoder:
     """
-    Initialize a model (autoencoder) according to config file. 
+    Initialize a encoder_decoder (autoencoder) according to config file. 
     
 
     
@@ -210,10 +211,10 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
 
     config : dict
         This should be a dictionary that we loaded from a .yml file. It should house all the 
-        settings we expect to use to generate the data and train the models. We expect this 
-        dictionary to contain the following keys (if a key is within a dictionary that is specified 
-        by another key, then we tab the sub-key relative to the dictionary key): 
-            - model
+        settings we expect to use to generate the data and train the encoder_decoder. We expect 
+        this dictionary to contain the following keys (if a key is within a dictionary that is 
+        specified by another key, then we tab the sub-key relative to the dictionary key): 
+            - encoder_decoder
                 - type
     
        
@@ -222,34 +223,34 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
     Returns
     -----------------------------------------------------------------------------------------------
 
-    model : torch.nn.Module
-        A torch.nn.Module object that acts as the trainable model in the LaSDI framework. This 
-        model should have a latent space of some form. We learn a set of dynamics to describe how 
-        this latent space evolves over time. 
+    encoder_decoder : EncoderDecoder
+        A EncoderDecoder object that acts as the trainable encoder_decoder in the LaSDI framework. 
+        This encoder_decoder should have a latent space of some form. We learn a set of dynamics to 
+        describe how this latent space evolves over time. 
     """
 
 
-    # First, determine what model we are using in the latent dynamics. Make sure the user 
+    # First, determine what encoder_decoder we are using in the latent dynamics. Make sure the user 
     # included all the information that is necessary to initialize the corresponding dynamics.
-    model_type : str = config['model']['type'];
-    assert(model_type in config['model']);
-    assert(model_type in model_dict);
-    LOGGER.info("Initializing Model (%s)" % model_type);
+    encoder_decoder_type : str = config['EncoderDecoder']['type'];
+    assert(encoder_decoder_type in config['EncoderDecoder']);
+    assert(encoder_decoder_type in encoder_decoder_dict);
+    LOGGER.info("Initializing EncoderDecoder (%s)" % encoder_decoder_type);
 
     # Autoencoder, autoencoder pair case.
-    if(model_type == "ae" or model_type == "pair" or model_type == "autoencoder" or model_type == "autoencoder_pair"):
+    if(encoder_decoder_type == "ae" or encoder_decoder_type == "pair" or encoder_decoder_type == "autoencoder" or encoder_decoder_type == "autoencoder_pair"):
         # Next, fetch the hidden widths and latent dimension (n_z). 
-        model_config        : dict              = config['model'][model_type];
-        hidden_widths       : list[int]         = model_config['hidden_widths'];
-        n_z                 : int               = model_config['latent_dimension'];
+        encoder_decoder_config  : dict              = config['EncoderDecoder'][encoder_decoder_type];
+        hidden_widths           : list[int]         = encoder_decoder_config['hidden_widths'];
+        n_z                     : int               = encoder_decoder_config['latent_dimension'];
 
         # Fetch the activations. This can either be a string or a list of strings. If it's 
         # a string, then we use that activation for all layers.
         n_hidden_layers     : int               = len(hidden_widths);
-        if(isinstance(model_config['activations'], str)):
-            activations         : list[str]     = [model_config['activations']] * n_hidden_layers;   # The final layer has no activation.
-        elif(isinstance(model_config['activations'], list)):
-            activations         : list[str]     = model_config['activations'];
+        if(isinstance(encoder_decoder_config['activations'], str)):
+            activations         : list[str]     = [encoder_decoder_config['activations']] * n_hidden_layers;   # The final layer has no activation.
+        elif(isinstance(encoder_decoder_config['activations'], list)):
+            activations         : list[str]     = encoder_decoder_config['activations'];
             assert(len(activations) == n_hidden_layers);
         else:
             raise ValueError("Activations must be a string or a list of strings.");
@@ -259,44 +260,44 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
         space_dim           : int               = numpy.prod(Frame_Shape).item();
         widths              : list[int]         = [space_dim] + hidden_widths + [n_z];
 
-        # Now build the model!
-        model           : torch.nn.Module       = model_dict[model_type](
+        # Now build the encoder_decoder!
+        encoder_decoder : EncoderDecoder        = encoder_decoder_dict[encoder_decoder_type](
                                                         widths          = widths, 
                                                         activations     = activations, 
                                                         reshape_shape   = Frame_Shape);
 
         # All done!
-        return model;
+        return encoder_decoder;
 
 
     # Convolutional autoencoder case.
-    elif(model_type == "cnn_3d" or model_type == "cnn_3d_ae" or model_type == "cnn_3d_autoencoder"):
-        model_config        : dict              = config['model'][model_type];
+    elif(encoder_decoder_type == "cnn_3d" or encoder_decoder_type == "cnn_3d_ae" or encoder_decoder_type == "cnn_3d_autoencoder"):
+        encoder_decoder_config  : dict              = config['EncoderDecoder'][encoder_decoder_type];
 
         # FC configuration (analogous to the AE's hidden_widths/activations).
-        hidden_widths_fc    : list[int]         = model_config.get('hidden_widths_fc', model_config.get('hidden_widths'));
-        n_z                 : int               = model_config['latent_dimension'];
+        hidden_widths_fc        : list[int]         = encoder_decoder_config.get('hidden_widths_fc', encoder_decoder_config.get('hidden_widths'));
+        n_z                     : int               = encoder_decoder_config['latent_dimension'];
 
         # FC activations can either be a string or a list of strings.
-        n_hidden_layers     : int               = len(hidden_widths_fc);
-        act_cfg = model_config.get('activations_fc', model_config.get('activations'));
+        n_hidden_layers         : int               = len(hidden_widths_fc);
+        act_cfg = encoder_decoder_config.get('activations_fc', encoder_decoder_config.get('activations'));
         if(isinstance(act_cfg, str)):
-            activations_fc       : list[str]     = [act_cfg] * n_hidden_layers;
+            activations_fc      : list[str]        = [act_cfg] * n_hidden_layers;
         elif(isinstance(act_cfg, list)):
-            activations_fc       : list[str]     = act_cfg;
+            activations_fc      : list[str]        = act_cfg;
             assert(len(activations_fc) == n_hidden_layers);
         else:
             raise ValueError("activations_fc must be a string or a list of strings.");
 
         # Conv configuration.
-        conv_channels       : list[int]         = model_config['conv_channels'];
-        conv_kernel_sizes   = model_config.get('conv_kernel_sizes', 3);
-        conv_strides        = model_config.get('conv_strides', 2);
-        conv_paddings       = model_config.get('conv_paddings', 1);
+        conv_channels       : list[int]         = encoder_decoder_config['conv_channels'];
+        conv_kernel_sizes   = encoder_decoder_config.get('conv_kernel_sizes', 3);
+        conv_strides        = encoder_decoder_config.get('conv_strides', 2);
+        conv_paddings       = encoder_decoder_config.get('conv_paddings', 1);
 
         # Per-layer conv activations. This can be a string (use same activation for all conv layers)
         # or a list of strings of length len(conv_channels) - 1.
-        conv_act_cfg = model_config.get('conv_activations', 'relu');
+        conv_act_cfg = encoder_decoder_config.get('conv_activations', 'relu');
         if(isinstance(conv_act_cfg, str)):
             conv_activations : list[str] = [conv_act_cfg] * (len(conv_channels) - 1);
         elif(isinstance(conv_act_cfg, list)):
@@ -312,7 +313,7 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
         reshape_shape   : list[int] = [int(x) for x in Frame_Shape[1:]];
         assert conv_channels[0] == C, "conv_chanels[0] = %d, but the data has %d channels. These must match" % (conv_channels[0], C);
 
-        model           : torch.nn.Module       = model_dict[model_type](
+        encoder_decoder     : EncoderDecoder    = encoder_decoder_dict[encoder_decoder_type](
                                                         reshape_shape        = reshape_shape,
                                                         hidden_widths_fc     = hidden_widths_fc,
                                                         activations_fc       = activations_fc,
@@ -323,10 +324,10 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
                                                         conv_paddings        = conv_paddings,
                                                         conv_activations     = conv_activations);
 
-        return model;
+        return encoder_decoder;
 
     else:
-        raise ValueError("Model type %s not supported." % model_type);
+        raise ValueError("EncoderDecoder type %s not supported." % encoder_decoder_type);
 
 
 
@@ -341,9 +342,9 @@ def Initialize_Physics(config: dict, param_names : list[str]) -> Physics:
 
     config : dict
         A dictionary we loaded from a .yml file. It should house all the settings we expect to use 
-        to generate the data and train the models. We expect this dictionary to contain the 
-        following keys (if a key is within a dictionary that is specified by another key, then we 
-        tab the sub-key relative to the dictionary key): 
+        to generate the data and train the encoder_decoders. We expect this dictionary to contain 
+        the following keys (if a key is within a dictionary that is specified by another key, then 
+        we tab the sub-key relative to the dictionary key): 
             - physics 
                 - type
 

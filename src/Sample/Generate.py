@@ -224,16 +224,16 @@ def Generate_Training_Data(trainer : Trainer) -> NextStep:
                     U_new_i = new_U_Train[i];  # List of tensors (one per IC)
                     t_new_i = new_t_Train[i];  # Time grid tensor
                     
-                    # Move model to CPU for encoding (calibrate expects CPU tensors)
-                    original_device = next(trainer.model.parameters()).device;
-                    model_cpu = trainer.model.cpu();
+                    # Move encoder_decoder to CPU for encoding (calibrate expects CPU tensors)
+                    original_device = next(trainer.encoder_decoder.parameters()).device;
+                    encoder_decoder_cpu = trainer.encoder_decoder.cpu();
                     with torch.no_grad():
                         # Encode trajectory 
-                        Z_new_i_tuple = model_cpu.Encode(*[u.cpu() for u in U_new_i]);
+                        Z_new_i_tuple = encoder_decoder_cpu.Encode(*[u.cpu() for u in U_new_i]);
                         Z_new_i_list = list(Z_new_i_tuple);  # Convert tuple to list
                     
-                    # Move model back to original device
-                    trainer.model.to(original_device);
+                    # Move encoder_decoder back to original device
+                    trainer.encoder_decoder.to(original_device);
                     
                     # Prepare inputs for calibrate: expects list[list[tensor]] where inner list has n_IC elements
                     Latent_States_list = [Z_new_i_list];  # list[list[tensor]], one param combination

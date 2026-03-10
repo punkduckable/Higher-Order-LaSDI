@@ -7,13 +7,13 @@ import sys;
 from pathlib import Path;
 
 # Resolve paths relative to the project root (Higher-Order-LaSDI/), independent of CWD.
-Figures_Path    : str   = os.path.join(os.path.abspath(os.path.dirname(os.path.dirname(__file__))), "Figures");
-Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
-LD_Path         : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
-Model_Path      : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Models"));
+Figures_Path        : str   = os.path.join(os.path.abspath(os.path.dirname(os.path.dirname(__file__))), "Figures");
+Physics_Path        : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
+LD_Path             : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
+EncoderDecoder_Path : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "EncoderDecoder"));
 sys.path.append(Physics_Path);
 sys.path.append(LD_Path);
-sys.path.append(Model_Path);
+sys.path.append(EncoderDecoder_Path);
 
 import  logging;
 
@@ -23,6 +23,7 @@ import  matplotlib.pyplot           as      plt;
 import  matplotlib                  as      mpl;
 from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 
+from    EncoderDecoder              import  EncoderDecoder;
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
 from    SolveROMs                   import  sample_roms;
@@ -54,7 +55,7 @@ mpl.rcParams['ytick.direction'] = 'in';
 # -------------------------------------------------------------------------------------------------
 
 def Plot_Latent_Trajectories(physics         : Physics,
-                             model           : torch.nn.Module,
+                             encoder_decoder : EncoderDecoder,
                              latent_dynamics : LatentDynamics,
                              gp_list         : list[GaussianProcessRegressor],
                              param_grid      : numpy.ndarray,
@@ -79,8 +80,8 @@ def Plot_Latent_Trajectories(physics         : Physics,
     physics : Physics
         A Physics object which acts as a wrapper for the FOM. We use this to get the FOM IC.
 
-    model : torch.nn.Module
-        The model we use to encode the FOM IC and the FOM trajectories.
+    encoder_decoder : EncoderDecoder
+        The EncoderDecoder we use to encode the FOM IC and the FOM trajectories.
 
     latent_dynamics : LatentDynamics
         The LatentDynamics model we use to simulate the latent dynamics forward in time.
@@ -123,7 +124,7 @@ def Plot_Latent_Trajectories(physics         : Physics,
 
     # Checks
     assert isinstance(physics, Physics),                "type(physics) = %s" % type(physics);
-    assert isinstance(model, torch.nn.Module),          "type(model) = %s" % type(model);
+    assert isinstance(encoder_decoder, EncoderDecoder), "type(encoder_decoder) = %s" % type(EncoderDecoder);
     assert isinstance(latent_dynamics, LatentDynamics), "type(latent_dynamics) = %s" % type(latent_dynamics);
     assert isinstance(gp_list, list),                   "type(gp_list) = %s" % type(gp_list);
     assert len(gp_list)     == latent_dynamics.n_coefs, "len(gp_list) = %d != latent_dynamics.n_coefs = %d" % (len(gp_list), latent_dynamics.n_coefs);
@@ -163,7 +164,7 @@ def Plot_Latent_Trajectories(physics         : Physics,
     # Here, n_param is the number of combinations of parameter values.
     LOGGER.info("Solving the latent dynamics using %d samples of the posterior distributions for %d combinations of parameter values" % (n_samples, n_param));
     Predicted_Latent_Trajectories : list[list[numpy.ndarray]] = sample_roms( 
-                                                                    model           = model, 
+                                                                    encoder_decoder = encoder_decoder, 
                                                                     physics         = physics, 
                                                                     latent_dynamics = latent_dynamics, 
                                                                     gp_list         = gp_list, 
@@ -178,7 +179,7 @@ def Plot_Latent_Trajectories(physics         : Physics,
     True_Latent_Trajectories : list[list[numpy.ndarray]] = [];          # len = n_param
     for i in range(n_param):
         ith_True_Latent_Trajectories : list[numpy.ndarray] = [];
-        ith_Encoding : tuple[torch.Tensor] = model.Encode(*U_True[i]);
+        ith_Encoding : tuple[torch.Tensor] = encoder_decoder.Encode(*U_True[i]);
         for j in range(len(ith_Encoding)):
                 ith_True_Latent_Trajectories.append(ith_Encoding[j].detach().numpy());
         

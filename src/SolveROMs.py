@@ -4,13 +4,13 @@
 
 import  sys;
 import  os;
-Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
-LD_Path         : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
-Model_Path      : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Models"));
-Utilities_Path  : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
+Physics_Path        : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
+LD_Path             : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
+EncoderDecoder_Path : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "EncoderDecoder"));
+Utilities_Path      : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
 sys.path.append(Physics_Path);
 sys.path.append(LD_Path);
-sys.path.append(Model_Path);
+sys.path.append(EncoderDecoder_Path);
 sys.path.append(Utilities_Path);
 
 import  torch;
@@ -21,6 +21,7 @@ from    GaussianProcess             import  eval_gp, sample_coefs, fit_gps;
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
 from    ParameterSpace              import  ParameterSpace;
+from    EncoderDecoder              import  EncoderDecoder;
 from    Trainer                     import  Trainer;
 
 import  logging;
@@ -32,7 +33,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # Simulate latent dynamics
 # -------------------------------------------------------------------------------------------------
 
-def average_rom(model           : torch.nn.Module, 
+def average_rom(encoder_decoder : EncoderDecoder, 
                 physics         : Physics, 
                 latent_dynamics : LatentDynamics, 
                 gp_list         : list[GaussianProcessRegressor], 
@@ -51,17 +52,18 @@ def average_rom(model           : torch.nn.Module,
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    model : torch.nn.Module
-        The actual model object that we use to map the ICs into the latent space. physics, 
-        latent_dynamics, and model should have the same number of initial conditions.
+    encoder_decoder : EncoderDecoder
+        The actual EncoderDecoder object that we use to map the ICs into the latent space. physics, 
+        latent_dynamics, and EncoderDecoder should have the same number of initial conditions.
 
     physics : Physics
         Allows us to get the latent IC solution for each combination of parameter values. physics, 
-        latent_dynamics, and model should have the same number of initial conditions.
+        latent_dynamics, and EncoderDecoder should have the same number of initial conditions.
     
     latent_dynamics : LatentDynamics
-        describes how we specify the dynamics in the model's latent space. We assume that 
-        physics, latent_dynamics, and model all have the same number of initial conditions.
+        describes how we specify the dynamics in the EncoderDecoder's latent space. We assume that 
+        physics, latent_dynamics, and EncoderDecoder all have the same number of initial 
+        conditions.
 
     gp_list : list[], len = n_coef
         An n_coef element list of trained GP regressor objects. The i'th element of this list is 
@@ -107,14 +109,14 @@ def average_rom(model           : torch.nn.Module,
 
     n_IC    : int   = latent_dynamics.n_IC;
     n_z     : int   = latent_dynamics.n_z;
-    assert model.n_IC       == n_IC,                "model.n_IC = %d, n_IC %d" % (model.n_IC, n_IC);
-    assert physics.n_IC     == n_IC,                "physics.n_IC = %d, n_IC %d" % (physics.n_IC, n_IC);
+    assert encoder_decoder.n_IC == n_IC,            "encoder_decoder.n_IC = %d, n_IC %d" % (encoder_decoder.n_IC, n_IC);
+    assert physics.n_IC         == n_IC,            "physics.n_IC = %d, n_IC %d" % (physics.n_IC, n_IC);
 
 
     # For each parameter in param_grid, fetch the corresponding initial condition and then encode
     # it. This gives us a list whose i'th element holds the encoding of the i'th initial condition.
     LOGGER.debug("Fetching latent space initial conditions for %d combinations of parameters." % n_param);
-    Z0      : list[list[numpy.ndarray]] = model.latent_initial_conditions(param_grid, physics, trainer = trainer);
+    Z0      : list[list[numpy.ndarray]] = encoder_decoder.latent_initial_conditions(param_grid, physics, trainer = trainer);
 
     # Evaluate each GP at each combination of parameter values. This returns two arrays, the 
     # first of which is a 2d array of shape (n_param, n_coef) whose i,j element specifies the mean 
@@ -152,7 +154,7 @@ def average_rom(model           : torch.nn.Module,
 
 
 
-def sample_roms(model           : torch.nn.Module, 
+def sample_roms(encoder_decoder : EncoderDecoder, 
                 physics         : Physics, 
                 latent_dynamics : LatentDynamics, 
                 gp_list         : list[GaussianProcessRegressor], 
@@ -169,19 +171,19 @@ def sample_roms(model           : torch.nn.Module,
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    model : torch.nn.Module
-        A model (i.e., autoencoder). We use this to map the FOM IC's (which we can get from 
-        physics) to the latent space using the model's encoder. physics, latent_dynamics, and 
-        model should have the same number of initial conditions.
+    encoder_decoder : EncoderDecoder
+        An EncoderDecoder (i.e., autoencoder). We use this to map the FOM IC's (which we can get 
+        from physics) to the latent space using the EncoderDecoder's encoder. physics, 
+        latent_dynamics, and encoder_decoder should have the same number of initial conditions.
 
     physics : Physics
         allows us to find the IC for a particular combination of parameter values. physics, 
-        latent_dynamics, and model should have the same number of initial conditions.
+        latent_dynamics, and encoder_decoder should have the same number of initial conditions.
     
     latent_dynamics : LatentDynamics
-        describes how we specify the dynamics in the model's latent space. We use this to simulate 
-        the latent dynamics forward in time. physics, latent_dynamics, and model should have the
-        same number of initial conditions.
+        describes how we specify the dynamics in the encoder_decoder's latent space. We use this
+        to simulate the latent dynamics forward in time. physics, latent_dynamics, and 
+        encoder_decoder should have the same number of initial conditions.
 
     gp_list : list[GaussianProcessRegressor], len = n_coef
         i'th element is a trained GP regressor object that predicts the i'th coefficient. 
@@ -230,9 +232,9 @@ def sample_roms(model           : torch.nn.Module,
 
     n_coef      : int               = len(gp_list);
     n_IC        : int               = latent_dynamics.n_IC;
-    n_z         : int               = model.n_z;
+    n_z         : int               = encoder_decoder.n_z;
     assert physics.n_IC             == n_IC, "physics.n_IC = %d, n_IC %d" % (physics.n_IC, n_IC);
-    assert model.n_IC               == n_IC, "model.n_IC = %d, n_IC %d" % (model.n_IC, n_IC);
+    assert encoder_decoder.n_IC     == n_IC, "encoder_decoder.n_IC = %d, n_IC %d" % (encoder_decoder.n_IC, n_IC);
 
 
     # Reshape t_Grid so that the i'th element is a numpy.ndarray of shape (1, n_t(i)). This is what 
@@ -252,7 +254,7 @@ def sample_roms(model           : torch.nn.Module,
     # list whose j'th element is an array of shape (1, n_z) holding the IC for the j'th derivative
     # of the latent state when we use the i'th combination of parameter values. 
     LOGGER.debug("Fetching latent space initial conditions for %d combinations of parameters." % n_param);
-    Z0      : list[list[numpy.ndarray]] = model.latent_initial_conditions(param_grid, physics, trainer = trainer);
+    Z0      : list[list[numpy.ndarray]] = encoder_decoder.latent_initial_conditions(param_grid, physics, trainer = trainer);
 
 
     # Setup a list to hold the simulated dynamics. There are n_param parameters. For each 
@@ -300,7 +302,7 @@ def sample_roms(model           : torch.nn.Module,
                     f"Parameter {i}: Failed to generate {n_needed} non-divergent samples after "
                     f"{max_resample_attempts} total resampling attempts. Using divergent samples. "
                     f"This suggests:\n"
-                    f"  - Model hasn't converged yet (train longer)\n"
+                    f"  - EncoderDecoder hasn't converged yet (train longer)\n"
                     f"  - GP variance is too high (increase alpha in GaussianProcess.py)\n"
                     f"  - Latent dynamics are fundamentally unstable at this parameter value"
                 );
@@ -367,7 +369,7 @@ def sample_roms(model           : torch.nn.Module,
 
 
 
-def Rollout_Error_and_STD(  model           : torch.nn.Module,
+def Rollout_Error_and_STD(  encoder_decoder : EncoderDecoder,
                             physics         : Physics,
                             param_space     : ParameterSpace,
                             latent_dynamics : LatentDynamics,
@@ -404,8 +406,8 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    model : torch.nn.Module
-        For each combinations of parameters, we find the model's latent dynamics for that 
+    encoder_decoder : EncoderDecoder
+        For each combinations of parameters, we find the encoder_decoder's latent dynamics for that 
         combination and solve them forward in time. 
 
     physics : Physics
@@ -507,10 +509,10 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
     # For each combination of parameter values in the testing set, sample the latent coefficients 
     # and solve the latent dynamics forward in time. 
     LOGGER.info("Generating latent dynamics trajectories for %d samples of the coefficients for %d combinations of testing parameter" % (n_samples, n_Test));
-    Zis_samples     : list[list[numpy.ndarray]] = sample_roms(model, physics, latent_dynamics, gp_list, param_test, t_Test, n_samples, trainer = trainer);    # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_samples, n_z)
+    Zis_samples     : list[list[numpy.ndarray]] = sample_roms(encoder_decoder, physics, latent_dynamics, gp_list, param_test, t_Test, n_samples, trainer = trainer);    # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_samples, n_z)
 
     LOGGER.info("Generating latent dynamics trajectories using posterior distribution means for %d combinations of testing parameter" % (n_Test));
-    Zis_mean        : list[list[numpy.ndarray]] = average_rom(model, physics, latent_dynamics, gp_list, param_test, t_Test, trainer = trainer);               # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_z)
+    Zis_mean        : list[list[numpy.ndarray]] = average_rom(encoder_decoder, physics, latent_dynamics, gp_list, param_test, t_Test, trainer = trainer);               # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_z)
         
 
     # ---------------------------------------------------------------------------------------------
@@ -558,7 +560,7 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
             Zis_mean_i.append(torch.Tensor(Zis_mean[i][j]));
 
         # Decode the mean latent trajectories for each combination of parameter values.
-        U_Pred_Mean_i       : list[torch.Tensor] = list(model.Decode(*Zis_mean_i));
+        U_Pred_Mean_i       : list[torch.Tensor] = list(encoder_decoder.Decode(*Zis_mean_i));
 
         # Fetch the corresponding test predictions.
         U_Test_i            : list[numpy.ndarray] = U_Test[i];
@@ -602,7 +604,7 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
             Zis_sample_ij: list[torch.Tensor] = [];
             for k in range(n_IC):
                 Zis_sample_ij.append(torch.Tensor(Zis_samples[i][k][:, j, :]));
-            U_Pred_ij   : tuple[torch.Tensor]     = model.Decode(*Zis_sample_ij);
+            U_Pred_ij   : tuple[torch.Tensor]     = encoder_decoder.Decode(*Zis_sample_ij);
             
             # Detach, convert to numpy, and store in U_Pred_i.
             for k in range(n_IC):

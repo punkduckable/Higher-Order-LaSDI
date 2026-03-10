@@ -3,14 +3,14 @@
 # -------------------------------------------------------------------------------------------------
 
 import  sys;
-import  os;
-Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
-LD_Path         : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
-Model_Path      : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Models"));
-Utils_Path      : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
+import  os; 
+Physics_Path        : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
+LD_Path             : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
+EncoderDecoder_Path : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "EncoderDecoder"));
+Utils_Path          : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
 sys.path.append(Physics_Path);
 sys.path.append(LD_Path);
-sys.path.append(Model_Path);
+sys.path.append(EncoderDecoder_Path);
 sys.path.append(Utils_Path);
 
 import  logging;
@@ -24,6 +24,7 @@ import  pickle;
 import  time;
 
 from    GaussianProcess             import  sample_coefs, fit_gps;
+from    EncoderDecoder              import  EncoderDecoder;
 from    Autoencoder                 import  Autoencoder;
 from    Autoencoder_Pair            import  Autoencoder_Pair;
 from    Timing                      import  Timer;
@@ -69,15 +70,15 @@ class Trainer:
 
     def __init__(self, 
                  physics            : Physics, 
-                 model              : torch.nn.Module, 
+                 encoder_decoder    : EncoderDecoder, 
                  latent_dynamics    : LatentDynamics, 
                  param_space        : ParameterSpace, 
                  config             : dict):
         """
-        This class runs a full round of training. As input, it takes the model defined as a 
-        torch.nn.Module object, a Physics object to recover FOM ICs + information on the time 
-        discretization, a latent dynamics object, and a parameter space object (which holds the 
-        testing and training sets of parameters).
+        This class runs a full round of training. As input, it takes a EncoderDecoder object to 
+        encode and decode FOM frames, a Physics object to recover FOM ICs + information on the 
+        time discretization, a latent dynamics object, and a parameter space object (which holds 
+        the testing and training sets of parameters).
 
         The "train" method runs the active learning training loop, computes the reconstruction and 
         SINDy loss, trains the GPs, and samples a new FOM data point.
@@ -88,16 +89,16 @@ class Trainer:
         -------------------------------------------------------------------------------------------
 
         physics : Physics
-            Encodes the FOM model. It allows us to fetch the FOM solution and/or initial conditions 
+            Encodes the FOM. It allows us to fetch the FOM solution and/or initial conditions 
             for a particular combination of parameters. We use this object to generate FOM 
-            solutions which we then use to train the model and latent dynamics.
+            solutions which we then use to train the encoder_decoder and latent dynamics.
          
-        model : torch.nn.Module
+        encoder_decoder : EncoderDecoder
             use to compress the FOM state to a reduced, latent state.
 
         latent_dynamics : LatentDynamics
-            A LatentDynamics object which describes how we specify the dynamics in the model's 
-            latent space.
+            A LatentDynamics object which describes how we specify the dynamics in the 
+            EncoderDecoder's latent space.
 
         param_space: ParameterSpace
             holds the set of testing and training parameters. 
@@ -114,10 +115,10 @@ class Trainer:
         """
         
         # Checks.
-        n_IC    : int           = latent_dynamics.n_IC;
-        assert model.n_IC       == n_IC, "model.n_IC = %d, n_IC = %d" % (model.n_IC, n_IC);
-        assert physics.n_IC     == n_IC, "physics.n_IC = %d, n_IC = %d" % (physics.n_IC, n_IC);
-        self.n_IC               = n_IC;
+        n_IC    : int               = latent_dynamics.n_IC;
+        assert encoder_decoder.n_IC == n_IC, "encoder_decoder.n_IC = %d, n_IC = %d" % (encoder_decoder.n_IC, n_IC);
+        assert physics.n_IC         == n_IC, "physics.n_IC = %d, n_IC = %d" % (physics.n_IC, n_IC);
+        self.n_IC                   = n_IC;
         assert('trainer' in config), "config must contain a 'trainer' sub-dictionary";
 
         LOGGER.info("Initializing a Trainer object"); 
@@ -128,7 +129,7 @@ class Trainer:
         trainer_config : dict = config['trainer'];
 
         self.physics                        = physics;
-        self.model                          = model;
+        self.encoder_decoder                = encoder_decoder;
         self.latent_dynamics                = latent_dynamics;
         self.param_space                    = param_space;
         
@@ -182,7 +183,7 @@ class Trainer:
 
         # Set up the optimizer and loss function.
         LOGGER.info("Setting up the optimizer with a learning rate of %f" % (self.lr));
-        self.optimizer          : Optimizer = torch.optim.Adam(list(model.parameters()) + [self.test_coefs], lr = self.lr, weight_decay = 1.0e-5);
+        self.optimizer          : Optimizer = torch.optim.Adam(list(encoder_decoder.parameters()) + [self.test_coefs], lr = self.lr, weight_decay = 1.0e-5);
         self.MSE                            = torch.nn.MSELoss(reduction = 'mean');
         self.MAE                            = torch.nn.L1Loss(reduction = 'mean');
 
@@ -407,7 +408,7 @@ class Trainer:
 
     def train(self, reset_optim : bool = True) -> None:
         """
-        Runs a round of training on the model.
+        Runs a round of training on the encoder_decoder.
 
         
         -------------------------------------------------------------------------------------------
@@ -442,21 +443,21 @@ class Trainer:
         # Fetch parameters. Note that p_rollout and p_IC_rollout can be negative.
         # IMPORTANT: Calculate rollout proportions using epochs within CURRENT round (not accumulated restart_iter).
         # This ensures rollout starts small after each greedy sampling and gradually increases.
-        n_train             : int               = self.param_space.n_train();
-        epochs_in_round     : int               = 0;  # Will be updated each iteration
-        p_rollout           : float             = min(self.max_p_rollout,    self.p_rollout_init    + self.dp_per_update   *(epochs_in_round//self.rollout_update_freq));
-        p_IC_rollout        : float             = min(self.max_p_IC_rollout, self.p_IC_rollout_init + self.IC_dp_per_update*(epochs_in_round//self.IC_rollout_update_freq));
-        best_loss           : float             = numpy.inf;                    # Stores the lowest loss we get in this round of training.
+        n_train                 : int               = self.param_space.n_train();
+        epochs_in_round         : int               = 0;  # Will be updated each iteration
+        p_rollout               : float             = min(self.max_p_rollout,    self.p_rollout_init    + self.dp_per_update   *(epochs_in_round//self.rollout_update_freq));
+        p_IC_rollout            : float             = min(self.max_p_IC_rollout, self.p_IC_rollout_init + self.IC_dp_per_update*(epochs_in_round//self.IC_rollout_update_freq));
+        best_loss               : float             = numpy.inf;                    # Stores the lowest loss we get in this round of training.
 
         # Map everything to self's device.
-        device              : str                       = self.device;
-        model_device        : torch.nn.Module           = self.model.to(device);
+        device                  : str                       = self.device;
+        encoder_decoder_device  : EncoderDecoder            = self.encoder_decoder.to(device);
         
-        # Determine model type once (assumed constant throughout training)
-        is_autoencoder_pair : bool                      = isinstance(model_device, Autoencoder_Pair);
+        # Determine encoder_decoder type once (assumed constant throughout training)
+        is_autoencoder_pair     : bool                      = isinstance(encoder_decoder_device, Autoencoder_Pair);
         
-        U_Train_device      : list[list[torch.Tensor]]  = [];
-        t_Train_device      : list[torch.Tensor]        = [];
+        U_Train_device          : list[list[torch.Tensor]]  = [];
+        t_Train_device          : list[torch.Tensor]        = [];
         for i in range(n_train):
             t_Train_device.append(self.t_Train[i].to(device));
             
@@ -652,7 +653,7 @@ class Trainer:
                     # the FOM solution at time t_Grid[i][k] when we use the i'th combination of 
                     # parameter values. Here, n_t(i) is the number of time steps in the solution 
                     # for the i'th combination of parameter values. 
-                    Z_i         : torch.Tensor  = model_device.Encode(U_i)[0];
+                    Z_i         : torch.Tensor  = encoder_decoder_device.Encode(U_i)[0];
                     
                     # Log latent state statistics to diagnose potential autoencoder collapse
                     if iter % 100 == 0 or iter == self.restart_iter:  # Log every 100 iters and first iter
@@ -663,7 +664,7 @@ class Trainer:
                             str(Z_i.device)));
                     
                     Latent_States.append([Z_i]);
-                    U_Pred_i    : torch.Tensor  = model_device.Decode(Z_i)[0];
+                    U_Pred_i    : torch.Tensor  = encoder_decoder_device.Decode(Z_i)[0];
 
                     LOGGER.debug("Forward Pass (Autoencoder) - complete for parameter combination %d" % i);
                     self.timer.end("Forward Pass");
@@ -742,7 +743,7 @@ class Trainer:
 
                         # Encode all (n_rollout_ICs * n_rollout_targets) FOM targets in one batch.
                         # Result shape: (n_rollout_ICs[i] * n_rollout_targets, n_z).
-                        ROM_Rollout_Targets.append([model_device.Encode(*FOM_Rollout_Targets_i)[0]]);
+                        ROM_Rollout_Targets.append([encoder_decoder_device.Encode(*FOM_Rollout_Targets_i)[0]]);
                     
                         LOGGER.debug("Rollout Setup (Autoencoder) - complete for parameter combination %d" % i);
                         self.timer.end("Rollout Setup");
@@ -855,7 +856,7 @@ class Trainer:
                         ROM_Rollout_Targets_i       : torch.Tensor = ROM_Rollout_Targets[i][0];    # shape = (n_rollout_ICs[i] * n_rollout_targets, n_z)
 
                         # Decode the latent predictions to get FOM predictions.
-                        FOM_Rollout_Predict_i       : torch.Tensor = model_device.Decode(ROM_Rollout_Predict_i_flat)[0];
+                        FOM_Rollout_Predict_i       : torch.Tensor = encoder_decoder_device.Decode(ROM_Rollout_Predict_i_flat)[0];
                     
                         # Get the corresponding FOM targets.
                         FOM_Rollout_Target_i        : torch.Tensor = FOM_Rollout_Targets[i][0];    # shape = (n_rollout_ICs[i] * n_rollout_targets, *physics.Frame_Shape)
@@ -910,7 +911,7 @@ class Trainer:
                             U_IC_i = self.normalize_tensor(U_IC_i, 0);
                         
                         # Encode the FOM initial conditions
-                        Z_IC_i : torch.Tensor = model_device.Encode(U_IC_i)[0];
+                        Z_IC_i : torch.Tensor = encoder_decoder_device.Encode(U_IC_i)[0];
                         
                         # Get the coefficients for this combination of parameters
                         train_coef_i            : torch.Tensor              = train_coefs[i, :].reshape(1, -1);
@@ -925,13 +926,13 @@ class Trainer:
                         Z_IC_Predict_i      : torch.Tensor              = Z_IC_Rollout_i[0][0].squeeze(1);    # shape = (n_t_IC_rollout[i], n_z)
 
                         # Decode the predicted trajectory to get FOM predictions
-                        U_IC_Predict_i      : torch.Tensor              = model_device.Decode(Z_IC_Predict_i)[0];
+                        U_IC_Predict_i      : torch.Tensor              = encoder_decoder_device.Decode(Z_IC_Predict_i)[0];
                         
                         # Get the corresponding FOM targets
                         U_IC_Target_i       : list[torch.Tensor]        = U_IC_Rollout_Targets[i][0];         # shape = (n_t_IC_rollout[i], physics.Frame_Shape)
 
                         # Encode the FOM targets for latent space comparison
-                        Z_IC_Target_i : torch.Tensor = model_device.Encode(U_IC_Target_i)[0];
+                        Z_IC_Target_i : torch.Tensor = encoder_decoder_device.Encode(U_IC_Target_i)[0];
 
                         # Compute differences once
                         diff_ROM = Z_IC_Target_i - Z_IC_Predict_i;
@@ -1033,7 +1034,7 @@ class Trainer:
                     # the j'th time derivative of the FOM solution at time t_Grid[i][k] when we use 
                     # the i'th combination of parameter values. Here, n_t(i) is the number of time 
                     # steps in the solution for the i'th combination of parameter values. 
-                    Z_i     : list[torch.Tensor]        = list(model_device.Encode(*U_Train_device[i]));
+                    Z_i     : list[torch.Tensor]        = list(encoder_decoder_device.Encode(*U_Train_device[i]));
                     Z_D_i   : torch.Tensor              = Z_i[0];       # shape (n_t(i), n_z)
                     Z_V_i   : torch.Tensor              = Z_i[1];       # shape (n_t(i), n_z)
                     
@@ -1052,7 +1053,7 @@ class Trainer:
                     
                     Latent_States.append(Z_i);
 
-                    U_Pred_i    : list[torch.Tensor]    = list(model_device.Decode(*Z_i));
+                    U_Pred_i    : list[torch.Tensor]    = list(encoder_decoder_device.Decode(*Z_i));
                     D_Pred_i    : torch.Tensor          = U_Pred_i[0];  # shape = (n_t(i), physics.Frame_Shape)
                     V_Pred_i    : torch.Tensor          = U_Pred_i[1];  # shape = (n_t(i), physics.Frame_Shape)
 
@@ -1158,7 +1159,7 @@ class Trainer:
                         # reverse mode AD) of inputs with v. It returns the result of the forward pass 
                         # and the associated jacobian-vector product. We only keep the latter.
                         d_dz_D_Pred__Z_V_i  : torch.Tensor  = torch.autograd.functional.jvp(
-                                                                    func    = lambda Z_D : model_device.Displacement_Autoencoder.Decode(Z_D)[0], 
+                                                                    func    = lambda Z_D : encoder_decoder_device.Displacement_Autoencoder.Decode(Z_D)[0], 
                                                                     inputs  = Z_D_i, 
                                                                     v       = Z_V_i)[1];
                         
@@ -1178,7 +1179,7 @@ class Trainer:
                         #                   = (d/dX)\phi_E,D(D(t)) V(t)
                         # Here, \phi_E,D is the displacement portion of the encoder.
                         d_dx_Z_D__V         : torch.Tensor  = torch.autograd.functional.jvp(
-                                                                    func    = lambda D : model_device.Displacement_Autoencoder.Encode(D)[0],
+                                                                    func    = lambda D : encoder_decoder_device.Displacement_Autoencoder.Encode(D)[0],
                                                                     inputs  = D_i, 
                                                                     v       = V_i)[1];
                         
@@ -1229,7 +1230,7 @@ class Trainer:
 
                         # Fetch the corresponding target by encoding the FOM targets using the 
                         # current encoder.
-                        ROM_Rollout_Targets.append(list(model_device.Encode(*FOM_Rollout_Targets_i)));
+                        ROM_Rollout_Targets.append(list(encoder_decoder_device.Encode(*FOM_Rollout_Targets_i)));
                     
                         LOGGER.debug("Rollout Setup (Autoencoder_Pair) - complete for parameter combination %d" % i);
                         self.timer.end("Rollout Setup");
@@ -1325,8 +1326,8 @@ class Trainer:
                         # should be stored in FOM_Rollout_Targets[i][0][j, ...]
 
                         # First, fetch the predicted solution at the target times.
-                        ROM_D_Rollout_Predict_i : torch.Tensor = torch.empty((n_rollout_ICs[i], model_device.n_z), dtype = torch.float32, device = device);
-                        ROM_V_Rollout_Predict_i : torch.Tensor = torch.empty((n_rollout_ICs[i], model_device.n_z), dtype = torch.float32, device = device);
+                        ROM_D_Rollout_Predict_i : torch.Tensor = torch.empty((n_rollout_ICs[i], encoder_decoder_device.n_z), dtype = torch.float32, device = device);
+                        ROM_V_Rollout_Predict_i : torch.Tensor = torch.empty((n_rollout_ICs[i], encoder_decoder_device.n_z), dtype = torch.float32, device = device);
                         
                         for j in range(n_rollout_ICs[i]):
                             ROM_D_Rollout_Predict_i[j, :] = ROM_D_Predict_Rollout_Trajectory_i[Rollout_Indices[i][j], j, :];
@@ -1343,7 +1344,7 @@ class Trainer:
                         ROM_V_Rollout_Target_i  : torch.Tensor          = ROM_Rollout_Targets_i[1];     # shape = (n_rollout_ICs[i], physics.Frame_Shape)
 
                         # Decode the latent predictions to get FOM predictions.
-                        FOM_D_Rollout_Predict_i, FOM_V_Rollout_Predict_i = model_device.Decode(ROM_D_Rollout_Predict_i, ROM_V_Rollout_Predict_i);
+                        FOM_D_Rollout_Predict_i, FOM_V_Rollout_Predict_i = encoder_decoder_device.Decode(ROM_D_Rollout_Predict_i, ROM_V_Rollout_Predict_i);
                     
                         # Get the corresponding FOM targets.
                         FOM_Rollout_Targets_i   : list[torch.Tensor]    = FOM_Rollout_Targets[i];         # shape = (n_rollout_ICs[i], physics.Frame_Shape)
@@ -1416,7 +1417,7 @@ class Trainer:
                             V_IC_i = self.normalize_tensor(V_IC_i, 1);
                         
                         # Encode the FOM initial conditions
-                        Z_D_IC_i, Z_V_IC_i = model_device.Encode(D_IC_i, V_IC_i);
+                        Z_D_IC_i, Z_V_IC_i = encoder_decoder_device.Encode(D_IC_i, V_IC_i);
                         
                         # Get the coefficients for this combination of parameters
                         train_coef_i            : torch.Tensor              = train_coefs[i, :].reshape(1, -1);
@@ -1436,7 +1437,7 @@ class Trainer:
                         Z_V_IC_Predict_i  : torch.Tensor              = Z_V_IC_Predict_i.squeeze(1);  # shape = (n_t_IC_rollout[i], n_z)
 
                         # Decode the predicted trajectory to get FOM predictions
-                        D_IC_Predict_i, V_IC_Predict_i = model_device.Decode(Z_D_IC_Predict_i, Z_V_IC_Predict_i);
+                        D_IC_Predict_i, V_IC_Predict_i = encoder_decoder_device.Decode(Z_D_IC_Predict_i, Z_V_IC_Predict_i);
                         
                         # Get the corresponding FOM targets
                         U_IC_Target_i     : list[torch.Tensor]        = U_IC_Rollout_Targets[i];
@@ -1444,7 +1445,7 @@ class Trainer:
                         V_IC_Target_i     : torch.Tensor              = U_IC_Target_i[1];  # shape = (n_t_IC_rollout[i], physics.Frame_Shape)
 
                         # Encode the FOM targets for latent space comparison
-                        Z_D_IC_Target_i, Z_V_IC_Target_i = model_device.Encode(D_IC_Target_i, V_IC_Target_i);
+                        Z_D_IC_Target_i, Z_V_IC_Target_i = encoder_decoder_device.Encode(D_IC_Target_i, V_IC_Target_i);
 
                         # Compute differences once
                         diff_Z_D = Z_D_IC_Target_i - Z_D_IC_Predict_i;
@@ -1527,12 +1528,12 @@ class Trainer:
             self.timer.start("Backwards Pass");
             LOGGER.debug("Backward Pass - start (iteration %d)" % (iter + 1));
 
-            #  Run back propagation and update the model parameters. 
+            #  Run back propagation and update the encoder_decoder parameters. 
             # Note: optimizer.zero_grad() is already called at the start of the iteration (line 373)
             loss.backward();
             
             # Clip gradients to prevent explosion during latent dynamics rollout.
-            grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm = self.gradient_clip);
+            grad_norm = torch.nn.utils.clip_grad_norm_(self.encoder_decoder.parameters(), max_norm = self.gradient_clip);
             
             # Log if gradient clipping activates (indicates potential instability)
             if grad_norm > self.gradient_clip:
@@ -1545,13 +1546,13 @@ class Trainer:
             # Check if we hit a new minimum loss. If so, make a checkpoint, record the loss and 
             # the iteration number. 
             # NOTE: Skip checkpointing during warmup period to avoid saving "lucky" early epochs
-            # that benefit from distribution shift before model has adapted.
+            # that benefit from distribution shift before encoder_decoder has adapted.
             
             if loss.item() < best_loss:
                 if epochs_in_round >= self.warmup_epochs:
                     LOGGER.info("Got a new lowest loss (%f) on epoch %d" % (loss.item(), iter + 1));
-                    torch.save(model_device.cpu().state_dict(), self.path_checkpoint + '/' + 'checkpoint.pt');
-                    model_device.to(device);  # Move model back to original device after saving
+                    torch.save(encoder_decoder_device.cpu().state_dict(), self.path_checkpoint + '/' + 'checkpoint.pt');
+                    encoder_decoder_device.to(device);  # Move encoder_decoder back to original device after saving
                     
                     # Update the best set of parameters. 
                     self.best_train_coefs   = train_coefs_detached.copy();     # Shape = (n_train, n_coefs).
@@ -1632,12 +1633,12 @@ class Trainer:
         # Now that we have completed another round of training, update the restart iteration.
         self.restart_iter += self.n_iter;
 
-        # Recover the model + coefficients which attained the lowest loss from this round of 
+        # Recover the encoder_decoder + coefficients which attained the lowest loss from this round of 
         # training.
         assert(self.best_train_coefs is not None);
-        LOGGER.info("Model attained it's best performance on epoch %d. Replacing model with the checkpoint from that epoch" % self.best_epoch);
+        LOGGER.info("encoder_decoder attained it's best performance on epoch %d. Replacing encoder_decoder with the checkpoint from that epoch" % self.best_epoch);
         state_dict  = torch.load(self.path_checkpoint + '/' + 'checkpoint.pt', map_location = 'cpu');
-        self.model.load_state_dict(state_dict);
+        self.encoder_decoder.load_state_dict(state_dict);
 
         # Report timing information.
         self.timer.end("finalize");
@@ -1963,7 +1964,7 @@ class Trainer:
 
         dict_ : dict
             A dictionary housing most of the internal variables in self. You can pass this 
-            dictionary to self (after initializing it using ParameterSpace, model, and 
+            dictionary to self (after initializing it using ParameterSpace, encoder_decoder, and 
             LatentDynamics objects) to make a GLaSDI object whose internal state matches that of 
             self.
         """
@@ -2018,7 +2019,7 @@ class Trainer:
         self.t_Test             : list[torch.Tensor]        = dict_['t_Test'];              # len = n_test.
 
         self.best_train_coefs   : numpy.ndarray             = dict_['best_coefs'];          # Shape = (n_train, n_coefs).
-        self.best_epoch         : int                       = dict_['restart_iter'];        # The current model has the best loss so far.
+        self.best_epoch         : int                       = dict_['restart_iter'];        # The current encoder_decoder has the best loss so far.
         self.restart_iter       : int                       = dict_['restart_iter'];
 
         # Restore normalization stats (if present).

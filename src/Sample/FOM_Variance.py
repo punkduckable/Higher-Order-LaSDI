@@ -4,11 +4,11 @@
 
 # Add the main (src) directory to the search path.
 import  os, sys;
-src_path        : str   = os.path.abspath(os.path.dirname(os.path.dirname(__file__)));
-Utilities_path  : str   = os.path.join(src_path, "Utilities");
-Models_path     : str   = os.path.join(src_path, "Models");
+src_path            : str   = os.path.abspath(os.path.dirname(os.path.dirname(__file__)));
+Utilities_path      : str   = os.path.join(src_path, "Utilities");
+EncoderDecoder_path : str   = os.path.join(src_path, "EncoderDecoder");
 sys.path.append(Utilities_path);
-sys.path.append(Models_path);
+sys.path.append(EncoderDecoder_path);
 sys.path.append(src_path);
 
 import  logging;
@@ -23,6 +23,7 @@ from    GaussianProcess             import  fit_gps, sample_coefs;
 from    Autoencoder                 import  Autoencoder;
 from    Autoencoder_Pair            import  Autoencoder_Pair;
 from    CNN_3D_Autoencoder          import  CNN_3D_Autoencoder;
+from    EncoderDecoder              import  EncoderDecoder;
 
 
 # Setup logger.
@@ -90,14 +91,14 @@ def FOM_Variance(trainer : Trainer) -> NextStep:
     train_coefs : numpy.ndarray = trainer.best_train_coefs;                     # Shape = (n_train, n_coefs).
     LOGGER.info('\n~~~~~~~ Finding New Point ~~~~~~~');
 
-    # Move the model to the cpu (this is where all the GP stuff happens) and load the model 
-    # from the last checkpoint. This should be the one that obtained the best loss so far. 
-    # Remember that train_coefs should specify the coefficients from that iteration. 
-    LOGGER.info("Sampling: Loading model from checkpoint.");
-    model       : torch.nn.Module   = trainer.model.cpu();
-    n_test      : int               = trainer.param_space.n_test();
-    n_train     : int               = trainer.param_space.n_train();
-    model.load_state_dict(torch.load(trainer.path_checkpoint + '/' + 'checkpoint.pt', map_location = 'cpu'));
+    # Move the encoder_decoder to the cpu (this is where all the GP stuff happens) and load the 
+    # encoder_decoder from the last checkpoint. This should be the one that obtained the best loss 
+    # so far. Remember that train_coefs should specify the coefficients from that iteration. 
+    LOGGER.info("Sampling: Loading encoder_decoder from checkpoint.");
+    encoder_decoder : EncoderDecoder    = trainer.encoder_decoder.cpu();
+    n_test          : int               = trainer.param_space.n_test();
+    n_train         : int               = trainer.param_space.n_train();
+    encoder_decoder.load_state_dict(torch.load(trainer.path_checkpoint + '/' + 'checkpoint.pt', map_location = 'cpu'));
 
     # First, find the candidate parameters. These are the elements of the testing set that 
     # are not already in the training set.
@@ -131,9 +132,10 @@ def FOM_Variance(trainer : Trainer) -> NextStep:
     # element is an numpy.ndarray of shape (1, n_z) whose k'th element holds the k'th component
     # of the encoding of the initial condition for the j'th derivative of the latent dynamics 
     # corresponding to the i'th candidate combination of parameter values.
-    Z0 : list[list[numpy.ndarray]]  = model.latent_initial_conditions(  param_grid  = candidate_parameters, 
-                                                                        physics     = trainer.physics,
-                                                                        trainer     = trainer);
+    Z0 : list[list[numpy.ndarray]]  = encoder_decoder.latent_initial_conditions(  
+                                                                param_grid  = candidate_parameters, 
+                                                                physics     = trainer.physics,
+                                                                trainer     = trainer);
 
     # Log coefficient statistics before fitting GPs (this is critical for debugging!)
     LOGGER.info("Coefficient statistics for GP fitting:");
@@ -207,7 +209,7 @@ def FOM_Variance(trainer : Trainer) -> NextStep:
                 LatentStates[i][k][j, :, :] = LatentState_ij[0][k][:, 0, :];
 
     # Find the index of the parameter with the largest std.
-    m_index : int = get_FOM_max_std(model, LatentStates);
+    m_index : int = get_FOM_max_std(encoder_decoder, LatentStates);
 
     # We have found the testing parameter we want to add to the training set. Fetch it, then
     # stop the timer and return the parameter. 
@@ -225,7 +227,7 @@ def FOM_Variance(trainer : Trainer) -> NextStep:
 
 
 
-def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndarray]]) -> int:
+def get_FOM_max_std(encoder_decoder : EncoderDecoder, LatentStates : list[list[numpy.ndarray]]) -> int:
     r"""
     We find the combination of parameter values which produces with FOM solution with the greatest
     variance.
@@ -256,9 +258,10 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    model : torch.nn.Module
-        The model. We assume the solved dynamics (whose frames are stored in Zis) 
-        take place in the model's latent space. We use this to decode the solution frames.
+    encoder_decoder : EncoderDecoder
+        The encoder_decoder. We assume the solved dynamics (whose frames are stored in Zis) 
+        take place in the encoder_decoder's latent space. We use this to decode the solution 
+        frames.
 
     LatentStates : list[list[torch.Tensor]], len = n_param
         i'th element is an n_IC element list whose j'th element is a 3d tensor of shape 
@@ -287,7 +290,7 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
     n_IC    : int   = len(LatentStates[0]);
     n_z     : int   = LatentStates[0][0].shape[2];
 
-    assert n_z  == model.n_z, "n_z = %d, expected %d" % (n_z, model.n_z);
+    assert n_z  == encoder_decoder.n_z, "n_z = %d, expected %d" % (n_z, encoder_decoder.n_z);
 
     for i in range(n_param):
         assert isinstance(LatentStates[i], list),                   "type(LatentStates[%d]) = %s, expected list" % (i, type(LatentStates[i]));
@@ -310,7 +313,7 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
     max_std     : float     = 0.0;
     m_index     : int       = 0;
     
-    if(isinstance(model, Autoencoder) or isinstance(model, CNN_3D_Autoencoder)):
+    if(isinstance(encoder_decoder, Autoencoder) or isinstance(encoder_decoder, CNN_3D_Autoencoder)):
         assert n_IC == 1, "n_IC = %d, expected 1" % (n_IC);
 
         for i in range(n_param):
@@ -327,14 +330,14 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
             # Now decode the frames, one sample at a time.
             n_samples_i     : int           = Z_i.shape[0];
             n_t_i           : int           = Z_i.shape[1];
-            if isinstance(model, CNN_3D_Autoencoder):
-                fom_shape = [model.conv_channels[0]] + model.reshape_shape   # [C,I,J,K]
+            if isinstance(encoder_decoder, CNN_3D_Autoencoder):
+                fom_shape = [encoder_decoder.conv_channels[0]] + encoder_decoder.reshape_shape   # [C,I,J,K]
             else:
-                fom_shape = model.reshape_shape
+                fom_shape = encoder_decoder.reshape_shape
 
             U_Pred_i = numpy.empty([n_samples_i, n_t_i] + fom_shape, dtype = numpy.float32)
             for j in range(n_samples_i):
-                U_Pred_i[j, ...] = model.Decode(Z_i[j, :, :])[0].detach().numpy();
+                U_Pred_i[j, ...] = encoder_decoder.Decode(Z_i[j, :, :])[0].detach().numpy();
 
             # Compute the standard deviation across the sample axis. This gives us an array of shape 
             # (n_t, n_FOM) whose i,j element holds the (sample) standard deviation of the j'th component 
@@ -360,7 +363,7 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
         return m_index
 
 
-    elif(isinstance(model, Autoencoder_Pair)):
+    elif(isinstance(encoder_decoder, Autoencoder_Pair)):
         assert n_IC == 2, "n_IC = %d, expected 2" % (n_IC);
 
         for i in range(n_param):
@@ -380,9 +383,9 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
 
             n_samples_i : int           = Z_D_i.shape[0];
             n_t_i       : int           = Z_D_i.shape[1];
-            D_Pred_i    : numpy.ndarray = numpy.empty([n_samples_i, n_t_i] + model.reshape_shape, dtype = numpy.float32);
+            D_Pred_i    : numpy.ndarray = numpy.empty([n_samples_i, n_t_i] + encoder_decoder.reshape_shape, dtype = numpy.float32);
             for j in range(n_samples_i):
-                D_Pred_ij, _ = model.Decode(Latent_Displacement   = Z_D_i[j, :, :], Latent_Velocity    = Z_V_i[j, :, :]);
+                D_Pred_ij, _ = encoder_decoder.Decode(Latent_Displacement   = Z_D_i[j, :, :], Latent_Velocity    = Z_V_i[j, :, :]);
                 D_Pred_i[j, ...] = D_Pred_ij.detach().numpy();
 
             # Compute the standard deviation across the sample axis. This gives us an array of 
@@ -410,4 +413,4 @@ def get_FOM_max_std(model : torch.nn.Module, LatentStates : list[list[numpy.ndar
     
     
     else:
-        raise ValueError("Invalid model type!");
+        raise ValueError("Invalid EncoderDecoder type!");

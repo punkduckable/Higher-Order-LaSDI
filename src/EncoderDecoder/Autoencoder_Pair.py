@@ -5,20 +5,25 @@
 # Add the Physics directory to the search path.
 import  sys;
 import  os;
-Physics_Path    : str  = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, "Physics"));
+src_Path        : str   = os.path.abspath(os.path.dirname(os.path.dirname(__file__)));
+Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, "Physics"));
 
 sys.path.append(Physics_Path);
 
 import  logging;
-from    typing      import  Callable;
 
 import  torch;
 import  numpy;
 
-from    MLP         import  act_dict;
-from    Autoencoder import  Autoencoder, load_Autoencoder;
-from    Physics     import  Physics;
+from    typing          import  TYPE_CHECKING;
+if TYPE_CHECKING:
+    from    Trainer     import  Trainer;
+    from    Physics     import  Physics;
 
+
+from    EncoderDecoder  import  EncoderDecoder;
+from    MLP             import  act_dict;
+from    Autoencoder     import  Autoencoder, load_Autoencoder;
 # Set up logging.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
@@ -27,7 +32,7 @@ LOGGER  : logging.Logger    = logging.getLogger(__name__);
 # Displacement, Velocity Autoencoder
 # -------------------------------------------------------------------------------------------------
 
-class Autoencoder_Pair(torch.nn.Module):
+class Autoencoder_Pair(EncoderDecoder):
     """"
     This class defines a pair of auto-encoders for displacement, velocity data. Specifically, each 
     object consists of a pair of auto-encoders, one for processing displacement data and another 
@@ -85,20 +90,18 @@ class Autoencoder_Pair(torch.nn.Module):
         assert numpy.prod(reshape_shape) == widths[0],      "numpy.prod(self.reshape_shape) = %d, widths[0] = %d; must be equal" % (numpy.prod(reshape_shape), widths[0]);
 
         # Call the super class initializer.
-        super().__init__();
+        super().__init__(n_IC = 2, n_z = widths[-1]);
         LOGGER.info("Initializing an Autoencoder_Pair");
 
         # In general, the FOM solution may be vector valued and have multiple spatial dimensions. 
         # We need to know the shape of each FOM frame. 
-        self.reshape_shape : list[int]     = reshape_shape; 
+        self.reshape_shape  : list[int]     = reshape_shape; 
         
         # Fetch information about the domain/co-domain.
-        self.widths     : list[int]     = widths
-        self.n_z        : int           = widths[-1];
-        self.n_IC       : int           = 2;
+        self.widths         : list[int]     = widths;
 
         # Use the settings to set up the activation information for the encoder.
-        self.activations : list[str]   =  activations;
+        self.activations    : list[str]     =  activations;
 
         # Next, build the velocity and displacement auto-encoders.
         LOGGER.info("Initializing the Displacement Autoencoder...");
@@ -269,8 +272,8 @@ class Autoencoder_Pair(torch.nn.Module):
 
     def latent_initial_conditions(  self,
                                     param_grid     : numpy.ndarray, 
-                                    physics        : Physics,
-                                    trainer        = None) -> list[list[numpy.ndarray]]:
+                                    physics        : "Physics",
+                                    trainer        : "Trainer") -> list[list[numpy.ndarray]]:
         """
         This function maps a set of initial conditions for the FOM to initial conditions for the 
         latent space dynamics. Specifically, we take in a set of possible parameter values. For 
@@ -288,10 +291,12 @@ class Autoencoder_Pair(torch.nn.Module):
             of parameter values. Here, n_p is the number of parameters and n_param is the number
             of combinations of parameter values.
 
-        physics : Physics
+        physics : "Physics"
             allows us to calculate the IC for each combination of parameter values. This physics 
             object should have the same number of initial conditions as self.
 
+        trainer : "Trainer"
+            The trainer object used to train the EncoderDecoder.
 
         -------------------------------------------------------------------------------------------
         Returns

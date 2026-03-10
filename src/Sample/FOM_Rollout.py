@@ -4,8 +4,9 @@
 
 # Add the main (src) directory to the search path.
 import  os, sys;
-src_path        : str   = os.path.abspath(os.path.dirname(os.path.dirname(__file__)));
-Utilities_path  : str   = os.path.join(src_path, "Utilities");
+src_path            : str   = os.path.abspath(os.path.dirname(os.path.dirname(__file__)));
+EncoderDecoder_Path : str   = os.path.join(src_path, "EncoderDecoder");
+Utilities_path      : str   = os.path.join(src_path, "Utilities");
 sys.path.append(Utilities_path);
 sys.path.append(src_path);
 
@@ -19,6 +20,7 @@ from    Enums                       import  NextStep;
 from    Trainer                     import  Trainer;
 from    SolveROMs                   import  sample_roms;
 from    GaussianProcess             import  fit_gps;
+from    EncoderDecoder              import  EncoderDecoder;
 
 
 # Setup logger.
@@ -81,14 +83,14 @@ def FOM_Rollout(trainer : Trainer) -> NextStep:
     train_coefs : numpy.ndarray = trainer.best_train_coefs;                     # Shape = (n_train, n_coefs).
     LOGGER.info('\n~~~~~~~ Finding New Point ~~~~~~~');
 
-    # Move the model to the cpu (this is where all the GP stuff happens) and load the model 
-    # from the last checkpoint. This should be the one that obtained the best loss so far. 
-    # Remember that train_coefs should specify the coefficients from that iteration. 
-    LOGGER.info("Sampling: Loading model from checkpoint.");
-    model       : torch.nn.Module   = trainer.model.cpu();
-    n_test      : int               = trainer.param_space.n_test();
-    n_train     : int               = trainer.param_space.n_train();
-    model.load_state_dict(torch.load(trainer.path_checkpoint + '/' + 'checkpoint.pt', map_location = 'cpu'));
+    # Move the encoder_decoder to the cpu (this is where all the GP stuff happens) and load the 
+    # encoder_decoder from the last checkpoint. This should be the one that obtained the best 
+    # loss so far. Remember that train_coefs should specify the coefficients from that iteration. 
+    LOGGER.info("Sampling: Loadin encoder_decoder from checkpoint.");
+    encoder_decoder : EncoderDecoder    = trainer.encoder_decoder.cpu();
+    n_test          : int               = trainer.param_space.n_test();
+    n_train         : int               = trainer.param_space.n_train();
+    encoder_decoders.load_state_dict(torch.load(trainer.path_checkpoint + '/' + 'checkpoint.pt', map_location = 'cpu'));
 
 
 
@@ -145,8 +147,9 @@ def FOM_Rollout(trainer : Trainer) -> NextStep:
     # ---------------------------------------------------------------------------------------------
     # Generate the latent trajectories.
 
+    LOGGER.debug("Sampling roms with %d rollouts per candidiate" % trainer.n_samples);
     Zis_Samples : list[list[torch.Tensor]] = sample_roms(
-                                                model               = model, 
+                                                encoder_decoder     = encoder_decoder, 
                                                 physics             = trainer.physics,
                                                 latent_dynamics     = trainer.latent_dynamics, 
                                                 gp_list             = gp_list, 
@@ -159,6 +162,7 @@ def FOM_Rollout(trainer : Trainer) -> NextStep:
     # ---------------------------------------------------------------------------------------------
     # Decode the samples and compute relative errors
 
+    LOGGER.debug("Setting up arrays to hold relative errors");
     n_samples   : int   = trainer.n_samples;
     n_IC        : int   = trainer.n_IC;
 
@@ -207,7 +211,7 @@ def FOM_Rollout(trainer : Trainer) -> NextStep:
             Zis_sample_ij: list[torch.Tensor] = [];
             for k in range(n_IC):
                 Zis_sample_ij.append(torch.Tensor(Zis_Samples[i][k][:, j, :]));
-            U_Pred_ij           : tuple[torch.Tensor]   = model.Decode(*Zis_sample_ij);
+            U_Pred_ij           : tuple[torch.Tensor]   = encoder_decoder.Decode(*Zis_sample_ij);
             
             # Set up a list to hold the STDs of the FOM solution.
             U_Cand_i_std        : list[float]           = [];
@@ -244,6 +248,7 @@ def FOM_Rollout(trainer : Trainer) -> NextStep:
         # If this is bigger than the biggest total relative error we have seen so far, update the 
         # maximum and corresponding index.
         if(Total_Rel_Error_i > max_Total_Rel_Error):
+            LOGGER.info("Found new largest total relative error (%f) with parameter combination %s" % (Total_Rel_Error_i, str(candidate_parameters[k])));
             max_Total_Rel_Error = Total_Rel_Error_i;
             m_index             = i;
 

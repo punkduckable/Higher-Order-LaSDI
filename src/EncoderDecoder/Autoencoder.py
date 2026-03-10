@@ -5,18 +5,23 @@
 # Add the Physics directory to the search path.
 import  sys;
 import  os;
-Physics_Path    : str  = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, "Physics"));
+src_Path        : str   = os.path.abspath(os.path.dirname(os.path.dirname(__file__)));
+Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, "Physics"));
 sys.path.append(Physics_Path);
 
 import  logging;
-from    typing      import  Callable;
 
 import  torch;
 import  numpy;
 
-from    MLP         import  MultiLayerPerceptron, act_dict;
-from    Physics     import  Physics;
+from    typing          import  TYPE_CHECKING;
+if TYPE_CHECKING:
+    from    Trainer     import  Trainer;
+    from    Physics     import  Physics;
 
+
+from    EncoderDecoder  import  EncoderDecoder;
+from    MLP             import  MultiLayerPerceptron, act_dict;
 # Set up logging.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
@@ -27,7 +32,7 @@ LOGGER  : logging.Logger    = logging.getLogger(__name__);
 # Autoencoder class
 # -------------------------------------------------------------------------------------------------
 
-class Autoencoder(torch.nn.Module):
+class Autoencoder(EncoderDecoder):
     def __init__(   self,                     
                     reshape_shape   : list[int],
                     widths          : list[int], 
@@ -41,8 +46,6 @@ class Autoencoder(torch.nn.Module):
         try to train E and map data in \mathbb{R}^F to elements of a low dimensional latent 
         space (\mathbb{R}^L) which D can send back to the original data. (thus, E, and D should
         act like inverses of one another).
-
-        The Autoencoder class implements this model as a trainable torch.nn.Module object. 
 
 
         
@@ -91,14 +94,11 @@ class Autoencoder(torch.nn.Module):
             assert activations[i].lower() in act_dict.keys(),   "activations[%d] = %s; not in act_dict keys" % (i, activations[i].lower());
         assert numpy.prod(reshape_shape) == widths[0],      "numpy.prod(self.reshape_shape) = %d, widths[0] = %d; must be equal" % (numpy.prod(reshape_shape), widths[0]);
 
-
         # Run the superclass initializer.
-        super().__init__();
+        super().__init__(n_IC = 1, n_z = widths[-1]);
         
         # Store information (for return purposes).
-        self.n_IC           : int       = 1;
         self.widths         : list[int] = widths;
-        self.n_z            : int       = widths[-1];
         self.activations    : list[str] = activations;
         self.reshape_shape  : list[int] = reshape_shape;
         LOGGER.info("Initializing an Autoencoder with latent space dimension %d" % self.n_z);
@@ -229,8 +229,8 @@ class Autoencoder(torch.nn.Module):
 
     def latent_initial_conditions(  self,
                                     param_grid     : numpy.ndarray, 
-                                    physics        : Physics,
-                                    trainer        = None) -> list[list[numpy.ndarray]]:
+                                    physics        : "Physics",
+                                    trainer        : "Trainer") -> list[list[numpy.ndarray]]:
         """
         This function maps a set of initial conditions for the FOM to initial conditions for the 
         latent space dynamics. Specifically, we take in a set of possible parameter values. For 
@@ -248,11 +248,13 @@ class Autoencoder(torch.nn.Module):
             parameters. Here, n_param is the number of combinations of parameter values and n_p is the 
             number of parameters (in each combination).
 
-        physics : Physics
+        physics : "Physics"
             A "Physics" object that, among other things, stores the IC for each combination of 
             parameter values. This physics object should have the same number of initial conditions as 
             self.
 
+        trainer : "Trainer"
+            The trainer object used to train the EncoderDecoder.
 
         -------------------------------------------------------------------------------------------
         Returns
