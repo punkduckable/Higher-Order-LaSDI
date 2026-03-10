@@ -30,7 +30,6 @@ from    Timing                      import  Timer;
 from    ParameterSpace              import  ParameterSpace;
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
-from    SolveROMs                   import  get_FOM_max_std;
 from    FiniteDifference            import  Derivative1_Order4, Derivative1_Order2_NonUniform;
 from    Logging                     import  Log_Dictionary;
 from    MoveOptimizer               import  Move_Optimizer_To_Device;
@@ -104,7 +103,7 @@ class BayesianGLaSDI:
             holds the set of testing and training parameters. 
 
         config: dict
-            houses the LaSDI settings. This should contain a 'lasdi' sub-dictionary.
+            houses the Trainer settings. This should contain a 'trainer' sub-dictionary.
 
         
         -------------------------------------------------------------------------------------------
@@ -119,17 +118,14 @@ class BayesianGLaSDI:
         assert model.n_IC       == n_IC, "model.n_IC = %d, n_IC = %d" % (model.n_IC, n_IC);
         assert physics.n_IC     == n_IC, "physics.n_IC = %d, n_IC = %d" % (physics.n_IC, n_IC);
         self.n_IC               = n_IC;
-        assert('lasdi' in config), "config must contain a 'lasdi' sub-dictionary";
-        assert('type' in config['lasdi']), "config['lasdi'] must contain a 'type' key";
-        assert(config['lasdi']['type'] in ['gplasdi']), "config['lasdi']['type'] must be 'gplasdi'";
-        assert('gplasdi' in config['lasdi']), "config['lasdi'] must contain a 'gplasdi' sub-dictionary";
+        assert('trainer' in config), "config must contain a 'trainer' sub-dictionary";
 
-        LOGGER.info("Initializing a GPLaSDI object"); 
+        LOGGER.info("Initializing a Trainer object"); 
         Log_Dictionary(LOGGER = LOGGER, D = config, level = logging.INFO);
 
-        # Fetch the gplasdi sub-dictionary.
+        # Fetch the trainer sub-dictionary.
         self.config = config;
-        gplasdi_config : dict = config['lasdi']['gplasdi'];
+        trainer_config : dict = config['trainer'];
 
         self.physics                        = physics;
         self.model                          = model;
@@ -140,36 +136,36 @@ class BayesianGLaSDI:
         self.timer                          = Timer();
 
         # Extract training/loss hyperparameters from the configuration file. 
-        self.lr                     : float     = gplasdi_config['lr'];                             # Learning rate for the optimizer.
-        self.gradient_clip          : float     = gplasdi_config.get('gradient_clip', 15.0);        # Maximum allowable gradient magnitude; will rescale gradientsif exceeded.
-        self.n_samples              : int       = gplasdi_config.get('n_samples', 20);              # Number of samples to draw per coefficient per combination of parameters
-        self.p_rollout_init         : float     = gplasdi_config.get('p_rollout_init', 0.01);       # The proportion of the simulated we simulate forward when computing the rollout loss.
-        self.rollout_update_freq    : float     = gplasdi_config.get('rollout_update_freq', 10);    # We increase p_rollout after this many iterations.
-        self.dp_per_update          : float     = gplasdi_config.get('dp_per_update', 0.005);       # We increase p_rollout by this much each time we increase it.
-        self.rollout_spline_order   : int       = gplasdi_config.get('rollout_spline_order', 1);    # The order of the spline used to interpolate the rollout targets.
-        self.n_rollout_targets      : int       = gplasdi_config.get('n_rollout_targets', 3);       # Number of random target times sampled per rollable frame per epoch for the rollout loss.
-        self.p_IC_rollout_init      : float     = gplasdi_config.get('p_IC_rollout_init', 0.01);    # The proportion of the simulation we simulate forward when computing the IC rollout loss.
-        self.IC_rollout_update_freq : float     = gplasdi_config.get('IC_rollout_update_freq', 10); # We increase p_IC_rollout after this many iterations.
-        self.IC_dp_per_update       : float     = gplasdi_config.get('IC_dp_per_update', 0.005);    # We increase p_IC_rollout by this much each time we increase it.
-        self.max_p_rollout          : float     = gplasdi_config.get('max_p_rollout', 0.75);        # Maximum value p_rollout is allowed to reach (curriculum ceiling for the frame rollout loss).
-        self.max_p_IC_rollout       : float     = gplasdi_config.get('max_p_IC_rollout', 1.0);      # Maximum value p_IC_rollout is allowed to reach (curriculum ceiling for the IC rollout loss).
-        self.warmup_epochs          : int       = gplasdi_config.get('warmup_epochs', 40);          # We warmup the learning rate for this many epochs after greedy sampling.
-        self.n_iter                 : int       = gplasdi_config['n_iter'];                         # Number of iterations for one train and greedy sampling
-        self.max_iter               : int       = gplasdi_config['max_iter'];                       # We stop training if restart_iter goes above this number. 
-        self.max_greedy_iter        : int       = gplasdi_config['max_greedy_iter'];                # We stop performing greedy sampling if restart_iter goes above this number.
-        self.loss_weights           : dict      = gplasdi_config['loss_weights'];                   # A dictionary housing the weights of the various parts of the loss function.
-        self.loss_types             : dict      = gplasdi_config['loss_types'];                     # A dictionary housing the type of loss function (MSE or MAE) for each part of the loss function.
-        self.learnable_coefs        : bool      = gplasdi_config['learnable_coefs'];                # If True, the latent dynamics coefficients are learnable parameters. If false, we compute them using Least Squares.
+        self.lr                     : float     = trainer_config.get('lr', '0.001');                # Learning rate for the optimizer.
+        self.gradient_clip          : float     = trainer_config.get('gradient_clip', 15.0);        # Maximum allowable gradient magnitude; will rescale gradientsif exceeded.
+        self.n_samples              : int       = trainer_config.get('n_samples', 20);              # Number of samples to draw per coefficient per combination of parameters
+        self.p_rollout_init         : float     = trainer_config.get('p_rollout_init', 0.01);       # The proportion of the simulated we simulate forward when computing the rollout loss.
+        self.rollout_update_freq    : float     = trainer_config.get('rollout_update_freq', 10);    # We increase p_rollout after this many iterations.
+        self.dp_per_update          : float     = trainer_config.get('dp_per_update', 0.005);       # We increase p_rollout by this much each time we increase it.
+        self.rollout_spline_order   : int       = trainer_config.get('rollout_spline_order', 1);    # The order of the spline used to interpolate the rollout targets.
+        self.n_rollout_targets      : int       = trainer_config.get('n_rollout_targets', 3);       # Number of random target times sampled per rollable frame per epoch for the rollout loss.
+        self.p_IC_rollout_init      : float     = trainer_config.get('p_IC_rollout_init', 0.01);    # The proportion of the simulation we simulate forward when computing the IC rollout loss.
+        self.IC_rollout_update_freq : float     = trainer_config.get('IC_rollout_update_freq', 10); # We increase p_IC_rollout after this many iterations.
+        self.IC_dp_per_update       : float     = trainer_config.get('IC_dp_per_update', 0.005);    # We increase p_IC_rollout by this much each time we increase it.
+        self.max_p_rollout          : float     = trainer_config.get('max_p_rollout', 0.75);        # Maximum value p_rollout is allowed to reach (curriculum ceiling for the frame rollout loss).
+        self.max_p_IC_rollout       : float     = trainer_config.get('max_p_IC_rollout', 1.0);      # Maximum value p_IC_rollout is allowed to reach (curriculum ceiling for the IC rollout loss).
+        self.warmup_epochs          : int       = trainer_config.get('warmup_epochs', 40);          # We warmup the learning rate for this many epochs after greedy sampling.
+        self.n_iter                 : int       = trainer_config['n_iter'];                         # Number of iterations for one train and greedy sampling
+        self.max_iter               : int       = trainer_config['max_iter'];                       # We stop training if restart_iter goes above this number. 
+        self.max_greedy_iter        : int       = trainer_config['max_greedy_iter'];                # We stop performing greedy sampling if restart_iter goes above this number.
+        self.loss_weights           : dict      = trainer_config['loss_weights'];                   # A dictionary housing the weights of the various parts of the loss function.
+        self.loss_types             : dict      = trainer_config['loss_types'];                     # A dictionary housing the type of loss function (MSE or MAE) for each part of the loss function.
+        self.learnable_coefs        : bool      = trainer_config.get('learnable_coefs', True);      # If True, the latent dynamics coefficients are learnable parameters. If false, we compute them using Least Squares.
 
         # Optional normalization (training-only stats).
         # If enabled, we compute a single mean/std across ALL training trajectories (per IC),
         # then normalize both training + testing trajectories using these values.
-        self.normalize          : bool          = bool(gplasdi_config.get('normalize', False));
+        self.normalize          : bool          = bool(trainer_config.get('normalize', False));
         self.data_mean                : list[torch.Tensor] | None = None;   # per-IC scalar tensors (CPU)
         self.data_std                 : list[torch.Tensor] | None = None;   # per-IC scalar tensors (CPU)
 
         # Set the device to train on. We default to cpu.
-        device = gplasdi_config['device'] if 'device' in gplasdi_config else 'cpu';
+        device = trainer_config['device'] if 'device' in trainer_config else 'cpu';
         if (device.startswith('cuda')):
             assert(torch.cuda.is_available());
             self.device = device;
@@ -1956,186 +1952,6 @@ class BayesianGLaSDI:
 
         # All done!
         return t_Grid_IC_rollout, n_IC_rollout_frames, U_IC_Rollout_Targets;
-
-
-
-    def get_new_sample_point(self) -> numpy.ndarray:
-        """
-        This function finds the element of the testing set (excluding the training set) whose 
-        corresponding latent dynamics gives the highest variance FOM time series. 
-
-        How does this work? The latent space coefficients change with parameter values. For each 
-        coefficient, we fit a gaussian process whose input is the parameter values. Thus, for each 
-        potential parameter value and coefficient, we can find a distribution for that coefficient 
-        when we use that parameter value.
-
-        With this in mind, for each combination of parameters in self.param_space's test space, 
-        we draw a set of samples of the coefficients at that combination of parameter values. For
-        each combination, we solve the latent dynamics forward in time (using the sampled set of
-        coefficient values to define the latent dynamics). This gives us a time series of latent 
-        states. We do this for each sample, for each testing parameter. 
-
-        For each time step and parameter combination, we get a set of latent frames. We map that 
-        set to a set of FOM frames and then find the STD of each component of those FOM frames 
-        across the samples. This give us a number. We find the corresponding number for each time 
-        step and combination of parameter values and then return the parameter combination that 
-        gives the biggest number (for some time step). This becomes the new sample point.
-
-        Thus, the sample point is ALWAYS an element of the testing set. 
-
-
-
-        -------------------------------------------------------------------------------------------
-        Arguments
-        -------------------------------------------------------------------------------------------
-
-        None!
-
-        
-
-        -------------------------------------------------------------------------------------------
-        Returns
-        -------------------------------------------------------------------------------------------
-
-        new_sample : numpy.ndarray, shape = (1, n_p)
-            (0, j) element holds the value of the j'th parameter in the new sample. Here, n_p is 
-            the number of parameters.
-        """
-
-        self.timer.start("new_sample");
-        assert len(self.U_Test)             >  0,                                   "len(self.U_Test) = %d" % len(self.U_Test);
-        assert len(self.U_Test)             == self.param_space.n_test(),           "len(self.U_Test) = %d, self.param_space.n_test() = %d" % (len(self.U_Test), self.param_space.n_test());
-        assert self.best_train_coefs is not None,                                   "best_train_coefs is None (did training run and checkpoint succeed?)";
-        assert self.best_train_coefs.shape[0]     == self.param_space.n_train(),    "self.best_train_coefs.shape[0] = %d, self.param_space.n_train() = %d" % (self.best_train_coefs.shape[0], self.param_space.n_train());
-
-        train_coefs : numpy.ndarray = self.best_train_coefs;                        # Shape = (n_train, n_coefs).
-        LOGGER.info('\n~~~~~~~ Finding New Point ~~~~~~~');
-
-        # Move the model to the cpu (this is where all the GP stuff happens) and load the model 
-        # from the last checkpoint. This should be the one that obtained the best loss so far. 
-        # Remember that train_coefs should specify the coefficients from that iteration. 
-        model       : torch.nn.Module   = self.model.cpu();
-        n_test      : int               = self.param_space.n_test();
-        n_train     : int               = self.param_space.n_train();
-        model.load_state_dict(torch.load(self.path_checkpoint + '/' + 'checkpoint.pt', map_location = 'cpu'));
-
-        # First, find the candidate parameters. This is the elements of the testing set that 
-        # are not already in the training set.
-        candidate_parameters    : list[numpy.ndarray]   = [];
-        t_Candidates            : list[torch.Tensor]    = [];
-        for i in range(n_test):
-            ith_Test_param = self.param_space.test_space[i, :];
-            
-            # Check if the i'th testing parameter is in the training set (all close returns True if
-            # the two arrays are equal to within a tolerance)
-            in_train : bool = False;
-            for j in range(n_train):
-                if numpy.allclose(self.param_space.train_space[j, :], ith_Test_param, rtol = 1e-12, atol = 1e-14):
-                    in_train = True;
-                    break;
-            
-            # If not, add it to the set of candidates
-            if(in_train == False):
-                candidate_parameters.append(ith_Test_param);
-                t_Candidates.append(self.t_Test[i]);
-        
-        # Concatenate the candidates to form an array of shape (n_candidates, n_coefs).
-        n_candidates : int = len(candidate_parameters);
-        LOGGER.info("There are %d candidate testing parameters (%d in the testing space, %d in the training set)" % (n_candidates, n_test, n_train));
-        assert n_candidates >= 1, "n_candidates = %d" % n_candidates;
-        candidate_parameters    = numpy.array(candidate_parameters);
-
-
-        # Map the initial conditions for the FOM to initial conditions in the latent space.
-        # Yields an n_candidates element list whose i'th element is an n_IC element list whose j'th
-        # element is an numpy.ndarray of shape (1, n_z) whose k'th element holds the k'th component
-        # of the encoding of the initial condition for the j'th derivative of the latent dynamics 
-        # corresponding to the i'th candidate combination of parameter values.
-        Z0 : list[list[numpy.ndarray]]  = model.latent_initial_conditions(  param_grid  = candidate_parameters, 
-                                                                            physics     = self.physics,
-                                                                            trainer     = self);
-
-        # Log coefficient statistics before fitting GPs (this is critical for debugging!)
-        LOGGER.info("Coefficient statistics for GP fitting:");
-        LOGGER.info("  Training parameters shape: %s" % str(self.param_space.train_space.shape));
-        LOGGER.info("  Coefficients shape: %s" % str(train_coefs.shape));
-        for coef_idx in range(min(5, train_coefs.shape[1])):  # Log first 5 coefficients
-            coef_vals = train_coefs[:, coef_idx];
-            LOGGER.info("  Coef %d: mean=%.6e, std=%.6e, min=%.6e, max=%.6e, range=%.6e" % (
-                coef_idx, numpy.mean(coef_vals), numpy.std(coef_vals), 
-                numpy.min(coef_vals), numpy.max(coef_vals), numpy.max(coef_vals) - numpy.min(coef_vals)));
-        
-        # Train the GPs on the training data, get one GP per latent space coefficient.
-        gp_list : list[GaussianProcessRegressor] = fit_gps(self.param_space.train_space, train_coefs);
-
-        # For each combination of parameter values in the candidate set, for each coefficient, 
-        # draw a set of samples from the posterior distribution for that coefficient evaluated at
-        # the candidate parameters. We store the samples for a particular combination of parameter 
-        # values in a 2d numpy.ndarray of shape (n_sample, n_coef), whose i, j element holds the 
-        # i'th sample of the j'th coefficient. We store the arrays for different parameter values 
-        # in a list of length n_test. 
-        coef_samples : list[numpy.ndarray] = [sample_coefs(gp_list, candidate_parameters[i, :], self.n_samples) for i in range(n_candidates)];
-        
-        # Log GP prediction statistics for first candidate to diagnose zero-variance issue
-        if n_candidates > 0:
-            from GaussianProcess import eval_gp;
-            pred_mean, pred_std = eval_gp(gp_list, candidate_parameters[0:1, :]);
-            LOGGER.info("GP predictions for first candidate %s:" % str(candidate_parameters[0]));
-            for coef_idx in range(min(5, pred_mean.shape[1])):
-                LOGGER.info("  Coef %d: mean=%.6e, std=%.6e" % (coef_idx, pred_mean[0, coef_idx], pred_std[0, coef_idx]));
-            avg_std = numpy.mean(pred_std[0, :]);
-            LOGGER.info("  Average std across all coefficients: %.6e" % avg_std);
-            if avg_std < 1e-6:
-                LOGGER.warning("  WARNING: GP variance is near-zero! This suggests coefficients are nearly constant across parameter space!");
-                LOGGER.warning("  This will cause poor greedy sampling - all points will look equally good/bad.");
-
-        # Now, solve the latent dynamics forward in time for each set of coefficients in 
-        # coef_samples. There are n_candidates combinations of parameter values, and we have 
-        # n_samples sets of coefficients for each combination of parameter values. For the i'th one
-        # of those, we want to solve the latent dynamics for n_t(i) times steps. Each solution 
-        # frame consists of n_IC elements of \marthbb{R}^{n_z}.
-        # 
-        # Thus, we store the latent states in an n_candidates element list whose i'th element is an 
-        # n_IC element list whose j'th element is an array of shape (n_samples, n_t(i), n_z) whose
-        # p, q, r element holds the r'th component of j'th derivative of the latent state at the 
-        # q'th time step when we use the p'th set of coefficient values sampled from the posterior
-        # distribution for the i'th combination of testing parameter values.
-        LatentStates    : list[list[numpy.ndarray]]     = [];
-        n_z             : int                           = self.latent_dynamics.n_z;
-        for i in range(n_candidates):
-            LatentStates_i  : list[numpy.ndarray]    = [];
-            for j in range(self.n_IC):
-                # Each candidate can have a different number of time samples (adaptive stepping,
-                # truncated outputs, etc.), so allocate per-candidate.
-                LatentStates_i.append(numpy.empty([self.n_samples, len(t_Candidates[i]), n_z], dtype = numpy.float32));
-            LatentStates.append(LatentStates_i);
-        
-        for i in range(n_candidates):
-            # Fetch the t_Grid for the i'th combination of parameter values.
-            # Use a 1D time grid (shared across ICs). This avoids accidental shape/length
-            # mismatches due to 2D handling downstream.
-            t_Grid  : numpy.ndarray = t_Candidates[i].detach().numpy().reshape(-1);
-
-            # Simulate one sample at a time; store the resulting frames.           
-            for j in range(self.n_samples):
-                LatentState_ij : list[list[numpy.ndarray]] = self.latent_dynamics.simulate( coefs   = coef_samples[i][j:(j + 1), :], 
-                                                                                            IC      = [Z0[i]], 
-                                                                                            t_Grid  = [t_Grid], 
-                                                                                            params  = candidate_parameters[i, :].reshape(1, -1));
-                for k in range(self.n_IC):
-                    LatentStates[i][k][j, :, :] = LatentState_ij[0][k][:, 0, :];
-
-        # Find the index of the parameter with the largest std.
-        m_index : int = get_FOM_max_std(model, LatentStates);
-
-        # We have found the testing parameter we want to add to the training set. Fetch it, then
-        # stop the timer and return the parameter. 
-        new_sample : numpy.ndarray = candidate_parameters[m_index, :].reshape(1, -1);
-        LOGGER.info('New param: ' + str(numpy.round(new_sample, 4)) + '\n');
-        self.timer.end("new_sample");
-
-        # All done!
-        return new_sample;
 
 
 

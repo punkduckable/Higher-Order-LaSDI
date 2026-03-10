@@ -8,15 +8,16 @@ import  os;
 LD_Path         : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
 Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
 Utils_Path      : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
+Sample_Path     : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Sample"));
 sys.path.append(LD_Path); 
 sys.path.append(Physics_Path); 
 sys.path.append(Utils_Path); 
+sys.path.append(Sample_Path);
 
 import  yaml;
 import  argparse;
 import  logging;
 import  time;
-import  random;
 
 import  numpy;
 import  torch;
@@ -30,9 +31,10 @@ from    Physics                     import  Physics;
 from    Enums                       import  NextStep;
 from    LatentDynamics              import  LatentDynamics;
 from    GPLaSDI                     import  BayesianGLaSDI;
-from    GaussianProcess             import  fit_gps, eval_gp;
+from    GaussianProcess             import  fit_gps;
 from    Initialize                  import  Initialize_Trainer;
-from    Sample                      import  Run_Samples, Update_Train_Space;
+from    FOM_Variance                import  FOM_Variance;
+from    Generate                    import  Generate_Training_Data;
 from    Logging                     import  Initialize_Logger, Log_Dictionary;
 from    Plot                        import  Plot_Heatmap2d, Plot_Latent_Trajectories, trainSpace_RelativeErrors_Heatmap;
 from    Animate                     import  make_solution_movies;
@@ -44,6 +46,11 @@ Initialize_Logger(level = logging.INFO);
 LOGGER : logging.Logger = logging.getLogger(__name__);
 
 
+# Set up Sample dictionary. 
+Sample_dict = { 'FOM_Variance'      : FOM_Variance, 
+                'FOM_Greedy'        : FOM_Variance };
+
+
 # Set up the command line arguments
 parser = argparse.ArgumentParser(description        = "",
                                  formatter_class    = argparse.RawTextHelpFormatter);
@@ -52,7 +59,6 @@ parser.add_argument('--config',
                     required    = True,
                     type        = str,
                     help        = 'config file to run LasDI workflow.\n');
-
 
 
 
@@ -567,13 +573,13 @@ def step(trainer        : BayesianGLaSDI,
     elif (next_step is NextStep.PickSample):
         # Use greedy sampling to pick that sample. Note that if the training set is empty, this 
         # function does nothing.
-        next_step = Update_Train_Space(trainer);
+        next_step = Sample_dict[config['trainer']['sample_criteria']](trainer);
 
 
     elif (next_step is NextStep.RunSample):
         # Generate the trajectories for all new testing and training parameters. Append these new
         # trajectories to trainer's U_Train and U_Test attributes.
-        next_step = Run_Samples(trainer);
+        next_step = Generate_Training_Data(trainer);
         
         if(config["workflow"]["plot_train_rel_errors"] == True):
             trainSpace_RelativeErrors_Heatmap(  trainer     = trainer, 

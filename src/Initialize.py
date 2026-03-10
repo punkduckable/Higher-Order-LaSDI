@@ -44,7 +44,6 @@ LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
 # Set up the dictionaries; we use this to allow the code to call different classes, functions 
 # depending on the settings.
-trainer_dict    =  {'gplasdi'               : BayesianGLaSDI};
 model_dict      =  {'ae'                    : Autoencoder,
                     'autoencoder'           : Autoencoder,
                     'pair'                  : Autoencoder_Pair,
@@ -84,8 +83,8 @@ physics_dict    =  {'Burgers'               : Burgers.Burgers,
 
 def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[BayesianGLaSDI, ParameterSpace, Physics, torch.nn.Module, LatentDynamics]:
     """
-    Initialize a LaSDI object with a latent space model and physics object according to config 
-    file. Currently only 'gplasdi' is available.
+    Initialize a Trainer object with a latent space model and physics object according to config 
+    file. 
 
     
 
@@ -102,8 +101,7 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Bayesia
                 - type
             - latent_dynamics   (how we parameterize the latent dynamics; e.g. SINDy)
                 - type
-            - lasdi
-                - type
+            - trainer
 
     restart_dict : dict, optional
         If provided, then we will use the settings in this dictionary to initialize the trainer, 
@@ -137,12 +135,6 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Bayesia
         Defines the dynamical system in model's latent space. The n_IC attribute of this object 
         must match the n_IC attribute of model.
     """
-
-    # Fetch the trainer type. Note that only "gplasdi" is allowed.
-    trainer_type            = config['lasdi']['type'];
-    assert(trainer_type in config['lasdi']);
-    assert(trainer_type in trainer_dict);
-    LOGGER.info("Initializing Trainer (%s)" % trainer_type);
 
     # Set up a ParameterSpace object. This will keep track of all parameter combinations we want
     # to try during testing and training. We load the set of possible parameters and their possible
@@ -188,12 +180,11 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Bayesia
 
     # Initialize the trainer object. If we are using a restart file, then load the 
     # trainer from that file.
-    trainer                 = trainer_dict[trainer_type](physics, model, latent_dynamics, param_space, config);
+    trainer                 = BayesianGLaSDI(physics, model, latent_dynamics, param_space, config);
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
         trainer.load(restart_dict['trainer']);
 
-    # If we are loading from a restart file, then make a checkpoint using the current model 
-    # parameters. This enables us to run get_new_sample_point, which loads from a checkpoint.       
+    # If we are loading from a restart file, make a checkpoint using the current model parameters.
     if (bool(restart_dict) == True): 
         torch.save(model.cpu().state_dict(), trainer.path_checkpoint + '/' + 'checkpoint.pt');
 
@@ -232,7 +223,7 @@ def Initialize_Model(physics : Physics, config : dict) -> torch.nn.Module:
     -----------------------------------------------------------------------------------------------
 
     model : torch.nn.Module
-        A torch.nn.Module object that acts as the trainable model in the gplasdi framework. This 
+        A torch.nn.Module object that acts as the trainable model in the LaSDI framework. This 
         model should have a latent space of some form. We learn a set of dynamics to describe how 
         this latent space evolves over time. 
     """

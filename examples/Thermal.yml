@@ -1,51 +1,50 @@
-lasdi:
-  type:                     gplasdi
-  gplasdi:
-    lr:                     0.001
-    gradient_clip:          15.0      # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
-    n_samples:              20
+trainer:
+  lr:                     0.001
+  gradient_clip:          10.0      # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
+  n_samples:              20        # Used for latent trajectory plotting and new parameter sampling
 
-    # If true, compute a single global mean/std from TRAINING data only, and normalize
-    # all training/testing trajectories using these values.
-    normalize:              true
+  # If true, compute a single global mean/std from TRAINING data only, and normalize
+  # all training/testing trajectories using these values.
+  normalize:              true
 
-    # p_rollout grows from p_rollout_init by dp_per_update every rollout_update_freq epochs, capped at max_p_rollout.
-    p_rollout_init:         0.01
-    rollout_update_freq:    10
-    dp_per_update:          0.005
-    max_p_rollout:          0.5       # Maximum proportion of the time window used for rollout loss.
-    rollout_spline_order:   1
-    n_rollout_targets:      5         # Number of random target times sampled per rollable frame per epoch for the rollout loss.
+  # p_rollout grows from p_rollout_init by dp_per_update every rollout_update_freq epochs, capped at max_p_rollout.
+  p_rollout_init:         0.01
+  rollout_update_freq:    10
+  dp_per_update:          0.005
+  max_p_rollout:          0.5       # Maximum proportion of the time window used for rollout loss.
+  rollout_spline_order:   1
+  n_rollout_targets:      5         # Number of random target times sampled per rollable frame per epoch for the rollout loss.
 
-    p_IC_rollout_init:      0.01
-    IC_rollout_update_freq: 10
-    IC_dp_per_update:       0.01
-    max_p_IC_rollout:       1.0       # Maximum proportion of the time window used for IC rollout loss.
+  p_IC_rollout_init:      0.01
+  IC_rollout_update_freq: 10
+  IC_dp_per_update:       0.01
+  max_p_IC_rollout:       1.0       # Maximum proportion of the time window used for IC rollout loss.
 
-    max_iter:               4000
-    n_iter:                 2000
-    max_greedy_iter:        4000
+  max_iter:               4000
+  n_iter:                 2000
+  max_greedy_iter:        4000
+  sample_criteria:        'FOM_Variance'
 
-    warmup_epochs:          40    # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
+  warmup_epochs:          40    # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
 
-    loss_weights:
-      recon:                1.0
-      LD:                   100.0
-      rollout:              0.5
-      IC_rollout:           0.0
-      coef:                 0.01
+  loss_weights:
+    recon:                1.0
+    LD:                   100.0
+    rollout:              0.5
+    IC_rollout:           0.0
+    coef:                 0.01
 
-      chain_rule:           1.0
-      consistency:          1.0
+    chain_rule:           1.0
+    consistency:          1.0
 
-    loss_types:
-      recon:                "MSE"
-      LD:                   "MSE"
-      rollout:              "MSE"
-      IC_rollout:           "MSE"
+  loss_types:
+    recon:                "MSE"
+    LD:                   "MSE"
+    rollout:              "MSE"
+    IC_rollout:           "MSE"
 
-    learnable_coefs:        true
-  
+  learnable_coefs:        true
+
 workflow:
   use_restart:              False
   restart_file:             
