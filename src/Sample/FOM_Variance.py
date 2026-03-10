@@ -18,7 +18,7 @@ import  torch;
 import  numpy;
 
 from    Enums                       import  NextStep;  
-from    GPLaSDI                     import  BayesianGLaSDI;
+from    Trainer                     import  Trainer;
 from    GaussianProcess             import  fit_gps, sample_coefs;
 from    Autoencoder                 import  Autoencoder;
 from    Autoencoder_Pair            import  Autoencoder_Pair;
@@ -36,7 +36,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # FOM_Variance function
 # -------------------------------------------------------------------------------------------------
 
-def FOM_Variance(trainer : BayesianGLaSDI) -> NextStep:
+def FOM_Variance(trainer : Trainer) -> NextStep:
     """
     This function used greedy sampling to find the element of the trainer's testing set (excluding 
     the training set) whose corresponding latent dynamics gives the highest variance FOM time 

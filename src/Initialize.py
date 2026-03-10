@@ -26,7 +26,7 @@ from    SINDy               import  SINDy;
 from    SwitchSINDy         import  SwitchSINDy;
 from    DampedSpring        import  DampedSpring;
 from    ParameterSpace      import  ParameterSpace;
-from    GPLaSDI             import  BayesianGLaSDI;
+from    Trainer             import  Trainer;
 from    Autoencoder         import  Autoencoder, load_Autoencoder;
 from    Autoencoder_Pair    import  Autoencoder_Pair, load_Autoencoder_Pair;
 from    CNN_3D_Autoencoder  import  CNN_3D_Autoencoder, load_CNN_3D_Autoencoder;
@@ -81,7 +81,7 @@ physics_dict    =  {'Burgers'               : Burgers.Burgers,
 # Initialization functions
 # -------------------------------------------------------------------------------------------------
 
-def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[BayesianGLaSDI, ParameterSpace, Physics, torch.nn.Module, LatentDynamics]:
+def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer, ParameterSpace, Physics, torch.nn.Module, LatentDynamics]:
     """
     Initialize a Trainer object with a latent space model and physics object according to config 
     file. 
@@ -115,7 +115,7 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Bayesia
 
     trainer, param_space, physics, model, latent_dynamics
      
-    trainer : BayesianGLaSDI
+    trainer : Trainer
         Should have been initialized using the settings in config and is ready to begin training.
 
     param_space : ParameterSpace
@@ -180,7 +180,7 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Bayesia
 
     # Initialize the trainer object. If we are using a restart file, then load the 
     # trainer from that file.
-    trainer                 = BayesianGLaSDI(physics, model, latent_dynamics, param_space, config);
+    trainer                 = Trainer(physics, model, latent_dynamics, param_space, config);
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
         trainer.load(restart_dict['trainer']);
 

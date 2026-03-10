@@ -30,7 +30,7 @@ from    ParameterSpace              import  ParameterSpace;
 from    Physics                     import  Physics;
 from    Enums                       import  NextStep;
 from    LatentDynamics              import  LatentDynamics;
-from    GPLaSDI                     import  BayesianGLaSDI;
+from    Trainer                     import  Trainer;
 from    GaussianProcess             import  fit_gps;
 from    Initialize                  import  Initialize_Trainer;
 from    FOM_Variance                import  FOM_Variance;
@@ -511,7 +511,7 @@ def main():
 # Step
 # -------------------------------------------------------------------------------------------------
 
-def step(trainer        : BayesianGLaSDI, 
+def step(trainer        : Trainer, 
          next_step      : NextStep, 
          config         : dict) -> NextStep:
     """
@@ -528,7 +528,7 @@ def step(trainer        : BayesianGLaSDI,
     Arguments
     -----------------------------------------------------------------------------------------------
     
-    trainer : BayesianGLaSDI
+    trainer : Trainer
         A Trainer class object that we use when training the model for a particular instance of 
         the settings.
 
@@ -623,7 +623,7 @@ def Save(   param_space         : ParameterSpace,
             physics             : Physics, 
             model               : torch.nn.Module, 
             latent_dynamics     : LatentDynamics,
-            trainer             : BayesianGLaSDI, 
+            trainer             : Trainer, 
             next_step           : NextStep, 
             restart_filename    : str               = "") -> None:
     """
@@ -656,7 +656,7 @@ def Save(   param_space         : ParameterSpace,
         defines the dynamics in model's latent space. physics, latent_dynamics, and model should 
         have the same number of initial conditions.
 
-    trainer : BayesianGLaSDI
+    trainer : Trainer
         trains model using physics to define the FOM, latent_dynamics to define the ROM, and 
         model to connect them.
 
@@ -705,8 +705,6 @@ def Save(   param_space         : ParameterSpace,
     # Set up the restart path.
     # Use an absolute results directory under the project root (Higher-Order-LaSDI/results),
     # independent of the current working directory.
-    #
-    # Prefer trainer.path_results if available (keeps consistency with GPLaSDI).
     from pathlib import Path;
     if hasattr(trainer, "path_results"):
         results_dir = Path(trainer.path_results);
@@ -740,7 +738,7 @@ def Save(   param_space         : ParameterSpace,
 
 def count_parameters(   model           : torch.nn.Module, 
                         latent_dynamics : LatentDynamics,
-                        trainer         : BayesianGLaSDI) -> None:
+                        trainer         : Trainer) -> None:
     """
     Calculate and print the number of parameters in the model, latent dynamics, and trainer.
     
@@ -754,7 +752,7 @@ def count_parameters(   model           : torch.nn.Module,
     latent_dynamics : LatentDynamics
         The latent dynamics model.
         
-    trainer : BayesianGLaSDI
+    trainer : Trainer
         The trainer object which may contain learnable coefficients.
     """
     

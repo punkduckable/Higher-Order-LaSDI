@@ -24,6 +24,7 @@ from    Autoencoder                 import  Autoencoder;
 from    Autoencoder_Pair            import  Autoencoder_Pair;
 from    CNN_3D_Autoencoder          import  CNN_3D_Autoencoder;
 from    ParameterSpace              import  ParameterSpace;
+from    Trainer                     import  Trainer;
 
 import  logging;
 LOGGER : logging.Logger = logging.getLogger(__name__);
@@ -40,7 +41,7 @@ def average_rom(model           : torch.nn.Module,
                 gp_list         : list[GaussianProcessRegressor], 
                 param_grid      : numpy.ndarray,
                 t_Grid          : list[numpy.ndarray | torch.Tensor],
-                trainer         = None) -> list[list[numpy.ndarray]]:
+                trainer         : Trainer) -> list[list[numpy.ndarray]]:
     """
     This function simulates the latent dynamics for a set of parameter values by using the mean of
     the posterior distribution for each coefficient's posterior distribution. Specifically, for 
@@ -79,7 +80,7 @@ def average_rom(model           : torch.nn.Module,
         whose k'th or (0, k)'th entry specifies the k'th time value we want to find the latent 
         states when we use the j'th initial conditions and the i'th set of coefficients.
 
-    trainer : GPLaSDI
+    trainer : Trainer
         The trainer object. We use this to get normalization stats if they are enabled.
         If normalization is enabled, we use the stats to normalize initial conditions and
         de-normalize predictions for reporting/plots.
@@ -161,7 +162,7 @@ def sample_roms(model           : torch.nn.Module,
                 param_grid      : numpy.ndarray, 
                 t_Grid          : list[numpy.ndarray | torch.Tensor],
                 n_samples       : int,
-                trainer         = None) ->           list[list[numpy.ndarray]]:
+                trainer         : Trainer) ->           list[list[numpy.ndarray]]:
     """
     This function samples the latent coefficients, solves the corresponding latent dynamics, and 
     then returns the resulting latent solutions. 
@@ -377,7 +378,7 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
                             t_Test          : list[torch.Tensor],
                             U_Test          : list[list[torch.Tensor]],
                             n_samples       : int,
-                            trainer         = None) -> tuple[numpy.ndarray, numpy.ndarray, list[list[numpy.ndarray]], list[list[numpy.ndarray]]]:
+                            trainer         : Trainer) -> tuple[numpy.ndarray, numpy.ndarray, list[list[numpy.ndarray]], list[list[numpy.ndarray]]]:
     r"""
     This function computes the relative error and STD between the FOM solution and its 
     prediction when we rollout the FOM solution using the the ICs and mean of the posterior 
@@ -548,7 +549,7 @@ def Rollout_Error_and_STD(  model           : torch.nn.Module,
 
     # If the workflow uses normalization, U_Test and decoded predictions are in normalized
     # units. De-normalize here for meaningful physical errors/plots using the trainer.
-    use_denorm: bool = (trainer is not None) and hasattr(trainer, "has_normalization") and trainer.has_normalization();
+    use_denorm : bool = hasattr(trainer, "has_normalization") and trainer.has_normalization();
 
     if(isinstance(model, Autoencoder) or isinstance(model, CNN_3D_Autoencoder)):
         for i in range(n_Test):

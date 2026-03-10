@@ -40,10 +40,10 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 
 
 # -------------------------------------------------------------------------------------------------
-# BayesianGLaSDI class
+# Trainer class
 # -------------------------------------------------------------------------------------------------
 
-class BayesianGLaSDI:
+class Trainer:
     # An n_Train element list. The i'th element is is an n_IC element list whose j'th element is a
     # numpy ndarray of shape (n_t(i), Frame_Shape) holding a sequence of samples of the j'th 
     # derivative of the FOM solution when we use the i'th combination of training values. 
@@ -74,7 +74,7 @@ class BayesianGLaSDI:
                  param_space        : ParameterSpace, 
                  config             : dict):
         """
-        This class runs a full GPLaSDI training. As input, it takes the model defined as a 
+        This class runs a full round of training. As input, it takes the model defined as a 
         torch.nn.Module object, a Physics object to recover FOM ICs + information on the time 
         discretization, a latent dynamics object, and a parameter space object (which holds the 
         testing and training sets of parameters).

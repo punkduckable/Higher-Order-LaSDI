@@ -14,7 +14,7 @@ import  torch;
 import  numpy;
 
 from    Enums                       import  NextStep;  
-from    GPLaSDI                     import  BayesianGLaSDI;
+from    Trainer                     import  Trainer;
 
 
 # Setup logger.
@@ -28,7 +28,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # Generate_Training_Data
 # -------------------------------------------------------------------------------------------------
 
-def Generate_Training_Data(trainer : BayesianGLaSDI) -> NextStep:
+def Generate_Training_Data(trainer : Trainer) -> NextStep:
     """
     This function updates trainer.U_Train and trainer.U_Test by adding solutions generated from 
     parameter combinations in trainer.param_space.train_space and trainer.param_space.test_space.
@@ -50,8 +50,8 @@ def Generate_Training_Data(trainer : BayesianGLaSDI) -> NextStep:
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    trainer : BayesianGLaSDI
-        A BayesianGLaSDI object that we use for training. We assume that if the user has added 
+    trainer : Trainer
+        A Trainer object that we use for training. We assume that if the user has added 
         new training parameter combinations, that they appended these new parameters onto the end 
         of trainer.param_space.train_space. Same for testing parameters.
 

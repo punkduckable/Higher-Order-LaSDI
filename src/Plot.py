@@ -29,6 +29,7 @@ from    Autoencoder                 import  Autoencoder;
 from    Autoencoder_Pair            import  Autoencoder_Pair;
 from    SolveROMs                   import  sample_roms;
 from    ParameterSpace              import  ParameterSpace;
+from    Trainer                     import  Trainer;
 
 
 # Set up the logger
@@ -403,11 +404,12 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
 
 
 
-def trainSpace_RelativeErrors_Heatmap(trainer        : 'BayesianGLaSDI',
-                                     param_space     : ParameterSpace,
-                                     figsize         : tuple[int]    = (10, 10), 
-                                     title           : str           = '',
-                                     file_prefix     : str           = "") -> None:
+def trainSpace_RelativeErrors_Heatmap(
+            trainer         : Trainer,
+            param_space     : ParameterSpace,
+            figsize         : tuple[int]    = (10, 10), 
+            title           : str           = '',
+            file_prefix     : str           = "") -> None:
     """
     This function creates heatmaps showing the relative errors between all pairs of training 
     trajectories. The (i,j) cell of the d'th heatmap displays the relative error of d'th 
@@ -424,10 +426,10 @@ def trainSpace_RelativeErrors_Heatmap(trainer        : 'BayesianGLaSDI',
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    trainer : BayesianGLaSDI
-        A GPLaSDI (or BayesianGLaSDI) object that holds the training trajectories in its U_Train 
-        attribute. U_Train should be a list of length n_train, where each element is a list of 
-        torch.Tensors representing different initial conditions or derivatives.
+    trainer : Trainer
+        A Trainer object that holds the training trajectories in its U_Train  attribute. U_Train 
+        should be a list of length n_train, where each element is a list of torch.Tensors 
+        representing different initial conditions or derivatives.
 
     param_space : ParameterSpace
         A ParameterSpace object which holds the training parameter combinations in its train_space 
