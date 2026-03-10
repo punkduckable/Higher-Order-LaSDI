@@ -1,6 +1,6 @@
 # Higher-Order LaSDI
 
-Higher-Order LaSDI provides tools for building reduced-order models (ROMs) from full-order simulations using latent-space dynamics identification with Gaussian Process-based greedy sampling. The library supports physics that require multiple time derivatives (e.g., displacement and velocity for second-order systems) and handles time series with either uniform or non-uniform time grids. Latent dynamics models such as SINDy and damped-spring systems are provided, and new models can be added easily.
+Higher-Order LaSDI provides tools for building reduced-order models (ROMs) from full-order simulations using latent-space dynamics identification with Gaussian Process-based greedy sampling. The library supports physics that require multiple time derivatives (e.g., displacement and velocity for second-order systems) and handles time series with either uniform or non-uniform time grids. Latent dynamics models such as SINDy and damped-spring systems are provided, and new EncoderDecoders can be added easily.
 
 ## Key Features
 
@@ -27,7 +27,7 @@ This command will:
 1. Generate or load training data from the physics solver
 2. Train the autoencoder and latent dynamics using GPLaSDI
 3. Perform greedy sampling to adaptively select new training points
-4. Evaluate the learned model on test data
+4. Evaluate the learned ROM on test data
 5. Generate plots and error metrics
 
 ### Workflow Components
@@ -63,11 +63,12 @@ The `examples/` directory contains configuration files for various physics probl
 
 - **`src/Workflow.py`** – Main command-line driver that loads configuration files, initializes components, and runs the training pipeline
 - **`src/GPLaSDI.py`** – The `BayesianGLaSDI` class implements the main training loop with GP-based greedy sampling
-- **`src/Initialize.py`** – Factory functions for initializing trainers, models, physics solvers, and latent dynamics from config files
-- **`src/Model.py`** – Neural network architectures:
-  - `MultiLayerPerceptron`: Flexible MLP with customizable activations
-  - `Autoencoder`: Standard autoencoder for first-order systems
-  - `Autoencoder_Pair`: Paired autoencoder for higher-order systems (encodes multiple derivatives)
+- **`src/Initialize.py`** – Factory functions for initializing trainers, EncoderDecoders, physics solvers, and latent dynamics from config files
+- **`src/EncoderDecoder`** – Neural network architectures:
+  - `EncoderDecoder.py`: Base `EncoderDecoder` class.
+  - `MLP.py`: Flexible MLP with customizable activations
+  - `Autoencoder.py`: Standard autoencoder for first-order systems
+  - `Autoencoder_Pair.py`: Paired autoencoder for higher-order systems (encodes multiple derivatives)
 - **`src/ParameterSpace.py`** – Parameter space management, grid generation, and train/test split utilities
 - **`src/SolveROMs.py`** – ROM simulation functions:
   - `average_rom()`: Simulate using GP mean predictions
@@ -154,8 +155,8 @@ Configuration files are YAML-based and specify:
 - Parameter definitions (uniform, list, or file-based)
 - Test space configuration (grid, random, or file-based)
 
-### Model Architecture (`model`)
-- Model type: `ae` (Autoencoder), `pair` (Autoencoder_Pair), or `3d CNN` (CNN_3D).
+### EncoderDecoder Architecture (`EncoderDecoder`)
+- EncoderDecoder type: `ae` (Autoencoder), `pair` (Autoencoder_Pair), or `3d CNN` (CNN_3D).
 - Hidden layer widths
 - Activation functions
 - Latent dimension
@@ -364,22 +365,23 @@ New applications can be implemented by deriving from the appropriate base classe
    }
    ```
 
-### Adding a New Model Architecture
+### Adding a New EncoderDecoder Architecture
 
-1. **Create a subclass** of `torch.nn.Module` in `src/Model.py`
+1. **Create a subclass** of `EncoderDecoder` which should be placed in a file in `src/EncoderDecoder`
 2. **Implement required methods**:
    - `Encode(self, U)`: Encode full-order state to latent space
    - `Decode(self, Z)`: Decode latent state to full-order space
-   - `latent_initial_conditions(self, U_IC)`: Extract latent initial conditions
+   - `latent_initial_conditions(self, U_IC, physics, trainer)`: Extract latent initial conditions
+   - `export()`: Returns a dictionary that can be used to serialize the EncoderDecoder.
 3. **Register in `Initialize.py`**:
    ```python
-   model_dict = {
+   encoder_decoder_dict = {
        ...
-       'yourmodel': YourModel,
+       'your_encoder_decoder': YourEncoderDecoder,
    }
-   model_load_dict = {
+   encoder_decoder_load_dict = {
        ...
-       'yourmodel': load_YourModel,
+       'your_encoder_decoder': load_YourEncoderDecoder,
    }
    ```
 
@@ -396,7 +398,7 @@ The `Test/` directory contains Jupyter notebooks for testing and validating comp
 Training produces several outputs:
 
 ### Saved Files
-- **Checkpoint**: `checkpoint/checkpoint.pt` – Model weights and training state
+- **Checkpoint**: `checkpoint/checkpoint.pt` – EncoderDecoder weights and training state
 - **Results**: `results/<physics_type>_loss_by_param.pkl` – Per-epoch loss curves (per training parameter + totals)
 - **Figures**: `Figures/*.png` – Latent trajectory plots, error heatmaps
 - **Animations**: `Figures/*.mp4` – Solution animations (if generated)
