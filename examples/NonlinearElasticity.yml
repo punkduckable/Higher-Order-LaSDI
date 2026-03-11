@@ -23,6 +23,7 @@ trainer:
   max_iter:               20000
   n_iter:                 4000
   max_greedy_iter:        20000
+  sample_criteria:        'FOM_Variance'
 
   warmup_epochs:          20    # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
 
@@ -67,7 +68,7 @@ parameter_space:
   test_space:
     type:                   grid
 
-model:
+EncoderDecoder:
   type:                     pair
   pair:
     hidden_widths:          [250, 100, 100, 100]

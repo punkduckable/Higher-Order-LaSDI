@@ -20,10 +20,10 @@ trainer:
   IC_dp_per_update:       0.01
   max_p_IC_rollout:       1.0       # Maximum proportion of the time window used for IC rollout loss.
 
-  max_iter:               4000
-  n_iter:                 2000
-  max_greedy_iter:        4000
-  sample_criteria:        'FOM_Variance'
+  max_iter:               400
+  n_iter:                 200
+  max_greedy_iter:        400
+  sample_criteria:        'FOM_Rollout'
 
   warmup_epochs:          40    # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
 
@@ -61,7 +61,7 @@ parameter_space:
   test_space:
     type:                   grid
 
-model:
+EncoderDecoder:
   type:                     cnn_3d
   ae:
     hidden_widths:          [1000, 300, 100]
