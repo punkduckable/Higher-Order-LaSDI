@@ -211,7 +211,49 @@ class EncoderDecoder(torch.nn.Module):
             the returned list is [self.encoder(*U0_i)].
         """
 
-        raise RuntimeError("Abstract method EncoderDecoder.latent_initial_conditions!");
+        # Checks.
+        assert isinstance(param_grid, numpy.ndarray),   "type(param_grid) = %s, must be numpy.ndarray" % str(type(param_grid));
+        assert len(param_grid.shape) == 2,              "param_grid.shape = %s, must have length 2" % str(param_grid.shape);
+        assert physics.n_IC == self.n_IC,               "physics.n_IC = %d, self.n_IC = %d; must be equal" % (physics.n_IC, self.n_IC);
+
+        # Determine device for encoding.
+        encoder_device : torch.device = next(self.parameters()).device;
+
+        n_param : int = param_grid.shape[0];
+        Z0      : list[list[numpy.ndarray]] = [];
+        LOGGER.debug("Encoding initial conditions for %d combinations of parameter values" % n_param);
+
+        has_norm : bool = (trainer is not None) and hasattr(trainer, "has_normalization") and trainer.has_normalization();
+
+        with torch.no_grad():
+            for i in range(n_param):
+                # Get the ICs for the i'th combination of parameter values.
+                ICs : list[numpy.ndarray] = physics.initial_condition(param_grid[i]);
+                assert isinstance(ICs, list), "type(ICs) = %s, expected list" % str(type(ICs));
+                assert len(ICs) == self.n_IC, "len(ICs) = %d, expected %d (=self.n_IC)" % (len(ICs), self.n_IC);
+
+                # Convert ICs to tensors, optionally normalize, then encode.
+                X0_list : list[torch.Tensor] = [];
+                for k in range(self.n_IC):
+                    x0_np : numpy.ndarray = ICs[k];
+                    x0_t  : torch.Tensor  = torch.Tensor(x0_np).reshape((1,) + x0_np.shape).to(encoder_device);
+                    if has_norm:
+                        x0_t = trainer.normalize_tensor(x0_t, k);
+                    X0_list.append(x0_t);
+
+                # Encode (positional arguments). Must return a tuple of length self.n_IC.
+                Z0_tuple : tuple[torch.Tensor, ...] = self.Encode(*X0_list);
+                assert isinstance(Z0_tuple, tuple), "Encode must return a tuple; got %s" % str(type(Z0_tuple));
+                assert len(Z0_tuple) == self.n_IC,  "Encode returned %d outputs; expected %d (=self.n_IC)" % (len(Z0_tuple), self.n_IC);
+
+                # Detach to numpy arrays.
+                Z0_i : list[numpy.ndarray] = [];
+                for k in range(self.n_IC):
+                    Z0_i.append(Z0_tuple[k].detach().cpu().numpy());
+
+                Z0.append(Z0_i);
+
+        return Z0;
 
 
 
