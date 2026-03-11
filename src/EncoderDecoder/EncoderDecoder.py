@@ -87,19 +87,20 @@ class EncoderDecoder(torch.nn.Module):
 
 
 
-    def Encode(self, X : tuple[torch.Tensor]) -> tuple[torch.Tensor]:
+    def Encode(self, X1 : torch.Tensor, Xn_IC : torch.Tensor) -> tuple[torch.Tensor]:
         """
-        This function should accept n_IC elements of the FOM space and map them to n_IC elements 
-        of the latent space. The output must be a tuple of tensors. The input can either be n_IC 
-        distinct variables, or one tuple of length n_IC.
+        In general, the Encode method should take n_IC positional arguments, each one containing 
+        a batch of elements of the FOM space, and map them to n_IC elements of the latent space. 
+        The output must be a tuple of tensors. The input should be n_IC tensors (as positional 
+        arguments), each with the same shape.
 
         
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
 
-        X : tuple[torch.Tensor], len = self.n_IC
-            The inputs to be encoded
+        X1, ... , Xn_IC : torch.Tensor, shape = (n_inputs, ...)
+            The inputs to be encoded.
 
 
         -------------------------------------------------------------------------------------------
@@ -114,18 +115,18 @@ class EncoderDecoder(torch.nn.Module):
 
 
 
-    def Decode(self, Z : tuple[torch.Tensor]) -> tuple[torch.Tensor]:
+    def Decode(self, Z1 : torch.Tensor, Xn_IC : torch.Tensor) -> tuple[torch.Tensor]:
         """
         This function should accept n_IC elements of the latent space and map them to n_IC elements 
-        of the FOM space. The output must be a tuple of tensors. The input can either be n_IC 
-        distinct variables, or one tuple of length n_IC.
+        of the FOM space. The output must be a tuple of tensors. The input should be n_IC tensors 
+        (as positional arguments), each with the same shape.
 
         
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Z : tuple[torch.Tensor], len = self.n_IC
+        Z1, .. , Zn_IC : torch.Tensor, shape = (n_inputs, ...)
             The latent states to be decoded.
 
 
@@ -141,18 +142,18 @@ class EncoderDecoder(torch.nn.Module):
 
 
 
-    def forward(self, X : tuple[torch.Tensor]) -> tuple[torch.Tensor]:
+    def forward(self, X1 : torch.Tensor, Xn_IC : torch.Tensor) -> tuple[torch.Tensor]:
         """
-        This function passes X through the encoder, producing a latent state, Z. It then passes 
-        Z through the decoder; hopefully producing a set of vectors that approximates X.
+        This function passes the X's through the encoder, producing a latent state, Z. It then 
+        passes Z through the decoder; hopefully producing a set of vectors that approximates X.
         
 
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
 
-        X : tuple[torch.Tensor], len = self.n_IC
-            The inputs to the encoder.
+        X1, ... , Xn_IC : torch.Tensor, shape = (n_inputs, ...)
+            The inputs to be encoded.
 
 
         -------------------------------------------------------------------------------------------
@@ -203,13 +204,11 @@ class EncoderDecoder(torch.nn.Module):
         -------------------------------------------------------------------------------------------
         
         Z0 : list[list[numpy.ndarray]], len = n_param
-            An n_param element list whose i'th element is an n_IC element list whose j'th element 
-            is an numpy.ndarray of shape (1, n_z) whose k'th element holds the k'th component of 
-            the encoding of the initial condition for the j'th derivative of the latent dynamics 
-            corresponding to the i'th combination of parameter values.
-        
+            An n_param element list whose i'th element is an n_IC element list holding the encoding
+            of the initial conditions for the i'th combination of parameters. 
+            
             If we let U0_i denote the FOM IC for the i'th set of parameters, then the i'th element of 
-            the returned list is [self.encoder(U0_i)].
+            the returned list is [self.encoder(*U0_i)].
         """
 
         raise RuntimeError("Abstract method EncoderDecoder.latent_initial_conditions!");
