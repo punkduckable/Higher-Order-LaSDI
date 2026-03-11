@@ -369,8 +369,9 @@ New applications can be implemented by deriving from the appropriate base classe
 
 1. **Create a subclass** of `EncoderDecoder` which should be placed in a file in `src/EncoderDecoder`
 2. **Implement required methods**:
-   - `Encode(self, U)`: Encode full-order state to latent space
-   - `Decode(self, Z)`: Decode latent state to full-order space
+   - `Encode(self, X(1), ... , X(n_IC))`: Encode full-order state to latent space
+   - `Decode(self, Z(1), ... , Z(n_IC))`: Decode latent state to full-order space
+   - `forward(self, X(1), ... , X(n_IC))`: Encode and then Decode the FOM states.
    - `latent_initial_conditions(self, U_IC, physics, trainer)`: Extract latent initial conditions
    - `export()`: Returns a dictionary that can be used to serialize the EncoderDecoder.
 3. **Register in `Initialize.py`**:
@@ -384,6 +385,8 @@ New applications can be implemented by deriving from the appropriate base classe
        'your_encoder_decoder': load_YourEncoderDecoder,
    }
    ```
+4. **Define how to train your architecture**: Import your new EncoderDecoder sub-class in `Trainer.py`. Either add the new class to one of the existing cases (using the pre-selected loss functions) in the `Trainer` class' `train` method, or define a new case to handle your new class.
+
 
 ## Testing and Development
 
