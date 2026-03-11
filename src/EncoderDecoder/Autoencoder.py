@@ -128,7 +128,6 @@ class Autoencoder(EncoderDecoder):
 
 
 
-
     def Encode(self, U : torch.Tensor) -> tuple[torch.Tensor]:
         """
         This function encodes a set of displacement and velocity frames.
@@ -191,7 +190,6 @@ class Autoencoder(EncoderDecoder):
 
 
 
-
     def forward(self, X : torch.Tensor) -> tuple[torch.Tensor]:
         """
         This function passes X through the encoder, producing a latent state, Z. It then passes 
@@ -224,9 +222,6 @@ class Autoencoder(EncoderDecoder):
 
         # All done! Hopefully Y \approx X.
         return Y;
-
-
-
 
 
 

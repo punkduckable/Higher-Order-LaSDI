@@ -444,9 +444,6 @@ class CNN_3D_Autoencoder(EncoderDecoder):
 
 
 
-
-
-
     def export(self) -> dict:
         """
         This function extracts everything we need to recreate self from scratch.

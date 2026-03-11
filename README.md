@@ -372,7 +372,6 @@ New applications can be implemented by deriving from the appropriate base classe
    - `Encode(self, X(1), ... , X(n_IC))`: Encode full-order state to latent space
    - `Decode(self, Z(1), ... , Z(n_IC))`: Decode latent state to full-order space
    - `forward(self, X(1), ... , X(n_IC))`: Encode and then Decode the FOM states.
-   - `latent_initial_conditions(self, U_IC, physics, trainer)`: Extract latent initial conditions
    - `export()`: Returns a dictionary that can be used to serialize the EncoderDecoder.
 3. **Register in `Initialize.py`**:
    ```python
