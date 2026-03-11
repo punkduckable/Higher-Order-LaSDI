@@ -19,7 +19,7 @@ import  numpy;
 
 from    Enums                       import  NextStep;  
 from    Trainer                     import  Trainer;
-from    GaussianProcess             import  fit_gps, sample_coefs;
+from    GaussianProcess             import  fit_gps, sample_coefs, eval_gp;
 from    Autoencoder                 import  Autoencoder;
 from    Autoencoder_Pair            import  Autoencoder_Pair;
 from    CNN_3D_Autoencoder          import  CNN_3D_Autoencoder;
@@ -95,7 +95,10 @@ def FOM_Variance(trainer : Trainer) -> NextStep:
     # encoder_decoder from the last checkpoint. This should be the one that obtained the best loss 
     # so far. Remember that train_coefs should specify the coefficients from that iteration. 
     LOGGER.info("Sampling: Loading encoder_decoder from checkpoint.");
-    encoder_decoder : EncoderDecoder    = trainer.encoder_decoder.cpu();
+    # Do GP + decoding on CPU, but restore the original device afterwards.
+    encoder_decoder_device : torch.device = next(trainer.encoder_decoder.parameters()).device;
+
+    encoder_decoder : EncoderDecoder    = trainer.encoder_decoder.to("cpu");
     n_test          : int               = trainer.param_space.n_test();
     n_train         : int               = trainer.param_space.n_train();
     encoder_decoder.load_state_dict(torch.load(trainer.path_checkpoint + '/' + 'checkpoint.pt', map_location = 'cpu'));
@@ -160,7 +163,6 @@ def FOM_Variance(trainer : Trainer) -> NextStep:
     
     # Log GP prediction statistics for first candidate to diagnose zero-variance issue
     if n_candidates > 0:
-        from GaussianProcess import eval_gp;
         pred_mean, pred_std = eval_gp(gp_list, candidate_parameters[0:1, :]);
         LOGGER.info("GP predictions for first candidate %s:" % str(candidate_parameters[0]));
         for coef_idx in range(min(5, pred_mean.shape[1])):
@@ -210,6 +212,9 @@ def FOM_Variance(trainer : Trainer) -> NextStep:
 
     # Find the index of the parameter with the largest std.
     m_index : int = get_FOM_max_std(encoder_decoder, LatentStates);
+
+    # Move the model back to its original device now that decoding is finished.
+    trainer.encoder_decoder.to(encoder_decoder_device);
 
     # We have found the testing parameter we want to add to the training set. Fetch it, then
     # stop the timer and return the parameter. 
@@ -309,108 +314,73 @@ def get_FOM_max_std(encoder_decoder : EncoderDecoder, LatentStates : list[list[n
             assert LatentStates[i][j].shape[2]      == n_z,         "LatentStates[%d][%d].shape = %s, expected %d" % (i, j, str(LatentStates[i][j].shape), n_z);
 
 
-    # Find the index that gives the largest STD!
+
+    # ---------------------------------------------------------------------------------------------
+    # Find parameter combination with the max STD.
+    # ---------------------------------------------------------------------------------------------
+
     max_std     : float     = 0.0;
     m_index     : int       = 0;
-    
-    if(isinstance(encoder_decoder, Autoencoder) or isinstance(encoder_decoder, CNN_3D_Autoencoder)):
-        assert n_IC == 1, "n_IC = %d, expected 1" % (n_IC);
 
-        for i in range(n_param):
-            # Fetch the set of latent trajectories for the i'th combination of parameter values.
-            # Z_i is a 3d tensor of shape (n_samples_i, n_t_i, n_z), where n_samples_i is the 
-            # number of samples of the posterior distribution for the i'th combination of parameter 
-            # values, n_t_i is the number of time steps in the latent dynamics solution for the 
-            # i'th combination of parameter values, nd n_z is the dimension of the latent space. 
-            # The p, q, r element of Zi is the r'th component of the q'th frame of the latent 
-            # solution corresponding to p'th sample of the posterior distribution for the i'th 
-            # combination of parameter values.
-            Z_i             : torch.Tensor  = torch.Tensor(LatentStates[i][0]);
+    for i in range(n_param):
+        # i'th parameter's latent trajectories:
+        # LatentStates[i] is length n_IC; each entry is (n_samples_i, n_t_i, n_z).
+        n_samples_i : int = LatentStates[i][0].shape[0];
+        n_t_i       : int = LatentStates[i][0].shape[1];
 
-            # Now decode the frames, one sample at a time.
-            n_samples_i     : int           = Z_i.shape[0];
-            n_t_i           : int           = Z_i.shape[1];
-            if isinstance(encoder_decoder, CNN_3D_Autoencoder):
-                fom_shape = [encoder_decoder.conv_channels[0]] + encoder_decoder.reshape_shape   # [C,I,J,K]
-            else:
-                fom_shape = encoder_decoder.reshape_shape
+        # First decode the 0'th sample for the i'th combination of parameters. This tells us the
+        # shape of the outputs. We begin by converting the latent states for the 0'th sample and 
+        # i'th combination of parameters into a tuple.
+        Z0_list : list[torch.Tensor] = [];
+        for k in range(n_IC):
+            Z0_list.append(torch.from_numpy(LatentStates[i][k][0, :, :]));
 
-            U_Pred_i = numpy.empty([n_samples_i, n_t_i] + fom_shape, dtype = numpy.float32)
-            for j in range(n_samples_i):
-                U_Pred_i[j, ...] = encoder_decoder.Decode(Z_i[j, :, :])[0].detach().numpy();
+        # Decode        
+        U0_tuple : tuple[torch.Tensor, ...] = encoder_decoder.Decode(*Z0_list);
+        assert len(U0_tuple) == n_IC, "Decode returned %d outputs; expected n_IC=%d" % (len(U0_tuple), n_IC);
 
-            # Compute the standard deviation across the sample axis. This gives us an array of shape 
-            # (n_t, n_FOM) whose i,j element holds the (sample) standard deviation of the j'th component 
-            # of the i'th frame of the FOM solution. In this case, the sample distribution consists of 
-            # the set of j'th components of i'th frames of FOM solutions (one for each sample of the 
-            # coefficient posterior distributions).
-            U_pred_i_std    : numpy.ndarray = U_Pred_i.std(0);
+        # Build an array to hold the predictions (for each sample) for the i'th combination of
+        # parameters.
+        U_Pred_i : list[numpy.ndarray] = [];
+        for k in range(n_IC):
+            U_Pred_i.append(numpy.empty((n_samples_i,) + tuple(U0_tuple[k].shape), dtype = numpy.float32));
 
-            # Handle inf/nan values gracefully by replacing them with a large but finite value
-            if not numpy.all(numpy.isfinite(U_pred_i_std)):
-                LOGGER.warning(f"Parameter {i}: STD contains inf/nan values. This suggests divergent samples escaped detection. Replacing with 1e10.");
-                U_pred_i_std = numpy.nan_to_num(U_pred_i_std, nan = 0.0, posinf = 1e10, neginf = 1e10);
+        # Store sample 0.
+        for k in range(n_IC):
+            U_Pred_i[k][0, ...] = U0_tuple[k].detach().numpy();
+
+        # Decode remaining samples.
+        for j in range(1, n_samples_i):
+            # Convert latent sates to tensors.
+            Z_ij : list[torch.Tensor] = [];
+            for k in range(n_IC):
+                Z_ij.append(torch.from_numpy(LatentStates[i][k][j, :, :]));
             
-            # Compute the maximum standard deviation 
-            max_std_i                : numpy.float32 = U_pred_i_std.max();
+            # Decode and store.
+            U_ij : tuple[torch.Tensor, ...] = encoder_decoder.Decode(*Z_ij);
+            for k in range(n_IC):
+                U_Pred_i[k][j, ...] = U_ij[k].detach().numpy();
 
-            # If this is bigger than the biggest std we have seen so far, update the maximum.
-            if max_std_i > max_std:
-                m_index : int   = i;
-                max_std : float = max_std_i;
-
-        # Report the index of the testing parameter that gave the largest maximum std.
-        return m_index
-
-
-    elif(isinstance(encoder_decoder, Autoencoder_Pair)):
-        assert n_IC == 2, "n_IC = %d, expected 2" % (n_IC);
-
-        for i in range(n_param):
-            # Fetch the set of latent trajectories for the i'th combination of parameter values.
-            # Z_D_i and Z_D_i are a 3d tensor sof shape (n_samples_i, n_t_i, n_z), where 
-            # n_samples_i is the number of samples of the posterior distribution for the i'th 
-            # combination of parameter values, n_t_i is the number of time steps in the latent 
-            # dynamics solution for the i'th combination of parameter values, nd n_z is the 
-            # dimension of the latent space. 
-            # 
-            # The p, q, r element of Z_D_i is the r'th component of the q'th frame of the latent 
-            # displacement corresponding to p'th sample of the posterior distribution for the i'th 
-            # combination of parameter values. The components of Z_V_i are analogous but for the 
-            # latent velocity. 
-            Z_D_i   : torch.Tensor  = torch.Tensor(LatentStates[i][0]);
-            Z_V_i   : torch.Tensor  = torch.Tensor(LatentStates[i][1]);
-
-            n_samples_i : int           = Z_D_i.shape[0];
-            n_t_i       : int           = Z_D_i.shape[1];
-            D_Pred_i    : numpy.ndarray = numpy.empty([n_samples_i, n_t_i] + encoder_decoder.reshape_shape, dtype = numpy.float32);
-            for j in range(n_samples_i):
-                D_Pred_ij, _ = encoder_decoder.Decode(Latent_Displacement   = Z_D_i[j, :, :], Latent_Velocity    = Z_V_i[j, :, :]);
-                D_Pred_i[j, ...] = D_Pred_ij.detach().numpy();
-
-            # Compute the standard deviation across the sample axis. This gives us an array of 
-            # shape (n_t, n_FOM) whose i,j element holds the (sample) standard deviation of the 
-            # j'th component of the i'th frame of the FOM solution. In this case, the sample 
-            # distribution consists of the set of j'th components of i'th frames of FOM solutions 
-            # (one for each sample of the coefficient posterior distributions).
-            D_Pred_i_std    : numpy.ndarray = D_Pred_i.std(0);
-
-            # Handle inf/nan values gracefully by replacing them with a large but finite value
-            if not numpy.all(numpy.isfinite(D_Pred_i_std)):
-                LOGGER.warning(f"Parameter {i}: STD contains inf/nan values. This suggests divergent samples escaped detection. Replacing with 1e10.");
-                D_Pred_i_std = numpy.nan_to_num(D_Pred_i_std, nan=0.0, posinf=1e10, neginf=1e10);
+        # Compute STD across samples, then take the maximum across time + all FOM components and
+        # across all decoded components (e.g., displacement + velocity for Autoencoder_Pair).
+        max_std_i : float = 0.0;
+        for k in range(n_IC):
+            U_std_k : numpy.ndarray = U_Pred_i[k].std(axis = 0);
+            if not numpy.all(numpy.isfinite(U_std_k)):
+                LOGGER.warning(
+                    "Parameter %d: STD for %d'th decoded component contains inf/nan values; "
+                    "replacing with finite values." % (i, k)
+                );
+                
+                U_std_k = numpy.nan_to_num(U_std_k, nan = 0.0, posinf = 1e10, neginf = 1e10);
             
-            # Compute the maximum standard deviation.
-            max_std_i                : numpy.float32 = D_Pred_i_std.max();
+            max_std_i = max(max_std_i, float(U_std_k.max()));
 
-            # If this is bigger than the biggest std we have seen so far, update the maximum.
-            if max_std_i > max_std:
-                m_index : int   = i;
-                max_std : float = max_std_i;
+        # Check if the max from the i'th combination exceeds the current global maximum. If so, 
+        # updated m_index.
+        if max_std_i > max_std:
+            m_index = i;
+            max_std = max_std_i;
 
-        # Report the index of the testing parameter that gave the largest maximum std.
-        return m_index;
-    
-    
-    else:
-        raise ValueError("Invalid EncoderDecoder type!");
+    # All done!
+    return m_index;
