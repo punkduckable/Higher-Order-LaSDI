@@ -341,6 +341,7 @@ New applications can be implemented by deriving from the appropriate base classe
    - `__init__(self, config, param_names)`: Initialize solver parameters
    - `initial_condition(self, param)`: Generate initial conditions for given parameters
    - `solve(self, param, t_grid)`: Solve and return solution trajectory
+   - Optional: `threshold`: An optional callable function which accepts three arguments, the current time (t), a FOM frame, and the set of node positions. It should return a 'mask', an 1D array of 0's and 1's whose lenght matches the number of nodes. If present, this is passed to the animate functions. For each frame, only plot nodes whose corresponding mask value (at that time) is 1. 
 3. **Register in `Initialize.py`**:
    ```python
    physics_dict = {
@@ -349,6 +350,7 @@ New applications can be implemented by deriving from the appropriate base classe
    }
    ```
 4. **Create config file** in `examples/YourSolver.yml`
+
 
 ### Adding a New Latent Dynamics Model
 

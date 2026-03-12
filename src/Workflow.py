@@ -417,11 +417,25 @@ def main():
             U_i_true_np = _flatten_for_movie(U_i_true_np);
             U_i_pred_np = _flatten_for_movie(U_i_pred_np);
 
+
+            if U_i_true_np.shape[1] == 1:
+                data    = U_i_true_np;
+            else:
+                data    = numpy.linalg.norm(U_i_true_np, axis = 1);
+            vmin    = data.min();
+            vmax    = data.max();
+            if(hasattr(physics, "threshold")):
+                threshold = physics.threshold;
+            else:
+                threshold = None;
             make_solution_movies(U_True         = U_i_true_np, 
                                  U_Pred         = U_i_pred_np, 
                                  X              = physics.X_Positions, 
                                  T              = t_worst.detach().numpy(),
-                                 fname_prefix   = prefix);
+                                 vmin           = vmin,
+                                 vmax           = vmax,
+                                 fname_prefix   = prefix, 
+                                 threshold      = threshold);
     
 
 

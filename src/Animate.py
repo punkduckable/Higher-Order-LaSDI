@@ -13,6 +13,7 @@ from    matplotlib.animation        import  FuncAnimation, FFMpegWriter;
 from    contextlib                  import  contextmanager;
 from    matplotlib.colors           import  LinearSegmentedColormap;
 from    mpl_toolkits.mplot3d        import  Axes3D;  # noqa: F401 (registers 3D projection)
+from    collections.abc             import  Callable;
 
 # Set up logging.
 import  logging;
@@ -46,9 +47,13 @@ def _scalar_anim(   data        : numpy.ndarray,
                     T           : numpy.ndarray,
                     save_dir    : Path          = Path("."),
                     fps         : int           = 30,
+                    vmin        : float | None  = None,
+                    vmax        : float | None  = None,
                     dpi         : int           = 150,
                     alpha       : float         = 0.5,
-                    cmap        : str           = "viridis") -> Path:  # data shape (N_t, N_x)
+                    cmap        : str           = "viridis",
+                    threshold   : Callable[[float, numpy.ndarray, numpy.ndarray], numpy.ndarray] | None = None
+                    ) -> Path:  # data shape (N_t, N_x)
     """
     Create an MP4 showing the evolution of a **scalar** field sampled on a point cloud in 
     2d or 3d domain.
@@ -80,6 +85,9 @@ def _scalar_anim(   data        : numpy.ndarray,
     
     fps : int, default 30
         Frames per second.
+
+    vmin, vmax: floats
+        If provided, these specify the upper and lower limits of the color bar.
     
     dpi : int, default 150
         Dots-per-inch for the figure canvas.
@@ -90,10 +98,13 @@ def _scalar_anim(   data        : numpy.ndarray,
     cmap : str, default ``'viridis'``
         Matplotlib colour-map used to encode the scalar amplitude.
 
-        
+    threshold : callable | None, default ``None``
+        Optional per-frame filtering to "remove" points by selecting which nodes are
+        plotted in each frame.
 
-    -------------------------------------------------------------------------------------------
-    Returns
+        If provided, it is invoked as ``threshold(t, D_t, X)`` where ``t = T[i_t]`` and
+        ``D_t`` is the 1D data slice for that frame (shape ``(N_x,)``).
+        It must return a boolean mask of shape ``(N_x,)`` (True = keep/visible).
     -------------------------------------------------------------------------------------------
     
     pathlib.Path
@@ -128,12 +139,34 @@ def _scalar_anim(   data        : numpy.ndarray,
 
         # Setup.
         N_t         : int   = T.shape[0];
-        vmin                = data.min();
-        vmax                = data.max();
+
+        if(vmin == None):
+            vmin                = data.min();
+        if(vmax == None):
+            vmax                = data.max();
+        assert vmin <= vmax,     "vmin = %f, vmax = %f; but we must have vmin <= vmax" % (vmin, vmax);
+
 
         # Ensure output directory exists.
         save_dir = Path(save_dir);
         save_dir.mkdir(parents = True, exist_ok = True);
+
+        # Make NaN / masked values fully transparent (so "deleted" points disappear).
+        cmap_obj = plt.get_cmap(cmap);
+        if hasattr(cmap_obj, "copy"):
+            cmap_obj = cmap_obj.copy();
+        cmap_obj.set_bad(color = (0, 0, 0, 0));
+
+        def _keep_mask(i_t: int) -> numpy.ndarray:
+            """Return boolean mask (N_x,) selecting which nodes to plot in frame i_t."""
+            if threshold is None:
+                return numpy.ones((X.shape[1],), dtype = bool);
+            keep = threshold(T[i_t], data[i_t], X);
+            keep = numpy.asarray(keep, dtype = bool);
+            if keep.shape != (X.shape[1],):
+                raise ValueError("threshold(t, D_t, X) must return shape (%d,), got %s"
+                                 % (X.shape[1], str(keep.shape)));
+            return keep;
 
         # Create a new figure/axes object (2D or 3D depending on X).
         if(X.shape[0] == 2):
@@ -142,26 +175,53 @@ def _scalar_anim(   data        : numpy.ndarray,
             fig = plt.figure();
             ax = fig.add_subplot(111, projection = "3d");
 
+        # Fix axis limits to the full domain extents so mask-based filtering does not
+        # cause autoscaling to follow the (changing) visible subset of points.
+        mins = X.min(axis = 1);
+        maxs = X.max(axis = 1);
+        spans = maxs - mins;
+        pad = 0.02 * numpy.where(spans == 0, 1.0, spans);
+        if X.shape[0] == 2:
+            ax.set_xlim(mins[0] - pad[0], maxs[0] + pad[0]);
+            ax.set_ylim(mins[1] - pad[1], maxs[1] + pad[1]);
+            ax.set_autoscale_on(False);
+        else:
+            ax.set_xlim(mins[0] - pad[0], maxs[0] + pad[0]);
+            ax.set_ylim(mins[1] - pad[1], maxs[1] + pad[1]);
+            ax.set_zlim(mins[2] - pad[2], maxs[2] + pad[2]);
+            ax.set_autoscale_on(False);
+
+        # Plot only the subset of points that pass the threshold in frame 0.
+        keep0 = _keep_mask(0);
+        X0 = X[:, keep0];
+        c0 = data[0, keep0];
+
         # Plot the initial frame of the data as a filled triangular contour plot
         if(X.shape[0] == 2):
-            scat = ax.scatter(  X[0],                   # array of x coordinates for the triangulation
-                                X[1],                   # array of y coordinates for the triangulation
-                                c           = data[0],  # data values at those (x,y) positions for the first time slice
-                                cmap        = cmap,     # what colormap we use
+            scat = ax.scatter(  X0[0],                  # array of x coordinates for the triangulation
+                                X0[1],                  # array of y coordinates for the triangulation
+                                c           = c0,       # data values at those (x,y) positions for the first time slice
+                                cmap        = cmap_obj, # what colormap we use
                                 vmin        = vmin,     # lower bounds for color scaling
                                 vmax        = vmax,     # upper bounds for color scaling
                                 alpha       = alpha,    # transparency of the markers
                                 s           = 60);      # Area of the markers.
         else:
-            scat = ax.scatter3D(X[0],                   # array of x coordinates for the triangulation
-                                X[1],                   # array of y coordinates for the triangulation
-                                X[2],                   # array of z coordinates for the triangulation
-                                c           = data[0],  # data values at those (x,y,z) positions for the first time slice
-                                cmap        = cmap,     # what colormap we use
+            scat = ax.scatter3D(X0[0],                  # array of x coordinates for the triangulation
+                                X0[1],                  # array of y coordinates for the triangulation
+                                X0[2],                  # array of z coordinates for the triangulation
+                                c           = c0,       # data values at those (x,y,z) positions for the first time slice
+                                cmap        = cmap_obj, # what colormap we use
                                 vmin        = vmin,     # lower bounds for color scaling
                                 vmax        = vmax,     # upper bounds for color scaling
                                 alpha       = alpha,    # transparency of the markers
-                                s           = 20);      # Area of the markers.
+                                s           = 20,       # Area of the markers.
+                                depthshade  = False); 
+            scat.update_scalarmappable();
+            if hasattr(scat, "_z_markers_idx"):
+                scat._z_markers_idx = None;
+            scat._facecolor3d = scat._facecolors;
+            scat._edgecolor3d = scat._edgecolors;
        
         # Add a colorbar to the figure, linked to the contour collection `scat`
         cb = fig.colorbar(scat, ax = ax);
@@ -171,7 +231,6 @@ def _scalar_anim(   data        : numpy.ndarray,
 
         # Set the initial title of the axes, including the time at T[0]
         time_text = ax.set_title(f"{title}\n$t$ = {T[0]:.3f}");
-
         def update(frame: int):
             """
             This function will be called for each frame of the animation.
@@ -181,9 +240,24 @@ def _scalar_anim(   data        : numpy.ndarray,
             2. Update the title to display the new time
             3. Return the updated artists so FuncAnimation knows what to redraw
             """
-            
-            # Replace the contour array with the new frame's data
-            scat.set_array(data[frame]);
+            # Update which points are plotted for this frame (boolean mask threshold).
+            keep = _keep_mask(frame);
+            if X.shape[0] == 2:
+                scat.set_offsets(numpy.column_stack((X[0, keep], X[1, keep])));
+            else:
+                scat._offsets3d = (X[0, keep], X[1, keep], X[2, keep]);
+
+            values = data[frame, keep];
+            scat.set_array(values);
+            scat.update_scalarmappable();
+
+            # 3D scatter internals keep a cached z-sort index; reset it when the
+            # number of points changes (mask-based filtering) to avoid index errors.
+            if X.shape[0] == 3:
+                if hasattr(scat, "_z_markers_idx"):
+                    scat._z_markers_idx = None;
+                scat._facecolor3d = scat._facecolors;
+                scat._edgecolor3d = scat._edgecolors;
             
             # Update the title text to show the current time
             time_text.set_text(f"{title}\n$t$ = {T[frame]:.3f}");
@@ -220,6 +294,8 @@ def _vector_anim(   data        : numpy.ndarray,
                     T           : numpy.ndarray,
                     save_dir    : Path          = Path("."),
                     fps         : int           = 30,
+                    vmin        : float | None  = None, 
+                    vmax        : float | None  = None, 
                     dpi         : int           = 150,
                     cmap        : str           = "viridis") -> Path:
     """
@@ -247,6 +323,9 @@ def _vector_anim(   data        : numpy.ndarray,
     
     T : ndarray, shape (N_t,)
         Time stamps.
+
+    vmin, vmax: floats
+        If provided, these specify the upper and lower limits of the color bar.
     
     save_dir : pathlib.Path, default ``Path('.')``
         Directory in which the movie is written.
@@ -300,8 +379,11 @@ def _vector_anim(   data        : numpy.ndarray,
 
         N_t         : int   = T.shape[0];
         magnitudes          = numpy.linalg.norm(data, axis = 1);
-        vmin                = magnitudes.min();
-        vmax                = magnitudes.max();
+        if(vmin == None):
+            vmin                = magnitudes.min();
+        if(vmax == None):
+            vmax                = magnitudes.max();
+        assert vmin <= vmax,     "vmin = %f, vmax = %f; but we must have vmin <= vmax" % (vmin, vmax);
 
         # Make a quiver plot using the data
         if X.shape[0] == 2:
@@ -392,8 +474,12 @@ def make_solution_movies(   U_True          : numpy.ndarray,
                             save_dir        : str | Path | None  = None,
                             fname_prefix    : str           = "solution",
                             fps             : int           = 30,
+                            vmin            : float | None  = None,
+                            vmax            : float | None  = None,
                             dpi             : int           = 150,
-                            cmap            : str           = "viridis") -> tuple[Path, Path, Path]:
+                            cmap            : str           = "viridis",
+                            threshold       : Callable[[float, numpy.ndarray, numpy.ndarray], numpy.ndarray] | None = None
+                            ) -> tuple[Path, Path, Path]:
     """
     Create three movies visualising a spatio-temporal solution: the true field, the predicted 
     field, and their difference. The solution can be a scalar or vector field in a 2d or 3d domain.
@@ -421,6 +507,9 @@ def make_solution_movies(   U_True          : numpy.ndarray,
     
     fps : int
         Frames per second for the saved movies.
+
+    vmin, vmax: floats
+        If provided, these specify the upper and lower limits of the color bar.
     
     dpi : int
         Resolution of the rendered frames.
@@ -428,10 +517,13 @@ def make_solution_movies(   U_True          : numpy.ndarray,
     cmap : str
         Matplotlib colour-map for scalar plots.
 
-    
-        
-    -----------------------------------------------------------------------------------------------
-    Returns
+    threshold : callable | None, default ``None``
+        Optional per-frame filtering to "remove" points by selecting which nodes are
+        plotted in each frame.
+
+        If provided, it is invoked as ``threshold(t, D_t, X)`` where ``t = T[i_t]`` and
+        ``D_t`` is the 1D data slice for that frame (shape ``(N_x,)``).
+        It must return a boolean mask of shape ``(N_x,)`` (True = keep/visible).
     -----------------------------------------------------------------------------------------------
 
     (true_path, pred_path, err_path)
@@ -480,6 +572,9 @@ def make_solution_movies(   U_True          : numpy.ndarray,
     save_dir = Path(save_dir).expanduser().resolve();
     save_dir.mkdir(parents = True, exist_ok = True);
 
+    if (vmin is not None) and (vmax is not None):
+        assert vmin <= vmax,     "vmin = %f, vmax = %f; but we must have vmin <= vmax" % (vmin, vmax);
+
 
 
     # ---------------------------------------------------------------------------------------------
@@ -507,20 +602,34 @@ def make_solution_movies(   U_True          : numpy.ndarray,
                                 fname       = f"{fname_prefix}_True.mp4",
                                 save_dir    = save_dir,
                                 X           = X,
-                                T           = T);
-        
+                                T           = T, 
+                                fps         = fps,
+                                vmin        = vmin, 
+                                vmax        = vmax, 
+                                cmap        = cmap,
+                                threshold   = threshold);
         p_path = _scalar_anim(  data        = U_Pred[:, 0, :], 
                                 title       = "Predicted field", 
                                 fname       = f"{fname_prefix}_Pred.mp4",
                                 save_dir    = save_dir,
                                 X           = X,
-                                T           = T);
+                                T           = T, 
+                                fps         = fps,
+                                vmin        = vmin, 
+                                vmax        = vmax, 
+                                cmap        = cmap,
+                                threshold   = threshold);
         e_path = _scalar_anim(  data        = (U_Pred - U_True)[:, 0, :],
                                 title       = "Prediction error",
                                 fname       = f"{fname_prefix}_error.mp4",
                                 save_dir    = save_dir,
                                 X           = X,
-                                T           = T);
+                                T           = T,
+                                fps         = fps,
+                                vmin        = vmin, 
+                                vmax        = vmax, 
+                                cmap        = cmap,
+                                threshold   = threshold);
     
     else:  # 2 or 3 components: vector field
         LOGGER.info("Making vector field movie for %s" % fname_prefix);
@@ -529,19 +638,31 @@ def make_solution_movies(   U_True          : numpy.ndarray,
                                 fname       = f"{fname_prefix}_True.mp4",
                                 save_dir    = save_dir,
                                 X           = X,
-                                T           = T);
+                                T           = T,
+                                fps         = fps,
+                                vmin        = vmin, 
+                                vmax        = vmax, 
+                                cmap        = cmap);
         p_path = _vector_anim(  data        = U_Pred, 
                                 title       = "Predicted vector field", 
                                 fname       = f"{fname_prefix}_Pred.mp4",
                                 save_dir    = save_dir,
                                 X           = X,
-                                T           = T);
+                                T           = T,
+                                fps         = fps,
+                                vmin        = vmin, 
+                                vmax        = vmax, 
+                                cmap        = cmap);
         e_path = _vector_anim(  data        = U_Pred - U_True, 
                                 title       = "Error vector field", 
                                 fname       = f"{fname_prefix}_error.mp4",
                                 save_dir    = save_dir,
                                 X           = X,
-                                T           = T);
+                                T           = T,
+                                fps         = fps,
+                                vmin        = vmin, 
+                                vmax        = vmax, 
+                                cmap        = cmap);
 
     return t_path, p_path, e_path
 
