@@ -531,7 +531,7 @@ def Rollout_Error_and_STD(  encoder_decoder : EncoderDecoder,
 
         # Build an array for each derivative of the FOM solution.
         for j in range(n_IC):
-            STD_i.append(numpy.zeros_like(U_Test[i][j].numpy()));
+            STD_i.append(numpy.zeros_like(U_Test[i][j].detach().cpu().numpy()));
             Rel_Error_i.append(numpy.zeros(n_t_i, dtype = numpy.float32));
 
         # Append the lists for the i'th combination to the overall lists.
@@ -560,31 +560,33 @@ def Rollout_Error_and_STD(  encoder_decoder : EncoderDecoder,
             Zis_mean_i.append(torch.Tensor(Zis_mean[i][j]));
 
         # Decode the mean latent trajectories for each combination of parameter values.
-        U_Pred_Mean_i       : list[torch.Tensor] = list(encoder_decoder.Decode(*Zis_mean_i));
+        U_Pred_Mean_i       : list[torch.Tensor]    = list(encoder_decoder.Decode(*Zis_mean_i));
 
         # Fetch the corresponding test predictions.
-        U_Test_i            : list[numpy.ndarray] = U_Test[i];
+        U_Test_i            : list[torch.Tensor]    = U_Test[i];
         
         # Set up a list to hold the STDs of the FOM solution.
-        U_Test_i_std    : list[float] = [];
+        U_Test_i_std        : list[float]           = [];
 
         # Convert to numpy and denormalize. Also populate U_Test_i_std.
+        U_Test_i_np         : list[numpy.ndarray]   = [];
+        U_Pred_Mean_i_np    : list[numpy.ndarray]   = [];
         for j in range(n_IC):
-            U_Pred_Mean_i[j]    = U_Pred_Mean_i[j].detach().numpy();    # (n_t_i, physics.Frame_Shape)
-            U_Test_i[j]         = U_Test_i[j].detach().numpy();         # (n_t_i, physics.Frame_Shape)
+            U_Pred_Mean_i_np.append(U_Pred_Mean_i[j].detach().numpy())  # (n_t_i, physics.Frame_Shape)
+            U_Test_i_np.append(U_Test_i[j].detach().numpy())            # (n_t_i, physics.Frame_Shape)
             
             if use_denorm:
-                U_Pred_Mean_i[j]    = trainer.denormalize_np(U_Pred_Mean_i[j], j);
-                U_Test_i[j]         = trainer.denormalize_np(U_Test_i[j], j);
+                U_Pred_Mean_i_np[j] = trainer.denormalize_np(U_Pred_Mean_i_np[j], j);
+                U_Test_i_np[j]      = trainer.denormalize_np(U_Test_i_np[j], j);
         
-            U_Test_i_std.append(numpy.std(U_Test_i[j]))
+            U_Test_i_std.append(numpy.std(U_Test_i_np[j]))
 
         # For each frame, compute the relative error between the true and predicted FOM solutions.
         # We normalize the error by the std of the true solution.
         n_t_i : int = t_Test[i].shape[0];
         for j in range(n_IC):
             for k in range(n_t_i):
-                Rel_Error[i][j][k] = numpy.mean(numpy.abs(U_Pred_Mean_i[j][k, ...] - U_Test_i[j][k, ...]))/U_Test_i_std[j];
+                Rel_Error[i][j][k] = numpy.mean(numpy.abs(U_Pred_Mean_i_np[j][k, ...] - U_Test_i_np[j][k, ...]))/U_Test_i_std[j];
         
             # Now compute the corresponding element of max_Rel_Error
             max_Rel_Error[i, j] = Rel_Error[i][j].max();
