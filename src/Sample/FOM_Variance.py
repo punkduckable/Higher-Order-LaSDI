@@ -105,10 +105,10 @@ def FOM_Variance(trainer : Trainer) -> NextStep:
 
     # First, find the candidate parameters. These are the elements of the testing set that 
     # are not already in the training set.
-    candidate_parameters    : list[numpy.ndarray]   = [];
-    t_Candidates            : list[torch.Tensor]    = [];
+    candidate_parameters_list   : list[numpy.ndarray]   = [];
+    t_Candidates                : list[torch.Tensor]    = [];
     for i in range(n_test):
-        ith_Test_param = trainer.param_space.test_space[i, :];
+        ith_Test_param = trainer.param_space.test_space[i, :];      # shape = (n_p)
         
         # Check if the i'th testing parameter is in the training set (all close returns True if
         # the two arrays are equal to within a tolerance)
@@ -120,14 +120,14 @@ def FOM_Variance(trainer : Trainer) -> NextStep:
         
         # If not, add it to the set of candidates
         if(in_train == False):
-            candidate_parameters.append(ith_Test_param);
+            candidate_parameters_list.append(ith_Test_param);
             t_Candidates.append(trainer.t_Test[i]);
     
-    # Concatenate the candidates to form an array of shape (n_candidates, n_coefs).
-    n_candidates : int = len(candidate_parameters);
+    # Concatenate the candidates to form an array of shape (n_candidates, n_p).
+    n_candidates : int = len(candidate_parameters_list);
     LOGGER.info("There are %d candidate testing parameters (%d in the testing space, %d in the training set)" % (n_candidates, n_test, n_train));
     assert n_candidates >= 1, "n_candidates = %d" % n_candidates;
-    candidate_parameters    = numpy.array(candidate_parameters);
+    candidate_parameters    = numpy.array(candidate_parameters_list);        # (n_candidates, n_p) 
 
 
     # Map the initial conditions for the FOM to initial conditions in the latent space.
@@ -211,7 +211,7 @@ def FOM_Variance(trainer : Trainer) -> NextStep:
                 LatentStates[i][k][j, :, :] = LatentState_ij[0][k][:, 0, :];
 
     # Find the index of the parameter with the largest std.
-    m_index : int = get_FOM_max_std(encoder_decoder, LatentStates);
+    m_index : int = get_FOM_max_std(encoder_decoder, LatentStates, candidate_parameters);
 
     # Move the model back to its original device now that decoding is finished.
     trainer.encoder_decoder.to(encoder_decoder_device);
@@ -232,7 +232,7 @@ def FOM_Variance(trainer : Trainer) -> NextStep:
 
 
 
-def get_FOM_max_std(encoder_decoder : EncoderDecoder, LatentStates : list[list[numpy.ndarray]]) -> int:
+def get_FOM_max_std(encoder_decoder : EncoderDecoder, LatentStates : list[list[numpy.ndarray]], candidate_parameters : numpy.ndarray) -> int:
     r"""
     We find the combination of parameter values which produces with FOM solution with the greatest
     variance.
@@ -275,7 +275,10 @@ def get_FOM_max_std(encoder_decoder : EncoderDecoder, LatentStates : list[list[n
         using the p'th set of coefficients we got by sampling the posterior distribution for the 
         i'th combination of parameter values. 
 
-
+    candidate_parameters : numpy.ndarray, shape = (n_param, n_p)
+        An array holding the candidiate parameters. This is only used for debugging.
+        
+    
     -----------------------------------------------------------------------------------------------
     Returns:
     -----------------------------------------------------------------------------------------------
@@ -290,6 +293,8 @@ def get_FOM_max_std(encoder_decoder : EncoderDecoder, LatentStates : list[list[n
     assert isinstance(LatentStates[0],      list),                  "type(LatentStates[0]) = %s, expected list" % (type(LatentStates[0]));
     assert isinstance(LatentStates[0][0],   numpy.ndarray),         "type(LatentStates[0][0]) = %s, expected numpy.ndarray" % (type(LatentStates[0][0]));
     assert len(LatentStates[0][0].shape)    == 3,                   "len(LatentStates[0][0].shape) = %d, expected 3" % (len(LatentStates[0][0].shape));
+
+    assert isinstance(candidate_parameters, numpy.ndarray),         "candidate_parameters must be an ndarray, not %s" % str(type(candidate_parameters));
 
     n_param : int   = len(LatentStates);
     n_IC    : int   = len(LatentStates[0]);
@@ -379,6 +384,7 @@ def get_FOM_max_std(encoder_decoder : EncoderDecoder, LatentStates : list[list[n
         # Check if the max from the i'th combination exceeds the current global maximum. If so, 
         # updated m_index.
         if max_std_i > max_std:
+            LOGGER.info("Found new largest STD (%f) with parameter combination %s" % (max_std_i, str(candidate_parameters[i])));
             m_index = i;
             max_std = max_std_i;
 

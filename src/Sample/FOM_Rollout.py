@@ -90,7 +90,7 @@ def FOM_Rollout(trainer : Trainer) -> NextStep:
     encoder_decoder : EncoderDecoder    = trainer.encoder_decoder.cpu();
     n_test          : int               = trainer.param_space.n_test();
     n_train         : int               = trainer.param_space.n_train();
-    encoder_decoders.load_state_dict(torch.load(trainer.path_checkpoint + '/' + 'checkpoint.pt', map_location = 'cpu'));
+    encoder_decoder.load_state_dict(torch.load(trainer.path_checkpoint + '/' + 'checkpoint.pt', map_location = 'cpu'));
 
 
 
