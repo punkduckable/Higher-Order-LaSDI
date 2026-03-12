@@ -227,10 +227,10 @@ def FOM_Rollout(trainer : Trainer) -> NextStep:
                     U_Pred_ij_np[k]     = trainer.denormalize_np(U_Pred_ij_np[k], k);
                     U_Cand_i_np[k]      = trainer.denormalize_np(U_Cand_i_np[k], k);
             
+                U_Cand_i_std.append(numpy.std(U_Cand_i_np[k]));
                 if(U_Cand_i_std[k] < eps):
                     LOGGER.warning("The std for the %d'th candidiate (%s) is below %f; replacing with %f" % (k, str(candidate_parameters[k]), eps, eps));
                     U_Cand_i_std[k] = eps;
-                U_Cand_i_std.append(numpy.std(U_Cand_i_np[k]));
 
             # For each frame, compute the relative error between the true and predicted FOM solutions.
             # We normalize the error by the std of the true solution.
