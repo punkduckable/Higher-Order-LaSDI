@@ -40,19 +40,25 @@ def _agg_backend():
     finally:
         plt.switch_backend(original);
 
-def _scalar_anim(   data        : numpy.ndarray,
-                    title       : str,
-                    fname       : str,
-                    X           : numpy.ndarray,
-                    T           : numpy.ndarray,
-                    save_dir    : Path          = Path("."),
-                    fps         : int           = 30,
-                    vmin        : float | None  = None,
-                    vmax        : float | None  = None,
-                    dpi         : int           = 150,
-                    alpha       : float         = 0.5,
-                    cmap        : str           = "viridis",
-                    threshold   : Callable[[float, numpy.ndarray, numpy.ndarray], numpy.ndarray] | None = None
+def _scalar_anim(   data            : numpy.ndarray,
+                    title           : str,
+                    fname           : str,
+                    X               : numpy.ndarray,
+                    T               : numpy.ndarray,
+                    save_dir        : Path          = Path("."),
+                    fps             : int           = 30,
+                    vmin            : float | None  = None,
+                    vmax            : float | None  = None,
+                    dpi             : int           = 150,
+                    alpha           : float         = 0.5,
+                    cmap            : str           = "viridis",
+                    threshold       : Callable[[float, numpy.ndarray, numpy.ndarray], numpy.ndarray] | None = None,
+                    cbar_shrink     : float         = 0.8,
+                    cbar_pad        : float         = 0.02,
+                    cbar_aspect     : int           = 30,
+                    cbar_label      : str | None    = None,
+                    cbar_ticksize   : int | None    = 9,
+                    cbar_rect       : tuple | None  = None
                     ) -> Path:  # data shape (N_t, N_x)
     """
     Create an MP4 showing the evolution of a **scalar** field sampled on a point cloud in 
@@ -105,6 +111,26 @@ def _scalar_anim(   data        : numpy.ndarray,
         If provided, it is invoked as ``threshold(t, D_t, X)`` where ``t = T[i_t]`` and
         ``D_t`` is the 1D data slice for that frame (shape ``(N_x,)``).
         It must return a boolean mask of shape ``(N_x,)`` (True = keep/visible).
+
+    cbar_shrink : float, default 0.8
+        Shrink factor applied to the colorbar height/length.
+
+    cbar_pad : float, default 0.02
+        Padding between the axes and the colorbar (figure fraction units).
+
+    cbar_aspect : int, default 30
+        Aspect ratio of the colorbar (higher = thinner).
+
+    cbar_label : str | None, default ``None``
+        Optional label for the colorbar. If ``None``, no label is shown.
+
+    cbar_ticksize : int | None, default 9
+        Tick label font size for the colorbar. If ``None``, matplotlib defaults are used.
+
+    cbar_rect : tuple[float, float, float, float] | None, default ``None``
+        Optional manual colorbar placement specified as a figure-relative rectangle
+        ``(left, bottom, width, height)`` in [0, 1] coordinates. If provided, the
+        colorbar is drawn in its own axes to avoid overlapping the main plot.
     -------------------------------------------------------------------------------------------
     
     pathlib.Path
@@ -222,12 +248,20 @@ def _scalar_anim(   data        : numpy.ndarray,
                 scat._z_markers_idx = None;
             scat._facecolor3d = scat._facecolors;
             scat._edgecolor3d = scat._edgecolors;
-       
-        # Add a colorbar to the figure, linked to the contour collection `scat`
-        cb = fig.colorbar(scat, ax = ax);
+        # Add a compact colorbar. For 3D (and tight layouts), using a dedicated colorbar axes
+        # avoids overlapping the main plot labels.
+        if cbar_rect is None:
+            # Reserve space on the right for the colorbar axes.
+            fig.subplots_adjust(right = 0.86);
+            cax = fig.add_axes([0.88, 0.20, 0.03, 0.60]);
+        else:
+            cax = fig.add_axes(list(cbar_rect));
 
-        # Label the colorbar, using the provided title (strip out any newlines)
-        cb.set_label(title.replace("\n", " "));
+        cb = fig.colorbar(scat, cax = cax);
+        if cbar_label is not None:
+            cb.set_label(cbar_label.replace("\n", " "));
+        if cbar_ticksize is not None:
+            cb.ax.tick_params(labelsize = cbar_ticksize);
 
         # Set the initial title of the axes, including the time at T[0]
         time_text = ax.set_title(f"{title}\n$t$ = {T[0]:.3f}");
