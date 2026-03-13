@@ -386,10 +386,12 @@ def Rollout_Error_and_STD(  encoder_decoder : EncoderDecoder,
     To do this, we first sample the posterior distribution of the coefficients for each combination 
     of parameter values and solve the latent dynamics forward in time using each sample (as well as
     the mean of the posterior distribution). We then decode the latent trajectories to get a set of 
-    FOM solutions. We then compute the relative error between the mean predicted solution and the 
-    true solution for each frame of each derivative of the FOM solution for each combination of 
-    parameter values. We then find the maximum relative error (across the frames and components) 
-    for each derivative for each combination of parameter values. 
+    FOM solutions. We then compute a *normalized absolute error* between the mean predicted solution 
+    and the true solution for each frame of each derivative of the FOM solution for each combination 
+    of parameter values. The normalization is a single standard deviation per (parameter, derivative)
+    computed over all time steps and spatial nodes of the true trajectory. We then find the maximum 
+    relative error (across the frames and components) for each derivative for each combination of 
+    parameter values. 
     
     We also compute the STD (across the samples) of each frame of each derivative of the FOM 
     solution for each combination of the parameter values. We then find the maximum STD (across 
@@ -398,8 +400,10 @@ def Rollout_Error_and_STD(  encoder_decoder : EncoderDecoder,
     Note: If X_1, ... , X_M \in \mathbb{R}^N are vectors then the STD of this collection is the 
     vector whose i'th component holds the (sample) STD of {X_1[i], ... , X_M[i]}.
     
-    Note: If X, Y in \mathbb{R}^N are vectors then we define the relative error of X relative to 
-    Y as the vector whose i'th component is given by (x_i - y_i)/||y||_{\inf}. 
+    Note: The implementation below does **not** use an l^\infty normalization. Instead, for each
+    (parameter, derivative) it computes
+        mean_x |u_pred(t_k, x) - u_true(t_k, x)| / std(u_true)
+    where std(u_true) is computed over the full true trajectory (all times and spatial nodes).
 
 
     -----------------------------------------------------------------------------------------------
