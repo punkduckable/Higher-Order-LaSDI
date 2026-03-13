@@ -229,7 +229,7 @@ def FOM_Rollout(trainer : Trainer) -> NextStep:
             
                 U_Cand_i_std.append(numpy.std(U_Cand_i_np[k]));
                 if(U_Cand_i_std[k] < eps):
-                    LOGGER.warning("The std for the %d'th candidiate (%s) is below %f; replacing with %f" % (k, str(candidate_parameters[k]), eps, eps));
+                    LOGGER.warning("The std for the %d'th candidate (param %s) is below %f; replacing with %f" % (k, str(candidate_parameters[i]), eps, eps));
                     U_Cand_i_std[k] = eps;
 
             # For each frame, compute the relative error between the true and predicted FOM solutions.
@@ -238,17 +238,22 @@ def FOM_Rollout(trainer : Trainer) -> NextStep:
                 for q in range(n_t_i):
                     Rel_Error[i][p][j, q] = numpy.mean(numpy.abs(U_Pred_ij_np[p][q, ...] - U_Cand_i_np[p][q, ...]))/U_Cand_i_std[p];
     
-        # Now, Total_Rel_Error[i] should hold the sum of relative errors across time derivatives, 
-        # time steps, and samples.
+        # Now, Total_Rel_Error_i holds a worst-case-in-time error score for this candidate.
+        #
+        # We align this metric with the heatmap-style computation by taking:
+        #   (1) average over posterior samples at each time, then
+        #   (2) max over time, then
+        #   (3) sum across derivatives (n_IC).
         Total_Rel_Error_i = 0.0;
         for p in range(n_IC):
-            Total_Rel_Error_i += numpy.sum(Rel_Error[i][p]);
-    
-
+            # Rel_Error[i][p] has shape (n_samples, n_t_i)
+            mean_over_samples = numpy.mean(Rel_Error[i][p], axis = 0);
+            Total_Rel_Error_i += float(numpy.max(mean_over_samples));
+        
         # If this is bigger than the biggest total relative error we have seen so far, update the 
         # maximum and corresponding index.
         if(Total_Rel_Error_i > max_Total_Rel_Error):
-            LOGGER.info("Found new largest total relative error (%f) with parameter combination %s" % (Total_Rel_Error_i, str(candidate_parameters[k])));
+            LOGGER.info("Found new largest total relative error (%f) with parameter combination %s" % (Total_Rel_Error_i, str(candidate_parameters[i])));
             max_Total_Rel_Error = Total_Rel_Error_i;
             m_index             = i;
 
