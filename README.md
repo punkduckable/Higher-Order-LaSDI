@@ -143,7 +143,7 @@ Configuration files are YAML-based and specify:
 - Normalization settings
 - Rollout parameters (initial probability, update frequency)
 - Training iterations and greedy sampling iterations
-- Loss weights: `recon`, `LD`, `rollout`, `IC_rollout`, `coef`, `chain_rule`, `consistency`
+- Loss weights: `recon`, `LD`, `rollout`, `IC_rollout`, `stab` (stability penalty), `chain_rule`, `consistency`
 - Loss types: `MSE` or `MAE`
 - Learnable coefficients flag
 
@@ -163,7 +163,7 @@ Configuration files are YAML-based and specify:
 
 ### Latent Dynamics (`latent_dynamics`)
 - Type: `sindy`, `spring`, or `switch sindy`.
-- Coefficient norm order
+- Stability regularization (stability penalty)
 
 ### Physics (`physics`)
 - Physics type (must match a key in `physics_dict`)
@@ -356,7 +356,7 @@ New applications can be implemented by deriving from the appropriate base classe
 
 1. **Create a subclass** of `LatentDynamics` in `src/LatentDynamics/YourModel.py`
 2. **Implement required methods**:
-   - `__init__(self, n_z, coef_norm_order, Uniform_t_Grid)`: Initialize model
+   - `__init__(self, n_z, Uniform_t_Grid)`: Initialize model
    - `calibrate(self, Latent_States, loss_type, t_Grid, input_coefs)`: Compute/update coefficients
    - `simulate(self, Coefs, IC, t_Grid, n_steps)`: Simulate forward in time
 3. **Register in `Initialize.py`**:
@@ -425,7 +425,7 @@ Structure:
 - Each `loss_name` also contains a `'total'` entry, which is the loss summed across all training parameters for that epoch.
 
 Common `loss_name` keys include:
-- `recon`, `LD`, `coef`, `rollout_ROM`, `rollout_FOM`, `IC_rollout_ROM`, `IC_rollout_FOM`, and `total`
+- `recon`, `LD`, `stab`, `rollout_ROM`, `rollout_FOM`, `IC_rollout_ROM`, `IC_rollout_FOM`, and `total`
 - For paired autoencoders, additional keys such as `recon_D`, `recon_V`, `consistency_Z`, `consistency_U`, `chain_rule_U`, `chain_rule_Z`, `rollout_*_D/V`, and `IC_rollout_*` are also logged.
 
 Reading the file:

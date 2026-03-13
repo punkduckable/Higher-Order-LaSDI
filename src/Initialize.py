@@ -166,13 +166,11 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer
     assert(ld_type in ld_dict);
     if(ld_type == "switch"):
         latent_dynamics         = ld_dict[ld_type]( n_z             = encoder_decoder.n_z, 
-                                                    coef_norm_order = config['latent_dynamics']['coef_norm_order'],
                                                     Uniform_t_Grid  = physics.Uniform_t_Grid,
                                                     switch_time     = physics.switch_time,
                                                     lstsq_reg       = config['latent_dynamics'].get('lstsq_reg', 1.0));
     else:
         latent_dynamics         = ld_dict[ld_type]( n_z             = encoder_decoder.n_z, 
-                                                    coef_norm_order = config['latent_dynamics']['coef_norm_order'],
                                                     Uniform_t_Grid  = physics.Uniform_t_Grid,
                                                     lstsq_reg       = config['latent_dynamics'].get('lstsq_reg', 1.0));
     

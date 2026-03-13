@@ -31,7 +31,6 @@ LOGGER  : logging.Logger    = logging.getLogger(__name__);
 class SwitchSINDy(LatentDynamics):
     def __init__(   self, 
                     n_z             : int,
-                    coef_norm_order : str | float,
                     Uniform_t_Grid  : bool, 
                     switch_time     : callable,
                     lstsq_reg       : float = 1.0) -> None:
@@ -59,16 +58,6 @@ class SwitchSINDy(LatentDynamics):
 
         n_z : int
             The number of dimensions in the latent space, where the latent dynamics takes place.
-
-        coef_norm_order : float, 'inf', 'fro'
-            Specifies which norm we want to use when computing the coefficient loss. We pass this 
-            as the "p" argument to torch.norm. If it's a float, coef_norm_order = p \in \mathbb{R}, 
-            then we use the corresponding l^p norm. If it is "inf" or "fro", we use the infinity 
-            or Frobenius norm, respectively. 
-
-        Uniform_t_Grid : bool 
-            If True, then for each parameter value, the times corresponding to the frames of the 
-            solution for that parameter value will be uniformly spaced. In other words, the first 
             frame corresponds to time t0, the second to t0 + h, the k'th to t0 + (k - 1)h, etc 
             (note that h may depend on the parameter value, but it needs to be constant for a 
             specific parameter value). The value of this setting determines which finite difference 
@@ -96,12 +85,9 @@ class SwitchSINDy(LatentDynamics):
 
         # Run the base class initializer. The only thing this does is set the n_z and n_t 
         # attributes.
-        super().__init__(n_z                = n_z, 
-                         coef_norm_order    = coef_norm_order, 
-                         Uniform_t_Grid     = Uniform_t_Grid);
+        super().__init__(n_z = n_z, Uniform_t_Grid = Uniform_t_Grid);
         self.lstsq_reg : float = lstsq_reg;
-        LOGGER.info("Initializing a SINDY object with n_z = %d, coef_norm_order = %s, Uniform_t_Grid = %s, lstsq_reg = %s" % (  self.n_z, 
-                                                                                                                str(self.coef_norm_order), 
+        LOGGER.info("Initializing a SINDY object with n_z = %d, Uniform_t_Grid = %s, lstsq_reg = %s" % (  self.n_z, 
                                                                                                                 str(self.Uniform_t_Grid),
                                                                                                                 str(self.lstsq_reg)));
 
@@ -131,15 +117,15 @@ class SwitchSINDy(LatentDynamics):
                     params          : numpy.ndarray,
                     input_coefs     : list[torch.Tensor] = []) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         r"""
-        This function computes the SINDy and coefficient losses for a given combination of 
+        This function computes the SINDy and stability losses for a given combination of 
         parameter values. If no input_coefs are provided, then we learn the coefficients using 
         Least Squares. Otherwise we use the passed values. Once we have the coefficients, we 
         subsitue the passed latent states into the governing ODE (defined by the SINDy models). 
         The SINDy loss is simply the mean (across time values) squared error between the computed 
-        time derivative and the right hand side of the governing equation. The coefficient loss is 
+        time derivative and the right hand side of the governing equation. The stability loss is 
         the L1 norm of the coefficients. 
 
-        Note: the SINDy and coefficient losses are computed using the losses from both SINDy
+        Note: the SINDy and stability losses are computed using the losses from both SINDy
         models.
 
         -------------------------------------------------------------------------------------------
@@ -176,7 +162,7 @@ class SwitchSINDy(LatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------
 
-        output_coefs, loss_sindy, loss_coef. 
+        output_coefs, loss_sindy, loss_stab. 
         
         output_coefs : torch.Tensor, shape = (n_param, n_coef)
             A matrix of shape (n_param, n_coef). The i,j entry of this array holds the value of 
@@ -186,9 +172,10 @@ class SwitchSINDy(LatentDynamics):
             The i'th element of this list is a 0-dimensional tensor whose lone element holds the 
             sum of the SINDy losses from the i'th combination of parameter values. 
 
-        loss_coef : list[torch.Tensor], len = n_param
-            The i'th element of this list is a 0-dimensional tensor whose lone element holds the sum 
-            of the L1 norms of the coefficients from the i'th combination of parameter values.
+        loss_stab : list[torch.Tensor], len = n_param
+            The i'th element of this list is a 0-dimensional tensor whose lone element holds the
+            stability penalty for the i'th combination of parameter values (see
+            LatentDynamics.stability_penalty).
         """
 
         # Run checks.
@@ -235,7 +222,7 @@ class SwitchSINDy(LatentDynamics):
 
             # Compute the losses, coefficients for each combination of parameter values.
             loss_sindy_list  : list[torch.Tensor] = [];
-            loss_coef_list   : list[torch.Tensor] = [];
+            loss_stab_list   : list[torch.Tensor] = [];
             for i in range(n_param):
                 """"
                 Get the optimal SINDy coefficients for the i'th combination of parameter values. 
@@ -249,13 +236,13 @@ class SwitchSINDy(LatentDynamics):
                 params_i = None if params is None else params[i, :].reshape(1, -1);
                 
                 if(len(input_coefs) == 0):
-                    output_coefs, loss_sindy_i, loss_coef_i = self.calibrate(   
+                    output_coefs, loss_sindy_i, loss_stab_i = self.calibrate(   
                                                                     Latent_States = [Latent_States[i]], 
                                                                     t_Grid        = [t_Grid[i]],
                                                                     loss_type     = loss_type, 
                                                                     params        = params_i);
                 else:
-                    output_coefs, loss_sindy_i, loss_coef_i = self.calibrate(
+                    output_coefs, loss_sindy_i, loss_stab_i = self.calibrate(
                                                                     Latent_States = [Latent_States[i]], 
                                                                     t_Grid        = [t_Grid[i]],
                                                                     input_coefs   = [input_coefs[i]],
@@ -265,12 +252,12 @@ class SwitchSINDy(LatentDynamics):
                 # Package the results from this combination of parameter values.
                 output_coefs_list.append(output_coefs);
                 loss_sindy_list.append(loss_sindy_i[0]);
-                loss_coef_list.append(loss_coef_i[0]);
+                loss_stab_list.append(loss_stab_i[0]);
             
             # Package everything to return!
             # Use cat instead of stack since each output_coefs already has shape (1, n_coefs)
             # cat along dim=0 gives (n_param, n_coefs) as expected
-            return torch.cat(output_coefs_list, dim=0), loss_sindy_list, loss_coef_list;
+            return torch.cat(output_coefs_list, dim=0), loss_sindy_list, loss_stab_list;
             
 
         # -----------------------------------------------------------------------------------------
@@ -408,15 +395,15 @@ class SwitchSINDy(LatentDynamics):
         # for both n_t_before and n_t_after to be zero, so the divisor will always be non-zero.
         loss_sindy = (loss_sindy_before + loss_sindy_after) / (n_t_before + n_t_after);
 
-        loss_coef_before = torch.norm(coefs_before, self.coef_norm_order);
-        loss_coef_after  = torch.norm(coefs_after, self.coef_norm_order);
-        loss_coef = loss_coef_before + loss_coef_after;
+        A_before = coefs_before[1:, :].T;  # z' = b_before + A_before z
+        A_after  = coefs_after[1:, :].T;   # z' = b_after  + A_after  z
+        loss_stab = self.stability_penalty(A_before) + self.stability_penalty(A_after);
 
         # Prepare coefs and the losses to return. Note that we flatten the coefficient matrices.
         # Concatenate flattened coefficients: [coefs_before_flat, coefs_after_flat]
         # Shape should be (1, 2*n_z*(n_z+1)) to match expected (n_param, n_coefs) format
         output_coefs   : torch.Tensor  = torch.cat([coefs_before.flatten(), coefs_after.flatten()]).reshape(1, -1);
-        return output_coefs, [loss_sindy], [loss_coef]
+        return output_coefs, [loss_sindy], [loss_stab]
 
 
 

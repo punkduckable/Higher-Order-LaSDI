@@ -33,7 +33,7 @@ trainer:
     LD:                   1.0
     rollout:              1.0
     IC_rollout:           1.0
-    coef:                 0.001
+    stab:                 0.001
     consistency:          1.0
 
   loss_types:
@@ -78,7 +78,6 @@ EncoderDecoder:
 
 latent_dynamics:
   type:                     spring
-  coef_norm_order:          fro
   lstsq_reg:                1.0           # Ridge-regression regularization for SINDy coefficient initialization (prevents blow-up for new greedy-sampled points).
   spring:
 

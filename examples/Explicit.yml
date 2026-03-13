@@ -32,7 +32,7 @@ trainer:
     LD:                   10.0
     rollout:              0.0
     IC_rollout:           0.5
-    coef:                 0.0002
+    stab:                 0.0002
 
     chain_rule:           1.0
     consistency:          1.0
@@ -79,7 +79,6 @@ EncoderDecoder:
 
 latent_dynamics:
   type:                     sindy
-  coef_norm_order:          fro
   lstsq_reg:                0.1
   spring:
   sindy:
