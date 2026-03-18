@@ -139,7 +139,7 @@ class Trainer:
         # Extract training/loss hyperparameters from the configuration file. 
         self.lr                     : float     = trainer_config.get('lr', '0.001');                # Learning rate for the optimizer.
         self.gradient_clip          : float     = trainer_config.get('gradient_clip', 15.0);        # Maximum allowable gradient magnitude; will rescale gradientsif exceeded.
-        self.n_samples              : int       = trainer_config.get('n_samples', 20);              # Number of samples to draw per coefficient per combination of parameters
+        self.n_samples              : int       = 20                                                # Used for plotting.
         self.p_rollout_init         : float     = trainer_config.get('p_rollout_init', 0.01);       # The proportion of the simulated we simulate forward when computing the rollout loss.
         self.rollout_update_freq    : float     = trainer_config.get('rollout_update_freq', 10);    # We increase p_rollout after this many iterations.
         self.dp_per_update          : float     = trainer_config.get('dp_per_update', 0.005);       # We increase p_rollout by this much each time we increase it.

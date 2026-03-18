@@ -376,8 +376,8 @@ def Rollout_Error_and_STD(  encoder_decoder : EncoderDecoder,
                             gp_list         : list[GaussianProcessRegressor],
                             t_Test          : list[torch.Tensor],
                             U_Test          : list[list[torch.Tensor]],
-                            n_samples       : int,
-                            trainer         : Trainer) -> tuple[numpy.ndarray, numpy.ndarray, list[list[numpy.ndarray]], list[list[numpy.ndarray]]]:
+                            trainer         : Trainer,
+                            n_samples       : int       = 20) -> tuple[numpy.ndarray, numpy.ndarray, list[list[numpy.ndarray]], list[list[numpy.ndarray]]]:
     r"""
     This function computes the relative error and STD between the FOM solution and its 
     prediction when we rollout the FOM solution using the the ICs and mean of the posterior 
@@ -441,6 +441,9 @@ def Rollout_Error_and_STD(  encoder_decoder : EncoderDecoder,
         i'th element is an n_IC element list whose j'th element is a torch.Tensor of shape 
         (n_t(i), ...) whose k, ... slice holds the k'th frame of the j'th time derivative of the
         FOM model when we use the i'th combination of parameter values to define the FOM model.
+
+    trainer : Trainer
+        A Trainer object.
 
     n_samples : int
         The number of samples we draw from each GP's posterior distribution. Each sample gives us 

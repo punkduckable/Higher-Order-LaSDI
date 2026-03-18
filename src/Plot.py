@@ -59,11 +59,11 @@ def Plot_Latent_Trajectories(physics         : Physics,
                              latent_dynamics : LatentDynamics,
                              gp_list         : list[GaussianProcessRegressor],
                              param_grid      : numpy.ndarray,
-                             n_samples       : int,
                              U_True          : list[list[torch.Tensor]],
                              t_Grid          : list[torch.Tensor],
                              file_prefix     : str,
                              trainer         = None,
+                             n_samples       : int           = 20,
                              figsize         : tuple[int]    = (15, 13)) -> None:
     """
     This function plots the latent trajectories of the latent dynamics model for a combination of 
@@ -95,10 +95,6 @@ def Plot_Latent_Trajectories(physics         : Physics,
         A numpy array whose rows holds the parameter values whose latent dynamics we want to plot.
         We assume that the i'th row hodls the i'th combination of parameter values.
 
-    n_samples : int
-        The number of samples we want to draw from the GP posterior distribution for each 
-        combination of parameter values.
-
     U_True : list[list[torch.Tensor]], len = n_param
         The i'th element is an n_IC element list whose j'th element is a torch.Tensor of shape 
         (n_t_i,) + physics.Frame_Shape whose k'th row holds the j'th time derivative of the FOM 
@@ -110,7 +106,11 @@ def Plot_Latent_Trajectories(physics         : Physics,
 
     file_prefix : str
         The prefix of the file name we use to save the plots. Usually the name of the FOM model.
-
+    
+    n_samples : int
+        The number of samples we want to draw from the GP posterior distribution for each 
+        combination of parameter values.
+        
     figsize : tuple[int], len = 2
         A two element tuple specifying the size of the overall figure size. 
 
