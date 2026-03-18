@@ -367,6 +367,34 @@ New applications can be implemented by deriving from the appropriate base classe
    }
    ```
 
+
+### Adding a New Sampler (Greedy Sampling Strategy)
+
+Greedy sampling is implemented via `Sampler` classes in `src/Sample/`. A sampler selects the next
+parameter point(s) to add to the training set after each training round.
+
+1. **Create a subclass** of `Sampler` in `src/Sample/YourSampler.py`.
+2. **Implement required methods**:
+   - `__init__(self, config)`: Parse `config['type']` and your sampler-specific settings.
+   - `Sample(self, trainer) -> NextStep`: Append the chosen point(s) to `trainer.param_space.train_space`
+     and return `NextStep.RunSample`.
+   - (Optional) override `Generate_Training_Data(self, trainer)` if you need custom data-generation behavior.
+     Most samplers can reuse the base implementation.
+3. **Register in `Initialize.py`**:
+   ```python
+   sampler_dict = {
+       ...
+       'YourSampler': YourSampler,
+   }
+   ```
+4. **Configure in YAML**:
+   ```yaml
+   sampler:
+     type: YourSampler
+     YourSampler:
+       # sampler-specific settings
+   ```
+
 ### Adding a New EncoderDecoder Architecture
 
 1. **Create a subclass** of `EncoderDecoder` which should be placed in a file in `src/EncoderDecoder`

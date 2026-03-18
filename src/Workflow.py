@@ -34,9 +34,7 @@ from    LatentDynamics              import  LatentDynamics;
 from    Trainer                     import  Trainer;
 from    GaussianProcess             import  fit_gps;
 from    Initialize                  import  Initialize_Trainer;
-from    FOM_Variance                import  FOM_Variance;
-from    FOM_Rollout                 import  FOM_Rollout;
-from    Generate                    import  Generate_Training_Data;
+from    Sampler                     import  Sampler;
 from    Logging                     import  Initialize_Logger, Log_Dictionary;
 from    Plot                        import  Plot_Heatmap2d, Plot_Latent_Trajectories, trainSpace_RelativeErrors_Heatmap;
 from    Animate                     import  make_solution_movies;
@@ -46,12 +44,6 @@ from    SolveROMs                   import  average_rom;
 # Set up the logger.
 Initialize_Logger(level = logging.INFO);
 LOGGER : logging.Logger = logging.getLogger(__name__);
-
-
-# Set up Sample dictionary. 
-Sample_dict = { 'FOM_Variance'      : FOM_Variance, 
-                'FOM_Rollout'       : FOM_Rollout};
-
 
 # Set up the command line arguments
 parser = argparse.ArgumentParser(description        = "",
@@ -124,13 +116,13 @@ def main():
         next_step       = NextStep.RunSample;
     
     # Initialize the trainer.
-    trainer, param_space, physics, encoder_decoder, latent_dynamics = Initialize_Trainer(config, restart_dict);
+    trainer, sampler, param_space, physics, encoder_decoder, latent_dynamics = Initialize_Trainer(config, restart_dict);
 
     # Calculate and print the number of parameters
     count_parameters(encoder_decoder, latent_dynamics, trainer);
 
     # Start running steps.
-    next_step = step(trainer, next_step, config);
+    next_step = step(trainer, sampler, next_step, config);
 
     # Report the result of training.
     LOGGER.info("Steps completed. Completed %d/%d training steps. The next step step succeeded. Preparing for the next step." % (trainer.restart_iter, trainer.max_iter));
@@ -525,7 +517,8 @@ def main():
 # Step
 # -------------------------------------------------------------------------------------------------
 
-def step(trainer        : Trainer, 
+def step(trainer        : Trainer,
+         sampler        : Sampler,  
          next_step      : NextStep, 
          config         : dict) -> NextStep:
     """
@@ -545,6 +538,10 @@ def step(trainer        : Trainer,
     trainer : Trainer
         A Trainer class object that we use when training the encoder_decoder for a particular 
         instance of the settings.
+    
+    sampler : Sampler
+        The sampler object used to select the "worst" testing parameter combination during greedy 
+        sampling.
 
     next_step : NextStep
         The step to execute first. When restarting, this should be loaded from the restart file.
@@ -587,13 +584,13 @@ def step(trainer        : Trainer,
     elif (next_step is NextStep.PickSample):
         # Use greedy sampling to pick that sample. Note that if the training set is empty, this 
         # function does nothing.
-        next_step = Sample_dict[config['trainer']['sample_criteria']](trainer);
+        next_step = sampler.Sample(trainer);
 
 
     elif (next_step is NextStep.RunSample):
         # Generate the trajectories for all new testing and training parameters. Append these new
         # trajectories to trainer's U_Train and U_Test attributes.
-        next_step = Generate_Training_Data(trainer);
+        next_step = sampler.Generate_Training_Data(trainer);
         
         if(config["workflow"]["plot_train_rel_errors"] == True):
             trainSpace_RelativeErrors_Heatmap(  trainer     = trainer, 
@@ -619,7 +616,7 @@ def step(trainer        : Trainer,
         
     # Otherwise, continue the workflow.
     LOGGER.info("Next step is: %s" % next_step);
-    next_step = step(trainer, next_step, config);
+    next_step = step(trainer, sampler, next_step, config);
 
     # All done!
     return next_step;

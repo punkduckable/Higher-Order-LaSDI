@@ -17,28 +17,36 @@ import  logging;
 import  numpy;
 import  torch; 
 
-import  Burgers;
-import  BurgersSecondOrder;
-import  Explicit;
-import  ExplicitSecondOrder;
+
 from    LatentDynamics      import  LatentDynamics;
 from    SINDy               import  SINDy;
 from    SwitchSINDy         import  SwitchSINDy;
 from    DampedSpring        import  DampedSpring;
+
 from    ParameterSpace      import  ParameterSpace;
 from    Trainer             import  Trainer;
+
 from    EncoderDecoder      import  EncoderDecoder;
 from    Autoencoder         import  Autoencoder, load_Autoencoder;
 from    Autoencoder_Pair    import  Autoencoder_Pair, load_Autoencoder_Pair;
 from    CNN_3D_Autoencoder  import  CNN_3D_Autoencoder, load_CNN_3D_Autoencoder;
+
 from    Physics             import  Physics;
 #from    NonlinearElasticity import  NonlinearElasticity;
 #from    Advection           import  Advection;
 #from    WaveEquation        import  WaveEquation;
 #from    KleinGordon         import  KleinGordon;
 #from    Telegraphers        import  Telegraphers;
-from    Burgers2D           import  Burgers2D;
-from    Thermal             import  Thermal;
+import  Burgers2D;
+import  Thermal;
+import  Burgers;
+import  BurgersSecondOrder;
+import  Explicit;
+import  ExplicitSecondOrder;
+
+from    Sampler             import  Sampler;
+from    FOM_Rollout         import  FOM_Rollout;
+from    FOM_Variance        import  FOM_Variance;
 
 # Set up logger.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
@@ -62,12 +70,14 @@ encoder_decoder_load_dict = {   'ae'                    : load_Autoencoder,
 ld_dict = {                     'sindy'                 : SINDy, 
                                 'spring'                : DampedSpring,
                                 'switch'                : SwitchSINDy};
+sampler_dict = {                'FOM_Rollout'           : FOM_Rollout,
+                                'FOM_Variance'          : FOM_Variance};
 physics_dict = {                'Burgers'               : Burgers.Burgers,
                                 'BurgersSecondOrder'    : BurgersSecondOrder.Burgers,
-                                'Burgers2D'             : Burgers2D,
+                                'Burgers2D'             : Burgers2D.Burgers2D,
                                 'Explicit'              : Explicit.Explicit,
                                 'ExplicitSecondOrder'   : ExplicitSecondOrder.Explicit,
-                                'Thermal'               : Thermal};
+                                'Thermal'               : Thermal.Thermal};
 """
                                 'Advection'             : Advection,
                                 'NonlinearElasticity'   : NonlinearElasticity,
@@ -82,7 +92,7 @@ physics_dict = {                'Burgers'               : Burgers.Burgers,
 # Initialization functions
 # -------------------------------------------------------------------------------------------------
 
-def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer, ParameterSpace, Physics, EncoderDecoder, LatentDynamics]:
+def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer, Sampler, ParameterSpace, Physics, EncoderDecoder, LatentDynamics]:
     """
     Initialize a Trainer object with a latent space model and physics object according to config 
     file. 
@@ -114,10 +124,14 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer
     Returns
     -----------------------------------------------------------------------------------------------
 
-    trainer, param_space, physics, encoder_decoder, latent_dynamics
+    trainer, sampler, param_space, physics, encoder_decoder, latent_dynamics
      
     trainer : Trainer
         Should have been initialized using the settings in config and is ready to begin training.
+
+    sampler : Sampler
+        The sampler object used to select the "worst" testing parameter combination during greedy 
+        sampling.
 
     param_space : ParameterSpace
         holds the combinations of parameters in the testing and training sets.
@@ -187,9 +201,12 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer
     if (bool(restart_dict) == True): 
         torch.save(encoder_decoder.cpu().state_dict(), trainer.path_checkpoint + '/' + 'checkpoint.pt');
 
-
+    # Load the sampler.
+    sampler_type    : str       = config['sampler']['type'];
+    sampler         : Sampler   = sampler_dict[sampler_type](config['sampler']);
+    
     # All done!
-    return trainer, param_space, physics, encoder_decoder, latent_dynamics;
+    return trainer, sampler, param_space, physics, encoder_decoder, latent_dynamics;
 
 
 
