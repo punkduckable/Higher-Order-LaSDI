@@ -189,72 +189,107 @@ def FOM_Rollout(trainer : Trainer) -> NextStep:
 
 
     # ---------------------------------------------------------------------------------------------
+    # Setup relative error denominator
+
+    # Sampling error settings are REQUIRED when using FOM_Rollout sampling.
+    sampling_cfg    = trainer.config.get('trainer', {}).get('sampling_error', None);
+    assert sampling_cfg is not None, (
+        "Missing required config: trainer.sampling_error. Add e.g.\n"
+        "trainer:\n  sampling_error:\n    units: normalized\n    normalization: none\n    eps: 0.01\n"
+    );
+    units       = str(sampling_cfg.get('units', '')).lower();
+    norm_mode   = str(sampling_cfg.get('normalization', '')).lower();
+    eps         = float(sampling_cfg.get('eps', 0.01));
+    
+    # Checks
+    assert units in ['normalized', 'denormalized'], f"sampling_error.units must be 'normalized' or 'denormalized', got {units}";
+    assert norm_mode in ['none', 'global_std', 'trajectory_std'], f"sampling_error.normalization must be one of none/global_std/trajectory_std, got {norm_mode}";
+
+    # Precompute global denominators per IC if requested.
+    global_denoms = None
+    if norm_mode == 'global_std':
+        if units == 'normalized':
+            # Use the current (possibly normalized) stored test set directly.
+            _, stds = trainer._compute_mean_std_from_U(trainer.U_Test);
+            global_denoms = [max(float(s), eps) for s in stds];
+        else:  # denormalized
+            if hasattr(trainer, 'has_normalization') and trainer.has_normalization():
+                # If normalization is affine: std_phys = std_norm * data_std. For test-normalized data, std_norm ~ 1.
+                global_denoms = [max(float(trainer.data_std[j].item()), eps) for j in range(trainer.n_IC)];
+            else:
+                _, stds = trainer._compute_mean_std_from_U(trainer.U_Test);
+                global_denoms = [max(float(s), eps) for s in stds];
+
+    max_Total_Rel_Error : float = -1.0;
+    m_index             : int   = 0;
+
+    # Candidate_parameters is a list[ndarray]; make it an ndarray for indexing/logging.
+    candidate_parameters = numpy.asarray(candidate_parameters);
+
+
+
+    # ---------------------------------------------------------------------------------------------
     # Compute relative errors.
 
-    # If the workflow uses normalization, U_Test and decoded predictions are in normalized
-    # units. De-normalize here for meaningful physical errors/plots using the trainer.
-    use_denorm : bool = hasattr(trainer, "has_normalization") and trainer.has_normalization();
-
-    # Find the index that gives the largest total relative error
-    max_Total_Rel_Error : float = 0.0;
-    m_index             : int   = 0;
-    eps                 : float = 0.01;
-
     for i in range(n_candidates):
-        # Setup
-        n_t_i       : int                   = t_Candidates[i].shape[0];
-        U_Cand_i    : list[torch.Tensor]    = U_Candidates[i];              # (n_IC)
+        n_t_i       : int                   = t_Candidates[i].shape[0]
+        U_Cand_i    : list[torch.Tensor]    = U_Candidates[i]  # (n_IC)
 
-        # Decode the samples for the j'th candidiate, compute relative error.
-        for j in range(n_samples):
-            # Decode the j'th set of samples for the i'th combination of parameters.
-            Zis_sample_ij: list[torch.Tensor] = [];
-            for k in range(n_IC):
-                Zis_sample_ij.append(torch.Tensor(Zis_Samples[i][k][:, j, :]));
-            U_Pred_ij           : tuple[torch.Tensor]   = encoder_decoder.Decode(*Zis_sample_ij);
-            
-            # Set up a list to hold the STDs of the FOM solution.
-            U_Cand_i_std        : list[float]           = [];
-
-            # Convert to numpy and denormalize. Also populate U_Test_i_std.
-            U_Pred_ij_np        : list[numpy.ndarray]   = [];
-            U_Cand_i_np         : list[numpy.ndarray]   = [];
-            for k in range(n_IC):
-                U_Pred_ij_np.append(U_Pred_ij[k].detach().numpy());
-                U_Cand_i_np.append( U_Cand_i[k].detach().numpy());          # (n_t_i, physics.Frame_Shape)
-                
-                if use_denorm:
-                    U_Pred_ij_np[k]     = trainer.denormalize_np(U_Pred_ij_np[k], k);
-                    U_Cand_i_np[k]      = trainer.denormalize_np(U_Cand_i_np[k], k);
-            
-                U_Cand_i_std.append(numpy.std(U_Cand_i_np[k]));
-                if(U_Cand_i_std[k] < eps):
-                    LOGGER.warning("The std for the %d'th candidate (param %s) is below %f; replacing with %f" % (k, str(candidate_parameters[i]), eps, eps));
-                    U_Cand_i_std[k] = eps;
-
-            # For each frame, compute the relative error between the true and predicted FOM solutions.
-            # We normalize the error by the std of the true solution.
-            for p in range(n_IC):
-                for q in range(n_t_i):
-                    Rel_Error[i][p][j, q] = numpy.mean(numpy.abs(U_Pred_ij_np[p][q, ...] - U_Cand_i_np[p][q, ...]))/U_Cand_i_std[p];
-    
-        # Now, Total_Rel_Error_i holds a worst-case-in-time error score for this candidate.
-        #
-        # We align this metric with the heatmap-style computation by taking:
-        #   (1) average over posterior samples at each time, then
-        #   (2) max over time, then
-        #   (3) sum across derivatives (n_IC).
-        Total_Rel_Error_i = 0.0;
+        # Prepare true trajectory arrays in requested units.
+        U_true_np : list[numpy.ndarray] = []
         for p in range(n_IC):
-            # Rel_Error[i][p] has shape (n_samples, n_t_i)
-            mean_over_samples = numpy.mean(Rel_Error[i][p], axis = 0);
-            Total_Rel_Error_i += float(numpy.max(mean_over_samples));
-        
-        # If this is bigger than the biggest total relative error we have seen so far, update the 
-        # maximum and corresponding index.
-        if(Total_Rel_Error_i > max_Total_Rel_Error):
-            LOGGER.info("Found new largest total relative error (%f) with parameter combination %s" % (Total_Rel_Error_i, str(candidate_parameters[i])));
-            max_Total_Rel_Error = Total_Rel_Error_i;
+            arr = U_Cand_i[p].detach().numpy()
+            if units == 'denormalized' and hasattr(trainer, 'has_normalization') and trainer.has_normalization():
+                arr = trainer.denormalize_np(arr, p)
+            U_true_np.append(arr)
+
+        # Compute trajectory-specific denominators if requested.
+        traj_denoms = None;
+        if norm_mode == 'trajectory_std':
+            traj_denoms = [max(float(numpy.std(U_true_np[p])), eps) for p in range(n_IC)]
+
+        # Accumulate a score: avg over samples at each time -> max over time -> sum over ICs.
+        Total_i = 0.0
+        for p in range(n_IC):
+            # Compute denominator
+            if norm_mode == 'none':
+                denom_p = 1.0;
+            elif norm_mode == 'global_std':
+                denom_p = float(global_denoms[p]);
+            else:  # trajectory_std
+                denom_p = float(traj_denoms[p]);
+
+            # Build per-sample per-time errors for this derivative.
+            err_samples = numpy.zeros((n_samples, n_t_i), dtype = numpy.float32)
+            for j in range(n_samples):
+                # Decode the j'th set of samples for the i'th combination of parameters.
+                Zis_sample_ij : list[torch.Tensor] = [];
+                for k in range(n_IC):
+                    Zis_sample_ij.append(torch.Tensor(Zis_Samples[i][k][:, j, :]));
+                U_Pred_ij : tuple[torch.Tensor] = encoder_decoder.Decode(*Zis_sample_ij);
+
+                # Convert to numpy and denormalize.
+                U_pred_np = U_Pred_ij[p].detach().numpy();
+                if units == 'denormalized' and hasattr(trainer, 'has_normalization') and trainer.has_normalization():
+                    U_pred_np = trainer.denormalize_np(U_pred_np, p);
+
+                # For each frame, compute the mean absolute error across the spatial dimensions 
+                # (vectorized over spatial dims; loop only over time) between the true and 
+                # predicted FOM solutions, then divide by denom_p (which may be candidate 
+                # specific).
+                for t_idx in range(n_t_i):
+                    err_samples[j, t_idx] = numpy.mean(numpy.abs(U_pred_np[t_idx, ...] - U_true_np[p][t_idx, ...])) / denom_p;
+
+            # Average across the samples.
+            mean_over_samples = numpy.mean(err_samples, axis = 0);
+
+            # Add the contribution for the p'th IC to the total for the i'th candidate.
+            Total_i += float(numpy.max(mean_over_samples));
+
+        # Check if we have a new "worst" parameter combination.
+        if Total_i > max_Total_Rel_Error:
+            LOGGER.info("Found new largest sampling score (%f) with parameter combination %s" % (Total_i, str(candidate_parameters[i])));
+            max_Total_Rel_Error = Total_i;
             m_index             = i;
 
 
