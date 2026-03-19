@@ -529,7 +529,8 @@ class SwitchSINDy(LatentDynamics):
         # (n(i), n_t(i)) or (n_t(i)).
         t_Grid0  : numpy.ndarray | torch.Tensor  = t_Grid[0];
         if(isinstance(t_Grid0, torch.Tensor)):
-            t_Grid0 = t_Grid0.detach().numpy();
+            # Support CUDA/MPS tensors by moving to CPU before NumPy conversion.
+            t_Grid0 = t_Grid0.detach().cpu().numpy();
         n_t_i   : int           = t_Grid0.shape[-1];
         if(len(t_Grid0.shape) == 1):
             Same_t_Grid : bool  = True;
