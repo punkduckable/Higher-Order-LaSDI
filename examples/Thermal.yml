@@ -11,25 +11,24 @@ trainer:
   rollout_update_freq:    10
   dp_per_update:          0.01
   max_p_rollout:          0.5       # Maximum proportion of the time window used for rollout loss.
-  rollout_spline_order:   1
-  n_rollout_targets:      5         # Number of random target times sampled per rollable frame per epoch for the rollout loss.
+  n_rollouts:             4         # Frame-rollout mode: number of rollable start frames to rollout per training parameter per epoch.
 
   p_IC_rollout_init:      0.01
   IC_rollout_update_freq: 10
   IC_dp_per_update:       0.01
   max_p_IC_rollout:       0.75      # Maximum proportion of the time window used for IC rollout loss.
 
-  max_iter:               9000
+  max_iter:               6000
   n_iter:                 1500
-  max_greedy_iter:        9000
+  max_greedy_iter:        6000
 
   warmup_epochs:          40    # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
 
   loss_weights:
     recon:                1.0
     LD:                   10.0
-    rollout:              0.5
-    IC_rollout:           0.5
+    rollout:              0.25
+    IC_rollout:           0.25
     stab:                 0.2
 
   loss_types:
@@ -84,9 +83,10 @@ EncoderDecoder:
     conv_activations:   ["relu", "relu", "relu"]
 
 latent_dynamics:
-  type:                     switch
+  type:                     sindy
   lstsq_reg:                0.5           # Ridge-regression regularization for SINDy coefficient initialization (prevents blow-up for new greedy-sampled points).
   switch:
+  sindy:
 
 physics:
   type:                     Thermal
@@ -95,5 +95,4 @@ physics:
     hdf5_dir:               /p/lustre1/robertrs/AI4NS/Generate_Data/9x9 dataset/
     use_cnn:                True
     threshold:              1900.0
-
 

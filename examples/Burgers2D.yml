@@ -11,8 +11,7 @@ trainer:
   rollout_update_freq:    20
   dp_per_update:          0.01
   max_p_rollout:          0.75      # Maximum proportion of the time window used for rollout loss.
-  rollout_spline_order:   1
-  n_rollout_targets:      3         # Number of random target times sampled per rollable frame per epoch for the rollout loss.
+  n_rollouts:             4         # Number of rollable start frames to rollout per training parameter per epoch.
 
   p_IC_rollout_init:      0.01
   IC_rollout_update_freq: 20
@@ -93,5 +92,4 @@ physics:
     y_max:                  2.0
     uniform_t_grid:         true
     w:                      0.5
-
 

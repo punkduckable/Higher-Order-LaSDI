@@ -18,10 +18,7 @@ import  logging;
 import  torch;
 import  numpy;
 from    torch.optim                 import  Optimizer;
-from    sklearn.gaussian_process    import  GaussianProcessRegressor;
-from    scipy                       import  interpolate;
 import  pickle;
-import  time;
 
 from    GaussianProcess             import  sample_coefs, fit_gps;
 from    EncoderDecoder              import  EncoderDecoder;
@@ -143,8 +140,17 @@ class Trainer:
         self.p_rollout_init         : float     = trainer_config.get('p_rollout_init', 0.01);       # The proportion of the simulated we simulate forward when computing the rollout loss.
         self.rollout_update_freq    : float     = trainer_config.get('rollout_update_freq', 10);    # We increase p_rollout after this many iterations.
         self.dp_per_update          : float     = trainer_config.get('dp_per_update', 0.005);       # We increase p_rollout by this much each time we increase it.
-        self.rollout_spline_order   : int       = trainer_config.get('rollout_spline_order', 1);    # The order of the spline used to interpolate the rollout targets.
-        self.n_rollout_targets      : int       = trainer_config.get('n_rollout_targets', 3);       # Number of random target times sampled per rollable frame per epoch for the rollout loss.
+        # Rollout supervision (frame-rollout mode; safe for non-autonomous latent dynamics):
+        #
+        # Randomly select `n_rollouts` rollable start frames per training trajectory per epoch,
+        # rollout each one using the *true* absolute-time grid slice t[k:j], and compare full
+        # predicted trajectories against the true trajectory slice (no interpolation).
+        assert 'n_rollouts' in trainer_config, "trainer config must include `n_rollouts` (int > 0) for rollout supervision";
+        self.n_rollouts             : int       = int(trainer_config['n_rollouts']);
+        assert self.n_rollouts > 0, "trainer.n_rollouts must be > 0";
+        # Disallow legacy settings to keep the repo behavior simple during development.
+        assert 'rollout_spline_order' not in trainer_config, "rollout_spline_order is no longer supported; use n_rollouts";
+        assert 'n_rollout_targets' not in trainer_config, "n_rollout_targets is no longer supported; use n_rollouts";
         self.p_IC_rollout_init      : float     = trainer_config.get('p_IC_rollout_init', 0.01);    # The proportion of the simulation we simulate forward when computing the IC rollout loss.
         self.IC_rollout_update_freq : float     = trainer_config.get('IC_rollout_update_freq', 10); # We increase p_IC_rollout after this many iterations.
         self.IC_dp_per_update       : float     = trainer_config.get('IC_dp_per_update', 0.005);    # We increase p_IC_rollout by this much each time we increase it.
@@ -471,16 +477,6 @@ class Trainer:
         Path(self.path_checkpoint).mkdir(   parents = True, exist_ok = True);
         Path(self.path_results).mkdir(      parents = True, exist_ok = True);
 
-        # Rollout setup
-        if(self.loss_weights['rollout'] > 0 and p_rollout > 0):
-            self.timer.start("Rollout Setup");
-
-            t_Grid_rollout, n_rollout_ICs, U_Target_Rollout_Trajectory = self._rollout_setup(
-                                                                            t            = t_Train_device, 
-                                                                            U            = U_Train_device, 
-                                                                            p_rollout    = p_rollout);
-            self.timer.end("Rollout Setup");
-
         # IC rollout setup
         if(self.loss_weights['IC_rollout'] > 0 and p_IC_rollout > 0):
             self.timer.start("IC Rollout Setup");
@@ -563,27 +559,12 @@ class Trainer:
 
 
             # -------------------------------------------------------------------------------------
-            # Check if we need to update p_rollout. If so, then we also need to update 
-            # t_Grid_rollout, n_rollout_ICs, and U_Target_Rollout_Trajectory
-            # NOTE: Use epochs_in_round (not iter) to reset rollout progression each training round
-            
+            # Check if we need to update p_rollout (curriculum over horizon length).
+            # NOTE: Use epochs_in_round (not iter) to reset rollout progression each training round.
+
             if(self.loss_weights['rollout'] > 0 and epochs_in_round > 0 and ((epochs_in_round % self.rollout_update_freq) == 0)):
-                self.timer.start("Rollout Setup");
-                LOGGER.debug("Rollout Setup");
-
-                # Recalculate p_rollout based on progress within current round
-                p_rollout   = min(self.max_p_rollout, self.p_rollout_init + self.dp_per_update*(epochs_in_round//self.rollout_update_freq));
-
+                p_rollout = min(self.max_p_rollout, self.p_rollout_init + self.dp_per_update*(epochs_in_round//self.rollout_update_freq));
                 LOGGER.info("p_rollout is now %f (epoch %d/%d in current round)" % (p_rollout, epochs_in_round, next_iter - self.restart_iter));
-
-                if(p_rollout > 0):
-                    t_Grid_rollout, n_rollout_ICs, U_Target_Rollout_Trajectory = self._rollout_setup(
-                                                                                    t            = t_Train_device, 
-                                                                                    U            = U_Train_device, 
-                                                                                    p_rollout    = p_rollout);
-                
-                LOGGER.debug("Rollout Setup complete");
-                self.timer.end("Rollout Setup");
 
 
             # -------------------------------------------------------------------------------------
@@ -628,11 +609,7 @@ class Trainer:
 
                 # Setup. 
                 Latent_States           : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_t_i, n_z) arrays.
-                ROM_Rollout_ICs         : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_rollout_ICs[i], n_z) arrays.
-                FOM_Rollout_Targets     : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_rollout_ICs[i], physics.Frame_Shape) arrays holding the FOM rollout targets.
-                ROM_Rollout_Targets     : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_rollout_ICs[i], n_z) arrays holding the ROM rollout targets.
-                Rollout_Indices         : list[int]                 = [];       # len = n_train. i'th element is an array of shape (n_rollout_ICs[i]) specifying the indices (in rollout trajectories) of the frames we use as rollout targets.
-                
+
                 # Cycle through the combinations of parameter values
                 for i in range(n_train):
                     # Setup. 
@@ -697,57 +674,6 @@ class Trainer:
                         LOGGER.debug("Reconstruction Loss (Autoencoder) - complete for parameter combination %d" % i);
                         self.timer.end("Reconstruction Loss");
 
-
-                    # ----------------------------------------------------------------------------
-                    # Setup Rollout losses.
-
-                    if(self.loss_weights['rollout'] > 0 and p_rollout > 0):
-                        self.timer.start("Rollout Setup");
-                        LOGGER.debug("Rollout Setup (Autoencoder) - start for parameter combination %d" % i);
-
-                        # Select the latent states we want to use as initial conditions for the i'th 
-                        # combination of parameter values. This should be the first 
-                        # n_rollout_ICs[i] frames (n_rollout_ICs[i] is computed such that if we 
-                        # simulate the first n_rollout_ICs[i] frames, the final times are less than 
-                        # the final time for this combination of parameter values. Each element of 
-                        # ROM_Rollout_IC is a 1 element list of torch.Tensor objects of shape 
-                        # (n_rollout_ICs[i], n_z).
-                        ROM_Rollout_ICs.append([Z_i[:n_rollout_ICs[i], :]]);
-
-                        # For each rollable frame (IC), sample n_rollout_targets target step indices
-                        # uniformly from [1, n_steps). We start at 1 (not 0) because index 0
-                        # corresponds to zero-duration rollout: the predicted state equals the IC
-                        # itself, so the loss reduces to reconstruction error rather than testing
-                        # forward dynamics. Shape: (n_rollout_ICs[i], n_rollout_targets).
-                        n_steps_i           : int           = t_Grid_rollout[i].shape[0];
-                        Rollout_Indices_i   : numpy.ndarray = numpy.random.randint(1, n_steps_i, (n_rollout_ICs[i], self.n_rollout_targets));
-                        Rollout_Indices.append(Rollout_Indices_i);
-
-                        # Fetch the corresponding FOM targets for the i'th combination of parameter 
-                        # values. For each time-derivative component j, we build a flat array of shape 
-                        # (n_rollout_ICs[i] * n_rollout_targets, Frame_Shape) by iterating over every 
-                        # (IC index k, target index m) pair and looking up the pre-interpolated FOM 
-                        # frame at that step. Flattening k and m together lets us encode all targets 
-                        # in a single batch call below.
-                        FOM_Rollout_Targets_i : list[torch.Tensor] = [];
-                        for j in range(self.n_IC):
-                            FOM_Rollout_Targets_ij : numpy.ndarray = numpy.empty(
-                                (n_rollout_ICs[i] * self.n_rollout_targets,) + tuple(self.physics.Frame_Shape), 
-                                dtype = numpy.float32);
-                            for k in range(n_rollout_ICs[i]):
-                                for m in range(self.n_rollout_targets):
-                                    FOM_Rollout_Targets_ij[k * self.n_rollout_targets + m, ...] = \
-                                        U_Target_Rollout_Trajectory[i][j][k, Rollout_Indices_i[k, m], ...];
-                            FOM_Rollout_Targets_i.append(torch.tensor(FOM_Rollout_Targets_ij, dtype = torch.float32, device = device));
-                        FOM_Rollout_Targets.append(FOM_Rollout_Targets_i);
-
-                        # Encode all (n_rollout_ICs * n_rollout_targets) FOM targets in one batch.
-                        # Result shape: (n_rollout_ICs[i] * n_rollout_targets, n_z).
-                        ROM_Rollout_Targets.append([encoder_decoder_device.Encode(*FOM_Rollout_Targets_i)[0]]);
-                    
-                        LOGGER.debug("Rollout Setup (Autoencoder) - complete for parameter combination %d" % i);
-                        self.timer.end("Rollout Setup");
-
                 # Store total recon loss.
                 self._store_total_loss('recon', iter + 1, loss_recon.item());
 
@@ -801,90 +727,115 @@ class Trainer:
                     self.timer.start("Rollout Loss");
                     LOGGER.debug("Rollout Loss (Autoencoder) - start");
 
-                    # Simulate the frames forward in time. This should return an n_param element list
-                    # whose i'th element is a 1 element list whose only element has shape (n_t_i, 
-                    # n_rollout_ICs[i], n_z) whose p, q, r element of the should hold the r'th 
-                    # component of the p'th frame of the j'th time derivative of the solution
-                    # when we use the p'th initial condition for the i'th combination of parameter 
-                    # values.
-                    #
-                    # Note that the latent dynamics are autonomous. Further, because we are simulating 
-                    # each IC for the same amount of time, the specific values of the time are
-                    # irreverent. The simulate function exploits this by solving one big IVP for each 
-                    # combination of parameter values, rather than n(i) smaller ones.                         
-                    ROM_Predicted_Rollout_Trajectories  : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(  
-                                                                                            coefs   = train_coefs, 
-                                                                                            IC      = ROM_Rollout_ICs, 
-                                                                                            t_Grid  = t_Grid_rollout,
-                                                                                            params  = self.param_space.train_space);            
-
-                    # Now cycle through the training examples.
+                    # For each training parameter combination, randomly select a small number of
+                    # rollable start frames, rollout each one on the *true* absolute time grid,
+                    # and compare full trajectories (no interpolation / no random target points).
                     for i in range(n_train):
-                        # Fetch the predicted rollout trajectory for the i'th parameter combination.
-                        # Shape: (n_steps, n_rollout_ICs[i], n_z).
-                        ROM_Predicted_Rollout_Trajectories_i : torch.Tensor = ROM_Predicted_Rollout_Trajectories[i][0];
+                        t_i     : torch.Tensor  = t_Train_device[i];
+                        n_t_i   : int           = t_i.shape[0];
 
-                        # Gather the predicted latent states at the randomly sampled target steps.
-                        # Rollout_Indices[i] has shape (n_rollout_ICs, n_rollout_targets); each entry
-                        # is a step index in [1, n_steps).
-                        #
-                        # Naive equivalent (Python loops):
-                        #   for k in range(n_rollout_ICs[i]):
-                        #       for m in range(self.n_rollout_targets):
-                        #           out[k, m, :] = ROM_Predicted_Rollout_Trajectories_i[Rollout_Indices[i][k,m], k, :]
-                        #
-                        # Vectorized via torch.gather:
-                        #   1. Permute trajectory to (n_rollout_ICs, n_steps, n_z) so ICs are the
-                        #      leading dim instead of steps.
-                        #   2. Expand the index array from (n_rollout_ICs, n_rollout_targets) to
-                        #      (n_rollout_ICs, n_rollout_targets, n_z) by repeating along the last dim.
-                        #   3. torch.gather(dim=1) picks, for every (IC, target, latent-component)
-                        #      triple, the single requested step — all in one fused GPU kernel call
-                        #      rather than a Python loop over n_rollout_ICs iterations.
-                        n_z_i       : int           = ROM_Predicted_Rollout_Trajectories_i.shape[2];
-                        traj_i      : torch.Tensor  = ROM_Predicted_Rollout_Trajectories_i.permute(1, 0, 2);                   # (n_rollout_ICs, n_steps, n_z)
-                        idx_i       : torch.Tensor  = torch.tensor(Rollout_Indices[i], dtype = torch.long, device = device);   # (n_rollout_ICs, n_rollout_targets)
-                        idx_exp     : torch.Tensor  = idx_i.unsqueeze(-1).expand(-1, -1, n_z_i);                               # (n_rollout_ICs, n_rollout_targets, n_z)
-                        ROM_Rollout_Predict_i       : torch.Tensor = torch.gather(traj_i, dim = 1, index = idx_exp);           # (n_rollout_ICs, n_rollout_targets, n_z)
+                        if n_t_i < 2:
+                            continue;
 
-                        # Flatten (n_rollout_ICs, n_rollout_targets) into one batch dimension so all
-                        # targets can be decoded together and compared against FOM_Rollout_Targets,
-                        # which was stored in the same (k * n_rollout_targets + m) order during setup.
-                        ROM_Rollout_Predict_i_flat  : torch.Tensor = ROM_Rollout_Predict_i.reshape(-1, n_z_i);                 # (n_rollout_ICs * n_rollout_targets, n_z)
+                        # Rollout duration for this parameter combination.
+                        t0      : float = float(t_i[0].item());
+                        tf      : float = float(t_i[-1].item());
+                        dur     : float = float(p_rollout * (tf - t0));
+                        if dur <= 0.0:
+                            continue;
+                        
+                        # Find the set of rollable frames.
+                        t_i_np      = t_i.detach().cpu().numpy();
+                        rollable    = numpy.where(t_i_np + dur <= tf)[0];
+                        if rollable.size == 0:
+                            continue;
+                        
+                        # Pick out which frames we will roll out.
+                        n_roll_i    = min(int(self.n_rollouts), int(rollable.size));
+                        start_idx   = numpy.random.choice(rollable, size = n_roll_i, replace = False);
 
-                        # Fetch the corresponding encoded targets (already flat from setup).
-                        ROM_Rollout_Targets_i       : torch.Tensor = ROM_Rollout_Targets[i][0];    # shape = (n_rollout_ICs[i] * n_rollout_targets, n_z)
+                        # Set up
+                        loss_rollout_ROM_i : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                        loss_rollout_FOM_i : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
 
-                        # Decode the latent predictions to get FOM predictions.
-                        FOM_Rollout_Predict_i       : torch.Tensor = encoder_decoder_device.Decode(ROM_Rollout_Predict_i_flat)[0];
-                    
-                        # Get the corresponding FOM targets.
-                        FOM_Rollout_Target_i        : torch.Tensor = FOM_Rollout_Targets[i][0];    # shape = (n_rollout_ICs[i] * n_rollout_targets, *physics.Frame_Shape)
-                    
-                        # Compute differences once
-                        diff_ROM = ROM_Rollout_Targets_i - ROM_Rollout_Predict_i_flat;
-                        diff_FOM = (FOM_Rollout_Predict_i - FOM_Rollout_Target_i);
-                        
-                        # Compute losses from normalized differences
-                        if(self.loss_types['rollout'] == "MSE"):
-                            loss_rollout_ROM_ith_param = torch.mean(diff_ROM**2);
-                            loss_rollout_FOM_ith_param = torch.mean(diff_FOM**2);
-                        elif(self.loss_types['rollout'] == "MAE"):
-                            loss_rollout_ROM_ith_param = torch.mean(torch.abs(diff_ROM));
-                            loss_rollout_FOM_ith_param = torch.mean(torch.abs(diff_FOM));
-                        else:
-                            loss_rollout_ROM_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
-                            loss_rollout_FOM_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
-                        
-                        loss_rollout_ROM += loss_rollout_ROM_ith_param;
-                        loss_rollout_FOM += loss_rollout_FOM_ith_param;
-                        
-                        # Store per-parameter-combination loss
-                        param_tuple = tuple(self.param_space.train_space[i, :]);
-                        self._store_loss_by_param('rollout_ROM', param_tuple, iter + 1, loss_rollout_ROM_ith_param.item());
-                        self._store_loss_by_param('rollout_FOM', param_tuple, iter + 1, loss_rollout_FOM_ith_param.item());
-                        
-                    # Store total rollout loss.
+                        param_i     = self.param_space.train_space[i, :].reshape(1, -1);
+                        coef_i      = train_coefs[i, :].reshape(1, -1);
+
+                        # Cycle through the frames we plan to rollout.
+                        for k in start_idx:
+                            k_int           : int   = int(k);
+                            t_start         : float = float(t_i[k_int].item());
+                            t_end_target    : float = t_start + dur;
+
+                            # Find j: index of time closest to t_end_target; the time closest to 
+                            # t_end_target will have the smallest absolute distance from 
+                            # t_end_target, so j for which t_i_np[j] - t_end_target is smallest
+                            # is the index we want. Ensure j > k when possible.
+                            j_int = int(numpy.argmin(numpy.abs(t_i_np - t_end_target)));
+                            if j_int < k_int:
+                                j_int = k_int;
+                            if j_int == k_int and (k_int + 1) < n_t_i:
+                                j_int = k_int + 1;
+
+                            # Pick out the times we will rollout over.
+                            t_win : torch.Tensor = t_i[k_int:(j_int + 1)];
+
+                            # Targets (ROM + FOM) on the same time grid slice.
+                            Z_tgt_list : list[torch.Tensor] = [];
+                            U_tgt_list : list[torch.Tensor] = [];
+                            Z0_list    : list[torch.Tensor] = [];
+                            for d in range(self.n_IC):
+                                Z_d = Latent_States[i][d];                      # (n_t_i, n_z)
+                                U_d = U_Train_device[i][d];                     # (n_t_i, ...)
+                                Z_tgt_list.append(Z_d[k_int:(j_int + 1), :]);
+                                U_tgt_list.append(U_d[k_int:(j_int + 1), ...]);
+                                Z0_list.append(Z_d[k_int:(k_int + 1), :]);      # (1, n_z)
+
+                            # Simulate latent dynamics using the absolute-time grid slice.
+                            Z_pred_list_all : list[list[torch.Tensor]] = self.latent_dynamics.simulate(
+                                coefs  = coef_i,
+                                IC     = [Z0_list],      # one param -> list[list[tensor]] of len n_IC
+                                t_Grid = [t_win],
+                                params = param_i);
+
+                            # Prepare trajectory for decoding
+                            Z_pred_comp : list[torch.Tensor] = [];
+                            for d in range(self.n_IC):
+                                Z_pd = Z_pred_list_all[0][d];
+                                assert Z_pd.ndim == 3 and Z_pd.shape[1] == 1, f"Expected (n_t, 1, n_z), got {tuple(Z_pd.shape)}";
+                                Z_pred_comp.append(Z_pd.squeeze(1));  # (n_t_win, n_z)
+
+                            # Decoded predicted trajectory.
+                            U_pred_tuple : tuple[torch.Tensor, ...] = encoder_decoder_device.Decode(*Z_pred_comp);
+
+                            # Accumulate losses over all IC components.
+                            for d in range(self.n_IC):
+                                diff_ROM = Z_tgt_list[d] - Z_pred_comp[d];
+                                diff_FOM = U_pred_tuple[d] - U_tgt_list[d];
+
+                                if self.loss_types['rollout'] == "MSE":
+                                    loss_rollout_ROM_i = loss_rollout_ROM_i + torch.mean(diff_ROM**2);
+                                    loss_rollout_FOM_i = loss_rollout_FOM_i + torch.mean(diff_FOM**2);
+                                elif self.loss_types['rollout'] == "MAE":
+                                    loss_rollout_ROM_i = loss_rollout_ROM_i + torch.mean(torch.abs(diff_ROM));
+                                    loss_rollout_FOM_i = loss_rollout_FOM_i + torch.mean(torch.abs(diff_FOM));
+                                else:
+                                    raise ValueError("Invalid rollout loss type: %s" % self.loss_types['rollout']);
+
+                        # Average across sampled rollouts (and across components implicitly by summation).
+                        loss_rollout_ROM_ith_param = loss_rollout_ROM_i / float(n_roll_i)
+                        loss_rollout_FOM_ith_param = loss_rollout_FOM_i / float(n_roll_i)
+
+                        # Accumulate totals.
+                        loss_rollout_ROM += loss_rollout_ROM_ith_param
+                        loss_rollout_FOM += loss_rollout_FOM_ith_param
+
+                        # Log loss for this combination of parameters
+                        param_tuple = tuple(self.param_space.train_space[i, :])
+                        self._store_loss_by_param('rollout_ROM', param_tuple, iter + 1, loss_rollout_ROM_ith_param.item())
+                        self._store_loss_by_param('rollout_FOM', param_tuple, iter + 1, loss_rollout_FOM_ith_param.item())
+
+                    # Log total rollout loss.
                     self._store_total_loss('rollout_ROM', iter + 1, loss_rollout_ROM.item());
                     self._store_total_loss('rollout_FOM', iter + 1, loss_rollout_FOM.item());
 
@@ -1004,13 +955,6 @@ class Trainer:
                 loss_IC_rollout_Z_V     : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
                 # Setup. 
                 Latent_States       : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 2 element list of (n_t_i, n_z) arrays.
-
-                ROM_Rollout_ICs     : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 2 element list of (n_rollout_ICs[i], n_z) arrays.
-                FOM_Rollout_Targets : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 2 element list of (n_rollout_ICs[i], physics.Frame_Shape) arrays holding the FOM rollout targets.
-                ROM_Rollout_Targets : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 2 element list of (n_rollout_ICs[i], n_z) arrays holding the ROM rollout targets.
-                Rollout_Indices     : list[int]                 = [];       # len = n_train. i'th element is an array of shape (n_rollout_ICs[i]) specifying the indices (in rollout trajectories) of the frames we use as rollout targets.
-                
-
 
                 # Cycle through the combinations of parameter values.
                 for i in range(n_train):
@@ -1196,45 +1140,6 @@ class Trainer:
                         LOGGER.debug("Chain Rule Loss (Autoencoder_Pair) - complete for parameter combination %d" % i);
                         self.timer.end("Chain Rule Loss");
 
-
-                    # ----------------------------------------------------------------------------
-                    # Setup Rollout losses.
-
-                    if(self.loss_weights['rollout'] > 0 and p_rollout > 0):
-                        self.timer.start("Rollout Setup");
-                        LOGGER.debug("Rollout Setup (Autoencoder_Pair) - start for parameter combination %d" % i);
-
-                        # Select the latent states we want to use as initial conditions for the i'th 
-                        # combination of parameter values. This should be the first 
-                        # n_rollout_ICs[i] frames (n_rollout_ICs[i] is computed such that if we 
-                        # simulate the first n_rollout_ICs[i] frames, the final times are less than 
-                        # the final time for this combination of parameter values. Each element of 
-                        # ROM_Rollout_IC is a 1 element list of torch.Tensor objects of shape 
-                        # (n_rollout_ICs[i], n_z).
-                        ROM_Rollout_ICs.append([Z_i[0][:n_rollout_ICs[i], :], Z_i[1][:n_rollout_ICs[i], :]]);
-
-                        # Generate the indices of the frames we want to use as the targets.
-                        Rollout_Indices_i   : numpy.ndarray = numpy.random.randint(0, t_Grid_rollout[i].shape[0], n_rollout_ICs[i]);
-                        Rollout_Indices.append(Rollout_Indices_i);
-
-                        # Fetch the corresponding targets.
-                        FOM_Rollout_Targets_i : list[torch.Tensor] = [];
-                        for j in range(self.n_IC):
-                            FOM_Rollout_Targets_ij : numpy.ndarray = numpy.empty((n_rollout_ICs[i],) + tuple(self.physics.Frame_Shape), dtype = numpy.float32);
-                            
-                            # Fetch the target solution at the target time for each IC.
-                            for k in range(n_rollout_ICs[i]):
-                                FOM_Rollout_Targets_ij[k, ...] = U_Target_Rollout_Trajectory[i][j][k, Rollout_Indices_i[k], ...];
-                            FOM_Rollout_Targets_i.append(torch.tensor(FOM_Rollout_Targets_ij, dtype = torch.float32, device = device));
-                        FOM_Rollout_Targets.append(FOM_Rollout_Targets_i);
-
-                        # Fetch the corresponding target by encoding the FOM targets using the 
-                        # current encoder.
-                        ROM_Rollout_Targets.append(list(encoder_decoder_device.Encode(*FOM_Rollout_Targets_i)));
-                    
-                        LOGGER.debug("Rollout Setup (Autoencoder_Pair) - complete for parameter combination %d" % i);
-                        self.timer.end("Rollout Setup");
-
                 # Store the total recon, consistency, and chain rule losses.
                 self._store_total_loss('recon_D', iter + 1, loss_recon_D.item());
                 self._store_total_loss('recon_V', iter + 1, loss_recon_V.item());
@@ -1295,91 +1200,119 @@ class Trainer:
                     self.timer.start("Rollout Loss");
                     LOGGER.debug("Rollout Loss (Autoencoder_Pair) - start");
 
-                    # Simulate the frames forward in time. This should return an n_param element list
-                    # whose i'th element is a 2 element list whose j'th element has shape (n_t_i, 
-                    # n_rollout_ICs[i], n_z) whose p, q, r element should hold the r'th component 
-                    # of the p'th frame of the j'th time derivative of the solution when we use the 
-                    # p'th initial condition for the i'th combination of parameter values.
-                    #
-                    # Note that the latent dynamics are autonomous. Further, because we are simulating 
-                    # each IC for the same amount of time, the specific values of the time are
-                    # irreverent. The simulate function exploits this by solving one big IVP for each 
-                    # combination of parameter values, rather than n(i) smaller ones. 
-                    ROM_Predict_Rollout_Trajectory  : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(
-                                                                                                coefs   = train_coefs, 
-                                                                                                IC      = ROM_Rollout_ICs, 
-                                                                                                t_Grid  = t_Grid_rollout,
-                                                                                                params  = self.param_space.train_space);            
-
-                    # Now cycle through the training examples.
+                    # For each training parameter combination, randomly select a small number of
+                    # rollable start frames, rollout each one on the *true* absolute time grid,
+                    # and compare full trajectories (no interpolation / no random target points).
                     for i in range(n_train):
-                        # Fetch the latent displacement/velocity for the i'th combination of parameter
-                        # values. 
-                        ROM_Predict_Rollout_Trajectory_i    : list[torch.Tensor]  = ROM_Predict_Rollout_Trajectory[i];
-                        ROM_D_Predict_Rollout_Trajectory_i  : torch.Tensor        = ROM_Predict_Rollout_Trajectory_i[0];               # shape = (len(t_Grid_rollout[i]), n_rollout_ICs[i], n_z)
-                        ROM_V_Predict_Rollout_Trajectory_i  : torch.Tensor        = ROM_Predict_Rollout_Trajectory_i[1];               # shape = (len(t_Grid_rollout[i]), n_rollout_ICs[i], n_z)
+                        t_i   : torch.Tensor = t_Train_device[i];
+                        n_t_i : int          = t_i.shape[0];
+                        if n_t_i < 2:
+                            continue;
 
-                        # Fetch Rollout_Indices[i][j]'th frame from the rollout trajectory for the 
-                        # j'th IC, which represents an approximation of the solution at 
-                        # self.t_Train[i][j] + t_Grid_rollout[i][Rollout_Indices[i][j]]. We will 
-                        # compare this to the interpolated FOM solution at the same time, which 
-                        # should be stored in FOM_Rollout_Targets[i][0][j, ...]
+                        # Rollout duration for this parameter combination.
+                        t0  : float = float(t_i[0].item());
+                        tf  : float = float(t_i[-1].item());
+                        dur : float = float(p_rollout * (tf - t0));
+                        if dur <= 0.0:
+                            continue;
 
-                        # First, fetch the predicted solution at the target times.
-                        ROM_D_Rollout_Predict_i : torch.Tensor = torch.empty((n_rollout_ICs[i], encoder_decoder_device.n_z), dtype = torch.float32, device = device);
-                        ROM_V_Rollout_Predict_i : torch.Tensor = torch.empty((n_rollout_ICs[i], encoder_decoder_device.n_z), dtype = torch.float32, device = device);
+                        # Find the set of rollable frames.
+                        t_i_np      = t_i.detach().cpu().numpy();
+                        rollable    = numpy.where(t_i_np + dur <= tf)[0];
+                        if rollable.size == 0:
+                            continue;
                         
-                        for j in range(n_rollout_ICs[i]):
-                            ROM_D_Rollout_Predict_i[j, :] = ROM_D_Predict_Rollout_Trajectory_i[Rollout_Indices[i][j], j, :];
-                            ROM_V_Rollout_Predict_i[j, :] = ROM_V_Predict_Rollout_Trajectory_i[Rollout_Indices[i][j], j, :];
+                        # Pick out which frames we will roll out.
+                        n_roll_i  = min(int(self.n_rollouts), int(rollable.size));
+                        start_idx = numpy.random.choice(rollable, size = n_roll_i, replace = False);
 
-                        # Now fetch the corresponding FOM targets.
-                        FOM_Rollout_Targets_i   : list[torch.Tensor]    = FOM_Rollout_Targets[i];
-                        FOM_D_Rollout_Target_i  : torch.Tensor          = FOM_Rollout_Targets_i[0];     # shape = (n_rollout_ICs[i], physics.Frame_Shape)
-                        FOM_V_Rollout_Target_i  : torch.Tensor          = FOM_Rollout_Targets_i[1];     # shape = (n_rollout_ICs[i], physics.Frame_Shape)
+                        # Set up
+                        loss_ROM_i_D : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                        loss_ROM_i_V : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                        loss_FOM_i_D : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                        loss_FOM_i_V : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
 
-                        # And the corresponding ROM targets.
-                        ROM_Rollout_Targets_i   : list[torch.Tensor]    = ROM_Rollout_Targets[i];
-                        ROM_D_Rollout_Target_i  : torch.Tensor          = ROM_Rollout_Targets_i[0];     # shape = (n_rollout_ICs[i], physics.Frame_Shape)
-                        ROM_V_Rollout_Target_i  : torch.Tensor          = ROM_Rollout_Targets_i[1];     # shape = (n_rollout_ICs[i], physics.Frame_Shape)
+                        param_i = self.param_space.train_space[i, :].reshape(1, -1);
+                        coef_i  = train_coefs[i, :].reshape(1, -1);
 
-                        # Decode the latent predictions to get FOM predictions.
-                        FOM_D_Rollout_Predict_i, FOM_V_Rollout_Predict_i = encoder_decoder_device.Decode(ROM_D_Rollout_Predict_i, ROM_V_Rollout_Predict_i);
-                    
-                        # Get the corresponding FOM targets.
-                        FOM_Rollout_Targets_i   : list[torch.Tensor]    = FOM_Rollout_Targets[i];         # shape = (n_rollout_ICs[i], physics.Frame_Shape)
-                        FOM_D_Rollout_Target_i  : torch.Tensor          = FOM_Rollout_Targets_i[0];       # shape = (n_rollout_ICs[i], physics.Frame_Shape)
-                        FOM_V_Rollout_Target_i  : torch.Tensor          = FOM_Rollout_Targets_i[1];       # shape = (n_rollout_ICs[i], physics.Frame_Shape)
-                    
-                        # Compute differences once
-                        diff_ROM_D = ROM_D_Rollout_Target_i - ROM_D_Rollout_Predict_i;
-                        diff_ROM_V = ROM_V_Rollout_Target_i - ROM_V_Rollout_Predict_i;
-                        diff_FOM_D = (FOM_D_Rollout_Target_i - FOM_D_Rollout_Predict_i);
-                        diff_FOM_V = (FOM_V_Rollout_Target_i - FOM_V_Rollout_Predict_i);
+                        Z_D_i : torch.Tensor = Latent_States[i][0];
+                        Z_V_i : torch.Tensor = Latent_States[i][1];
+                        D_i   : torch.Tensor = U_Train_device[i][0];
+                        V_i   : torch.Tensor = U_Train_device[i][1];
                         
-                        # Compute losses from normalized differences
-                        if(self.loss_types['rollout'] == "MSE"):
-                            rollout_ROM_D_loss_ith_param = torch.mean(diff_ROM_D**2);
-                            rollout_ROM_V_loss_ith_param = torch.mean(diff_ROM_V**2);
-                            rollout_FOM_D_loss_ith_param = torch.mean(diff_FOM_D**2);
-                            rollout_FOM_V_loss_ith_param = torch.mean(diff_FOM_V**2);
-                        elif(self.loss_types['rollout'] == "MAE"):
-                            rollout_ROM_D_loss_ith_param = torch.mean(torch.abs(diff_ROM_D));
-                            rollout_ROM_V_loss_ith_param = torch.mean(torch.abs(diff_ROM_V));
-                            rollout_FOM_D_loss_ith_param = torch.mean(torch.abs(diff_FOM_D));
-                            rollout_FOM_V_loss_ith_param = torch.mean(torch.abs(diff_FOM_V));
-                        else:
-                            rollout_ROM_D_loss_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
-                            rollout_ROM_V_loss_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
-                            rollout_FOM_D_loss_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
-                            rollout_FOM_V_loss_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
-                        
-                        loss_rollout_ROM_D  += rollout_ROM_D_loss_ith_param;
-                        loss_rollout_ROM_V  += rollout_ROM_V_loss_ith_param;
-                        loss_rollout_FOM_D  += rollout_FOM_D_loss_ith_param;
-                        loss_rollout_FOM_V  += rollout_FOM_V_loss_ith_param;
-                        
-                        # Store per-parameter-combination loss
+                        # Cycle through the frames we plan to rollout.
+                        for k in start_idx:
+                            k_int           : int   = int(k);
+                            t_start         : float = float(t_i[k_int].item());
+                            t_end_target    : float = t_start + dur;
+
+                            # Find j: index of time closest to t_end_target; the time closest to 
+                            # t_end_target will have the smallest absolute distance from 
+                            # t_end_target, so j for which t_i_np[j] - t_end_target is smallest
+                            # is the index we want. Ensure j > k when possible.
+                            j_int = int(numpy.argmin(numpy.abs(t_i_np - t_end_target)));
+                            if j_int < k_int:
+                                j_int = k_int;
+                            if j_int == k_int and (k_int + 1) < n_t_i:
+                                j_int = k_int + 1;
+
+                            # Pick out the times we will rollout over.
+                            t_win : torch.Tensor = t_i[k_int:(j_int + 1)];
+
+                            # Fetch the targets
+                            Z_D_tgt : torch.Tensor = Z_D_i[k_int:(j_int + 1), :];
+                            Z_V_tgt : torch.Tensor = Z_V_i[k_int:(j_int + 1), :];
+                            D_tgt   : torch.Tensor = D_i[k_int:(j_int + 1), ...];
+                            V_tgt   : torch.Tensor = V_i[k_int:(j_int + 1), ...];
+
+                            # Get the model's prediction (in the latent space)
+                            Z_D0 : torch.Tensor = Z_D_i[k_int:(k_int + 1), :];
+                            Z_V0 : torch.Tensor = Z_V_i[k_int:(k_int + 1), :];
+
+                            Z_pred_all : list[list[torch.Tensor]] = self.latent_dynamics.simulate(
+                                coefs  = coef_i,
+                                IC     = [[Z_D0, Z_V0]],
+                                t_Grid = [t_win],
+                                params = param_i);
+                            Z_D_pred = Z_pred_all[0][0].squeeze(1);
+                            Z_V_pred = Z_pred_all[0][1].squeeze(1);
+
+                            # Decode the predictions.
+                            D_pred, V_pred = encoder_decoder_device.Decode(Z_D_pred, Z_V_pred);
+
+                            # Compute differences between true and predicted value.
+                            diff_Z_D = Z_D_tgt - Z_D_pred;
+                            diff_Z_V = Z_V_tgt - Z_V_pred;
+                            diff_D   = D_pred - D_tgt;
+                            diff_V   = V_pred - V_tgt;
+
+                            # Update loss.
+                            if self.loss_types['rollout'] == "MSE":
+                                loss_ROM_i_D = loss_ROM_i_D + torch.mean(diff_Z_D**2);
+                                loss_ROM_i_V = loss_ROM_i_V + torch.mean(diff_Z_V**2);
+                                loss_FOM_i_D = loss_FOM_i_D + torch.mean(diff_D**2);
+                                loss_FOM_i_V = loss_FOM_i_V + torch.mean(diff_V**2);
+                            elif self.loss_types['rollout'] == "MAE":
+                                loss_ROM_i_D = loss_ROM_i_D + torch.mean(torch.abs(diff_Z_D));
+                                loss_ROM_i_V = loss_ROM_i_V + torch.mean(torch.abs(diff_Z_V));
+                                loss_FOM_i_D = loss_FOM_i_D + torch.mean(torch.abs(diff_D));
+                                loss_FOM_i_V = loss_FOM_i_V + torch.mean(torch.abs(diff_V));
+                            else:
+                                raise ValueError("Invalid rollout loss type: %s" % self.loss_types['rollout']);
+
+                        # Normalize losses based on number of rollouts.
+                        rollout_ROM_D_loss_ith_param = loss_ROM_i_D / float(n_roll_i);
+                        rollout_ROM_V_loss_ith_param = loss_ROM_i_V / float(n_roll_i);
+                        rollout_FOM_D_loss_ith_param = loss_FOM_i_D / float(n_roll_i);
+                        rollout_FOM_V_loss_ith_param = loss_FOM_i_V / float(n_roll_i);
+
+                        # Update total.
+                        loss_rollout_ROM_D += rollout_ROM_D_loss_ith_param;
+                        loss_rollout_ROM_V += rollout_ROM_V_loss_ith_param;
+                        loss_rollout_FOM_D += rollout_FOM_D_loss_ith_param;
+                        loss_rollout_FOM_V += rollout_FOM_V_loss_ith_param;
+
+                        # Store results for this combination of parameters
                         param_tuple = tuple(self.param_space.train_space[i, :]);
                         self._store_loss_by_param('rollout_ROM_D', param_tuple, iter + 1, rollout_ROM_D_loss_ith_param.item());
                         self._store_loss_by_param('rollout_ROM_V', param_tuple, iter + 1, rollout_ROM_V_loss_ith_param.item());
@@ -1678,188 +1611,12 @@ class Trainer:
 
 
     
-    def _rollout_setup( self, 
-                        t           : list[torch.Tensor], 
-                        U           : list[list[torch.Tensor]], 
-                        p_rollout   : float) -> tuple[list[torch.Tensor], list[int], list[list[torch.Tensor]]]:
-        """
-        An internal function that sets up the rollout loss. Specifically, it finds the t_grid for 
-        simulating each latent frame we plan to rollout, the number of frames we can rollout for 
-        each parameter value, the final time of each frame we rollout, and a target FOM frame for 
-        each frame we rollout. The user should not call this function directly; only the train 
-        method should call this.
-
-        
-        -------------------------------------------------------------------------------------------
-        Arguments
-        -------------------------------------------------------------------------------------------
-
-        t: : list[torch.Tensor], len = n_param
-            i'th element is a 1d torch.Tensor of shape (n_t_i) whose j'th element specifies the 
-            time of the j'th frame in the FOM solution for the i'th combination of parameter 
-            values. We assume the values in the j'th element are in increasing order and unique.
-
-        U : list[list[torch.Tensor]], len = n_param
-            i'th element is a n_IC element list whose j'th element is a torch.Tensor of shape 
-            (n_t_i, ...) whose k'th element specifies the value of the j'th time derivative of the 
-            FOM frame when using the i'th combination of parameter values.
-
-        p_rollout : float
-            A number between 0 and 1 specifying the ratio of the rollout time for a particular 
-            combination of parameter values to the length of the time interval for that combination 
-            of parameter values.
-
-
-        -------------------------------------------------------------------------------------------
-        Returns
-        -------------------------------------------------------------------------------------------
-        
-        t_Grid_rollout, n_rollout_ICs, U_Target_Rollout_Trajectory
-
-        t_Grid_rollout : list[torch.Tensor], len = n_param
-            i'th element is a 1d array whose j'th entry holds the j'th time at which we want to 
-            rollout the first frame for the i'th combination of parameter values. Why do we do 
-            this? When we rollout the latent states, we take advantage of the fact that the 
-            governing dynamics is autonomous. Specifically, the actual at which times we solve the 
-            ODE do not matter. All that matters is amount of time we solve for. This allows us to 
-            use the same time grid for all latent states that we rollout, which dramatically 
-            improves runtime. 
-
-        n_rollout_ICs : list[int], len = n_param
-            i'th element specifies how many frames we can rollout from the FOM solution for the 
-            i'th combination of parameter values. Specifically, the first n_rollout_ICs[i] 
-            frames from the i'th FOM solution are such that the time for each frame after rollout 
-            will be less than the final time for that FOM solution.
-
-        U_Target_Rollout_Trajectory : list[list[torch.Tensor]], len = n_param
-            i'th element is an n_IC element list whose j'th element is a torch.Tensor of shape 
-            (n_rollout_ICs[i], n_rollout_steps[i], physics.Frame_Shape), where n_rollout_steps[i] is 
-            len(t_Grid_rollout[i]). The U_Target_Rollout_Trajectory[i][j][k, l] holds the 
-            interpolated j'th derivative of the FOM solution at the l'th time step of the rollout 
-            for the k'th IC for the i'th combination of parameter values. 
-        """
-
-        # Checks
-        assert isinstance(p_rollout, float),    "type(p_rollout) = %s" % str(type(p_rollout));
-        assert isinstance(U, list),             "type(U) = %s" % str(type(U));
-        assert isinstance(t, list),             "type(t) = %s" % str(type(t));
-        assert len(t) == len(U),                "len(t) = %d, len(U) = %d" % (len(t), len(U));
-
-        assert isinstance(U[0], list),          "type(U[0]) = %s" % str(type(U[0]));
-        n_param     : int   = len(U);
-
-        for i in range(n_param):
-            assert isinstance(U[i], list),          "type(U[%d]) = %s" % (i, str(type(U[i])));
-            assert isinstance(t[i], torch.Tensor),  "type(t[%d]) = %s" % (i, str(type(t[i])));
-            assert len(U[i])        == self.n_IC,   "len(U[%d]) = %d, self.n_IC = %d" % (i, len(U[i]), self.n_IC);
-            assert len(t[i].shape)  == 1,           "len(t[%d].shape) = %d" % (i, len(t[i].shape));
-
-            n_t_i : int = t[i].shape[0];
-            for j in range(self.n_IC):
-                assert isinstance(U[i][j], torch.Tensor), "type(U[%d][%d]) = %s" % (i, j, str(type(U[i][j])));
-                assert U[i][j].shape[0]     == n_t_i,     "U[%d][%d].shape[0] = %d, n_t_i = %d" % (i, j, U[i][j].shape[0], n_t_i);
-
-
-        # Other setup.        
-        t_Grid_rollout                  : list[torch.Tensor]        = [];   # n_train element list whose i'th element is 1d array of times for rollout solve.
-        n_rollout_ICs                   : list[int]                 = [];   # n_train element list whose i'th element specifies how many frames we should simulate forward.
-        U_Target_Rollout_Trajectory     : list[list[torch.Tensor]]  = [];   # n_train element list whose i'th element is n_IC element list whose j'th element is a torch.Tensor of shape (n_rollout_ICs[i], n_rollout_steps[i], physics.Frame_Shape) holding target trajectories when we rollout the IC's for the j'th time derivative/i'th combination of parameters. 
-
-
-        # -----------------------------------------------------------------------------------------
-        # Find t_Grid_rollout, and n_rollout_ICs.
-
-        for i in range(n_param):
-            # Determine the amount of time that passes in the FOM simulation corresponding to the 
-            # i'th combination of parameter values. 
-            t_i                 : torch.Tensor  = t[i];
-            n_t_i               : int           = t_i.shape[0];
-            t_0_i               : float         = t_i[0].item();
-            t_final_i           : float         = t_i[-1].item();
-
-            # The final rollout time for this combination of parameter values. Remember that 
-            # t_rollout is the proportion of t_final_i - t_0_i over which we simulate.
-            t_rollout_i         : float         = p_rollout*(t_final_i - t_0_i);
-            t_rollout_final_i   : float         = t_rollout_i + t_0_i;
-            LOGGER.info("We will rollout the first frame for parameter combination #%d to t = %f" % (i, t_rollout_final_i));
-
-            # Now figure out how many time steps occur before t_rollout_final_i.
-            num_before_rollout_final_i  : int           = 0;
-            for j in range(n_t_i):
-                if(t_i[j] > t_rollout_final_i):
-                    break; 
-                
-                num_before_rollout_final_i += 1;
-            LOGGER.info("We will rollout each frame for parameter combination #%d over %d time steps" % (i, num_before_rollout_final_i));
-
-
-            # Now define the rollout time grid for the i'th combination of parameter values.
-            t_Grid_rollout.append(torch.linspace(start = t_0_i, end = t_rollout_final_i, steps = num_before_rollout_final_i));
-
-            # Now figure out how many times occur less than t_rollout_i from t_final_i. If 
-            # a time value satisifes this, then the corresponding frame is rollable.
-            n_rollout_ICs_i : int = 0;
-            for j in range(n_t_i):
-                if(t_i[j] + t_rollout_i > t_final_i):
-                    break;
-
-                n_rollout_ICs_i += 1;
-            n_rollout_ICs.append(n_rollout_ICs_i);
-            LOGGER.info("We will rollout %d FOM frames for parameter combination #%d." % (n_rollout_ICs_i, i));
-
-
-        # -----------------------------------------------------------------------------------------
-        # Find U_Target_Rollout_Trajectory.
-
-        for i in range(n_param):
-            LOGGER.debug("Making interpolators for parameter combination #%d" % i);
-
-            # Interpolate each U_Train[i][j], then evaluate it at the target times.
-            U_Train_i               : list[torch.Tensor]            = U[i];                         # len = n_IC, i'th element is a torch.Tensor of shape (n_t(i), ...)
-            # NOTE: SciPy interpolation expects NumPy arrays on CPU.
-            t_Train_i               : numpy.ndarray                 = t[i].detach().cpu().numpy();  # shape = (n_t(i))
-            t_Rollout_i             : numpy.ndarray                 = t_Grid_rollout[i].detach().cpu().numpy();  # shape = (n_rollout_steps_i,)
-
-            # Fetch the number of frames we will rollout and the number of time 
-            # steps we will rollout.
-            n_rollout_ICs_i         : int = n_rollout_ICs[i];
-            n_rollout_steps_i       : int = len(t_Grid_rollout[i]);
-
-            # Fetch the targets for the i'th combination of parameter values.
-            U_Target_Rollout_Trajectory_i       : list[torch.Tensor]            = [];
-            for j in range(self.n_IC):
-                # Interpolate the time series for the j'th derivative of the FOM solution when we 
-                # use the i'th combination of parameter values.
-                U_Train_ij  : numpy.ndarray = U_Train_i[j].detach().cpu().numpy();  # shape = (n_t(i), Physics.Frame_Shape)
-
-                # Interpolate the time series for the j'th derivative of the FOM solution when we 
-                # use the i'th combination of parameter values.
-                U_Train_ij          : numpy.ndarray = U_Train_i[j].detach().numpy();        # shape = (n_t(i), Physics.Frame_Shape)
-                U_Train_ij_interp                   = interpolate.make_interp_spline(x = t_Train_i, y = U_Train_ij, k = self.rollout_spline_order);
-
-                U_Target_Rollout_Trajectory_ij : numpy.ndarray = numpy.empty((n_rollout_ICs_i, n_rollout_steps_i) + tuple(self.physics.Frame_Shape), dtype = numpy.float32);
-                for k in range(n_rollout_ICs_i):
-                    # Evaluate the i,j interpolator at the target times for the k'th rollout IC.
-                    # The target times for the k'th IC rollout are the rollout timnes for the 1st 
-                    # frame (t_Grid_rollout) plus the time of the k'th IC (t_Train_i[k]).
-                    target_times = t_Rollout_i + t_Train_i[k];
-                    U_Target_Rollout_Trajectory_ij[k, ...] = U_Train_ij_interp(target_times).astype(numpy.float32, copy = False);
-
-                U_Target_Rollout_Trajectory_i.append(torch.tensor(U_Target_Rollout_Trajectory_ij, dtype = torch.float32, device = self.device));
-            U_Target_Rollout_Trajectory.append(U_Target_Rollout_Trajectory_i);
-    
-
-        # All done!
-        return t_Grid_rollout, n_rollout_ICs, U_Target_Rollout_Trajectory;
-
-
-
     def _IC_rollout_setup( self, 
                            t            : list[torch.Tensor], 
                            p_IC_rollout : float) -> tuple[list[torch.Tensor], list[int], list[list[torch.Tensor]]]:
         """
-        An internal function that sets up the IC rollout loss. This is similar to _rollout_setup but
-        for simulating forward from the FOM initial conditions. The user should not call this 
+        An internal function that sets up the IC rollout loss. This simulates forward from the FOM
+        initial conditions. The user should not call this 
         function directly; only the train method should call this.
 
         
