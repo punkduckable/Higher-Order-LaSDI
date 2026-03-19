@@ -143,7 +143,9 @@ Configuration files are YAML-based and specify:
 ### Trainer Settings (`trainer`)
 - Learning rate, gradient clipping
 - Normalization settings
-- Rollout parameters (initial probability, update frequency)
+- Rollout parameters:
+  - curriculum over rollout horizon: `p_rollout_init`, `rollout_update_freq`, `dp_per_update`, `max_p_rollout`
+  - rollout sampling: `n_rollouts` (number of rollable start frames to rollout per training trajectory per epoch)
 - Training iterations and greedy sampling iterations
 - Loss weights:
   - Always supported: `recon`, `LD`, `rollout`, `IC_rollout`, `stab`
