@@ -155,6 +155,10 @@ def main():
 
     # Get a GP for each coefficient in the latent dynamics.
     gp_list         : list[GaussianProcessRegressor]    = fit_gps(param_space.train_space, trainer.best_train_coefs);
+
+    # Number of coefficient/ROM samples used for plotting + uncertainty metrics.
+    # Most samplers expose this as an attribute; fall back to 20 for custom samplers.
+    n_samples_plot  : int = int(getattr(sampler, "n_samples", 20));
     
     # Compute the relative error between the FOM solution and its prediction when we rollout the 
     # IC using the encoder_decoder.
@@ -166,7 +170,7 @@ def main():
                                                                 gp_list         = gp_list,
                                                                 t_Test          = trainer.t_Test,
                                                                 U_Test          = trainer.U_Test,
-                                                                n_samples       = trainer.n_samples,
+                                                                n_samples       = n_samples_plot,
                                                                 trainer         = trainer);
 
     # Find the index of the parameter combination that has the largest relative error; we unravel the 
@@ -180,7 +184,7 @@ def main():
                                latent_dynamics = latent_dynamics,
                                gp_list         = gp_list,
                                param_grid      = param_space.test_space[i_worst, :].reshape(1, -1),
-                               n_samples       = trainer.n_samples,
+                               n_samples       = n_samples_plot,
                                U_True          = [trainer.U_Test[i_worst]],
                                t_Grid          = [trainer.t_Test[i_worst]],
                                file_prefix     = config["physics"]["type"],
@@ -489,13 +493,13 @@ def main():
         # parameter values and derivative of the FOM solution.
         for d in range(n_IC):
             if(d == 0):
-                title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{1, \ldots, %d\}} \left[ u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % trainer.n_samples;
+                title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{1, \ldots, %d\}} \left[ u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % n_samples_plot;
                 save_file_name  : str   = config["physics"]["type"] + "_U_STD_Heatmap.png";
             elif(d == 1):
-                title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{ 1, \ldots, %d\}} \left[\frac{d}{dt}u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % (trainer.n_samples);
+                title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{ 1, \ldots, %d\}} \left[\frac{d}{dt}u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % (n_samples_plot);
                 save_file_name  : str   = config["physics"]["type"] + "_Dt_U_STD_Heatmap.png";      
             else:
-                title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{ 1, \ldots, %d\}} \left[\frac{d^{%d}}{dt^{%d}}u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % (trainer.n_samples, d, d);
+                title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{ 1, \ldots, %d\}} \left[\frac{d^{%d}}{dt^{%d}}u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % (n_samples_plot, d, d);
                 save_file_name  : str   = config["physics"]["type"] + "_Dt^%d_U_STD_Heatmap.png" % d;
 
 

@@ -1,7 +1,6 @@
 trainer:
   lr:                     0.001
   gradient_clip:          15.0      # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
-  n_samples:              20        # Used for latent trajectory plotting and new parameter sampling
 
   # If true, compute a single global mean/std from TRAINING data only, and normalize
   # all training/testing trajectories using these values.
@@ -23,7 +22,6 @@ trainer:
   max_iter:               36000
   n_iter:                 4000
   max_greedy_iter:        36000
-  sample_criteria:        'FOM_Variance'
 
   warmup_epochs:          20    # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
 
@@ -46,6 +44,12 @@ workflow:
   use_restart:              False
   restart_file:            
   plot_train_rel_errors:    False
+
+sampler:
+  type:                   'FOM_Variance'
+  FOM_Variance:
+    n_samples:            20        # Number of samples used to compute rollout stds.
+
 
 parameter_space:
   parameters:

@@ -1,7 +1,6 @@
 trainer:
   lr:                     0.001
   gradient_clip:          100.0     # Long ODE rollouts produce legitimate gradients of 100-130; clipping at 25 discards 80% of the signal.
-  n_samples:              20        # Used for latent trajectory plotting and new parameter sampling
 
   # If true, compute a single global mean/std from TRAINING data only, and normalize
   # all training/testing trajectories using these values.
@@ -23,7 +22,6 @@ trainer:
   max_iter:               4000
   n_iter:                 2000
   max_greedy_iter:        4000
-  sample_criteria:        'FOM_Variance'
 
   warmup_epochs:          40    # number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmpup.
 
@@ -52,6 +50,11 @@ workflow:
   restart_file:             
   plot_train_rel_errors:    False
 
+sampler:
+  type:                   'FOM_Variance'
+  FOM_Variance:
+    n_samples:            20        # Number of samples used to compute rollout stds.
+    
 parameter_space:
   parameters:
     - name:                 A

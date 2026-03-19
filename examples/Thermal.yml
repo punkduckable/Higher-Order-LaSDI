@@ -9,7 +9,7 @@ trainer:
   # p_rollout grows from p_rollout_init by dp_per_update every rollout_update_freq epochs, capped at max_p_rollout.
   p_rollout_init:         0.01
   rollout_update_freq:    10
-  dp_per_update:          0.005
+  dp_per_update:          0.01
   max_p_rollout:          0.5       # Maximum proportion of the time window used for rollout loss.
   rollout_spline_order:   1
   n_rollout_targets:      5         # Number of random target times sampled per rollable frame per epoch for the rollout loss.
@@ -17,7 +17,7 @@ trainer:
   p_IC_rollout_init:      0.01
   IC_rollout_update_freq: 10
   IC_dp_per_update:       0.01
-  max_p_IC_rollout:       1.0       # Maximum proportion of the time window used for IC rollout loss.
+  max_p_IC_rollout:       0.75      # Maximum proportion of the time window used for IC rollout loss.
 
   max_iter:               9000
   n_iter:                 1500
@@ -27,9 +27,9 @@ trainer:
 
   loss_weights:
     recon:                1.0
-    LD:                   100.0
-    rollout:              0.25
-    IC_rollout:           0.25
+    LD:                   10.0
+    rollout:              0.5
+    IC_rollout:           0.5
     stab:                 0.2
 
   loss_types:
@@ -48,8 +48,8 @@ workflow:
 sampler: 
   type:                   'FOM_Rollout'
   FOM_Rollout:
-    n_samples:            20              
-    normalized_FOM:       True
+    n_samples:            20              # Number of samples to compute avg rollout loss.
+    normalized_FOM:       True            # Compute absolute errors using normalized or de-normalized values?
     error_normalization:  none            # none | global_std | trajectory_std
 
 parameter_space:
