@@ -1927,7 +1927,7 @@ class Trainer:
             # t_IC_rollout is the proportion of t_final_i - t_0_i over which we simulate.
             t_IC_rollout_i      : float         = p_IC_rollout*(t_final_i - t_0_i);
             t_IC_rollout_final_i: float         = t_IC_rollout_i + t_0_i;
-            LOGGER.info("We will rollout the initial condition for parameter combination #%d to t = %f" % (i, t_IC_rollout_final_i));
+            LOGGER.info("We will rollout the initial condition for parameter combination #%d to t <= %f" % (i, t_IC_rollout_final_i));
 
             # Now figure out how many time steps occur before t_IC_rollout_final_i.
             num_before_IC_rollout_final_i  : int           = 0;
@@ -1939,7 +1939,17 @@ class Trainer:
             LOGGER.info("We will rollout the initial condition for parameter combination #%d over %d time steps" % (i, num_before_IC_rollout_final_i));
 
             # Now define the IC rollout time grid for the i'th combination of parameter values.
-            t_Grid_IC_rollout.append(torch.linspace(start = t_0_i, end = t_IC_rollout_final_i, steps = num_before_IC_rollout_final_i));
+            #
+            # IMPORTANT:
+            # Use the *true* FOM time stamps for the first num_before_IC_rollout_final_i frames
+            # rather than a linspace. This keeps the rollout simulation times aligned with
+            # U_IC_Rollout_Targets, which are taken directly from U_Train[i][:num_before...].
+            #
+            # This is especially important for time-dependent / switched latent dynamics models
+            # (e.g., SwitchSINDy), where the absolute time values affect which dynamics regime
+            # (laser on/off) applies.
+            assert num_before_IC_rollout_final_i > 0, "IC rollout produced 0 time steps (unexpected when p_IC_rollout > 0)";
+            t_Grid_IC_rollout.append(t_i[:num_before_IC_rollout_final_i].clone());
 
             # The number of frames we simulate forward from the initial condition
             n_IC_rollout_frames.append(num_before_IC_rollout_final_i);
