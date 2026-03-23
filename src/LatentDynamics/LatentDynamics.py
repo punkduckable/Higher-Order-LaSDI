@@ -75,7 +75,7 @@ class LatentDynamics:
 
 
     @staticmethod
-    def stability_penalty(A: torch.Tensor, margin: float = 0.0) -> torch.Tensor:
+    def stability_penalty(A: torch.Tensor, margin : float = 0.1) -> torch.Tensor:
         """
         Differentiable stability regularizer for linear systems z' = Az (+ b).
 
@@ -104,7 +104,7 @@ class LatentDynamics:
                     loss_type       : str,
                     t_Grid          : list[torch.Tensor], 
                     params          : numpy.ndarray | None = None,
-                    input_coefs     : list[torch.Tensor] = []) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor]]:
+                    input_coefs     : list[torch.Tensor] = []) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
         """
         The user must implement this class on any latent dynamics sub-class. Each latent dynamics 
         object should implement a parameterized model for the dynamics in the latent space. A 
@@ -163,6 +163,11 @@ class LatentDynamics:
             The i'th element of this list is a 0-dimensional tensor whose lone element holds the 
             sum of the SINDy losses from the i'th combination of parameter values. 
 
+        loss_coef : list[torch.Tensor], len = n_para
+            The i'th element of this list is a 0-dimensional tensor whose lone element holds the
+            coefficient loss (Frobenius norm) of the coefficients for the i'th combination 
+            of parameter values.      
+            
         loss_stab : list[torch.Tensor], len = n_param
             The i'th element of this list is a 0-dimensional tensor whose lone element holds the
             coefficient regularization term for the i'th combination of parameter values. In the

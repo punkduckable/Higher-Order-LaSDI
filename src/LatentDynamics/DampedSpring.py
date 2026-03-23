@@ -97,7 +97,7 @@ class DampedSpring(LatentDynamics):
                   loss_type     : str,
                   t_Grid        : list[torch.Tensor],
                   params        : numpy.ndarray | None = None,
-                  input_coefs   : list[torch.Tensor] = []) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor]]:
+                  input_coefs   : list[torch.Tensor] = []) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
         r"""
         For each combination of parameter values, this function computes the optimal K, C, and b 
         coefficients in the sequence of latent states for that combination of parameter values.
@@ -159,6 +159,11 @@ class DampedSpring(LatentDynamics):
             The i'th element of this list is a 0-dimensional tensor whose lone element holds the 
             sum of the SINDy losses from the i'th combination of parameter values. 
 
+        loss_coef : list[torch.Tensor], len = n_para
+            The i'th element of this list is a 0-dimensional tensor whose lone element holds the
+            coefficient loss (Frobenius norm) of the coefficients for the i'th combination 
+            of parameter values.  
+        
         loss_stab : list[torch.Tensor], len = n_param
             The i'th element of this list is a 0-dimensional tensor whose lone element holds the
             stability penalty for the i'th combination of parameter values (see
@@ -201,8 +206,9 @@ class DampedSpring(LatentDynamics):
         # -----------------------------------------------------------------------------------------
 
         if (n_param > 1):
-            loss_sindy_list  : list[torch.Tensor] = [];
-            loss_stab_list   : list[torch.Tensor] = [];
+            loss_sindy_list : list[torch.Tensor] = [];
+            loss_stab_list  : list[torch.Tensor] = [];
+            loss_coef_list  : list[torch.Tensor] = [];
 
             # Prepare an array to house the flattened coefficient matrices for each combination of
             # parameter values.
@@ -214,12 +220,12 @@ class DampedSpring(LatentDynamics):
                 
                 # Calibrate on the i'th combination of parameter values.
                 if(len(input_coefs) == 0):
-                    output_coefs, loss_sindy_i, loss_stab_i = self.calibrate(  Latent_States = [Latent_States[i]], 
+                    output_coefs, loss_sindy_i, loss_coef_i, loss_stab_i = self.calibrate(  Latent_States = [Latent_States[i]], 
                                                                                                 t_Grid        = [t_Grid[i]],
                                                                                                 loss_type     = loss_type,
                                                                                                 params        = params_i);
                 else:
-                    output_coefs, loss_sindy_i, loss_stab_i = self.calibrate(  Latent_States = [Latent_States[i]], 
+                    output_coefs, loss_sindy_i, loss_coef_i, loss_stab_i = self.calibrate(  Latent_States = [Latent_States[i]], 
                                                                                                 t_Grid        = [t_Grid[i]],
                                                                                                 input_coefs   = [input_coefs[i]],
                                                                                                 loss_type     = loss_type,
@@ -229,11 +235,12 @@ class DampedSpring(LatentDynamics):
                 output_coefs_list.append(output_coefs);
                 loss_sindy_list.append(loss_sindy_i[0]);
                 loss_stab_list.append(loss_stab_i[0]);
+                loss_coef_list.append(loss_coef_i[0]);
             
             # Package everything to return!
             # Use cat instead of stack since each output_coefs already has shape (1, n_coefs)
             # cat along dim=0 gives (n_param, n_coefs) as expected
-            return torch.cat(output_coefs_list, dim=0), loss_sindy_list, loss_stab_list;
+            return torch.cat(output_coefs_list, dim=0), loss_sindy_list, loss_coef_list, loss_stab_list;
         
 
 
@@ -326,9 +333,12 @@ class DampedSpring(LatentDynamics):
         A = torch.cat([A_top, A_bottom], dim = 0);
         Loss_Stab = self.stability_penalty(A);
 
+        # Compute coefficient loss.
+        Loss_coef = torch.norm(coefs, 'fro');
+
         # Prepare coefs and the losses to return.
         output_coefs   : torch.Tensor  = coefs.reshape(1, -1);
-        return output_coefs, [Loss_LD], [Loss_Stab];
+        return output_coefs, [Loss_LD], [Loss_coef], [Loss_Stab];
     
 
 

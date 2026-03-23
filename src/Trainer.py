@@ -163,6 +163,12 @@ class Trainer:
         self.loss_types             : dict      = trainer_config['loss_types'];                     # A dictionary housing the type of loss function (MSE or MAE) for each part of the loss function.
         self.learnable_coefs        : bool      = trainer_config.get('learnable_coefs', True);      # If True, the latent dynamics coefficients are learnable parameters. If false, we compute them using Least Squares.
 
+        # Set default values for 'coef', 'stab' entries of loss_weights
+        if 'coef' not in self.loss_weights.keys():
+            self.loss_weights['coef'] = 0.0;
+        if 'stab' not in self.loss_weights.keys():
+            self.loss_weights['stab'] = 0.0;
+
         # Optional normalization (training-only stats).
         # If enabled, we compute a single mean/std across ALL training trajectories (per IC),
         # then normalize both training + testing trajectories using these values.
@@ -601,6 +607,7 @@ class Trainer:
                 loss_recon              : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
                 loss_LD                 : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
                 loss_stab               : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_coef               : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
                 loss_rollout_FOM        : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
                 loss_rollout_ROM        : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
                 loss_IC_rollout_FOM     : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
@@ -687,12 +694,12 @@ class Trainer:
                 # called "train_coefs" of shape (n_train, n_coefs), where n_train = number of 
                 # training combinations of parameters and n_coefs denotes the number of 
                 # coefficients in the latent dynamics model. 
-                train_coefs, loss_LD_list, loss_stab_list = self.latent_dynamics.calibrate(
-                                                                Latent_States    = Latent_States, 
-                                                                t_Grid           = t_Train_device,
-                                                                input_coefs      = train_coefs_list,
-                                                                loss_type        = self.loss_types['LD'],
-                                                                params           = self.param_space.train_space);
+                train_coefs, loss_LD_list, loss_coef_list, loss_stab_list = self.latent_dynamics.calibrate(
+                                                                                Latent_States    = Latent_States, 
+                                                                                t_Grid           = t_Train_device,
+                                                                                input_coefs      = train_coefs_list,
+                                                                                loss_type        = self.loss_types['LD'],
+                                                                                params           = self.param_space.train_space);
 
                 # Log coefficient statistics to diagnose constant dynamics issue
                 if iter % 100 == 0 or iter == self.restart_iter:  # Log every 100 iters and first iter
@@ -707,14 +714,19 @@ class Trainer:
                     param_tuple = tuple(self.param_space.train_space[i, :]);
                     self._store_loss_by_param('LD',   param_tuple, iter + 1, loss_LD_list[i].item());
                     self._store_loss_by_param('stab', param_tuple, iter + 1, loss_stab_list[i].item());
+                    self._store_loss_by_param('coef', param_tuple, iter + 1, loss_coef_list[i].item());
+
 
                 # Compute the total loss.
                 loss_LD   = torch.sum(torch.stack(loss_LD_list));
                 loss_stab = torch.sum(torch.stack(loss_stab_list));
+                loss_coef = torch.sum(torch.stack(loss_coef_list));
 
                 # Append the total loss to loss_by_param.
                 self._store_total_loss('LD', iter + 1, loss_LD.item());
                 self._store_total_loss('stab', iter + 1, loss_stab.item());
+                self._store_total_loss('coef', iter + 1, loss_coef.item());
+
 
                 self.timer.end("Calibration");
 
@@ -928,7 +940,8 @@ class Trainer:
                         self.loss_weights['LD']         * loss_LD + 
                         self.loss_weights['rollout']    * loss_rollout + 
                         self.loss_weights['IC_rollout'] * loss_IC_rollout + 
-                        self.loss_weights['stab']       * loss_stab);
+                        self.loss_weights['stab']       * loss_stab + 
+                        self.loss_weights['coef']       * loss_coef);
                 self._store_total_loss('total', iter + 1, loss.item());
                 LOGGER.debug("Total loss (Autoencoder) computed: %f" % loss.item());
 
@@ -938,6 +951,7 @@ class Trainer:
                 # Initialize losses. 
                 loss_LD                 : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
                 loss_stab               : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                loss_coef              : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
                 loss_recon_D            : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
                 loss_recon_V            : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
                 loss_consistency_Z      : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
@@ -1159,12 +1173,12 @@ class Trainer:
                 # called "train_coefs" of shape (n_train, n_coefs), where n_train = number of training 
                 # parameter parameters and n_coefs denotes the number of coefficients in the latent
                 # dynamics model. 
-                train_coefs, loss_LD_list, loss_stab_list   = self.latent_dynamics.calibrate(   
-                                                            Latent_States    = Latent_States, 
-                                                            t_Grid           = t_Train_device,
-                                                            input_coefs      = train_coefs_list,
-                                                            loss_type        = self.loss_types['LD'],
-                                                            params           = self.param_space.train_space);
+                train_coefs, loss_LD_list, loss_coef_list, loss_stab_list   = self.latent_dynamics.calibrate(   
+                                                                                Latent_States    = Latent_States, 
+                                                                                t_Grid           = t_Train_device,
+                                                                                input_coefs      = train_coefs_list,
+                                                                                loss_type        = self.loss_types['LD'],
+                                                                                params           = self.param_space.train_space);
 
                 # Log coefficient statistics to diagnose constant dynamics issue
                 if iter % 100 == 0 or iter == self.restart_iter:  # Log every 100 iters and first iter
@@ -1179,14 +1193,18 @@ class Trainer:
                     param_tuple = tuple(self.param_space.train_space[i, :]);
                     self._store_loss_by_param('LD', param_tuple, iter + 1, loss_LD_list[i].item());
                     self._store_loss_by_param('stab', param_tuple, iter + 1, loss_stab_list[i].item());
+                    self._store_loss_by_param('coef', param_tuple, iter + 1, loss_coef_list[i].item());
+
 
                 # Compute the total loss.
                 loss_LD     = torch.sum(torch.stack(loss_LD_list));
                 loss_stab   = torch.sum(torch.stack(loss_stab_list));
+                loss_coef   = torch.sum(torch.stack(loss_coef_list));
 
                 # Append the total loss to loss_by_param.
                 self._store_total_loss('LD', iter + 1, loss_LD.item());
                 self._store_total_loss('stab', iter + 1, loss_stab.item());
+                self._store_total_loss('coef', iter + 1, loss_coef.item());
 
                 LOGGER.debug("Calibration (Autoencoder_Pair) - complete");
                 self.timer.end("Calibration");
@@ -1441,7 +1459,8 @@ class Trainer:
                         self.loss_weights['rollout']        * loss_rollout +
                         self.loss_weights['IC_rollout']     * loss_IC_rollout +
                         self.loss_weights['LD']             * loss_LD + 
-                        self.loss_weights['stab']           * loss_stab);
+                        self.loss_weights['stab']           * loss_stab + 
+                        self.loss_weights['coef']           * loss_coef);
                 self._store_total_loss('total', iter + 1, loss.item());
                 LOGGER.debug("Total loss (Autoencoder_Pair) computed: %f" % loss.item());
 
@@ -1511,6 +1530,7 @@ class Trainer:
                 if(self.loss_weights['IC_rollout'] > 0):    info_str += ", IC Roll FOM: %3.6f, IC Roll ROM: %3.6f"  % (loss_IC_rollout_FOM.item(), loss_IC_rollout_ROM.item());
                 if(self.loss_weights['LD'] > 0):            info_str += ", LD: %3.6f"                               % loss_LD.item();
                 if(self.loss_weights['stab'] > 0):          info_str += ", Stab: %3.6f"                             % loss_stab.item();
+                if(self.loss_weights['coef'] > 0):          info_str += ", Coef: %3.6f"                             % loss_coef.item();
                 info_str += ", max|c|: %.3f" % max_train_coef;
                 LOGGER.info(info_str);
             
@@ -1523,7 +1543,9 @@ class Trainer:
                 if(self.loss_weights['IC_rollout'] > 0):    info_str += ", IC Roll D: %3.6f, IC Roll V: %3.6f, IC Roll ZD: %3.6f, IC Roll ZV: %3.6f"    % (loss_IC_rollout_D.item(),  loss_IC_rollout_V.item(),   loss_IC_rollout_Z_D.item(), loss_IC_rollout_Z_V.item());
                 if(self.loss_weights['LD'] > 0):            info_str += ", LD: %3.6f"                                                                   % loss_LD.item();
                 if(self.loss_weights['stab'] > 0):          info_str += ", Stab: %3.6f"                                                                 % loss_stab.item();
+                if(self.loss_weights['coef'] > 0):          info_str += ", Coef: %3.6f"                                                                 % loss_coef.item();
                 info_str += ", max|c|: %.3f" % max_train_coef;
+
                 LOGGER.info(info_str);
 
             # Report the set of parameter combinations using scientific notation.

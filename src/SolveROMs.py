@@ -130,7 +130,7 @@ def average_rom(encoder_decoder : EncoderDecoder,
     t_Grid_np : list[numpy.ndarray] = [];
     for i in range(n_param):
         if(isinstance(t_Grid[i], torch.Tensor)):
-            t_Grid_np.append(t_Grid[i].detach().numpy());
+            t_Grid_np.append(t_Grid[i].detach().cpu().numpy());
         else:
             t_Grid_np.append(t_Grid[i]);
         t_Grid_np[i] = t_Grid_np[i].reshape(1, -1);

@@ -115,7 +115,7 @@ class SwitchSINDy(LatentDynamics):
                     loss_type       : str,
                     t_Grid          : list[torch.Tensor], 
                     params          : numpy.ndarray,
-                    input_coefs     : list[torch.Tensor] = []) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+                    input_coefs     : list[torch.Tensor] = []) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
         r"""
         This function computes the SINDy and stability losses for a given combination of 
         parameter values. If no input_coefs are provided, then we learn the coefficients using 
@@ -172,6 +172,11 @@ class SwitchSINDy(LatentDynamics):
             The i'th element of this list is a 0-dimensional tensor whose lone element holds the 
             sum of the SINDy losses from the i'th combination of parameter values. 
 
+        loss_coef : list[torch.Tensor], len = n_para
+            The i'th element of this list is a 0-dimensional tensor whose lone element holds the
+            coefficient loss (Frobenius norm) of the coefficients for the i'th combination 
+            of parameter values.          
+    
         loss_stab : list[torch.Tensor], len = n_param
             The i'th element of this list is a 0-dimensional tensor whose lone element holds the
             stability penalty for the i'th combination of parameter values (see
@@ -221,8 +226,9 @@ class SwitchSINDy(LatentDynamics):
             output_coefs_list : list[torch.Tensor] = [];
 
             # Compute the losses, coefficients for each combination of parameter values.
-            loss_sindy_list  : list[torch.Tensor] = [];
-            loss_stab_list   : list[torch.Tensor] = [];
+            loss_sindy_list : list[torch.Tensor] = [];
+            loss_stab_list  : list[torch.Tensor] = [];
+            loss_coef_list  : list[torch.Tensor] = []; 
             for i in range(n_param):
                 """"
                 Get the optimal SINDy coefficients for the i'th combination of parameter values. 
@@ -236,13 +242,13 @@ class SwitchSINDy(LatentDynamics):
                 params_i = None if params is None else params[i, :].reshape(1, -1);
                 
                 if(len(input_coefs) == 0):
-                    output_coefs, loss_sindy_i, loss_stab_i = self.calibrate(   
+                    output_coefs, loss_sindy_i, loss_coef_i, loss_stab_i = self.calibrate(   
                                                                     Latent_States = [Latent_States[i]], 
                                                                     t_Grid        = [t_Grid[i]],
                                                                     loss_type     = loss_type, 
                                                                     params        = params_i);
                 else:
-                    output_coefs, loss_sindy_i, loss_stab_i = self.calibrate(
+                    output_coefs, loss_sindy_i, loss_coef_i, loss_stab_i = self.calibrate(
                                                                     Latent_States = [Latent_States[i]], 
                                                                     t_Grid        = [t_Grid[i]],
                                                                     input_coefs   = [input_coefs[i]],
@@ -253,11 +259,12 @@ class SwitchSINDy(LatentDynamics):
                 output_coefs_list.append(output_coefs);
                 loss_sindy_list.append(loss_sindy_i[0]);
                 loss_stab_list.append(loss_stab_i[0]);
+                loss_coef_list.append(loss_coef_i[0]);
             
             # Package everything to return!
             # Use cat instead of stack since each output_coefs already has shape (1, n_coefs)
             # cat along dim=0 gives (n_param, n_coefs) as expected
-            return torch.cat(output_coefs_list, dim=0), loss_sindy_list, loss_stab_list;
+            return torch.cat(output_coefs_list, dim=0), loss_sindy_list, loss_coef_list, loss_stab_list;
             
 
         # -----------------------------------------------------------------------------------------
@@ -395,15 +402,21 @@ class SwitchSINDy(LatentDynamics):
         # for both n_t_before and n_t_after to be zero, so the divisor will always be non-zero.
         loss_sindy = (loss_sindy_before + loss_sindy_after) / (n_t_before + n_t_after);
 
-        A_before = coefs_before[1:, :].T;  # z' = b_before + A_before z
-        A_after  = coefs_after[1:, :].T;   # z' = b_after  + A_after  z
-        loss_stab = self.stability_penalty(A_before) + self.stability_penalty(A_after);
+        # Stability losses
+        A_before            = coefs_before[1:, :].T;  # z' = b_before + A_before z
+        A_after             = coefs_after[1:, :].T;   # z' = b_after  + A_after  z
+        loss_stab           = self.stability_penalty(A_before) + self.stability_penalty(A_after);
+        
+        # Coefficient losses
+        loss_coef_before    = torch.norm(coefs_before, 'fro');
+        loss_coef_after     = torch.norm(coefs_after, 'fro');
+        loss_coef           = loss_coef_before + loss_coef_after;
 
         # Prepare coefs and the losses to return. Note that we flatten the coefficient matrices.
         # Concatenate flattened coefficients: [coefs_before_flat, coefs_after_flat]
         # Shape should be (1, 2*n_z*(n_z+1)) to match expected (n_param, n_coefs) format
         output_coefs   : torch.Tensor  = torch.cat([coefs_before.flatten(), coefs_after.flatten()]).reshape(1, -1);
-        return output_coefs, [loss_sindy], [loss_stab]
+        return output_coefs, [loss_sindy], [loss_coef], [loss_stab]
 
 
 

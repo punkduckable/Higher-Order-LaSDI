@@ -309,7 +309,7 @@ class Sampler:
                         params_array = new_param.reshape(1, -1);  # Shape: (1, n_p)
                         
                         # Call calibrate with empty input_coefs to compute least-squares solution
-                        output_coefs, _, _ = trainer.latent_dynamics.calibrate(
+                        output_coefs, _, _, _ = trainer.latent_dynamics.calibrate(
                                                 Latent_States   = Latent_States_list,
                                                 t_Grid          = t_Grid_list,
                                                 input_coefs     = [],  # Empty list triggers least-squares computation
