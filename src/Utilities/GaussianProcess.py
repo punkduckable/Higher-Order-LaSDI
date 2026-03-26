@@ -72,14 +72,32 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
     # (e.g., ~1e-9 and ~1e-4), which can trigger many ConvergenceWarnings.
     x_mean  : numpy.ndarray = numpy.mean(X, axis = 0);
     x_std   : numpy.ndarray = numpy.std(X, axis = 0, ddof = 1);  # Use unbiased estimator
-    LOGGER.debug(f"Input scaling: X_mean = {x_mean}, X_std = {x_std}");
+    LOGGER.info(f"Input scaling: X_mean = {x_mean}, X_std = {x_std}");
     
-    # Protect against near-zero std in any input dimension
+    # Protect against near-zero / non-finite std in any input dimension.
+    #
+    # IMPORTANT: We must be careful with *absolute* thresholds here because some parameters
+    # (e.g., laser power) can live at O(1e-9) but still be meaningfully varying. We therefore
+    # use a scale-aware threshold based on the observed range of the parameter values.
+    #
+    # Also note: numpy.std(..., ddof=1) returns NaN when n_train < 2. We explicitly guard
+    # against this so we don't propagate NaNs into Xs.
     for idx in range(n_inputs):
-        if x_std[idx] < 1e-8:
-            LOGGER.warning(f"Input dimension {idx}: x_std = {x_std[idx]:.2e} is near-zero. Using x_std[{idx}] = 1.0.");
-            x_std[idx] = 1.0;
-    
+        rng_idx : float = float(X[:, idx].max() - X[:, idx].min());
+        eps     : float = float(max(1e-15, 1e-6 * rng_idx));
+
+        # If std is NaN/Inf (e.g., n_train < 2) or extremely small relative to the range,
+        # replace it with something safe.
+        if (not numpy.isfinite(x_std[idx])) or (x_std[idx] < eps):
+            if rng_idx <= 0.0 or (not numpy.isfinite(rng_idx)):
+                # Truly constant dimension -> ignore it by using x_std = 1.0 (scaled values ~ 0).
+                LOGGER.warning(f"Input dimension {idx}: non-finite/near-zero x_std={x_std[idx]:.2e} with rng={rng_idx:.2e}. Treating as constant (x_std=1.0).");
+                x_std[idx] = 1.0;
+            else:
+                # Dimension varies, but std is too small / non-finite -> clamp to eps to preserve scale.
+                LOGGER.warning(f"Input dimension {idx}: non-finite/near-zero x_std={x_std[idx]:.2e} relative to rng={rng_idx:.2e}. Clamping x_std to eps={eps:.2e}.");
+                x_std[idx] = eps;
+
     Xs: numpy.ndarray = (X - x_mean) / x_std;
 
     # Initialize a list to hold the trained GP objects.
@@ -93,11 +111,19 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
         # Scale targets per coefficient (each GP has its own target distribution).
         ith_mean: float = float(numpy.mean(targets_i));
         ith_std: float  = float(numpy.std(targets_i, ddof = 1));  # Use unbiased estimator
-        # Protect against both zero and near-zero std
+
+        # Protect against non-finite / near-zero target std (e.g., ddof=1 with n_train < 2).
+        # Use a scale-aware threshold based on the observed range of the targets.
+        ith_rng: float  = float(numpy.max(targets_i) - numpy.min(targets_i));
+        ith_eps: float  = float(max(1e-15, 1e-6 * ith_rng));
         LOGGER.debug(f"GP {i}: ith_mean = {ith_mean:.6e}, ith_std = {ith_std:.6e}, targets_i range = [{numpy.min(targets_i):.6e}, {numpy.max(targets_i):.6e}]");
-        if ith_std < 1e-8:  # Threshold for numerical safety
-            LOGGER.warning(f"GP coefficient {i}: ith_std = {ith_std:.2e} is near-zero. Using ith_std=1.0. This suggests latent dynamics are nearly constant!");
-            ith_std = 1.0;
+        if (not numpy.isfinite(ith_std)) or (ith_std < ith_eps):
+            if ith_rng <= 0.0 or (not numpy.isfinite(ith_rng)):
+                LOGGER.warning(f"GP coefficient {i}: non-finite/near-zero ith_std={ith_std:.2e} with rng={ith_rng:.2e}. Treating as constant (ith_std=1.0).");
+                ith_std = 1.0;
+            else:
+                LOGGER.warning(f"GP coefficient {i}: non-finite/near-zero ith_std={ith_std:.2e} relative to rng={ith_rng:.2e}. Clamping ith_std to eps={ith_eps:.2e}.");
+                ith_std = ith_eps;
         targets_i_s: numpy.ndarray = (targets_i - ith_mean) / ith_std;
 
         # Make the kernel.
