@@ -169,7 +169,7 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer
     # encoder_decoder parameters from file.
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
         encoder_decoder_type : str    = config['EncoderDecoder']['type'];
-        encoder_decoder               = encoder_decoder_load_dict[encoder_decoder_type](restart_dict['EncoderDecoder']);
+        encoder_decoder               = encoder_decoder_load_dict[encoder_decoder_type](restart_dict['encoder_decoder']);
     else: 
         encoder_decoder               = Initialize_Encoder_Decoder(physics, config);
 

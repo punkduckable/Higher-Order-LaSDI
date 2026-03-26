@@ -83,14 +83,14 @@ def main():
     use_restart         : bool  = config['workflow']['use_restart'];
     restart_filename    : str   = "";
     if (use_restart == True):
-        restart_filename : str = config['workflow']['restart_file'];
+        restart_filename    : str   = config['workflow']['restart_file'];
         LOGGER.info("Loading from restart (%s)" % restart_filename);
 
         # Set up the restart path under Higher-Order-LaSDI/results (independent of CWD).
-        _SRC_DIR: Path = Path(__file__).resolve().parent;      # Higher-Order-LaSDI/src
-        _PROJECT_DIR: Path = _SRC_DIR.parent;                 # Higher-Order-LaSDI
-        results_dir: Path = _PROJECT_DIR / "results";
-        restart_path: str = str(results_dir / restart_filename);
+        _SRC_DIR            : Path  = Path(__file__).resolve().parent;      # Higher-Order-LaSDI/src
+        _PROJECT_DIR        : Path  = _SRC_DIR.parent;                      # Higher-Order-LaSDI
+        results_dir         : Path  = _PROJECT_DIR / "results";
+        restart_path        : str   = str(results_dir / restart_filename);
     
     LOGGER.info("Done! Took %fs" % (time.perf_counter() - timer));
 
@@ -265,6 +265,7 @@ def main():
         plt.plot(trainer.t_Test[i_worst], Rollout_Rel_Error[i_worst][i]);
         plt.xlabel("time (s)");
         plt.ylabel("Relative Error");
+        plt.grid(True, which = "both", alpha = 0.25);
 
         if(i == 0):     
             title_str       : str = "Relative Error of the rollout of U for %s"           % str(param_space.test_space[i_worst]);
@@ -563,6 +564,13 @@ def step(trainer        : Trainer,
         The step that would come next (informational; the workflow has already stopped). 
     """
 
+    # Check if training has finished. Recall that a trainer object's restart_iter member holds the 
+    # iteration number of the last iteration in the last round of training. Likewise, its 
+    # "max_iter" member specifies the total number of iterations we want to train for. Thus, if 
+    # restart_iter goes above max_iter, then it is time to stop running steps. 
+    if(trainer.restart_iter >= trainer.max_iter):
+        return next_step;
+
 
     # ---------------------------------------------------------------------------------------------
     # Run the next step 
@@ -578,7 +586,7 @@ def step(trainer        : Trainer,
         # Next, check if the restart_iter falls below the "max_greedy_iter". The later is the last
         # iteration at which we want to run greedy sampling. If the restart_iter is below the 
         # max_greedy_iter, then we should pick a new sample (perform greedy sampling). Otherwise, 
-        # we should continue training.
+        # if training has finished, then 
         if (trainer.restart_iter <= trainer.max_greedy_iter):
             next_step = NextStep.PickSample;
         else:
@@ -608,17 +616,10 @@ def step(trainer        : Trainer,
 
 
     # ---------------------------------------------------------------------------------------------
-    # Wrap up
+    # Move onto the next step!
     # ---------------------------------------------------------------------------------------------
-
-    # Check if training has finished. Recall that a trainer object's restart_iter member holds the 
-    # iteration number of the last iteration in the last round of training. Likewise, its 
-    # "max_iter" member specifies the total number of iterations we want to train for. Thus, if 
-    # restart_iter goes above max_iter, then it is time to stop running steps. 
-    if(trainer.restart_iter >= trainer.max_iter):
-        return next_step;
         
-    # Otherwise, continue the workflow.
+    # Continue the workflow!
     LOGGER.info("Next step is: %s" % next_step);
     next_step = step(trainer, sampler, next_step, config);
 
