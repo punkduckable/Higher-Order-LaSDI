@@ -378,17 +378,24 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
 
     # Set plot labels and plot!
     # Position x-axis label at the right of the axis
-    ax.set_xlabel(param_names[0], fontsize = 15, loc='right');
-    
-    # Position y-axis label at the top-left (horizontal), avoiding overlap with tick labels
-    ax.set_ylabel(param_names[1], fontsize = 15, rotation = 0, loc='top', labelpad=10);
-    
+    # Axis labels/ticks: keep labels inside the figure and increase readability.
+    ax.set_xlabel(param_names[0], fontsize = 16, labelpad = 10);
+    # Place x label slightly closer to the heatmap (and avoid being clipped).
+    ax.xaxis.set_label_coords(0.5, -0.06);
+
+    # y label at top-left (horizontal), avoiding overlap with tick labels
+    ax.set_ylabel(param_names[1], fontsize = 16, rotation = 0, labelpad = 12);
+    ax.yaxis.set_label_coords(-0.08, 1.02);
+
+    ax.tick_params(axis = 'both', which = 'major', labelsize = 12);
     ax.set_title(title, fontsize = 25);
 
     # Save the figure under Higher-Order-LaSDI/Figures (independent of CWD).
     figures_dir: Path = Path(Figures_Path);
     figures_dir.mkdir(parents=True, exist_ok=True);
     save_file_path: str = str(figures_dir / save_file_name);
+    # Ensure labels/ticks are not clipped in saved figures.
+    fig.tight_layout(rect = [0.06, 0.08, 0.98, 0.95]);
     fig.savefig(save_file_path);
     
     # Show the plot and then return!
