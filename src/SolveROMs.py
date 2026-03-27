@@ -369,7 +369,7 @@ def sample_roms(encoder_decoder : EncoderDecoder,
 
 
 
-def Rollout_Error_and_STD(  encoder_decoder : EncoderDecoder,
+def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
                             physics         : Physics,
                             param_space     : ParameterSpace,
                             latent_dynamics : LatentDynamics,
@@ -377,7 +377,7 @@ def Rollout_Error_and_STD(  encoder_decoder : EncoderDecoder,
                             t_Test          : list[torch.Tensor],
                             U_Test          : list[list[torch.Tensor]],
                             trainer         : Trainer,
-                            n_samples       : int       = 20) -> tuple[numpy.ndarray, numpy.ndarray, list[list[numpy.ndarray]], list[list[numpy.ndarray]]]:
+                            n_samples       : int       = 20) -> tuple[numpy.ndarray, numpy.ndarray, list[list[numpy.ndarray]], list[list[numpy.ndarray]], numpy.ndarray, numpy.ndarray]:
     r"""
     This function computes the relative error and STD between the FOM solution and its 
     prediction when we rollout the FOM solution using the the ICs and mean of the posterior 
@@ -456,7 +456,7 @@ def Rollout_Error_and_STD(  encoder_decoder : EncoderDecoder,
     Returns
     -----------------------------------------------------------------------------------------------
 
-    max_Rel_Error, max_STD, Rel_Error, STD
+    max_Rel_Error, max_STD, Rel_Error, STD, coef_means, coef_stds
 
     max_Rel_Error : numpy.ndarray, shape = (n_Test, n_IC)
         i, j element holds the maximum of rel_error[i][j] (see below).
@@ -475,7 +475,14 @@ def Rollout_Error_and_STD(  encoder_decoder : EncoderDecoder,
         matches that of U_Test[i][j]. The [k, ...] element of this array holds the std (across 
         the samples) of the k'th frame of the reconstruction of the j'th derivative of the FOM 
         solution when we use the i'th combination of testing parameters.
-        
+    
+    coef_means : numpy.ndarray, shape = (n_Test, n_Coef)
+        i, j element holds the mean of the posterior distribution for the j'th coefficient 
+        evaluated at the i'th combination of testing parameters.
+
+    coef_stds : numpy.ndarray, shape = (n_Test, n_Coef)
+        i, j element holds the stds of the posterior distribution for the j'th coefficient 
+        evaluated at the i'th combination of testing parameters.
     """ 
 
     # Run checks
@@ -509,6 +516,11 @@ def Rollout_Error_and_STD(  encoder_decoder : EncoderDecoder,
             assert isinstance(U_Test[i][j], torch.Tensor),  "type(U_Test[%d][%d]) = %s, expected torch.Tensor" % (i, j, type(U_Test[i][j]));
             assert U_Test[i][j].shape[0]    == n_t_i,       "U_Test[%d][%d].shape = %s, n_t_i = %d" % (i, j, str(U_Test[i][j].shape), n_t_i);
     
+    # ---------------------------------------------------------------------------------------------
+    # Compute the posterior means, stds.
+
+    coef_means, coef_stds = eval_gp(gp_list = gp_list, Inputs = param_test);
+
 
     # ---------------------------------------------------------------------------------------------
     # Draw n_samples samples of the posterior distribution.
@@ -632,4 +644,4 @@ def Rollout_Error_and_STD(  encoder_decoder : EncoderDecoder,
     
 
     # All done!
-    return max_Rel_Error, max_STD, Rel_Error, STD;
+    return max_Rel_Error, max_STD, Rel_Error, STD, coef_means, coef_stds;

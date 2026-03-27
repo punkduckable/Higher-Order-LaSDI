@@ -241,10 +241,11 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
                     param_space     : ParameterSpace,
                     figsize         : tuple[int]    = (10, 10), 
                     title           : str           = '',
-                    save_file_name  : str           = "Heatmap") -> None:
+                    save_file_name  : str           = "Heatmap",
+                    show_plot       : bool          = True) -> None:
     """
     This plot makes a "heatmap". Specifically, we assume that values represents the samples of 
-    a function which depends on two paramaters, p1 and p2 (the two variables in the 
+    a function which depends on two parameters, p1 and p2 (the two variables in the 
     ParameterSpace object). The i,j entry of values represents the value of some function when 
     p1 takes on it's i'th value and p2 takes on it's j'th. 
     
@@ -275,7 +276,10 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
         The plot title.
 
     save_file_name : str
-        The name of the file in which we want to save the figure in the Figures directiory.
+        The name of the file in which we want to save the figure in the Figures directory.
+    
+    show_plot : bool
+        If true, we will display the plot after saving it. Otherwise, we will not (save only). 
     
 
 
@@ -399,7 +403,10 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     fig.savefig(save_file_path);
     
     # Show the plot and then return!
-    plt.show();
+    if(show_plot == True):
+        plt.show();
+    plt.close(fig);
+
     return;
 
 

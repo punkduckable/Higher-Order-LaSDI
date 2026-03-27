@@ -25,7 +25,6 @@ import  matplotlib.pyplot           as      plt;
 from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 from    pathlib                     import  Path;
 
-import  SolveROMs;
 from    EncoderDecoder              import  EncoderDecoder;
 from    ParameterSpace              import  ParameterSpace;
 from    Physics                     import  Physics;
@@ -38,7 +37,7 @@ from    Sampler                     import  Sampler;
 from    Logging                     import  Initialize_Logger, Log_Dictionary;
 from    Plot                        import  Plot_Heatmap2d, Plot_Latent_Trajectories, trainSpace_RelativeErrors_Heatmap;
 from    Animate                     import  make_solution_movies;
-from    SolveROMs                   import  average_rom;
+from    SolveROMs                   import  average_rom, Generate_Heatmap_Data;
 
 
 # Set up the logger.
@@ -162,16 +161,16 @@ def main():
     
     # Compute the relative error between the FOM solution and its prediction when we rollout the 
     # IC using the encoder_decoder.
-    Max_Rollout_Rel_Error, Max_STD, Rollout_Rel_Error, STD  = SolveROMs.Rollout_Error_and_STD(
-                                                                encoder_decoder = encoder_decoder, 
-                                                                physics         = physics,
-                                                                param_space     = param_space,
-                                                                latent_dynamics = latent_dynamics,
-                                                                gp_list         = gp_list,
-                                                                t_Test          = trainer.t_Test,
-                                                                U_Test          = trainer.U_Test,
-                                                                n_samples       = n_samples_plot,
-                                                                trainer         = trainer);
+    Max_Rollout_Rel_Error, Max_STD, Rollout_Rel_Error, STD, coef_means, coef_stds  = Generate_Heatmap_Data(
+                                                                                        encoder_decoder = encoder_decoder, 
+                                                                                        physics         = physics,
+                                                                                        param_space     = param_space,
+                                                                                        latent_dynamics = latent_dynamics,
+                                                                                        gp_list         = gp_list,
+                                                                                        t_Test          = trainer.t_Test,
+                                                                                        U_Test          = trainer.U_Test,
+                                                                                        n_samples       = n_samples_plot,
+                                                                                        trainer         = trainer);
 
     # Find the index of the parameter combination that has the largest relative error; we unravel the 
     # index to get the row, column number of the maximum entry of Max_Rollout_Rel_Error, then keep
@@ -509,6 +508,26 @@ def main():
                             title           = title,
                             save_file_name  = save_file_name);
 
+
+        # Plot the mean and std of each coefficient at each testing parameter.
+        for d in range(latent_dynamics.n_coefs):
+            title           : str   = "Coefficient %d mean" % d;
+            save_file_name  : str   = config["physics"]["type"] + "Coefficient_%d_mean.png" % d;
+
+            Plot_Heatmap2d( values          = coef_means[:, d].reshape(param_space.test_grid_sizes),
+                            param_space     = param_space, 
+                            title           = title,
+                            save_file_name  = save_file_name,
+                            show_plot       = False);
+
+            title           : str   = "Coefficient %d std" % d;
+            save_file_name  : str   = config["physics"]["type"] + "Coefficient_%d_std.png" % d;
+
+            Plot_Heatmap2d( values          = coef_stds[:, d].reshape(param_space.test_grid_sizes),
+                            param_space     = param_space, 
+                            title           = title,
+                            save_file_name  = save_file_name,
+                            show_plot       = False);
 
     # All done!
     LOGGER.info("All done!");
