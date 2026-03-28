@@ -311,7 +311,7 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     n_test          : int           = param_space.n_test();
     param_names     : list[str]     = param_space.param_names;
     n_init_train    : int           = param_space.n_init_train;
-    LOGGER.info("Making heatmap. Parameters = %s. There are %d training points (%d initial) and %d testing points." % (str(param_names), n_train, n_init_train, n_test));
+    LOGGER.info("Making \"%s\" heatmap. Parameters = %s. %d training points (%d initial) and %d testing points." % (title, str(param_names), n_train, n_init_train, n_test));
 
 
     # ---------------------------------------------------------------------------------------------
@@ -347,7 +347,8 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     LOGGER.debug("Adding values to the center of each pixel");
     for i in range(n1):
         for j in range(n2):
-            ax.text(i, j, round(values[i, j], 2), fontsize = 10, ha = 'center', va = 'center', color = 'k');
+            label_ij : str = f"{values[i, j]:.3g}";
+            ax.text(i, j, label_ij, fontsize = 10, ha = 'center', va = 'center', color = 'k');
 
 
     # ---------------------------------------------------------------------------------------------

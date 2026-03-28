@@ -217,6 +217,12 @@ def _scalar_anim(   data            : numpy.ndarray,
             ax.set_zlim(mins[2] - pad[2], maxs[2] + pad[2]);
             ax.set_autoscale_on(False);
 
+            # Improve readability of 3D tick labels (avoid overlap with axis/tick marks).
+            # In particular, this helps negative tick labels where '-' can be obscured.
+            ax.xaxis.set_tick_params(pad = 8);
+            ax.yaxis.set_tick_params(pad = 8);
+            ax.zaxis.set_tick_params(pad = 14);
+
         # Plot only the subset of points that pass the threshold in frame 0.
         keep0 = _keep_mask(0);
         X0 = X[:, keep0];
@@ -251,9 +257,13 @@ def _scalar_anim(   data            : numpy.ndarray,
         # Add a compact colorbar. For 3D (and tight layouts), using a dedicated colorbar axes
         # avoids overlapping the main plot labels.
         if cbar_rect is None:
-            # Reserve space on the right for the colorbar axes.
-            fig.subplots_adjust(right = 0.86);
-            cax = fig.add_axes([0.88, 0.20, 0.03, 0.60]);
+            # Reserve space for the colorbar axes so it does not overlap tick labels (especially in 3D).
+            if X.shape[0] == 3:
+                fig.subplots_adjust(left = 0.10, right = 0.84, bottom = 0.10, top = 0.90);
+                cax = fig.add_axes([0.82, 0.18, 0.03, 0.64]);
+            else:
+                fig.subplots_adjust(right = 0.86);
+                cax = fig.add_axes([0.88, 0.20, 0.03, 0.60]);
         else:
             cax = fig.add_axes(list(cbar_rect));
 
