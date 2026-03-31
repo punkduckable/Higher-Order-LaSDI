@@ -19,19 +19,16 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 
 class LatentDynamics:
     # Class variables
-    n_z             : int   = -1;       # Dimensionality of the latent space
-    n_coefs         : int   = -1;       # Number of coefficients in the latent space dynamics
-    n_IC            : int   = -1;       # Number of initial conditions to define the initial latent state.
-    Uniform_t_Grid  : bool  = False;    # Is there an h such that the i'th frame is at t0 + i*h? Or is the spacing between frames arbitrary?
-
-    # TODO(kevin): do we want to store coefficients as an instance variable?
-    coefs   : torch.Tensor  = torch.Tensor([]);
+    n_z             : int           = -1;       # Dimensionality of the latent space
+    n_coefs         : int           = -1;       # Number of coefficients in the latent space dynamics
+    n_IC            : int           = -1;       # Number of initial conditions to define the initial latent state.
+    Uniform_t_Grid  : bool          = False;    # Is there an h such that the i'th frame is at t0 + i*h? Or is the spacing between frames arbitrary?
+    coefs           : torch.Tensor  = torch.Tensor([]);
 
 
 
     def __init__(   self, 
                     n_z             : int,
-                    coef_norm_order : str | float,  
                     Uniform_t_Grid  : bool) -> None:
         r"""
         Initializes a LatentDynamics object. Each LatentDynamics object needs to have a 
@@ -48,12 +45,6 @@ class LatentDynamics:
 
         n_z : int
             The number of dimensions in the latent space, where the latent dynamics takes place.
-
-        coef_norm_order : float, 'inf', 'fro'
-            Specifies which norm we want to use when computing the coefficient loss. We pass this 
-            as the "p" argument to torch.norm. If it's a float, coef_norm_order = p \in \mathbb{R}, 
-            then we use the corresponding l^p norm. If it is "inf" or "fro", we use the infinity 
-            or Frobenius norm, respectively. 
 
         Uniform_t_Grid : bool 
             If True, then for each parameter value, the times corresponding to the frames of the 
@@ -73,7 +64,6 @@ class LatentDynamics:
 
         # Set class variables.
         self.n_z             = n_z;
-        self.coef_norm_order = coef_norm_order; 
         self.Uniform_t_Grid  = Uniform_t_Grid;
 
         # There must be at least one latent dimension and there must be at least 1 time step.
@@ -84,12 +74,37 @@ class LatentDynamics:
     
 
 
+    @staticmethod
+    def stability_penalty(A: torch.Tensor, margin : float = 0.1) -> torch.Tensor:
+        """
+        Differentiable stability regularizer for linear systems z' = Az (+ b).
+
+        We penalize positive growth rates by computing the largest eigenvalue of the symmetric
+        part of A:  sym(A) = (A + A^T)/2.  If lambda_max(sym(A)) <= 0 then the system is
+        contractive in the Euclidean norm.
+
+        Returns a smooth nonnegative penalty: softplus(lambda_max(sym(A)) + margin).
+        """
+
+        # Checks
+        assert isinstance(A, torch.Tensor), f"A must be a torch.Tensor, got {type(A)}";
+        assert A.ndim == 2 and A.shape[0] == A.shape[1], f"A must be square, got {tuple(A.shape)}";
+
+        # Compute symmetric part of A
+        sym         = 0.5 * (A + A.T);
+
+        # Now compute the maximum eigenvalue.
+        lam_max     = torch.linalg.eigvalsh(sym).max();
+        return torch.nn.functional.softplus(lam_max + margin);
+
+
+
     def calibrate(  self, 
                     Latent_States   : list[list[torch.Tensor]], 
                     loss_type       : str,
                     t_Grid          : list[torch.Tensor], 
                     params          : numpy.ndarray | None = None,
-                    input_coefs     : list[torch.Tensor] = []) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor]]:
+                    input_coefs     : list[torch.Tensor] = []) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
         """
         The user must implement this class on any latent dynamics sub-class. Each latent dynamics 
         object should implement a parameterized model for the dynamics in the latent space. A 
@@ -138,7 +153,7 @@ class LatentDynamics:
         Returns
         -------------------------------------------------------------------------------------------
 
-        coefs, loss_sindy, loss_coef. 
+        coefs, loss_sindy, loss_stab. 
         
         coefs : torch.Tensor, shape = (n_param, n_coef)
             A matrix of shape (n_param, n_coef). The i,j entry of this array holds the value of 
@@ -148,9 +163,16 @@ class LatentDynamics:
             The i'th element of this list is a 0-dimensional tensor whose lone element holds the 
             sum of the SINDy losses from the i'th combination of parameter values. 
 
-        loss_coef : list[torch.Tensor], len = n_param
-            The i'th element of this list is a 0-dimensional tensor whose lone element holds the sum 
-            of the L1 norms of the coefficients from the i'th combination of parameter values.
+        loss_coef : list[torch.Tensor], len = n_para
+            The i'th element of this list is a 0-dimensional tensor whose lone element holds the
+            coefficient loss (Frobenius norm) of the coefficients for the i'th combination 
+            of parameter values.      
+            
+        loss_stab : list[torch.Tensor], len = n_param
+            The i'th element of this list is a 0-dimensional tensor whose lone element holds the
+            coefficient regularization term for the i'th combination of parameter values. In the
+            current codebase this is a *stability penalty* on the learned linear dynamics matrix
+            (see LatentDynamics.stability_penalty).
         """
 
         raise RuntimeError('Abstract function LatentDynamics.calibrate!');
@@ -221,7 +243,6 @@ class LatentDynamics:
         param_dict = {'n_z'             : self.n_z, 
                       'n_coefs'         : self.n_coefs, 
                       'n_IC'            : self.n_IC,
-                      'coef_norm_order' : self.coef_norm_order,
                       'Uniform_t_Grid'  : self.Uniform_t_Grid};
         return param_dict;
 
@@ -233,7 +254,6 @@ class LatentDynamics:
         assert(self.n_z             == dict_['n_z']);
         assert(self.n_coefs         == dict_['n_coefs']);
         assert(self.n_IC            == dict_['n_IC']);
-        assert(self.coef_norm_order == dict_['coef_norm_order']);
         assert(self.Uniform_t_Grid  == dict_['Uniform_t_Grid']);
         return;
     

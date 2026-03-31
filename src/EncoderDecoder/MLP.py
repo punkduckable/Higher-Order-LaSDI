@@ -14,7 +14,10 @@ from    typing      import  Callable;
 import  torch;
 import  numpy;
 
-from    Physics     import  Physics;
+from    typing          import  TYPE_CHECKING;
+if TYPE_CHECKING:
+    from    Trainer     import  Trainer;
+    from    Physics     import  Physics;
 
 
 # Set up logging.

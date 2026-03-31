@@ -32,7 +32,6 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 class DampedSpring(LatentDynamics):
     def __init__(   self, 
                     n_z             :   int, 
-                    coef_norm_order :   str | float, 
                     Uniform_t_Grid  :   bool,
                     lstsq_reg       :   float = 1.0) -> None:
         r"""
@@ -53,16 +52,6 @@ class DampedSpring(LatentDynamics):
 
         n_z : int
             The number of dimensions in the latent space, where the latent dynamics takes place.
-
-        coef_norm_order : float, 'inf', 'fro'
-            Specifies which norm we want to use when computing the coefficient loss. We pass this 
-            as the "p" argument to torch.norm. If it's a float, coef_norm_order = p \in \mathbb{R}, 
-            then we use the corresponding l^p norm. If it is "inf" or "fro", we use the infinity 
-            or Frobenius norm, respectively. 
-
-        Uniform_t_Grid : bool 
-            If True, then for each parameter value, the times corresponding to the frames of the 
-            solution for that parameter value will be uniformly spaced. In other words, the first 
             frame corresponds to time t0, the second to t0 + h, the k'th to t0 + (k - 1)h, etc 
             (note that h may depend on the parameter value, but it needs to be constant for a 
             specific parameter value). The value of this setting determines which finite difference 
@@ -84,12 +73,9 @@ class DampedSpring(LatentDynamics):
 
         # Run the base class initializer. The only thing this does is set the n_z and n_t 
         # attributes.;
-        super().__init__(   n_z             = n_z,
-                            coef_norm_order = coef_norm_order,
-                            Uniform_t_Grid  = Uniform_t_Grid);
+        super().__init__(n_z = n_z, Uniform_t_Grid = Uniform_t_Grid);
         self.lstsq_reg : float = lstsq_reg;
-        LOGGER.info("Initializing a SINDY object with n_z = %d, coef_norm_order = %s, Uniform_t_Grid = %s, lstsq_reg = %s" % (  self.n_z, 
-                                                                                                                str(self.coef_norm_order), 
+        LOGGER.info("Initializing a SINDY object with n_z = %d, Uniform_t_Grid = %s, lstsq_reg = %s" % (  self.n_z, 
                                                                                                                 str(self.Uniform_t_Grid),
                                                                                                                 str(self.lstsq_reg)));        
         
@@ -111,7 +97,7 @@ class DampedSpring(LatentDynamics):
                   loss_type     : str,
                   t_Grid        : list[torch.Tensor],
                   params        : numpy.ndarray | None = None,
-                  input_coefs   : list[torch.Tensor] = []) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor]]:
+                  input_coefs   : list[torch.Tensor] = []) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
         r"""
         For each combination of parameter values, this function computes the optimal K, C, and b 
         coefficients in the sequence of latent states for that combination of parameter values.
@@ -163,7 +149,7 @@ class DampedSpring(LatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------
 
-        output_coefs, loss_sindy, loss_coef. 
+        output_coefs, loss_sindy, loss_stab. 
         
         output_coefs : torch.Tensor, shape = (n_param, n_coef)
             A matrix of shape (n_param, n_coef). The i,j entry of this array holds the value of 
@@ -173,9 +159,15 @@ class DampedSpring(LatentDynamics):
             The i'th element of this list is a 0-dimensional tensor whose lone element holds the 
             sum of the SINDy losses from the i'th combination of parameter values. 
 
-        loss_coef : list[torch.Tensor], len = n_param
-            The i'th element of this list is a 0-dimensional tensor whose lone element holds the sum 
-            of the L1 norms of the coefficients from the i'th combination of parameter values.
+        loss_coef : list[torch.Tensor], len = n_para
+            The i'th element of this list is a 0-dimensional tensor whose lone element holds the
+            coefficient loss (Frobenius norm) of the coefficients for the i'th combination 
+            of parameter values.  
+        
+        loss_stab : list[torch.Tensor], len = n_param
+            The i'th element of this list is a 0-dimensional tensor whose lone element holds the
+            stability penalty for the i'th combination of parameter values (see
+            LatentDynamics.stability_penalty).
         """
 
         # Run checks.
@@ -214,8 +206,9 @@ class DampedSpring(LatentDynamics):
         # -----------------------------------------------------------------------------------------
 
         if (n_param > 1):
-            loss_sindy_list  : list[torch.Tensor] = [];
-            loss_coef_list   : list[torch.Tensor] = [];
+            loss_sindy_list : list[torch.Tensor] = [];
+            loss_stab_list  : list[torch.Tensor] = [];
+            loss_coef_list  : list[torch.Tensor] = [];
 
             # Prepare an array to house the flattened coefficient matrices for each combination of
             # parameter values.
@@ -227,12 +220,12 @@ class DampedSpring(LatentDynamics):
                 
                 # Calibrate on the i'th combination of parameter values.
                 if(len(input_coefs) == 0):
-                    output_coefs, loss_sindy_i, loss_coef_i = self.calibrate(  Latent_States = [Latent_States[i]], 
+                    output_coefs, loss_sindy_i, loss_coef_i, loss_stab_i = self.calibrate(  Latent_States = [Latent_States[i]], 
                                                                                                 t_Grid        = [t_Grid[i]],
                                                                                                 loss_type     = loss_type,
                                                                                                 params        = params_i);
                 else:
-                    output_coefs, loss_sindy_i, loss_coef_i = self.calibrate(  Latent_States = [Latent_States[i]], 
+                    output_coefs, loss_sindy_i, loss_coef_i, loss_stab_i = self.calibrate(  Latent_States = [Latent_States[i]], 
                                                                                                 t_Grid        = [t_Grid[i]],
                                                                                                 input_coefs   = [input_coefs[i]],
                                                                                                 loss_type     = loss_type,
@@ -241,12 +234,13 @@ class DampedSpring(LatentDynamics):
                 # Package the results from this combination of parameter values.
                 output_coefs_list.append(output_coefs);
                 loss_sindy_list.append(loss_sindy_i[0]);
+                loss_stab_list.append(loss_stab_i[0]);
                 loss_coef_list.append(loss_coef_i[0]);
             
             # Package everything to return!
             # Use cat instead of stack since each output_coefs already has shape (1, n_coefs)
             # cat along dim=0 gives (n_param, n_coefs) as expected
-            return torch.cat(output_coefs_list, dim=0), loss_sindy_list, loss_coef_list;
+            return torch.cat(output_coefs_list, dim=0), loss_sindy_list, loss_coef_list, loss_stab_list;
         
 
 
@@ -320,18 +314,31 @@ class DampedSpring(LatentDynamics):
 
 
         # -----------------------------------------------------------------------------------------
-        # Compute the coefficient losses and return.
+        # Compute the stability losses and return.
 
         if(loss_type == "MSE"):
             Loss_LD     = self.MSE(d2Z_dt2, LD_RHS);
         elif(loss_type == "MAE"):
             Loss_LD     = self.MAE(d2Z_dt2, LD_RHS);
 
-        Loss_Coef   = torch.norm(coefs, self.coef_norm_order);
+        # Stability penalty on the equivalent first-order system y' = A y (+ f).
+        # For z'' = -K z - C z' + b, define y = [z, z'] so A = [[0, I], [-K, -C]].
+        E   : torch.Tensor  = coefs.T;
+        K   : torch.Tensor  = -E[:, 0:self.n_z];
+        C   : torch.Tensor  = -E[:, self.n_z:(2*self.n_z)];
+        Z0  : torch.Tensor  = torch.zeros((self.n_z, self.n_z), device = coefs.device, dtype = coefs.dtype);
+        I   : torch.Tensor  = torch.eye(self.n_z, device = coefs.device, dtype = coefs.dtype);
+        A_top    = torch.cat([Z0, I], dim = 1);
+        A_bottom = torch.cat([-K, -C], dim = 1);
+        A = torch.cat([A_top, A_bottom], dim = 0);
+        Loss_Stab = self.stability_penalty(A);
+
+        # Compute coefficient loss.
+        Loss_coef = torch.norm(coefs, 'fro');
 
         # Prepare coefs and the losses to return.
         output_coefs   : torch.Tensor  = coefs.reshape(1, -1);
-        return output_coefs, [Loss_LD], [Loss_Coef];
+        return output_coefs, [Loss_LD], [Loss_coef], [Loss_Stab];
     
 
 
@@ -452,7 +459,8 @@ class DampedSpring(LatentDynamics):
         # (n(i), n_t(i)) or (n_t(i)).
         t_Grid0  : numpy.ndarray | torch.Tensor  = t_Grid[0];
         if(isinstance(t_Grid0, torch.Tensor)):
-            t_Grid0 = t_Grid0.detach().numpy();
+            # Support CUDA/MPS tensors by moving to CPU before NumPy conversion.
+            t_Grid0 = t_Grid0.detach().cpu().numpy();
         n_t_i   : int           = t_Grid0.shape[-1];
         if(len(t_Grid0.shape) == 1):
             Same_t_Grid : bool  = True;

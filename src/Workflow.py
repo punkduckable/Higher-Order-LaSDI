@@ -8,15 +8,16 @@ import  os;
 LD_Path         : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
 Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
 Utils_Path      : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
+Sample_Path     : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Sample"));
 sys.path.append(LD_Path); 
 sys.path.append(Physics_Path); 
 sys.path.append(Utils_Path); 
+sys.path.append(Sample_Path);
 
 import  yaml;
 import  argparse;
 import  logging;
 import  time;
-import  random;
 
 import  numpy;
 import  torch;
@@ -24,25 +25,24 @@ import  matplotlib.pyplot           as      plt;
 from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 from    pathlib                     import  Path;
 
-import  SolveROMs;
-from    Enums                       import  NextStep, Result;
+from    EncoderDecoder              import  EncoderDecoder;
 from    ParameterSpace              import  ParameterSpace;
 from    Physics                     import  Physics;
+from    Enums                       import  NextStep;
 from    LatentDynamics              import  LatentDynamics;
-from    GPLaSDI                     import  BayesianGLaSDI;
-from    GaussianProcess             import  fit_gps, eval_gp;
+from    Trainer                     import  Trainer;
+from    GaussianProcess             import  fit_gps;
 from    Initialize                  import  Initialize_Trainer;
-from    Sample                      import  Run_Samples, Update_Train_Space;
+from    Sampler                     import  Sampler;
 from    Logging                     import  Initialize_Logger, Log_Dictionary;
 from    Plot                        import  Plot_Heatmap2d, Plot_Latent_Trajectories, trainSpace_RelativeErrors_Heatmap;
 from    Animate                     import  make_solution_movies;
-from    SolveROMs                   import  average_rom;
+from    SolveROMs                   import  average_rom, Generate_Heatmap_Data;
 
 
 # Set up the logger.
 Initialize_Logger(level = logging.INFO);
 LOGGER : logging.Logger = logging.getLogger(__name__);
-
 
 # Set up the command line arguments
 parser = argparse.ArgumentParser(description        = "",
@@ -82,14 +82,14 @@ def main():
     use_restart         : bool  = config['workflow']['use_restart'];
     restart_filename    : str   = "";
     if (use_restart == True):
-        restart_filename : str = config['workflow']['restart_file'];
+        restart_filename    : str   = config['workflow']['restart_file'];
         LOGGER.info("Loading from restart (%s)" % restart_filename);
 
         # Set up the restart path under Higher-Order-LaSDI/results (independent of CWD).
-        _SRC_DIR: Path = Path(__file__).resolve().parent;      # Higher-Order-LaSDI/src
-        _PROJECT_DIR: Path = _SRC_DIR.parent;                 # Higher-Order-LaSDI
-        results_dir: Path = _PROJECT_DIR / "results";
-        restart_path: str = str(results_dir / restart_filename);
+        _SRC_DIR            : Path  = Path(__file__).resolve().parent;      # Higher-Order-LaSDI/src
+        _PROJECT_DIR        : Path  = _SRC_DIR.parent;                      # Higher-Order-LaSDI
+        results_dir         : Path  = _PROJECT_DIR / "results";
+        restart_path        : str   = str(results_dir / restart_filename);
     
     LOGGER.info("Done! Took %fs" % (time.perf_counter() - timer));
 
@@ -110,29 +110,21 @@ def main():
         # TODO(kevin): in long term, we should switch to hdf5 format.
         restart_dict    = numpy.load(restart_path, allow_pickle = True).item();
         next_step       = restart_dict['next_step'];
-        result          = restart_dict['result'];
     else:
         restart_dict    = {};
         next_step       = NextStep.RunSample;
-        result          = Result.Unexecuted;
     
     # Initialize the trainer.
-    trainer, param_space, physics, model, latent_dynamics = Initialize_Trainer(config, restart_dict);
+    trainer, sampler, param_space, physics, encoder_decoder, latent_dynamics = Initialize_Trainer(config, restart_dict);
 
     # Calculate and print the number of parameters
-    count_parameters(model, latent_dynamics, trainer);
+    count_parameters(encoder_decoder, latent_dynamics, trainer);
 
     # Start running steps.
-    result, next_step = step(trainer, next_step, config);
+    next_step = step(trainer, sampler, next_step, config);
 
-    # Report the result
-    if (  result is Result.Fail):
-        raise RuntimeError('Previous step has failed. Stopping the workflow.');
-    elif (result is Result.Success):
-        LOGGER.info("Previous step succeeded. Preparing for the next step.");
-        result = Result.Unexecuted;
-    elif (result is Result.Complete):
-        LOGGER.info("Workflow is finished.");
+    # Report the result of training.
+    LOGGER.info("Steps completed. Completed %d/%d training steps. The next step step succeeded. Preparing for the next step." % (trainer.restart_iter, trainer.max_iter));
 
 
 
@@ -145,11 +137,10 @@ def main():
     Save(   param_space         = param_space,
             config              = config,
             physics             = physics,
-            model               = model, 
+            encoder_decoder     = encoder_decoder, 
             latent_dynamics     = latent_dynamics,
             trainer             = trainer,
             next_step           = next_step,
-            result              = result,
             restart_filename    = restart_filename);
 
 
@@ -159,23 +150,27 @@ def main():
     # ---------------------------------------------------------------------------------------------
 
     # Set up gaussian processes. 
-    model.cpu();
+    encoder_decoder.cpu();
 
     # Get a GP for each coefficient in the latent dynamics.
     gp_list         : list[GaussianProcessRegressor]    = fit_gps(param_space.train_space, trainer.best_train_coefs);
+
+    # Number of coefficient/ROM samples used for plotting + uncertainty metrics.
+    # Most samplers expose this as an attribute; fall back to 20 for custom samplers.
+    n_samples_plot  : int = int(getattr(sampler, "n_samples", 20));
     
     # Compute the relative error between the FOM solution and its prediction when we rollout the 
-    # IC using the model.
-    Max_Rollout_Rel_Error, Max_STD, Rollout_Rel_Error, STD  = SolveROMs.Rollout_Error_and_STD(
-                                                                model           = model, 
-                                                                physics         = physics,
-                                                                param_space     = param_space,
-                                                                latent_dynamics = latent_dynamics,
-                                                                gp_list         = gp_list,
-                                                                t_Test          = trainer.t_Test,
-                                                                U_Test          = trainer.U_Test,
-                                                                n_samples       = trainer.n_samples,
-                                                                trainer         = trainer);
+    # IC using the encoder_decoder.
+    Max_Rollout_Rel_Error, Max_STD, Rollout_Rel_Error, STD, coef_means, coef_stds  = Generate_Heatmap_Data(
+                                                                                        encoder_decoder = encoder_decoder, 
+                                                                                        physics         = physics,
+                                                                                        param_space     = param_space,
+                                                                                        latent_dynamics = latent_dynamics,
+                                                                                        gp_list         = gp_list,
+                                                                                        t_Test          = trainer.t_Test,
+                                                                                        U_Test          = trainer.U_Test,
+                                                                                        n_samples       = n_samples_plot,
+                                                                                        trainer         = trainer);
 
     # Find the index of the parameter combination that has the largest relative error; we unravel the 
     # index to get the row, column number of the maximum entry of Max_Rollout_Rel_Error, then keep
@@ -184,11 +179,11 @@ def main():
 
     # Plot the latent trajectories for the i_worst'th element of the test set.
     Plot_Latent_Trajectories(  physics         = physics,
-                               model           = model,
+                               encoder_decoder = encoder_decoder,
                                latent_dynamics = latent_dynamics,
                                gp_list         = gp_list,
                                param_grid      = param_space.test_space[i_worst, :].reshape(1, -1),
-                               n_samples       = trainer.n_samples,
+                               n_samples       = n_samples_plot,
                                U_True          = [trainer.U_Test[i_worst]],
                                t_Grid          = [trainer.t_Test[i_worst]],
                                file_prefix     = config["physics"]["type"],
@@ -216,7 +211,7 @@ def main():
     for i in range(param_space.n_test()):
         # Reconstruct the FOM solution, store it in a list.
         LOGGER.debug("Reconstructing the FOM solution for parameter combination %d (%s)" % (i, str(param_space.test_space[i])));
-        ith_Reconstruction : torch.Tensor | tuple[torch.Tensor, torch.Tensor] = model(*trainer.U_Test[i]);
+        ith_Reconstruction : torch.Tensor | tuple[torch.Tensor, torch.Tensor] = encoder_decoder(*trainer.U_Test[i]);
         if(isinstance(ith_Reconstruction, tuple)):
             ith_Reconstruction = list(ith_Reconstruction);
         elif(isinstance(ith_Reconstruction, torch.Tensor)):
@@ -269,6 +264,7 @@ def main():
         plt.plot(trainer.t_Test[i_worst], Rollout_Rel_Error[i_worst][i]);
         plt.xlabel("time (s)");
         plt.ylabel("Relative Error");
+        plt.grid(True, which = "both", alpha = 0.25);
 
         if(i == 0):     
             title_str       : str = "Relative Error of the rollout of U for %s"           % str(param_space.test_space[i_worst]);
@@ -337,7 +333,7 @@ def main():
         param_worst    : numpy.ndarray         = param_space.test_space[i_worst, :].reshape(1, -1);
         t_worst        : torch.Tensor          = trainer.t_Test[i_worst];                          # shape = (n_t)
         U_True_worst   : list[torch.Tensor]    = trainer.U_Test[i_worst];                          # length = n_IC        
-        Zi_mean_np     : list[numpy.ndarray]   = average_rom(   model           = model,            # n_IC element list whose j'th element has shape (n_t(i), n_z)
+        Zi_mean_np     : list[numpy.ndarray]   = average_rom(   encoder_decoder = encoder_decoder, # n_IC element list whose j'th element has shape (n_t(i), n_z)
                                                                 physics         = physics, 
                                                                 latent_dynamics = latent_dynamics, 
                                                                 gp_list         = gp_list, 
@@ -349,15 +345,7 @@ def main():
         Zi_mean     : list[torch.Tensor]    = [];
         for i in range(len(Zi_mean_np)):
             Zi_mean.append(torch.Tensor(Zi_mean_np[i]));
-        U_Pred_worst : tuple[torch.Tensor] | torch.Tensor    = model.Decode(*Zi_mean);             # length = n_IC
-
-        # Convert U_Pred to a list
-        if(isinstance(U_Pred_worst, tuple)):
-            U_Pred_worst = list(U_Pred_worst);
-        elif(isinstance(U_Pred_worst, torch.Tensor)):
-            U_Pred_worst = [U_Pred_worst];
-        else:
-            raise ValueError("U_Pred is not a tuple or a torch.Tensor");
+        U_Pred_worst : list[torch.Tensor]          = list(encoder_decoder.Decode(*Zi_mean));             # length = n_IC
 
         # Make a movie for each derivative of the solution.
         n_IC        : int                   = physics.n_IC;
@@ -425,11 +413,25 @@ def main():
             U_i_true_np = _flatten_for_movie(U_i_true_np);
             U_i_pred_np = _flatten_for_movie(U_i_pred_np);
 
+
+            if U_i_true_np.shape[1] == 1:
+                data    = U_i_true_np;
+            else:
+                data    = numpy.linalg.norm(U_i_true_np, axis = 1);
+            vmin    = data.min();
+            vmax    = data.max();
+            if(hasattr(physics, "threshold")):
+                threshold = physics.threshold;
+            else:
+                threshold = None;
             make_solution_movies(U_True         = U_i_true_np, 
                                  U_Pred         = U_i_pred_np, 
                                  X              = physics.X_Positions, 
                                  T              = t_worst.detach().numpy(),
-                                 fname_prefix   = prefix);
+                                 vmin           = vmin,
+                                 vmax           = vmax,
+                                 fname_prefix   = prefix, 
+                                 threshold      = threshold);
     
 
 
@@ -445,13 +447,16 @@ def main():
         # of the FOM solution.
         for d in range(n_IC):
             if(d == 0):
-                title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| u_{\text{Pred}}(t_k, x_j) - u_{\text{True}}(t_k, x_j) \right|} {\sigma_{i, j} \left( u_{\text{True}}(t_i, x_j) \right) }$';
+                # NOTE: The implementation normalizes by a single global std for this parameter
+                # combination and derivative (computed over all time steps + spatial nodes), not a
+                # per-time/per-node std.
+                title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| u_{\text{Pred}}(t_k, x_j) - u_{\text{True}}(t_k, x_j) \right|} {\sigma \left( u_{\text{True}} \right) }$';
                 save_file_name  : str   = config["physics"]["type"] + "_U_Reconstruction_Relative_Error_Heatmap.png";
             elif(d == 1):
-                title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| \frac{d}{dt}u_{\text{Pred}}(t_k, x_j) - \frac{d}{dt}u_{\text{True}}(t_k, x_j) \right|} {\sigma_{i, j} \left( \frac{d}{dt}u_{\text{True}}(t_i, x_j) \right) }$';
+                title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| \frac{d}{dt}u_{\text{Pred}}(t_k, x_j) - \frac{d}{dt}u_{\text{True}}(t_k, x_j) \right|} {\sigma \left( \frac{d}{dt}u_{\text{True}} \right) }$';
                 save_file_name  : str   = config["physics"]["type"] + "_Dt_U_Reconstruction_Relative_Error_Heatmap.png";
             else:
-                title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| \frac{d^{%d}}{dt^{%d}}u_{\text{Pred}}(t_k, x_j) - \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t_k, x_j) \right|} {\sigma_{i, j} \left( \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t_i, x_j) \right) }$' % (d, d, d, d, d, d);
+                title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| \frac{d^{%d}}{dt^{%d}}u_{\text{Pred}}(t_k, x_j) - \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t_k, x_j) \right|} {\sigma \left( \frac{d^{%d}}{dt^{%d}}u_{\text{True}} \right) }$' % (d, d, d, d, d, d);
                 save_file_name  : str   = config["physics"]["type"] + "_Dt^%d_U_Reconstruction_Relative_Error_Heatmap.png" % d;
 
             Plot_Heatmap2d(     values          = Max_Recon_Rel_Error[:, d].reshape(param_space.test_grid_sizes) * 100, 
@@ -461,18 +466,21 @@ def main():
         
 
         # Plot maximum (across the frames) relative error between a frame and the frame that the 
-        # model predicts when we rollout the IC for the corresponding combination of parameter 
-        # values. Do this for each combination of parameter values and derivative of the FOM 
-        # solution.
+        # encoder_decoder predicts when we rollout the IC for the corresponding combination of 
+        # parameter values. Do this for each combination of parameter values and derivative of 
+        # the FOM solution.
         for d in range(n_IC):
             if(d == 0):
-                title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| u_{\text{Rollout}}(t_k, x_j) - u_{\text{True}}(t_k, x_j) \right|} {\sigma_{i, j} \left( u_{\text{True}}(t_k, x_j) \right) }$';
+                # NOTE: The implementation normalizes by a single global std for this parameter
+                # combination and derivative (computed over all time steps + spatial nodes), not a
+                # per-time/per-node std.
+                title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| u_{\text{Rollout}}(t_k, x_j) - u_{\text{True}}(t_k, x_j) \right|} {\sigma \left( u_{\text{True}} \right) }$';
                 save_file_name  : str   = config["physics"]["type"] + "_U_Rollout_Rel_Error_Heatmap.png";
             elif(d == 1):
-                title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| \frac{d}{dt}u_{\text{Rollout}}(t_k, x_j) - \frac{d}{dt}u_{\text{True}}(t_k, x_j) \right|} {\sigma_{i, j} \left( \frac{d}{dt}u_{\text{True}}(t_k, x_j) \right) }$';
+                title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| \frac{d}{dt}u_{\text{Rollout}}(t_k, x_j) - \frac{d}{dt}u_{\text{True}}(t_k, x_j) \right|} {\sigma \left( \frac{d}{dt}u_{\text{True}} \right) }$';
                 save_file_name  : str   = config["physics"]["type"] + "_Dt_U_Rollout_Rel_Error_Heatmap.png";
             else:
-                title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| \frac{d^{%d}}{dt^{%d}}u_{\text{Rollout}}(t_k, x_j) - \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t_k, x_j) \right|} {\sigma_{i, j} \left( \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t_k, x_j) \right) }$' % (d, d, d, d, d, d);
+                title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| \frac{d^{%d}}{dt^{%d}}u_{\text{Rollout}}(t_k, x_j) - \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t_k, x_j) \right|} {\sigma \left( \frac{d^{%d}}{dt^{%d}}u_{\text{True}} \right) }$' % (d, d, d, d, d, d);
                 save_file_name  : str   = config["physics"]["type"] + "_Dt^%d_U_Rollout_Rel_Error_Heatmap.png" % d;
 
             Plot_Heatmap2d(     values          = Max_Rollout_Rel_Error[:, d].reshape(param_space.test_grid_sizes) * 100, 
@@ -485,13 +493,13 @@ def main():
         # parameter values and derivative of the FOM solution.
         for d in range(n_IC):
             if(d == 0):
-                title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{1, \ldots, %d\}} \left[ u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % trainer.n_samples;
+                title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{1, \ldots, %d\}} \left[ u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % n_samples_plot;
                 save_file_name  : str   = config["physics"]["type"] + "_U_STD_Heatmap.png";
             elif(d == 1):
-                title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{ 1, \ldots, %d\}} \left[\frac{d}{dt}u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % (trainer.n_samples);
+                title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{ 1, \ldots, %d\}} \left[\frac{d}{dt}u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % (n_samples_plot);
                 save_file_name  : str   = config["physics"]["type"] + "_Dt_U_STD_Heatmap.png";      
             else:
-                title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{ 1, \ldots, %d\}} \left[\frac{d^{%d}}{dt^{%d}}u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % (trainer.n_samples, d, d);
+                title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{ 1, \ldots, %d\}} \left[\frac{d^{%d}}{dt^{%d}}u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % (n_samples_plot, d, d);
                 save_file_name  : str   = config["physics"]["type"] + "_Dt^%d_U_STD_Heatmap.png" % d;
 
 
@@ -501,6 +509,26 @@ def main():
                             save_file_name  = save_file_name);
 
 
+        # Plot the mean and std of each coefficient at each testing parameter.
+        for d in range(latent_dynamics.n_coefs):
+            title           : str   = "Coefficient %d mean" % d;
+            save_file_name  : str   = config["physics"]["type"] + "Coefficient_%d_mean.png" % d;
+
+            Plot_Heatmap2d( values          = coef_means[:, d].reshape(param_space.test_grid_sizes),
+                            param_space     = param_space, 
+                            title           = title,
+                            save_file_name  = save_file_name,
+                            show_plot       = False);
+
+            title           : str   = "Coefficient %d std" % d;
+            save_file_name  : str   = config["physics"]["type"] + "Coefficient_%d_std.png" % d;
+
+            Plot_Heatmap2d( values          = coef_stds[:, d].reshape(param_space.test_grid_sizes),
+                            param_space     = param_space, 
+                            title           = title,
+                            save_file_name  = save_file_name,
+                            show_plot       = False);
+
     # All done!
     LOGGER.info("All done!");
     return;
@@ -508,74 +536,15 @@ def main():
 
 
 
+
 # -------------------------------------------------------------------------------------------------
-# Helper functions
+# Step
 # -------------------------------------------------------------------------------------------------
 
-def count_parameters(   model           : torch.nn.Module, 
-                        latent_dynamics : LatentDynamics,
-                        trainer         : BayesianGLaSDI) -> None:
-    """
-    Calculate and print the number of parameters in the model, latent dynamics, and trainer.
-    
-    -----------------------------------------------------------------------------------------------
-    Arguments
-    -----------------------------------------------------------------------------------------------
-    
-    model : torch.nn.Module
-        The neural network model (autoencoder).
-        
-    latent_dynamics : LatentDynamics
-        The latent dynamics model.
-        
-    trainer : BayesianGLaSDI
-        The trainer object which may contain learnable coefficients.
-    """
-    
-    # Count model parameters
-    total_params = 0;
-    trainable_params = 0;
-    
-    for param in model.parameters():
-        total_params += param.numel();
-        if param.requires_grad:
-            trainable_params += param.numel();
-    
-
-    # Count learnable coefficients from trainer (only applies if we are learning the latent 
-    #dynamics coefficients)
-    coef_params = 0;
-    if hasattr(trainer, 'test_coefs') and trainer.test_coefs is not None:
-        coef_params = trainer.test_coefs.numel();
-    
-    # Print summary
-    LOGGER.info("=" * 80);
-    LOGGER.info("Model Parameter Summary");
-    LOGGER.info("=" * 80);
-    LOGGER.info("Model:");
-    LOGGER.info("  Total parameters:      {:,}".format(total_params));
-    LOGGER.info("  Trainable parameters:  {:,}".format(trainable_params));
-    LOGGER.info("  Non-trainable:         {:,}".format(total_params - trainable_params));
-    
-    if coef_params > 0:
-        LOGGER.info("Learnable Coefficients:");
-        LOGGER.info("  Total parameters:      {:,}".format(coef_params));
-    
-    grand_total = total_params + coef_params;
-    grand_trainable = trainable_params + coef_params;
-    
-    LOGGER.info("=" * 80);
-    LOGGER.info("Grand Total:");
-    LOGGER.info("  Total parameters:      {:,}".format(grand_total));
-    LOGGER.info("  Trainable parameters:  {:,}".format(grand_trainable));
-    LOGGER.info("=" * 80);
-    
-    return;
-
-
-def step(trainer        : BayesianGLaSDI, 
+def step(trainer        : Trainer,
+         sampler        : Sampler,  
          next_step      : NextStep, 
-         config         : dict) -> tuple[Result, NextStep]:
+         config         : dict) -> NextStep:
     """
     Runs the next step of the training procedure and recursively continues until the workflow is
     complete or encounters a failure. The full cycle is:
@@ -590,30 +559,36 @@ def step(trainer        : BayesianGLaSDI,
     Arguments
     -----------------------------------------------------------------------------------------------
     
-    trainer : BayesianGLaSDI
-        A Trainer class object that we use when training the model for a particular instance of 
-        the settings.
+    trainer : Trainer
+        A Trainer class object that we use when training the encoder_decoder for a particular 
+        instance of the settings.
+    
+    sampler : Sampler
+        The sampler object used to select the "worst" testing parameter combination during greedy 
+        sampling.
 
     next_step : NextStep
         The step to execute first. When restarting, this should be loaded from the restart file.
 
     config : dict
         This should be a dictionary that we loaded from a .yml file. It should house all the 
-        settings we expect to use to generate the data and train the models.
+        settings we expect to use to generate the data and train the encoder_decoder.
 
 
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
 
-    result, next_step
-    
-    result : Result
-        Result.Complete when training finishes normally, Result.Fail on error.
-
     next_step : NextStep
         The step that would come next (informational; the workflow has already stopped). 
     """
+
+    # Check if training has finished. Recall that a trainer object's restart_iter member holds the 
+    # iteration number of the last iteration in the last round of training. Likewise, its 
+    # "max_iter" member specifies the total number of iterations we want to train for. Thus, if 
+    # restart_iter goes above max_iter, then it is time to stop running steps. 
+    if(trainer.restart_iter >= trainer.max_iter):
+        return next_step;
 
 
     # ---------------------------------------------------------------------------------------------
@@ -626,21 +601,11 @@ def step(trainer        : BayesianGLaSDI,
         # the iteration number of the last iterating training.
         trainer.train();
 
-        # Check if we should stop running steps.
-        # Recall that a trainer object's restart_iter member holds the iteration number of the last
-        # iteration in the last round of training. Likewise, its "max_iter" member specifies the 
-        # total number of iterations we want to train for. Thus, if restart_iter goes above 
-        # max_iter, then it is time to stop running steps. Otherwise, we can mark the current step
-        # as a success and move onto the next one.
-        if (trainer.restart_iter >= trainer.max_iter):
-            result  = Result.Complete;
-        else:
-            result  = Result.Success;
 
         # Next, check if the restart_iter falls below the "max_greedy_iter". The later is the last
         # iteration at which we want to run greedy sampling. If the restart_iter is below the 
         # max_greedy_iter, then we should pick a new sample (perform greedy sampling). Otherwise, 
-        # we should continue training.
+        # if training has finished, then 
         if (trainer.restart_iter <= trainer.max_greedy_iter):
             next_step = NextStep.PickSample;
         else:
@@ -650,13 +615,13 @@ def step(trainer        : BayesianGLaSDI,
     elif (next_step is NextStep.PickSample):
         # Use greedy sampling to pick that sample. Note that if the training set is empty, this 
         # function does nothing.
-        result, next_step = Update_Train_Space(trainer);
+        next_step = sampler.Sample(trainer);
 
 
     elif (next_step is NextStep.RunSample):
         # Generate the trajectories for all new testing and training parameters. Append these new
         # trajectories to trainer's U_Train and U_Test attributes.
-        result, next_step = Run_Samples(trainer);
+        next_step = sampler.Generate_Training_Data(trainer);
         
         if(config["workflow"]["plot_train_rel_errors"] == True):
             trainSpace_RelativeErrors_Heatmap(  trainer     = trainer, 
@@ -670,34 +635,35 @@ def step(trainer        : BayesianGLaSDI,
 
 
     # ---------------------------------------------------------------------------------------------
-    # Wrap up
+    # Move onto the next step!
     # ---------------------------------------------------------------------------------------------
-
-    # If fail or complete, break the loop.
-    if ((result is Result.Fail) or (result is Result.Complete)):
-        return result, next_step;
         
-    # Continue the workflow.
+    # Continue the workflow!
     LOGGER.info("Next step is: %s" % next_step);
-    result, next_step = step(trainer, next_step, config);
+    next_step = step(trainer, sampler, next_step, config);
 
     # All done!
-    return result, next_step;
+    return next_step;
 
 
+
+
+
+# -------------------------------------------------------------------------------------------------
+# Save
+# -------------------------------------------------------------------------------------------------
 
 def Save(   param_space         : ParameterSpace, 
             config              : dict,
             physics             : Physics, 
-            model               : torch.nn.Module, 
+            encoder_decoder     : EncoderDecoder, 
             latent_dynamics     : LatentDynamics,
-            trainer             : BayesianGLaSDI, 
+            trainer             : Trainer, 
             next_step           : NextStep, 
-            result              : Result,
             restart_filename    : str               = "") -> None:
     """
-    This function saves a trained model, trainer, latent dynamics, etc. You should call this 
-    function after running the LASDI algorithm.
+    This function saves a trained encoder_decoder, trainer, latent dynamics, etc. You should call 
+    this function after running the LASDI algorithm.
 
 
     
@@ -710,31 +676,27 @@ def Save(   param_space         : ParameterSpace,
     
     config : dict
         This should be a dictionary that we loaded from a .yml file. It should house all the 
-        settings we expect to use to generate the data and train the models.
+        settings we expect to use to generate the data and train the encoder_decoder.
 
     physics : Physics
         defines the FOM model. We can use it to fetch the initial conditions and FOM solution for
-        a particular combination of parameter values. physics, latent_dynamics, and model should 
-        have the same number of initial conditions.
+        a particular combination of parameter values. physics, latent_dynamics, and encoder_decoder 
+        should have the same number of initial conditions.
 
-    model : torch.nn.Module
-        maps between the FOM and ROM spaces. physics, latent_dynamics, and model should have the 
-        same number of initial conditions.
+    encoder_decoder : EncoderDecoder
+        maps between the FOM and ROM spaces. physics, latent_dynamics, and encoder_decoder should 
+        have the same number of initial conditions.
 
     latent_dynamics : LatentDynamics 
-        defines the dynamics in model's latent space. physics, latent_dynamics, and model should 
-        have the same number of initial conditions.
+        defines the dynamics in encoder_decoder's latent space. physics, latent_dynamics, and 
+        encoder_decoder should have the same number of initial conditions.
 
-    trainer : BayesianGLaSDI
-        trains model using physics to define the FOM, latent_dynamics to define the ROM, and 
-        model to connect them.
+    trainer : Trainer
+        trains encoder_decoder using physics to define the FOM, latent_dynamics to define the ROM, 
+        and encoder_decoder to connect them.
 
     next_step : NextStep
         An enumeration indicating the next step (should we continue training). This should 
-        have been returned by the final call to the step function.
-
-    result : Result
-        An enumeration indicating the result of the last step of training. This should have
         have been returned by the final call to the step function.
 
     restart_filename : str
@@ -752,8 +714,8 @@ def Save(   param_space         : ParameterSpace,
 
     # Checks.
     n_IC    : int   = latent_dynamics.n_IC;
-    assert model.n_IC       == n_IC, "model.n_IC = %d != n_IC = %d" % (model.n_IC, n_IC);
-    assert(physics.n_IC     == n_IC);
+    assert encoder_decoder.n_IC     == n_IC, "encoder_decoder.n_IC = %d != n_IC = %d" % (encoder_decoder.n_IC, n_IC);
+    assert(physics.n_IC             == n_IC);
 
 
     # Save restart (or final) file.
@@ -778,8 +740,6 @@ def Save(   param_space         : ParameterSpace,
     # Set up the restart path.
     # Use an absolute results directory under the project root (Higher-Order-LaSDI/results),
     # independent of the current working directory.
-    #
-    # Prefer trainer.path_results if available (keeps consistency with GPLaSDI).
     from pathlib import Path;
     if hasattr(trainer, "path_results"):
         results_dir = Path(trainer.path_results);
@@ -793,17 +753,84 @@ def Save(   param_space         : ParameterSpace,
     # Build the restart save dictionary and then save it.
     restart_dict = {'parameter_space'   : param_space.export(),
                     'physics'           : physics.export(),
-                    'model'             : model.export(),
+                    'encoder_decoder'   : encoder_decoder.export(),
                     'latent_dynamics'   : latent_dynamics.export(),
                     'trainer'           : trainer.export(),
                     'timestamp'         : date_str,
-                    'next_step'         : next_step,
-                    'result'            : result};
+                    'next_step'         : next_step};
     numpy.save(restart_path, restart_dict);
 
     # All done!
     return;
 
+
+
+
+
+# -------------------------------------------------------------------------------------------------
+# Helper functions
+# -------------------------------------------------------------------------------------------------
+
+def count_parameters(   encoder_decoder : EncoderDecoder, 
+                        latent_dynamics : LatentDynamics,
+                        trainer         : Trainer) -> None:
+    """
+    Calculate and print the number of parameters in the encoder_decoder, latent dynamics, and 
+    trainer.
+    
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+    
+    encoder_decoder : EncoderDocoder
+        The neural network encoder_decoder.
+        
+    latent_dynamics : LatentDynamics
+        The latent dynamics encoder_decoder.
+        
+    trainer : Trainer
+        The trainer object which may contain learnable coefficients.
+    """
+    
+    # Count encoder_decoder parameters
+    total_params        = 0;
+    trainable_params    = 0;
+    
+    for param in encoder_decoder.parameters():
+        total_params += param.numel();
+        if param.requires_grad:
+            trainable_params += param.numel();
+    
+
+    # Count learnable coefficients from trainer (only applies if we are learning the latent 
+    #dynamics coefficients)
+    coef_params = 0;
+    if hasattr(trainer, 'test_coefs') and trainer.test_coefs is not None:
+        coef_params = trainer.test_coefs.numel();
+    
+    # Print summary
+    LOGGER.info("=" * 80);
+    LOGGER.info("EncoderDecoder Parameter Summary");
+    LOGGER.info("=" * 80);
+    LOGGER.info("EncoderDecoder:");
+    LOGGER.info("  Total parameters:      {:,}".format(total_params));
+    LOGGER.info("  Trainable parameters:  {:,}".format(trainable_params));
+    LOGGER.info("  Non-trainable:         {:,}".format(total_params - trainable_params));
+    
+    if coef_params > 0:
+        LOGGER.info("Learnable Coefficients:");
+        LOGGER.info("  Total parameters:      {:,}".format(coef_params));
+    
+    grand_total = total_params + coef_params;
+    grand_trainable = trainable_params + coef_params;
+    
+    LOGGER.info("=" * 80);
+    LOGGER.info("Grand Total:");
+    LOGGER.info("  Total parameters:      {:,}".format(grand_total));
+    LOGGER.info("  Trainable parameters:  {:,}".format(grand_trainable));
+    LOGGER.info("=" * 80);
+    
+    return;
 
 if __name__ == "__main__":
     main();

@@ -5,18 +5,23 @@
 # Add the Physics directory to the search path.
 import  sys;
 import  os;
-Physics_Path    : str  = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, "Physics"));
+src_Path        : str   = os.path.abspath(os.path.dirname(os.path.dirname(__file__)));
+Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, "Physics"));
 sys.path.append(Physics_Path);
 
 import  logging;
-from    typing      import  Callable;
 
 import  torch;
 import  numpy;
 
-from    MLP         import  MultiLayerPerceptron, act_dict;
-from    Physics     import  Physics;
+from    typing          import  TYPE_CHECKING;
+if TYPE_CHECKING:
+    from    Trainer     import  Trainer;
+    from    Physics     import  Physics;
 
+
+from    EncoderDecoder  import  EncoderDecoder;
+from    MLP             import  MultiLayerPerceptron, act_dict;
 # Set up logging.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
@@ -27,7 +32,7 @@ LOGGER  : logging.Logger    = logging.getLogger(__name__);
 # Autoencoder class
 # -------------------------------------------------------------------------------------------------
 
-class Autoencoder(torch.nn.Module):
+class Autoencoder(EncoderDecoder):
     def __init__(   self,                     
                     reshape_shape   : list[int],
                     widths          : list[int], 
@@ -41,8 +46,6 @@ class Autoencoder(torch.nn.Module):
         try to train E and map data in \mathbb{R}^F to elements of a low dimensional latent 
         space (\mathbb{R}^L) which D can send back to the original data. (thus, E, and D should
         act like inverses of one another).
-
-        The Autoencoder class implements this model as a trainable torch.nn.Module object. 
 
 
         
@@ -91,14 +94,11 @@ class Autoencoder(torch.nn.Module):
             assert activations[i].lower() in act_dict.keys(),   "activations[%d] = %s; not in act_dict keys" % (i, activations[i].lower());
         assert numpy.prod(reshape_shape) == widths[0],      "numpy.prod(self.reshape_shape) = %d, widths[0] = %d; must be equal" % (numpy.prod(reshape_shape), widths[0]);
 
-
         # Run the superclass initializer.
-        super().__init__();
+        super().__init__(n_IC = 1, n_z = widths[-1]);
         
         # Store information (for return purposes).
-        self.n_IC           : int       = 1;
         self.widths         : list[int] = widths;
-        self.n_z            : int       = widths[-1];
         self.activations    : list[str] = activations;
         self.reshape_shape  : list[int] = reshape_shape;
         LOGGER.info("Initializing an Autoencoder with latent space dimension %d" % self.n_z);
@@ -128,8 +128,7 @@ class Autoencoder(torch.nn.Module):
 
 
 
-
-    def Encode(self, U : torch.Tensor) -> torch.Tensor:
+    def Encode(self, U : torch.Tensor) -> tuple[torch.Tensor]:
         """
         This function encodes a set of displacement and velocity frames.
 
@@ -146,8 +145,9 @@ class Autoencoder(torch.nn.Module):
         Returns
         -------------------------------------------------------------------------------------------
 
-        Z : torch.Tensor, shape = (n_Frasmes, self.n_z)
-            i,j element holds the j'th component of the encoding of the i'th FOM frame.
+        Z : tuple[torch.Tensor], len = 1 
+            single element is a torch.Tensor of shape = (n_Frasmes, self.n_z) whose i,j element 
+            holds the j'th component of the encoding of the i'th FOM frame.
         """
 
         # Check that the inputs have the correct shape.
@@ -156,11 +156,11 @@ class Autoencoder(torch.nn.Module):
         assert list(U.shape[1:])    ==  self.reshape_shape,             "U.shape[1:] = %s, self.reshape_shape = %s" % (str(U.shape[1:]), str(self.reshape_shape));
     
         # Encode the frames!
-        return self.encoder(U);
+        return (self.encoder(U),);
 
 
 
-    def Decode(self, Z : torch.Tensor)-> torch.Tensor:
+    def Decode(self, Z : torch.Tensor) -> tuple[torch.Tensor]:
         """
         This function decodes a set of latent frames.
 
@@ -177,8 +177,9 @@ class Autoencoder(torch.nn.Module):
         Returns
         -------------------------------------------------------------------------------------------
 
-        R : torch.Tensor, shpe = (n_Frames,) + self.reshape_shape
-            R[i ...] represents the reconstruction of the i'th FOM frame.
+        R : tuple[torch.Tensor], len = 1
+            A single element tuple whose lone element is a torch.Tensor with shape = (n_Frames,) 
+            + self.reshape_shape. R[i ...] represents the reconstruction of the i'th FOM frame.
         """
 
         # Check that the input has the correct shape. 
@@ -189,8 +190,7 @@ class Autoencoder(torch.nn.Module):
 
 
 
-
-    def forward(self, U : torch.Tensor) -> torch.Tensor:
+    def forward(self, X : torch.Tensor) -> tuple[torch.Tensor]:
         """
         This function passes X through the encoder, producing a latent state, Z. It then passes 
         Z through the decoder; hopefully producing a vector that approximates X.
@@ -209,97 +209,19 @@ class Autoencoder(torch.nn.Module):
         Returns
         -------------------------------------------------------------------------------------------
 
-        Y : torch.Tensor, shape = X.shape
-            The image of X under the encoder and decoder. 
+        Y : tuple[torch.Tensor], len = 1
+            A single element tuple whose lone element is a torch.Tensor of shape = X.shape holding 
+            the image of X under the encoder and decoder. 
         """
 
         # Encoder the input
-        Z : torch.Tensor    = self.Encode(U);
+        Z : torch.Tensor            = self.Encode(X)[0];
 
         # Now decode z.
-        Y : torch.Tensor    = self.Decode(Z);
+        Y : tuple[torch.Tensor]     = self.Decode(Z);
 
         # All done! Hopefully Y \approx X.
         return Y;
-
-
-
-    def latent_initial_conditions(  self,
-                                    param_grid     : numpy.ndarray, 
-                                    physics        : Physics,
-                                    trainer        = None) -> list[list[numpy.ndarray]]:
-        """
-        This function maps a set of initial conditions for the FOM to initial conditions for the 
-        latent space dynamics. Specifically, we take in a set of possible parameter values. For 
-        each set of parameter values, we recover the FOM IC (from physics), then map this FOM IC to 
-        a latent space IC (by encoding it). We do this for each parameter combination and then 
-        return a list housing the latent space ICs.
-
-        
-        -------------------------------------------------------------------------------------------
-        Arguments
-        -------------------------------------------------------------------------------------------
-
-        param_grid : numpy.ndarray, shape = (n_param, n_p)
-            i,j element of this array holds the value of the j'th parameter in the i'th combination of 
-            parameters. Here, n_param is the number of combinations of parameter values and n_p is the 
-            number of parameters (in each combination).
-
-        physics : Physics
-            A "Physics" object that, among other things, stores the IC for each combination of 
-            parameter values. This physics object should have the same number of initial conditions as 
-            self.
-
-
-        -------------------------------------------------------------------------------------------
-        Returns
-        -------------------------------------------------------------------------------------------
-        
-        Z0 : list[list[numpy.ndarray]], len = n_param
-            An n_param element list whose i'th element is an n_IC element list whose j'th element 
-            is an numpy.ndarray of shape (1, n_z) whose k'th element holds the k'th component of 
-            the encoding of the initial condition for the j'th derivative of the latent dynamics 
-            corresponding to the i'th combination of parameter values.
-        
-            If we let U0_i denote the FOM IC for the i'th set of parameters, then the i'th element of 
-            the returned list is [self.encoder(U0_i)].
-        """
-
-        # Checks.
-        assert isinstance(param_grid, numpy.ndarray),   "type(param_grid) = %s, must be numpy.ndarray" % str(type(param_grid));
-        assert len(param_grid.shape) == 2,              "param_grid.shape = %s, must have length 2" % str(param_grid.shape);
-        assert physics.n_IC     == self.n_IC,           "physics.n_IC = %d, self.n_IC = %d; must be equal" % (physics.n_IC, self.n_IC);
-
-        # Figure out how many combinations of parameter values there are.
-        n_param     : int                       = param_grid.shape[0];
-        Z0          : list[list[numpy.ndarray]] = [];
-        LOGGER.debug("Encoding initial conditions for %d parameter values" % n_param);
-
-        # Cycle through the parameters.
-        for i in range(n_param):
-            # Fetch the IC for the i'th set of parameters. Then map it to a tensor.
-            u0_np   : numpy.ndarray = physics.initial_condition(param_grid[i])[0];
-            u0      : torch.Tensor  = torch.Tensor(u0_np).reshape((1,) + u0_np.shape);
-
-            # If the trainer uses normalization, normalize the IC before encoding.
-            # (We do NOT store normalization stats on the model.)
-            has_norm = (trainer is not None) and hasattr(trainer, "has_normalization") and trainer.has_normalization();
-            if has_norm:
-                LOGGER.debug(f"  Normalizing IC for param {i}: range [{u0.min().item():.3e}, {u0.max().item():.3e}] (physical units)");
-                u0 = trainer.normalize_tensor(u0, 0);
-                LOGGER.debug(f"    After normalization: range [{u0.min().item():.3e}, {u0.max().item():.3e}]");
-            else:
-                LOGGER.warning(f"  No normalization applied to IC for param {i}! Range: [{u0.min().item():.3e}, {u0.max().item():.3e}]");
-                LOGGER.warning(f"    This may cause issues if the model was trained on normalized data.");
-
-            # Encode the IC, then map the encoding to a numpy array.
-            z0      : numpy.ndarray = self.Encode(u0).detach().numpy();
-
-            # Append the new IC to the list of latent ICs
-            Z0.append([z0]);
-
-        # Return the list of latent ICs.
-        return Z0;
 
 
 

@@ -7,13 +7,13 @@ import sys;
 from pathlib import Path;
 
 # Resolve paths relative to the project root (Higher-Order-LaSDI/), independent of CWD.
-Figures_Path    : str   = os.path.join(os.path.abspath(os.path.dirname(os.path.dirname(__file__))), "Figures");
-Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
-LD_Path         : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
-Model_Path      : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Models"));
+Figures_Path        : str   = os.path.join(os.path.abspath(os.path.dirname(os.path.dirname(__file__))), "Figures");
+Physics_Path        : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
+LD_Path             : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
+EncoderDecoder_Path : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "EncoderDecoder"));
 sys.path.append(Physics_Path);
 sys.path.append(LD_Path);
-sys.path.append(Model_Path);
+sys.path.append(EncoderDecoder_Path);
 
 import  logging;
 
@@ -23,12 +23,12 @@ import  matplotlib.pyplot           as      plt;
 import  matplotlib                  as      mpl;
 from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 
+from    EncoderDecoder              import  EncoderDecoder;
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
-from    Autoencoder                 import  Autoencoder;
-from    Autoencoder_Pair            import  Autoencoder_Pair;
 from    SolveROMs                   import  sample_roms;
 from    ParameterSpace              import  ParameterSpace;
+from    Trainer                     import  Trainer;
 
 
 # Set up the logger
@@ -55,15 +55,15 @@ mpl.rcParams['ytick.direction'] = 'in';
 # -------------------------------------------------------------------------------------------------
 
 def Plot_Latent_Trajectories(physics         : Physics,
-                             model           : torch.nn.Module,
+                             encoder_decoder : EncoderDecoder,
                              latent_dynamics : LatentDynamics,
                              gp_list         : list[GaussianProcessRegressor],
                              param_grid      : numpy.ndarray,
-                             n_samples       : int,
                              U_True          : list[list[torch.Tensor]],
                              t_Grid          : list[torch.Tensor],
                              file_prefix     : str,
                              trainer         = None,
+                             n_samples       : int           = 20,
                              figsize         : tuple[int]    = (15, 13)) -> None:
     """
     This function plots the latent trajectories of the latent dynamics model for a combination of 
@@ -80,8 +80,8 @@ def Plot_Latent_Trajectories(physics         : Physics,
     physics : Physics
         A Physics object which acts as a wrapper for the FOM. We use this to get the FOM IC.
 
-    model : torch.nn.Module
-        The model we use to encode the FOM IC and the FOM trajectories.
+    encoder_decoder : EncoderDecoder
+        The EncoderDecoder we use to encode the FOM IC and the FOM trajectories.
 
     latent_dynamics : LatentDynamics
         The LatentDynamics model we use to simulate the latent dynamics forward in time.
@@ -95,10 +95,6 @@ def Plot_Latent_Trajectories(physics         : Physics,
         A numpy array whose rows holds the parameter values whose latent dynamics we want to plot.
         We assume that the i'th row hodls the i'th combination of parameter values.
 
-    n_samples : int
-        The number of samples we want to draw from the GP posterior distribution for each 
-        combination of parameter values.
-
     U_True : list[list[torch.Tensor]], len = n_param
         The i'th element is an n_IC element list whose j'th element is a torch.Tensor of shape 
         (n_t_i,) + physics.Frame_Shape whose k'th row holds the j'th time derivative of the FOM 
@@ -110,7 +106,11 @@ def Plot_Latent_Trajectories(physics         : Physics,
 
     file_prefix : str
         The prefix of the file name we use to save the plots. Usually the name of the FOM model.
-
+    
+    n_samples : int
+        The number of samples we want to draw from the GP posterior distribution for each 
+        combination of parameter values.
+        
     figsize : tuple[int], len = 2
         A two element tuple specifying the size of the overall figure size. 
 
@@ -124,7 +124,7 @@ def Plot_Latent_Trajectories(physics         : Physics,
 
     # Checks
     assert isinstance(physics, Physics),                "type(physics) = %s" % type(physics);
-    assert isinstance(model, torch.nn.Module),          "type(model) = %s" % type(model);
+    assert isinstance(encoder_decoder, EncoderDecoder), "type(encoder_decoder) = %s" % type(EncoderDecoder);
     assert isinstance(latent_dynamics, LatentDynamics), "type(latent_dynamics) = %s" % type(latent_dynamics);
     assert isinstance(gp_list, list),                   "type(gp_list) = %s" % type(gp_list);
     assert len(gp_list)     == latent_dynamics.n_coefs, "len(gp_list) = %d != latent_dynamics.n_coefs = %d" % (len(gp_list), latent_dynamics.n_coefs);
@@ -164,7 +164,7 @@ def Plot_Latent_Trajectories(physics         : Physics,
     # Here, n_param is the number of combinations of parameter values.
     LOGGER.info("Solving the latent dynamics using %d samples of the posterior distributions for %d combinations of parameter values" % (n_samples, n_param));
     Predicted_Latent_Trajectories : list[list[numpy.ndarray]] = sample_roms( 
-                                                                    model           = model, 
+                                                                    encoder_decoder = encoder_decoder, 
                                                                     physics         = physics, 
                                                                     latent_dynamics = latent_dynamics, 
                                                                     gp_list         = gp_list, 
@@ -179,15 +179,9 @@ def Plot_Latent_Trajectories(physics         : Physics,
     True_Latent_Trajectories : list[list[numpy.ndarray]] = [];          # len = n_param
     for i in range(n_param):
         ith_True_Latent_Trajectories : list[numpy.ndarray] = [];
-        ith_Encoding : torch.Tensor | tuple[torch.Tensor] = model.Encode(*U_True[i]);
-        if(isinstance(ith_Encoding, tuple)):
-            # If the encoding is a tuple, then we need to convert it to a list.
-            for j in range(len(ith_Encoding)):
+        ith_Encoding : tuple[torch.Tensor] = encoder_decoder.Encode(*U_True[i]);
+        for j in range(len(ith_Encoding)):
                 ith_True_Latent_Trajectories.append(ith_Encoding[j].detach().numpy());
-        elif(isinstance(ith_Encoding, torch.Tensor)):
-            ith_True_Latent_Trajectories.append(ith_Encoding.detach().numpy());
-        else:
-            raise ValueError("ith_Encoding is not a tuple or a torch.Tensor");
         
         True_Latent_Trajectories.append(ith_True_Latent_Trajectories);
         
@@ -247,10 +241,11 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
                     param_space     : ParameterSpace,
                     figsize         : tuple[int]    = (10, 10), 
                     title           : str           = '',
-                    save_file_name  : str           = "Heatmap") -> None:
+                    save_file_name  : str           = "Heatmap",
+                    show_plot       : bool          = True) -> None:
     """
     This plot makes a "heatmap". Specifically, we assume that values represents the samples of 
-    a function which depends on two paramaters, p1 and p2 (the two variables in the 
+    a function which depends on two parameters, p1 and p2 (the two variables in the 
     ParameterSpace object). The i,j entry of values represents the value of some function when 
     p1 takes on it's i'th value and p2 takes on it's j'th. 
     
@@ -281,7 +276,10 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
         The plot title.
 
     save_file_name : str
-        The name of the file in which we want to save the figure in the Figures directiory.
+        The name of the file in which we want to save the figure in the Figures directory.
+    
+    show_plot : bool
+        If true, we will display the plot after saving it. Otherwise, we will not (save only). 
     
 
 
@@ -313,7 +311,7 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     n_test          : int           = param_space.n_test();
     param_names     : list[str]     = param_space.param_names;
     n_init_train    : int           = param_space.n_init_train;
-    LOGGER.info("Making heatmap. Parameters = %s. There are %d training points (%d initial) and %d testing points." % (str(param_names), n_train, n_init_train, n_test));
+    LOGGER.info("Making \"%s\" heatmap. Parameters = %s. %d training points (%d initial) and %d testing points." % (title, str(param_names), n_train, n_init_train, n_test));
 
 
     # ---------------------------------------------------------------------------------------------
@@ -349,7 +347,8 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     LOGGER.debug("Adding values to the center of each pixel");
     for i in range(n1):
         for j in range(n2):
-            ax.text(i, j, round(values[i, j], 2), fontsize = 10, ha = 'center', va = 'center', color = 'k');
+            label_ij : str = f"{values[i, j]:.3g}";
+            ax.text(i, j, label_ij, fontsize = 10, ha = 'center', va = 'center', color = 'k');
 
 
     # ---------------------------------------------------------------------------------------------
@@ -384,30 +383,41 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
 
     # Set plot labels and plot!
     # Position x-axis label at the right of the axis
-    ax.set_xlabel(param_names[0], fontsize = 15, loc='right');
-    
-    # Position y-axis label at the top-left (horizontal), avoiding overlap with tick labels
-    ax.set_ylabel(param_names[1], fontsize = 15, rotation = 0, loc='top', labelpad=10);
-    
+    # Axis labels/ticks: keep labels inside the figure and increase readability.
+    ax.set_xlabel(param_names[0], fontsize = 16, labelpad = 10);
+    # Place x label slightly closer to the heatmap (and avoid being clipped).
+    ax.xaxis.set_label_coords(0.5, -0.06);
+
+    # y label at top-left (horizontal), avoiding overlap with tick labels
+    ax.set_ylabel(param_names[1], fontsize = 16, rotation = 0, labelpad = 12);
+    ax.yaxis.set_label_coords(-0.08, 1.02);
+
+    ax.tick_params(axis = 'both', which = 'major', labelsize = 12);
     ax.set_title(title, fontsize = 25);
 
     # Save the figure under Higher-Order-LaSDI/Figures (independent of CWD).
     figures_dir: Path = Path(Figures_Path);
     figures_dir.mkdir(parents=True, exist_ok=True);
     save_file_path: str = str(figures_dir / save_file_name);
+    # Ensure labels/ticks are not clipped in saved figures.
+    fig.tight_layout(rect = [0.06, 0.08, 0.98, 0.95]);
     fig.savefig(save_file_path);
     
     # Show the plot and then return!
-    plt.show();
+    if(show_plot == True):
+        plt.show();
+    plt.close(fig);
+
     return;
 
 
 
-def trainSpace_RelativeErrors_Heatmap(trainer        : 'BayesianGLaSDI',
-                                     param_space     : ParameterSpace,
-                                     figsize         : tuple[int]    = (10, 10), 
-                                     title           : str           = '',
-                                     file_prefix     : str           = "") -> None:
+def trainSpace_RelativeErrors_Heatmap(
+            trainer         : Trainer,
+            param_space     : ParameterSpace,
+            figsize         : tuple[int]    = (10, 10), 
+            title           : str           = '',
+            file_prefix     : str           = "") -> None:
     """
     This function creates heatmaps showing the relative errors between all pairs of training 
     trajectories. The (i,j) cell of the d'th heatmap displays the relative error of d'th 
@@ -424,10 +434,10 @@ def trainSpace_RelativeErrors_Heatmap(trainer        : 'BayesianGLaSDI',
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    trainer : BayesianGLaSDI
-        A GPLaSDI (or BayesianGLaSDI) object that holds the training trajectories in its U_Train 
-        attribute. U_Train should be a list of length n_train, where each element is a list of 
-        torch.Tensors representing different initial conditions or derivatives.
+    trainer : Trainer
+        A Trainer object that holds the training trajectories in its U_Train  attribute. U_Train 
+        should be a list of length n_train, where each element is a list of torch.Tensors 
+        representing different initial conditions or derivatives.
 
     param_space : ParameterSpace
         A ParameterSpace object which holds the training parameter combinations in its train_space 

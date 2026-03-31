@@ -249,6 +249,10 @@ class Thermal(Physics):
             return param_track_length / param_speed;
         self.switch_time = switch_time;
 
+        # Set threshold.
+        LOGGER.info("Setting plotting threshold to %f" % config['Thermal']['threshold']);
+        self.threshold = lambda t, D_t, X: (D_t >= config['Thermal']['threshold'])
+
         # All done!
         return;
                 
@@ -296,6 +300,7 @@ class Thermal(Physics):
             return [self.IC_array[power_index, speed_index, :].reshape(tuple(self.Frame_Shape))];
         else:
             return [self.IC_array[power_index, speed_index, :]];
+
 
 
     

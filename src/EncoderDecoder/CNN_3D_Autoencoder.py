@@ -5,18 +5,24 @@
 # Add the Physics directory to the search path.
 import  sys;
 import  os;
-Physics_Path    : str  = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, "Physics"));
+src_Path        : str   = os.path.abspath(os.path.dirname(os.path.dirname(__file__)));
+Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, "Physics"));
 sys.path.append(Physics_Path);
 
 import  logging;
-from    typing      import  Callable, Sequence;
+from    typing          import  Callable, Sequence;
 
 import  torch;
 import  numpy;
 
-from    MLP         import  MultiLayerPerceptron, act_dict;
-from    Physics     import  Physics;
+from    typing          import  TYPE_CHECKING;
+if TYPE_CHECKING:
+    from    Trainer     import  Trainer;
+    from    Physics     import  Physics;
 
+
+from    EncoderDecoder  import  EncoderDecoder;
+from    MLP             import  MultiLayerPerceptron, act_dict;
 # Set up logging.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
@@ -90,7 +96,7 @@ def _conv3d_out_shape(   in_shape    : tuple[int, int, int],
 # CNN_3D_Autoencoder class
 # -------------------------------------------------------------------------------------------------
 
-class CNN_3D_Autoencoder(torch.nn.Module):
+class CNN_3D_Autoencoder(EncoderDecoder):
     def __init__(   self,
                     reshape_shape       : list[int],
                     hidden_widths_fc    : list[int],
@@ -200,10 +206,9 @@ class CNN_3D_Autoencoder(torch.nn.Module):
 
 
         # Run the superclass initializer.
-        super().__init__();
+        super().__init__(n_IC   = 1, n_z = latent_dimension);
 
         # Store information (for return purposes).
-        self.n_IC               : int           = 1;
         self.reshape_shape      : list[int]     = reshape_shape;
 
         self.conv_channels      : list[int]     = conv_channels;
@@ -212,7 +217,6 @@ class CNN_3D_Autoencoder(torch.nn.Module):
 
         self.hidden_widths_fc   : list[int]     = hidden_widths_fc;
         self.activations_fc     : list[str]     = activations_fc
-        self.n_z                : int           = latent_dimension;
 
         # Expand conv hyperparameters.
         self.conv_kernel_sizes  : list[tuple[int, int, int]] = _expand_3tuple_param(conv_kernel_sizes, self.n_conv_layers, "conv_kernel_sizes");
@@ -320,7 +324,7 @@ class CNN_3D_Autoencoder(torch.nn.Module):
 
 
 
-    def Encode(self, U : torch.Tensor) -> torch.Tensor:
+    def Encode(self, U : torch.Tensor) -> tuple[torch.Tensor]:
         """
         This function encodes a set of 3D frames.
 
@@ -337,8 +341,9 @@ class CNN_3D_Autoencoder(torch.nn.Module):
         Returns
         -------------------------------------------------------------------------------------------
 
-        Z : torch.Tensor, shape = (n_Frames, self.n_z)
-            Latent-space encodings of each frame.
+        Z : tuple[torch.Tensor], len = 1
+            A single element tuple whose lone element is a tensor of shape = (n_Frames, self.n_z)
+            holding the latent-space encodings of each frame.
         """
 
         # Ensure input is 5D.
@@ -364,11 +369,11 @@ class CNN_3D_Autoencoder(torch.nn.Module):
         # Flatten and FC encoder.
         U = U.reshape((U.shape[0], self._flatten_dim));
         Z : torch.Tensor = self.encoder_fc(U);
-        return Z;
+        return (Z,);
 
 
 
-    def Decode(self, Z : torch.Tensor) -> torch.Tensor:
+    def Decode(self, Z : torch.Tensor) -> tuple[torch.Tensor]:
         """
         This function decodes a set of latent frames.
 
@@ -385,8 +390,9 @@ class CNN_3D_Autoencoder(torch.nn.Module):
         Returns
         -------------------------------------------------------------------------------------------
 
-        R : torch.Tensor, shape = (n_Frames, C, I, J, K)
-            Reconstructed 3D frames; C = self.conv_channels[0].
+        R : tuple[torch.Tensor], len = 1
+            A single element tuple whose lone element is a Tensor of shape = (n_Frames, C, I, J, K)
+            holding the reconstructed 3D frames; C = self.conv_channels[0].
         """
 
         # Checks.
@@ -404,62 +410,37 @@ class CNN_3D_Autoencoder(torch.nn.Module):
 
         assert list(U.shape[-3:]) == self.reshape_shape, "Decoded output shape mismatch: got %s, expected (n_Frames, %s)" % (str(U.shape), str(self.reshape_shape));
         assert U.shape[1] == self.conv_channels[0], "Decoded channel mismatch: got %d, expected %d" % (U.shape[1], self.conv_channels[0]);
-        return U;
+        return (U,);
 
 
 
-    def forward(self, U : torch.Tensor) -> torch.Tensor:
+    def forward(self, X : torch.Tensor) -> tuple[torch.Tensor]:
         """
-        This function passes U through the encoder, producing Z. It then passes Z through the
-        decoder.
+        This function passes X through the encoder, producing a latent state, Z. It then passes 
+        Z through the decoder; hopefully producing a vector that approximates X.
+        
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        U : torch.Tensor, shape = (n_Frames,) + self.reshape_shape
+            A tensor holding a batch of inputs. We pass this tensor through the encoder + decoder 
+            and then return the result.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        Y : tuple[torch.Tensor], len = 1
+            A single element tuple whose lone element is a torch.Tensor of shape = X.shape holding 
+            the image of X under the encoder and decoder. 
         """
 
-        Z : torch.Tensor = self.Encode(U);
-        Y : torch.Tensor = self.Decode(Z);
+        Z : torch.Tensor        = self.Encode(X)[0];
+        Y : tuple[torch.Tensor] = self.Decode(Z);
         return Y;
-
-
-
-    def latent_initial_conditions(  self,
-                                    param_grid     : numpy.ndarray,
-                                    physics        : Physics,
-                                    trainer        = None) -> list[list[numpy.ndarray]]:
-        """
-        This function maps a set of initial conditions for the FOM to initial conditions for the
-        latent space dynamics. See Autoencoder.latent_initial_conditions.
-        """
-
-        # Checks.
-        assert isinstance(param_grid, numpy.ndarray),   "type(param_grid) = %s, must be numpy.ndarray" % str(type(param_grid));
-        assert len(param_grid.shape) == 2,              "param_grid.shape = %s, must have length 2" % str(param_grid.shape);
-        assert physics.n_IC     == self.n_IC,           "physics.n_IC = %d, self.n_IC = %d; must be equal" % (physics.n_IC, self.n_IC);
-
-        # Figure out how many combinations of parameter values there are.
-        n_param     : int                       = param_grid.shape[0];
-        Z0          : list[list[numpy.ndarray]] = [];
-        LOGGER.debug("Encoding initial conditions for %d parameter values" % n_param);
-
-        # Cycle through the parameters.
-        for i in range(n_param):
-            # Fetch the IC for the i'th set of parameters. Then map it to a tensor.
-            u0_np   : numpy.ndarray = physics.initial_condition(param_grid[i])[0];
-            u0      : torch.Tensor  = torch.Tensor(u0_np).reshape((1,) + u0_np.shape);
-
-            # If the trainer uses normalization, normalize the IC before encoding.
-            has_norm = (trainer is not None) and hasattr(trainer, "has_normalization") and trainer.has_normalization();
-            if(has_norm):
-                u0 = trainer.normalize_tensor(u0, 0);
-            else:
-                LOGGER.warning(f"  No normalization applied to IC for param {i}!");
-
-            # Encode the IC, then map the encoding to a numpy array.
-            z0      : numpy.ndarray = self.Encode(u0).detach().numpy();
-
-            # Append the new IC to the list of latent ICs
-            Z0.append([z0]);
-
-        # Return the list of latent ICs.
-        return Z0;
 
 
 

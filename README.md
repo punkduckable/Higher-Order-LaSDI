@@ -1,6 +1,6 @@
 # Higher-Order LaSDI
 
-Higher-Order LaSDI provides tools for building reduced-order models (ROMs) from full-order simulations using latent-space dynamics identification with Gaussian Process-based greedy sampling. The library supports physics that require multiple time derivatives (e.g., displacement and velocity for second-order systems) and handles time series with either uniform or non-uniform time grids. Latent dynamics models such as SINDy and damped-spring systems are provided, and new models can be added easily.
+Higher-Order LaSDI provides tools for building reduced-order models (ROMs) from full-order simulations using latent-space dynamics identification with Gaussian Process-based greedy sampling. The library supports physics that require multiple time derivatives (e.g., displacement and velocity for second-order systems) and handles time series with either uniform or non-uniform time grids. Latent dynamics models such as SINDy and damped-spring systems are provided, and new EncoderDecoders can be added easily.
 
 ## Key Features
 
@@ -11,7 +11,7 @@ Higher-Order LaSDI provides tools for building reduced-order models (ROMs) from 
 - **Autoencoder Architectures**: Standard autoencoder and paired autoencoder for higher-order systems
 - **Rich Activation Functions**: Support for 20+ activation functions including sine, ReLU, tanh, GELU, and more
 - **Visualization Tools**: Automated plotting of latent trajectories, error heatmaps, and solution animations
-- **Training stability & diagnostics**: Gradient clipping (config: `lasdi.gplasdi.gradient_clip`) to prevent exploding gradients, and per-parameter loss logging to `results/*_loss_by_param.pkl` for post-hoc analysis
+- **Training stability & diagnostics**: Gradient clipping (config: `trainer.gradient_clip`) to prevent exploding gradients, and per-parameter loss logging to `results/*_loss_by_param.pkl` for post-hoc analysis
 
 ## Getting Started
 
@@ -25,17 +25,17 @@ python src/Workflow.py --config examples/KleinGordon.yml
 
 This command will:
 1. Generate or load training data from the physics solver
-2. Train the autoencoder and latent dynamics using GPLaSDI
+2. Train the autoencoder and latent dynamics using `Trainer`
 3. Perform greedy sampling to adaptively select new training points
-4. Evaluate the learned model on test data
+4. Evaluate the learned ROM on test data
 5. Generate plots and error metrics
 
 ### Workflow Components
 
 `Workflow.py` orchestrates the following pipeline:
 - **Data Generation**: Calls physics solvers to generate training trajectories
-- **Training**: Uses the `BayesianGLaSDI` class to train autoencoders and latent dynamics
-- **Greedy Sampling**: Fits Gaussian Processes to latent dynamics coefficients and selects new training points based on GP uncertainty
+- **Training**: Uses the `Trainer` class to train autoencoders and latent dynamics
+- **Greedy Sampling**: Uses a configurable `Sampler` to select new training points (often via Gaussian Processes fit to latent dynamics coefficients)
 - **Evaluation**: Computes rollout errors, relative errors, and standard deviations
 - **Visualization**: Generates latent trajectory plots, error heatmaps, and solution animations
 
@@ -62,18 +62,22 @@ The `examples/` directory contains configuration files for various physics probl
 ### Core Components
 
 - **`src/Workflow.py`** – Main command-line driver that loads configuration files, initializes components, and runs the training pipeline
-- **`src/GPLaSDI.py`** – The `BayesianGLaSDI` class implements the main training loop with GP-based greedy sampling
-- **`src/Initialize.py`** – Factory functions for initializing trainers, models, physics solvers, and latent dynamics from config files
-- **`src/Model.py`** – Neural network architectures:
-  - `MultiLayerPerceptron`: Flexible MLP with customizable activations
-  - `Autoencoder`: Standard autoencoder for first-order systems
-  - `Autoencoder_Pair`: Paired autoencoder for higher-order systems (encodes multiple derivatives)
+- **`src/Trainer.py`** – Implements the training loop and loss functions (reconstruction, latent dynamics, rollout, IC rollout, stability, and (for higher-order systems) chain rule + consistency)
+- **`src/Initialize.py`** – Factory functions for initializing trainers, EncoderDecoders, physics solvers, and latent dynamics from config files
+- **`src/EncoderDecoder`** – Neural network architectures:
+  - `EncoderDecoder.py`: Base `EncoderDecoder` class.
+  - `MLP.py`: Flexible MLP with customizable activations
+  - `Autoencoder.py`: Standard autoencoder for first-order systems
+  - `Autoencoder_Pair.py`: Paired autoencoder for higher-order systems (encodes multiple derivatives)
 - **`src/ParameterSpace.py`** – Parameter space management, grid generation, and train/test split utilities
 - **`src/SolveROMs.py`** – ROM simulation functions:
   - `average_rom()`: Simulate using GP mean predictions
   - `sample_roms()`: Simulate using samples from GP posteriors
   - Error computation and uncertainty quantification
-- **`src/Sample.py`** – Greedy sampling logic and training space updates
+- **`src/Sample/`** – Greedy sampling logic:
+  - `Sampler.py`: Base `Sampler` class (selects the next training parameter during greedy sampling)
+  - `FOM_Variance.py`: Selects next point by maximizing predictive variance in decoded (FOM) space
+  - `FOM_Rollout.py`: Selects next point by maximizing rollout error against the true FOM (intrusive)
 - **`src/Enums.py`** – Enumerations for workflow states (`NextStep`, `Result`)
 
 ### Physics Solvers
@@ -136,15 +140,24 @@ The `examples/` directory contains configuration files for various physics probl
 
 Configuration files are YAML-based and specify:
 
-### LaSDI Settings (`lasdi`)
-- Trainer type (currently `gplasdi`)
-- Learning rate, number of GP samples
+### Trainer Settings (`trainer`)
+- Learning rate, gradient clipping
 - Normalization settings
-- Rollout parameters (initial probability, update frequency)
+- Rollout parameters:
+  - curriculum over rollout horizon: `p_rollout_init`, `rollout_update_freq`, `dp_per_update`, `max_p_rollout`
+  - rollout sampling: `n_rollouts` (number of rollable start frames to rollout per training trajectory per epoch)
 - Training iterations and greedy sampling iterations
-- Loss weights: `recon`, `LD`, `rollout`, `IC_rollout`, `coef`, `chain_rule`, `consistency`
+- Loss weights:
+  - Always supported: `recon`, `LD`, `rollout`, `IC_rollout`, `stab`
+  - Higher-order only: `chain_rule`, `consistency`
 - Loss types: `MSE` or `MAE`
 - Learnable coefficients flag
+
+### Sampler Settings (`sampler`)
+- `sampler.type` selects a sampler implementation (e.g., `FOM_Variance` or `FOM_Rollout`).
+- Each sampler has its own settings block under `sampler.<TypeName>`. For example:
+  - `sampler.FOM_Variance.n_samples`
+  - `sampler.FOM_Rollout.n_samples`, `sampler.FOM_Rollout.normalized_FOM`, `sampler.FOM_Rollout.error_normalization`
 
 ### Workflow Settings (`workflow`)
 - Restart capability (load from checkpoint)
@@ -154,19 +167,22 @@ Configuration files are YAML-based and specify:
 - Parameter definitions (uniform, list, or file-based)
 - Test space configuration (grid, random, or file-based)
 
-### Model Architecture (`model`)
-- Model type: `ae` (Autoencoder), `pair` (Autoencoder_Pair), or `3d CNN` (CNN_3D).
+### EncoderDecoder Architecture (`EncoderDecoder`)
+- EncoderDecoder type: `ae` (Autoencoder), `pair` (Autoencoder_Pair), or `3d CNN` (CNN_3D).
 - Hidden layer widths
 - Activation functions
 - Latent dimension
 
 ### Latent Dynamics (`latent_dynamics`)
 - Type: `sindy`, `spring`, or `switch sindy`.
-- Coefficient norm order
+- Stability regularization (stability penalty)
 
 ### Physics (`physics`)
 - Physics type (must match a key in `physics_dict`)
 - Physics-specific parameters (grid sizes, time steps, domain bounds, etc.)
+
+See **Extending the Code** below for details on adding new Physics / LatentDynamics / Sampler /
+EncoderDecoder implementations and registering them in `src/Initialize.py`.
 
 ## Dependencies
 
@@ -181,7 +197,6 @@ Tested with the following versions:
 - pyyaml (6.0.2)
 - scipy (1.14.1)
 - matplotlib (3.9.2)
-- seaborn (0.13.2)
 
 These pacakages are listed in the "requirements.txt" file
 
@@ -205,7 +220,6 @@ python -m pip install \
   scikit-learn==1.5.2 \
   pyyaml==6.0.2 \
   matplotlib==3.9.2 \
-  seaborn==0.13.2 \
 
 # PyTorch (pick the right wheel for your platform/CUDA)
 python -m pip install torch==2.5.1
@@ -327,7 +341,7 @@ Physics objects expose a `Uniform_t_Grid` attribute which determines derivative 
 - When `True`: Uses higher-order finite difference schemes (Order 4 when available)
 - When `False`: Uses non-uniform grid schemes (currently Order 2)
 
-The `BayesianGLaSDI` class automatically selects the appropriate finite difference method based on this flag. See `Derivative1_Order2_NonUniform` in `src/Utilities/FiniteDifference.py` for non-uniform grid implementation.
+The `Trainer` class automatically selects the appropriate finite difference method based on this flag. See `Derivative1_Order2_NonUniform` in `src/Utilities/FiniteDifference.py` for non-uniform grid implementation.
 
 ## Extending the Code
 
@@ -340,6 +354,7 @@ New applications can be implemented by deriving from the appropriate base classe
    - `__init__(self, config, param_names)`: Initialize solver parameters
    - `initial_condition(self, param)`: Generate initial conditions for given parameters
    - `solve(self, param, t_grid)`: Solve and return solution trajectory
+   - Optional: `threshold`: An optional callable function which accepts three arguments, the current time (t), a FOM frame, and the set of node positions. It should return a 'mask', an 1D array of 0's and 1's whose lenght matches the number of nodes. If present, this is passed to the animate functions. For each frame, only plot nodes whose corresponding mask value (at that time) is 1. 
 3. **Register in `Initialize.py`**:
    ```python
    physics_dict = {
@@ -349,11 +364,12 @@ New applications can be implemented by deriving from the appropriate base classe
    ```
 4. **Create config file** in `examples/YourSolver.yml`
 
+
 ### Adding a New Latent Dynamics Model
 
 1. **Create a subclass** of `LatentDynamics` in `src/LatentDynamics/YourModel.py`
 2. **Implement required methods**:
-   - `__init__(self, n_z, coef_norm_order, Uniform_t_Grid)`: Initialize model
+   - `__init__(self, n_z, Uniform_t_Grid)`: Initialize model
    - `calibrate(self, Latent_States, loss_type, t_Grid, input_coefs)`: Compute/update coefficients
    - `simulate(self, Coefs, IC, t_Grid, n_steps)`: Simulate forward in time
 3. **Register in `Initialize.py`**:
@@ -364,24 +380,55 @@ New applications can be implemented by deriving from the appropriate base classe
    }
    ```
 
-### Adding a New Model Architecture
 
-1. **Create a subclass** of `torch.nn.Module` in `src/Model.py`
+### Adding a New Sampler (Greedy Sampling Strategy)
+
+Greedy sampling is implemented via `Sampler` classes in `src/Sample/`. A sampler selects the next
+parameter point(s) to add to the training set after each training round.
+
+1. **Create a subclass** of `Sampler` in `src/Sample/YourSampler.py`.
 2. **Implement required methods**:
-   - `Encode(self, U)`: Encode full-order state to latent space
-   - `Decode(self, Z)`: Decode latent state to full-order space
-   - `latent_initial_conditions(self, U_IC)`: Extract latent initial conditions
+   - `__init__(self, config)`: Parse `config['type']` and your sampler-specific settings.
+   - `Sample(self, trainer) -> NextStep`: Append the chosen point(s) to `trainer.param_space.train_space`
+     and return `NextStep.RunSample`.
+   - (Optional) override `Generate_Training_Data(self, trainer)` if you need custom data-generation behavior.
+     Most samplers can reuse the base implementation.
 3. **Register in `Initialize.py`**:
    ```python
-   model_dict = {
+   sampler_dict = {
        ...
-       'yourmodel': YourModel,
-   }
-   model_load_dict = {
-       ...
-       'yourmodel': load_YourModel,
+       'YourSampler': YourSampler,
    }
    ```
+4. **Configure in YAML**:
+   ```yaml
+   sampler:
+     type: YourSampler
+     YourSampler:
+       # sampler-specific settings
+   ```
+
+### Adding a New EncoderDecoder Architecture
+
+1. **Create a subclass** of `EncoderDecoder` which should be placed in a file in `src/EncoderDecoder`
+2. **Implement required methods**:
+   - `Encode(self, X(1), ... , X(n_IC))`: Encode full-order state to latent space
+   - `Decode(self, Z(1), ... , Z(n_IC))`: Decode latent state to full-order space
+   - `forward(self, X(1), ... , X(n_IC))`: Encode and then Decode the FOM states.
+   - `export()`: Returns a dictionary that can be used to serialize the EncoderDecoder.
+3. **Register in `Initialize.py`**:
+   ```python
+   encoder_decoder_dict = {
+       ...
+       'your_encoder_decoder': YourEncoderDecoder,
+   }
+   encoder_decoder_load_dict = {
+       ...
+       'your_encoder_decoder': load_YourEncoderDecoder,
+   }
+   ```
+4. **Define how to train your architecture**: Import your new EncoderDecoder sub-class in `Trainer.py`. Either add the new class to one of the existing cases (using the pre-selected loss functions) in the `Trainer` class' `train` method, or define a new case to handle your new class.
+
 
 ## Testing and Development
 
@@ -396,18 +443,18 @@ The `Test/` directory contains Jupyter notebooks for testing and validating comp
 Training produces several outputs:
 
 ### Saved Files
-- **Checkpoint**: `checkpoint/checkpoint.pt` – Model weights and training state
+- **Checkpoint**: `checkpoint/checkpoint.pt` – EncoderDecoder weights and training state
 - **Results**: `results/<physics_type>_loss_by_param.pkl` – Per-epoch loss curves (per training parameter + totals)
 - **Figures**: `Figures/*.png` – Latent trajectory plots, error heatmaps
 - **Animations**: `Figures/*.mp4` – Solution animations (if generated)
 
 ### Gradient clipping
 
-To prevent exploding gradients during training, `BayesianGLaSDI` applies global gradient-norm clipping via `torch.nn.utils.clip_grad_norm_` (threshold: `lasdi.gplasdi.gradient_clip`, default: `15.0`). When clipping activates, a warning is logged.
+To prevent exploding gradients during training, `Trainer` applies global gradient-norm clipping via `torch.nn.utils.clip_grad_norm_` (threshold: `trainer.gradient_clip`, default: `15.0`). When clipping activates, a warning is logged.
 
 ### Per-parameter loss logging (`*_loss_by_param.pkl`)
 
-During training, `src/GPLaSDI.py` writes a pickle file:
+During training, `src/Trainer.py` writes a pickle file:
 
 - Path: `results/<physics_type>_loss_by_param.pkl` (where `<physics_type>` is `config['physics']['type']`)
 - Type: nested Python dictionaries
@@ -419,7 +466,7 @@ Structure:
 - Each `loss_name` also contains a `'total'` entry, which is the loss summed across all training parameters for that epoch.
 
 Common `loss_name` keys include:
-- `recon`, `LD`, `coef`, `rollout_ROM`, `rollout_FOM`, `IC_rollout_ROM`, `IC_rollout_FOM`, and `total`
+- `recon`, `LD`, `stab`, `rollout_ROM`, `rollout_FOM`, `IC_rollout_ROM`, `IC_rollout_FOM`, and `total`
 - For paired autoencoders, additional keys such as `recon_D`, `recon_V`, `consistency_Z`, `consistency_U`, `chain_rule_U`, `chain_rule_Z`, `rollout_*_D/V`, and `IC_rollout_*` are also logged.
 
 Reading the file:

@@ -5,20 +5,25 @@
 # Add the Physics directory to the search path.
 import  sys;
 import  os;
-Physics_Path    : str  = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, "Physics"));
+src_Path        : str   = os.path.abspath(os.path.dirname(os.path.dirname(__file__)));
+Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, "Physics"));
 
 sys.path.append(Physics_Path);
 
 import  logging;
-from    typing      import  Callable;
 
 import  torch;
 import  numpy;
 
-from    MLP         import  act_dict;
-from    Autoencoder import  Autoencoder, load_Autoencoder;
-from    Physics     import  Physics;
+from    typing          import  TYPE_CHECKING;
+if TYPE_CHECKING:
+    from    Trainer     import  Trainer;
+    from    Physics     import  Physics;
 
+
+from    EncoderDecoder  import  EncoderDecoder;
+from    MLP             import  act_dict;
+from    Autoencoder     import  Autoencoder, load_Autoencoder;
 # Set up logging.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
@@ -27,7 +32,7 @@ LOGGER  : logging.Logger    = logging.getLogger(__name__);
 # Displacement, Velocity Autoencoder
 # -------------------------------------------------------------------------------------------------
 
-class Autoencoder_Pair(torch.nn.Module):
+class Autoencoder_Pair(EncoderDecoder):
     """"
     This class defines a pair of auto-encoders for displacement, velocity data. Specifically, each 
     object consists of a pair of auto-encoders, one for processing displacement data and another 
@@ -85,20 +90,18 @@ class Autoencoder_Pair(torch.nn.Module):
         assert numpy.prod(reshape_shape) == widths[0],      "numpy.prod(self.reshape_shape) = %d, widths[0] = %d; must be equal" % (numpy.prod(reshape_shape), widths[0]);
 
         # Call the super class initializer.
-        super().__init__();
+        super().__init__(n_IC = 2, n_z = widths[-1]);
         LOGGER.info("Initializing an Autoencoder_Pair");
 
         # In general, the FOM solution may be vector valued and have multiple spatial dimensions. 
         # We need to know the shape of each FOM frame. 
-        self.reshape_shape : list[int]     = reshape_shape; 
+        self.reshape_shape  : list[int]     = reshape_shape; 
         
         # Fetch information about the domain/co-domain.
-        self.widths     : list[int]     = widths
-        self.n_z        : int           = widths[-1];
-        self.n_IC       : int           = 2;
+        self.widths         : list[int]     = widths;
 
         # Use the settings to set up the activation information for the encoder.
-        self.activations : list[str]   =  activations;
+        self.activations    : list[str]     =  activations;
 
         # Next, build the velocity and displacement auto-encoders.
         LOGGER.info("Initializing the Displacement Autoencoder...");
@@ -158,8 +161,8 @@ class Autoencoder_Pair(torch.nn.Module):
         assert list(Displacement_Frames.shape[1:])  ==  self.reshape_shape,             "list(Displacement_Frames.shape[1:]) = %s, self.reshape_shape = %s; must be equal" % (str(list(Displacement_Frames.shape[1:])), str(self.reshape_shape));
     
         # Encode the displacement frames.
-        Latent_Displacement : torch.Tensor = self.Displacement_Autoencoder.Encode( Displacement_Frames);
-        Latent_Velocity     : torch.Tensor = self.Velocity_Autoencoder.Encode(     Velocity_Frames);
+        Latent_Displacement : torch.Tensor = self.Displacement_Autoencoder.Encode( Displacement_Frames)[0];
+        Latent_Velocity     : torch.Tensor = self.Velocity_Autoencoder.Encode(     Velocity_Frames)[0];
 
         # All done!
         return Latent_Displacement, Latent_Velocity;
@@ -208,8 +211,8 @@ class Autoencoder_Pair(torch.nn.Module):
         assert Latent_Velocity.shape            == Latent_Displacement.shape,   "Latent_Velocity.shape = %s, Latent_Displacement.shape = %s; must be equal" % (str(Latent_Displacement.shape), str(Latent_Velocity.shape));
 
         # Encode the displacement frames.
-        Reconstructed_Displacement  : torch.Tensor  = self.Displacement_Autoencoder.Decode( Latent_Displacement);
-        Reconstructed_Velocity      : torch.Tensor  = self.Velocity_Autoencoder.Decode(     Latent_Velocity);
+        Reconstructed_Displacement  : torch.Tensor  = self.Displacement_Autoencoder.Decode( Latent_Displacement)[0];
+        Reconstructed_Velocity      : torch.Tensor  = self.Velocity_Autoencoder.Decode(     Latent_Velocity)[0];
 
         # All done!
         return Reconstructed_Displacement, Reconstructed_Velocity;
@@ -267,84 +270,6 @@ class Autoencoder_Pair(torch.nn.Module):
 
 
 
-    def latent_initial_conditions(  self,
-                                    param_grid     : numpy.ndarray, 
-                                    physics        : Physics,
-                                    trainer        = None) -> list[list[numpy.ndarray]]:
-        """
-        This function maps a set of initial conditions for the FOM to initial conditions for the 
-        latent space dynamics. Specifically, we take in a set of possible parameter values. For 
-        each set of parameter values, we recover the FOM IC (from physics), then map this FOM IC 
-        to a latent space IC (by encoding it). We do this for each parameter combination and then 
-        return a list housing the latent space ICs.
-
-        
-        -------------------------------------------------------------------------------------------
-        Arguments
-        -------------------------------------------------------------------------------------------
-
-        param_grid : numpy.ndarray, shape = (n_param, n_p)
-            i,j element of this array holds the value of the j'th parameter in the i'th combination 
-            of parameter values. Here, n_p is the number of parameters and n_param is the number
-            of combinations of parameter values.
-
-        physics : Physics
-            allows us to calculate the IC for each combination of parameter values. This physics 
-            object should have the same number of initial conditions as self.
-
-
-        -------------------------------------------------------------------------------------------
-        Returns
-        -------------------------------------------------------------------------------------------
-
-        Z0 : list[list[numpy.ndarray]], len = n_param
-            i'th element is an n_IC element list whose j'th element is an numpy.ndarray of shape 
-            (1, n_z) whose k'th element holds the k'th component of the encoding of the initial
-            condition for the j'th derivative of the latent dynamics corresponding to the i'th 
-            combination of parameter values.
-                
-            If we let (U0_i, V0_i) denote the initial FOM displacement and velocity for the i'th 
-            combination of parameter values, then the i'th element of the returned list is the list 
-            [self.encoder(U0_i, V0_i)[0], self.encoder(U0_i, V0_i)[1]].
-        """
-
-        # Checks
-        assert isinstance(param_grid, numpy.ndarray),   "type(param_grid) = %s, must be numpy.ndarray" % str(type(param_grid));
-        assert len(param_grid.shape) == 2,              "param_grid.shape = %s, must have length 2" % str(param_grid.shape);
-        assert physics.n_IC     == self.n_IC,           "physics.n_IC = %d, self.n_IC = %d; must be equal" % (physics.n_IC, self.n_IC);
-
-        # Figure out how many combinations of parameter values there are.
-        n_param     : int                           = param_grid.shape[0];
-        Z0          : list[list[numpy.ndarray]]     = [];
-        LOGGER.debug("Encoding initial conditions for %d combinations of parameter values" % n_param);
-
-        # Cycle through the parameters.
-        for i in range(n_param):
-            # Get the ICs for the i'th combination of parameter values.
-            ICs     : list[numpy.ndarray]   = physics.initial_condition(param_grid[i]);
-            u0_np      : numpy.ndarray         = ICs[0];
-            v0_np      : numpy.ndarray         = ICs[1];
-            
-            # Map the ICs to a tensor.
-            u0      : torch.Tensor          = torch.Tensor(u0_np).reshape((1,) + u0_np.shape);
-            v0      : torch.Tensor          = torch.Tensor(v0_np).reshape((1,) + v0_np.shape);
-
-            # If the trainer uses normalization, normalize ICs before encoding.
-            if (trainer is not None) and hasattr(trainer, "has_normalization") and trainer.has_normalization():
-                u0 = trainer.normalize_tensor(u0, 0);
-                v0 = trainer.normalize_tensor(v0, 1);
-
-            # Encode the IC, then map the encoding to a numpy array.
-            z0_t, Dz0_t = self.Encode(  Displacement_Frames = u0, 
-                                    Velocity_Frames     = v0);
-            z0      : numpy.ndarray = z0_t.detach().numpy();
-            Dz0     : numpy.ndarray = Dz0_t.detach().numpy();
-
-            # Concatenate the IC's and append them to the list.
-            Z0.append([z0, Dz0]);
-
-        # Return the list of latent ICs.
-        return Z0;
 
 
 
