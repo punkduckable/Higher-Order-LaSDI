@@ -38,7 +38,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 
 
 # -------------------------------------------------------------------------------------------------
-# Trainer class
+# Trainer Base class
 # -------------------------------------------------------------------------------------------------
 
 class Trainer:
@@ -112,10 +112,10 @@ class Trainer:
         """
         
         # Checks.
-        n_IC    : int               = latent_dynamics.n_IC;
-        assert encoder_decoder.n_IC == n_IC, "encoder_decoder.n_IC = %d, n_IC = %d" % (encoder_decoder.n_IC, n_IC);
-        assert physics.n_IC         == n_IC, "physics.n_IC = %d, n_IC = %d" % (physics.n_IC, n_IC);
-        self.n_IC                   = n_IC;
+        n_IC    : int               =   latent_dynamics.n_IC;
+        assert encoder_decoder.n_IC ==  n_IC, "encoder_decoder.n_IC = %d, n_IC = %d" % (encoder_decoder.n_IC, n_IC);
+        assert physics.n_IC         ==  n_IC, "physics.n_IC = %d, n_IC = %d" % (physics.n_IC, n_IC);
+        self.n_IC                   =   n_IC;
         assert('trainer' in config), "config must contain a 'trainer' sub-dictionary";
 
         LOGGER.info("Initializing a Trainer object"); 
@@ -134,11 +134,11 @@ class Trainer:
         self.timer                          = Timer();
 
         # Extract training/loss hyperparameters from the configuration file. 
-        self.lr                     : float     = trainer_config.get('lr', '0.001');                # Learning rate for the optimizer.
-        self.gradient_clip          : float     = trainer_config.get('gradient_clip', 15.0);        # Maximum allowable gradient magnitude; will rescale gradientsif exceeded.
-        self.p_rollout_init         : float     = trainer_config.get('p_rollout_init', 0.01);       # The proportion of the simulated we simulate forward when computing the rollout loss.
-        self.rollout_update_freq    : float     = trainer_config.get('rollout_update_freq', 10);    # We increase p_rollout after this many iterations.
-        self.dp_per_update          : float     = trainer_config.get('dp_per_update', 0.005);       # We increase p_rollout by this much each time we increase it.
+        self.lr                     : float     = trainer_config.get('lr',                  0.001);     # Learning rate for the optimizer.
+        self.gradient_clip          : float     = trainer_config.get('gradient_clip',       15.0);      # Maximum allowable gradient magnitude; will rescale gradientsif exceeded.
+        self.p_rollout_init         : float     = trainer_config.get('p_rollout_init',      0.01);      # The proportion of the simulated we simulate forward when computing the rollout loss.
+        self.rollout_update_freq    : float     = trainer_config.get('rollout_update_freq', 10);        # We increase p_rollout after this many iterations.
+        self.dp_per_update          : float     = trainer_config.get('dp_per_update',       0.005);     # We increase p_rollout by this much each time we increase it.
         # Rollout supervision (frame-rollout mode; safe for non-autonomous latent dynamics):
         #
         # Randomly select `n_rollouts` rollable start frames per training trajectory per epoch,
@@ -370,8 +370,11 @@ class Trainer:
         """
         Helper function to store a loss value for a specific parameter combination.
         
+
+        -------------------------------------------------------------------------------------------
         Arguments:
-        ----------
+        -------------------------------------------------------------------------------------------
+
         loss_name : str
             Name of the loss component (e.g., 'recon', 'rollout_ROM')
         param_tuple : tuple
@@ -394,8 +397,11 @@ class Trainer:
         """
         Helper function to store a total loss value (summed across all parameter combinations).
         
+
+
+        -------------------------------------------------------------------------------------------
         Arguments:
-        ----------
+        -------------------------------------------------------------------------------------------
         loss_name : str
             Name of the loss component
         epoch : int
@@ -419,7 +425,7 @@ class Trainer:
 
     def train(self, reset_optim : bool = True) -> None:
         """
-        Runs a round of training on the encoder_decoder.
+        Runs a round of training.
 
         
         -------------------------------------------------------------------------------------------
