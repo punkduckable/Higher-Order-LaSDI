@@ -259,8 +259,17 @@ def _scalar_anim(   data            : numpy.ndarray,
         if cbar_rect is None:
             # Reserve space for the colorbar axes so it does not overlap tick labels (especially in 3D).
             if X.shape[0] == 3:
-                fig.subplots_adjust(left = 0.10, right = 0.84, bottom = 0.10, top = 0.90);
-                cax = fig.add_axes([0.82, 0.18, 0.03, 0.64]);
+                # fig.subplots_adjust(...) shrinks/repositions the main plot area inside the figure.
+                # left, right, top and bottom control the position of the left, right, top, and bottom
+                # edges of the figure.
+                fig.subplots_adjust(right = 0.8);
+                
+                # fig.add_axes([L, B, W, H]) creates a new axes at a fixed rectangle in figure coordinates
+                #   L = left position (0 = left edge of figure, 1 = right edge)
+                #   B = bottom position
+                #   W = width 
+                #   H = height
+                cax = fig.add_axes([0.88, 0.18, 0.03, 0.64]);
             else:
                 fig.subplots_adjust(right = 0.86);
                 cax = fig.add_axes([0.88, 0.20, 0.03, 0.60]);
