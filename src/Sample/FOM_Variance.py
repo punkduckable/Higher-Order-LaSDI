@@ -7,9 +7,11 @@ import  os, sys;
 src_path            : str   = os.path.abspath(os.path.dirname(os.path.dirname(__file__)));
 Utilities_path      : str   = os.path.join(src_path, "Utilities");
 EncoderDecoder_path : str   = os.path.join(src_path, "EncoderDecoder");
+Trainer_Path        : str   = os.path.join(src_path, "Trainer");
 sys.path.append(Utilities_path);
 sys.path.append(EncoderDecoder_path);
 sys.path.append(src_path);
+sys.path.append(Trainer_Path);
 
 import  logging;
 
@@ -126,17 +128,12 @@ class FOM_Variance(Sampler):
         train_coefs : numpy.ndarray = trainer.best_train_coefs;                     # Shape = (n_train, n_coefs).
         LOGGER.info('\n~~~~~~~ Finding New Point ~~~~~~~');
 
-        # Move the encoder_decoder to the cpu (this is where all the GP stuff happens) and load the 
-        # encoder_decoder from the last checkpoint. This should be the one that obtained the best loss 
-        # so far. Remember that train_coefs should specify the coefficients from that iteration. 
-        LOGGER.info("Sampling: Loading encoder_decoder from checkpoint.");
-        # Do GP + decoding on CPU, but restore the original device afterwards.
+        # Move the encoder_decoder to the cpu (this is where all the GP stuff happens). Remember 
+        # that train_coefs should specify the coefficients from that iteration. 
         encoder_decoder_device : torch.device = next(trainer.encoder_decoder.parameters()).device;
-
-        encoder_decoder : EncoderDecoder    = trainer.encoder_decoder.to("cpu");
+        encoder_decoder : EncoderDecoder    = trainer.encoder_decoder.cpu();
         n_test          : int               = trainer.param_space.n_test();
         n_train         : int               = trainer.param_space.n_train();
-        encoder_decoder.load_state_dict(torch.load(trainer.path_checkpoint + '/' + 'checkpoint.pt', map_location = 'cpu'));
 
         # First, find the candidate parameters. These are the elements of the testing set that 
         # are not already in the training set.
@@ -247,6 +244,10 @@ class FOM_Variance(Sampler):
 
         # Find the index of the parameter with the largest std.
         m_index : int = get_FOM_max_std(encoder_decoder, LatentStates, candidate_parameters);
+
+
+        # ---------------------------------------------------------------------------------------------
+        # Wrap up.
 
         # Move the model back to its original device now that decoding is finished.
         trainer.encoder_decoder.to(encoder_decoder_device);
