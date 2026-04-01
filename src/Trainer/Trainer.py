@@ -222,9 +222,8 @@ class Trainer:
         );
 
         # Set paths for checkpointing/results.
-        # Put these in the Higher-Order-LaSDI project root.
-        src_dir     = os.path.dirname(os.path.abspath(__file__));
-        project_dir = os.path.abspath(os.path.join(src_dir, os.pardir));
+        src_dir     = os.path.dirname(os.path.abspath(__file__));                       # .../Higher-Order-LaSDI/src/Trainer
+        project_dir = os.path.abspath(os.path.join(src_dir, os.pardir, os.pardir));     # .../Higher-Order-LaSDI
         self.path_checkpoint    : str = os.path.join(project_dir, "checkpoint");
         self.path_results       : str = os.path.join(project_dir, "results");
 
