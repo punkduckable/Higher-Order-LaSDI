@@ -56,7 +56,7 @@ class Thermal(Physics):
         """
 
         # First, let's fetch the hdf5 directory.
-        assert config['type'] == "Thermal",         "config['type'] = %s, should be Theramal" % config['type'];
+        assert config['type'] == "Thermal",         "config['type'] = %s, should be Thermal" % config['type'];
         assert 'Thermal' in config,                 "config must have a Thermal attribute";
         assert 'hdf5_dir' in config['Thermal'],     "Thermal sub-dictionary must have an `hdf5_dir` attribute."
         self.hdf5_dir : str  = config['Thermal']['hdf5_dir'];

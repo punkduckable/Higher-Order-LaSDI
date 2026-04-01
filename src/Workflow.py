@@ -76,7 +76,7 @@ def main():
         config      = yaml.safe_load(f);
     
     # Report the configuration settings.
-    Log_Dictionary(LOGGER = LOGGER, D = config, level = logging.DEBUG);
+    Log_Dictionary(LOGGER = LOGGER, D = config, level = logging.INFO);
 
     # Check if we are loading from a restart or not. If so, load it.
     use_restart         : bool  = config['workflow']['use_restart'];
@@ -803,7 +803,7 @@ def count_parameters(   encoder_decoder : EncoderDecoder,
     
 
     # Count learnable coefficients from trainer (only applies if we are learning the latent 
-    #dynamics coefficients)
+    # dynamics coefficients)
     coef_params = 0;
     if hasattr(trainer, 'test_coefs') and trainer.test_coefs is not None:
         coef_params = trainer.test_coefs.numel();

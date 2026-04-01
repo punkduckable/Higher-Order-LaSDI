@@ -42,3 +42,38 @@ def Move_Optimizer_To_Device(optim : torch.optim.Optimizer, device : str) -> Non
                     subparam.data = subparam.data.to(device);
                     if subparam._grad is not None:
                         subparam._grad.data = subparam._grad.data.to(device);
+
+
+
+# -------------------------------------------------------------------------------------------------
+# reset optimizer
+# -------------------------------------------------------------------------------------------------
+
+
+def Reset_Optimizer(optimizer  : torch.optim.Optimizer) -> None:
+    """
+    Set the optimizer's m_t and v_t attributes (first and second moments) to zero. After each 
+    training round, the momentum from the previous epoch may point us in the wrong direction. 
+    Resetting the momentum eliminates this problem.
+    """
+
+    # Cycle through the optimizer's parameter groups.
+    for group in optimizer.param_groups:
+
+        # Cycle through the parameters in the group.
+        for p in group['params']:
+            state : dict = optimizer.state[p];
+
+            # If the state is empty, skip this parameter.
+            if not state:
+                continue;
+            
+            # zero the biased first moment estimate
+            state['exp_avg'].zero_();
+
+            # zero the biased second moment estimate
+            state['exp_avg_sq'].zero_();
+            
+            # if you're using amsgrad:
+            if 'max_exp_avg_sq' in state:
+                state['max_exp_avg_sq'].zero_();
