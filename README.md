@@ -62,7 +62,9 @@ The `examples/` directory contains configuration files for various physics probl
 ### Core Components
 
 - **`src/Workflow.py`** – Main command-line driver that loads configuration files, initializes components, and runs the training pipeline
-- **`src/Trainer.py`** – Implements the training loop and loss functions (reconstruction, latent dynamics, rollout, IC rollout, stability, and (for higher-order systems) chain rule + consistency)
+- **`src/Trainer/Trainer.py`** – Base `Trainer` class: normalization helpers, checkpointing, loss logging, timing, and round-based training orchestration
+- **`src/Trainer/Rollout_1_IC.py`** – `Trainer` subclass for first-order systems (`n_IC = 1`): reconstruction + latent-dynamics + rollout losses
+- **`src/Trainer/Rollout_2_IC.py`** – `Trainer` subclass for second-order systems (`n_IC = 2`): paired-derivative training (includes chain rule + consistency losses)
 - **`src/Initialize.py`** – Factory functions for initializing trainers, EncoderDecoders, physics solvers, and latent dynamics from config files
 - **`src/EncoderDecoder`** – Neural network architectures:
   - `EncoderDecoder.py`: Base `EncoderDecoder` class.
@@ -141,17 +143,21 @@ The `examples/` directory contains configuration files for various physics probl
 Configuration files are YAML-based and specify:
 
 ### Trainer Settings (`trainer`)
-- Learning rate, gradient clipping
-- Normalization settings
-- Rollout parameters:
-  - curriculum over rollout horizon: `p_rollout_init`, `rollout_update_freq`, `dp_per_update`, `max_p_rollout`
-  - rollout sampling: `n_rollouts` (number of rollable start frames to rollout per training trajectory per epoch)
-- Training iterations and greedy sampling iterations
-- Loss weights:
-  - Always supported: `recon`, `LD`, `rollout`, `IC_rollout`, `stab`
-  - Higher-order only: `chain_rule`, `consistency`
-- Loss types: `MSE` or `MAE`
-- Learnable coefficients flag
+- `trainer.type` selects the concrete `Trainer` subclass to use (e.g., `Rollout_1_IC`, `Rollout_2_IC`).
+- Round scheduling / greedy sampling limits:
+  - `trainer.n_iter`, `trainer.max_iter`, `trainer.max_greedy_iter`
+- Normalization:
+  - `trainer.normalize` (if enabled, the library computes global mean/std and normalizes train/test data)
+- Device placement:
+  - `trainer.device` (optional; `"cpu"` by default)
+- Subclass-specific settings live under `trainer.<TypeName>`. Example (`Rollout_2_IC`):
+  - learning rate + stability: `lr`, `gradient_clip`, `warmup_epochs`
+  - rollout curriculum: `p_rollout_init`, `rollout_update_freq`, `dp_per_update`, `max_p_rollout`
+  - rollout sampling: `n_rollouts`
+  - IC rollout curriculum: `p_IC_rollout_init`, `IC_rollout_update_freq`, `IC_dp_per_update`, `max_p_IC_rollout`
+  - loss weights / types:
+    - weights: `loss_weights` (e.g. `recon`, `LD`, `rollout`, `IC_rollout`, `stab`, `coef`, plus higher-order losses)
+    - types: `loss_types` (`"MSE"` or `"MAE"`)
 
 ### Sampler Settings (`sampler`)
 - `sampler.type` selects a sampler implementation (e.g., `FOM_Variance` or `FOM_Rollout`).
@@ -183,6 +189,60 @@ Configuration files are YAML-based and specify:
 
 See **Extending the Code** below for details on adding new Physics / LatentDynamics / Sampler /
 EncoderDecoder implementations and registering them in `src/Initialize.py`.
+
+## Extending: Adding a new Trainer subclass
+
+The training loop is split into a base class (`src/Trainer/Trainer.py`) and concrete subclasses
+that implement one training strategy per greedy-sampling round.
+
+### 1) Create a new subclass
+
+Create a new file under `src/Trainer/`, for example `src/Trainer/MyTrainer.py`, and implement:
+
+- `__init__(physics, encoder_decoder, latent_dynamics, param_space, config)`
+- `Iterate(start_iter, end_iter)` (the actual per-epoch training logic)
+
+Follow the existing trainers (`Rollout_1_IC`, `Rollout_2_IC`) as templates. In particular, your
+`Iterate(...)` method should:
+
+- Log losses via `_store_loss_by_param(...)` / `_store_total_loss(...)`
+- Call `_Save_Checkpoint(...)` when a new best model is found (so `train()` can restore it)
+
+### 2) Register the trainer in `Initialize.py`
+
+In `src/Initialize.py`:
+
+1. Import your class:
+
+```python
+from MyTrainer import MyTrainer
+```
+
+2. Add it to `trainer_dict`:
+
+```python
+trainer_dict = {
+    'Rollout_1_IC': Rollout_1_IC,
+    'Rollout_2_IC': Rollout_2_IC,
+    'MyTrainer'  : MyTrainer,
+}
+```
+
+### 3) Add YAML config entries
+
+In your YAML file:
+
+```yaml
+trainer:
+  type: MyTrainer
+  n_iter: 2500
+  max_iter: 20000
+  max_greedy_iter: 20000
+  normalize: false
+
+  MyTrainer:
+    # your subclass-specific settings here
+```
 
 ## Dependencies
 

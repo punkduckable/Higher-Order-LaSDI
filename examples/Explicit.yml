@@ -1,48 +1,46 @@
 trainer:
-  lr:                     0.001
-  gradient_clip:          100.0     # Long ODE rollouts produce legitimate gradients of 100-130; clipping at 25 discards 80% of the signal.
-
-  # If true, compute a single global mean/std from TRAINING data only, and normalize
-  # all training/testing trajectories using these values.
-  normalize:              true
-
-  # p_rollout grows from p_rollout_init by dp_per_update every rollout_update_freq epochs, capped at max_p_rollout.
-  p_rollout_init:         0.01
-  rollout_update_freq:    10
-  dp_per_update:          0.005
-  max_p_rollout:          0.5 
-  n_rollouts:             4         # Number of rollable start frames to rollout per training parameter per epoch.
-
-  p_IC_rollout_init:      0.01
-  IC_rollout_update_freq: 10
-  IC_dp_per_update:       0.01
-  max_p_IC_rollout:       1.0  
+  type:                   "Rollout_1_IC"
 
   max_iter:               4000
   n_iter:                 2000
   max_greedy_iter:        4000
+  
+  # If true, compute a single global mean/std from TRAINING data only, and normalize
+  # all training/testing trajectories using these values.
+  normalize:              true
 
-  warmup_epochs:          40    # number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmpup.
+  device:                 'cpu'
 
-  loss_weights:
-    recon:                1.0
-    LD:                   10.0
-    rollout:              0.0
-    IC_rollout:           0.5
-    coef:                 0.0002
+  Rollout_1_IC:
+    lr:                     0.001
+    gradient_clip:          100.0     # Long ODE rollouts produce legitimate gradients of 100-130; clipping at 25 discards 80% of the signal.
 
-    chain_rule:           1.0
-    consistency:          1.0
+    # p_rollout grows from p_rollout_init by dp_per_update every rollout_update_freq epochs, capped at max_p_rollout.
+    p_rollout_init:         0.01
+    rollout_update_freq:    10
+    dp_per_update:          0.005
+    max_p_rollout:          0.5 
+    n_rollouts:             4         # Number of rollable start frames to rollout per training parameter per epoch.
 
-  loss_types:
-    recon:                "MSE"
-    LD:                   "MSE"
-    rollout:              "MSE"
-    IC_rollout:           "MSE"
-    chain_rule:           "MSE"
-    consistency:          "MSE"
+    p_IC_rollout_init:      0.01
+    IC_rollout_update_freq: 10
+    IC_dp_per_update:       0.01
+    max_p_IC_rollout:       1.0  
 
-  learnable_coefs:        true
+    warmup_epochs:          40    # number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmpup.
+
+    loss_weights:
+      recon:                1.0
+      LD:                   10.0
+      rollout:              0.0
+      IC_rollout:           0.5
+      coef:                 0.0002
+
+    loss_types:
+      recon:                "MSE"
+      LD:                   "MSE"
+      rollout:              "MSE"
+      IC_rollout:           "MSE"
   
 workflow:
   use_restart:              False
@@ -50,9 +48,9 @@ workflow:
   plot_train_rel_errors:    False
 
 sampler:
-  type:                   'FOM_Variance'
+  type:                     'FOM_Variance'
   FOM_Variance:
-    n_samples:            20        # Number of samples used to compute rollout stds.
+    n_samples:              20        # Number of samples used to compute rollout stds.
     
 parameter_space:
   parameters:
