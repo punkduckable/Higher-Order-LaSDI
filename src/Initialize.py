@@ -76,8 +76,8 @@ encoder_decoder_load_dict = {   'ae'                    : load_Autoencoder,
 ld_dict = {                     'sindy'                 : SINDy, 
                                 'spring'                : DampedSpring,
                                 'switch'                : SwitchSINDy};
-trainer_dict = {                'Rollout_1_IC'          : Rollout_1_IC, 
-                                'Rollout_2_IC'          : Rollout_2_IC}
+trainer_dict = {                'First_Order_Rollout'   : First_Order_Rollout, 
+                                'Second_Order_Rollout'  : Second_Order_Rollout}
 sampler_dict = {                'FOM_Rollout'           : FOM_Rollout,
                                 'FOM_Variance'          : FOM_Variance};
 physics_dict = {                'Burgers'               : Burgers.Burgers,

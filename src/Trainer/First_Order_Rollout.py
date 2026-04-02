@@ -38,7 +38,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # Trainer class
 # -------------------------------------------------------------------------------------------------
 
-class Second_Order_Rollout(Trainer):
+class First_Order_Rollout(Trainer):
     def __init__(self, 
                  physics            : Physics, 
                  encoder_decoder    : EncoderDecoder, 
