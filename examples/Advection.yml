@@ -1,5 +1,5 @@
 trainer:
-  type:                   "Rollout_1_IC"
+  type:                   "First_Order_Rollout"
 
   max_iter:               36000
   n_iter:                 4000
@@ -11,7 +11,7 @@ trainer:
   
   device:                 'cpu'
 
-  Rollout_1_IC:
+  First_Order_Rollout:
     lr:                     0.001
     gradient_clip:          15.0      # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
 

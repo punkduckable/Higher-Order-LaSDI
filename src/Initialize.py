@@ -21,28 +21,28 @@ import  numpy;
 import  torch; 
 
 
-from    LatentDynamics      import  LatentDynamics;
-from    SINDy               import  SINDy;
-from    SwitchSINDy         import  SwitchSINDy;
-from    DampedSpring        import  DampedSpring;
+from    LatentDynamics          import  LatentDynamics;
+from    SINDy                   import  SINDy;
+from    SwitchSINDy             import  SwitchSINDy;
+from    DampedSpring            import  DampedSpring;
 
-from    ParameterSpace      import  ParameterSpace;
+from    ParameterSpace          import  ParameterSpace;
 
-from    Trainer             import  Trainer;
-from    Rollout_1_IC        import  Rollout_1_IC;
-from    Rollout_2_IC        import  Rollout_2_IC;
+from    Trainer                 import  Trainer;
+from    First_Order_Rollout     import  First_Order_Rollout;
+from    Second_Order_Rollout    import  Second_Order_Rollout;
 
-from    EncoderDecoder      import  EncoderDecoder;
-from    Autoencoder         import  Autoencoder, load_Autoencoder;
-from    Autoencoder_Pair    import  Autoencoder_Pair, load_Autoencoder_Pair;
-from    CNN_3D_Autoencoder  import  CNN_3D_Autoencoder, load_CNN_3D_Autoencoder;
+from    EncoderDecoder          import  EncoderDecoder;
+from    Autoencoder             import  Autoencoder, load_Autoencoder;
+from    Autoencoder_Pair        import  Autoencoder_Pair, load_Autoencoder_Pair;
+from    CNN_3D_Autoencoder      import  CNN_3D_Autoencoder, load_CNN_3D_Autoencoder;
 
-from    Physics             import  Physics;
-#from    NonlinearElasticity import  NonlinearElasticity;
-#from    Advection           import  Advection;
-#from    WaveEquation        import  WaveEquation;
-#from    KleinGordon         import  KleinGordon;
-#from    Telegraphers        import  Telegraphers;
+from    Physics                 import  Physics;
+#from    NonlinearElasticity     import  NonlinearElasticity;
+#from    Advection               import  Advection;
+#from    WaveEquation            import  WaveEquation;
+#from    KleinGordon             import  KleinGordon;
+#from    Telegraphers            import  Telegraphers;
 import  Burgers2D;
 import  Thermal;
 import  Burgers;
@@ -50,9 +50,9 @@ import  BurgersSecondOrder;
 import  Explicit;
 import  ExplicitSecondOrder;
 
-from    Sampler             import  Sampler;
-from    FOM_Rollout         import  FOM_Rollout;
-from    FOM_Variance        import  FOM_Variance;
+from    Sampler                 import  Sampler;
+from    FOM_Rollout             import  FOM_Rollout;
+from    FOM_Variance            import  FOM_Variance;
 
 # Set up logger.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);

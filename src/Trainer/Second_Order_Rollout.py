@@ -26,6 +26,7 @@ from    EncoderDecoder              import  EncoderDecoder;
 from    ParameterSpace              import  ParameterSpace;
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
+from    FiniteDifference            import  Derivative1_Order4, Derivative1_Order2_NonUniform;
 from    Optimizer                   import  Reset_Optimizer;
 from    Trainer                     import  Trainer;
 
@@ -38,7 +39,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # Trainer class
 # -------------------------------------------------------------------------------------------------
 
-class Rollout_1_IC(Trainer):
+class Second_Order_Rollout(Trainer):
     def __init__(self, 
                  physics            : Physics, 
                  encoder_decoder    : EncoderDecoder, 
@@ -47,7 +48,7 @@ class Rollout_1_IC(Trainer):
                  config             : dict):
         """
         This defines a Trainer sub-class which is designed to run Rollouts on latent dynamics
-        that have one initial condition (n_IC = 1). It uses the following loss functions:
+        that have two initial conditions (n_IC = 2). It uses the following loss functions:
 
             - reconstruction (autoencoder)
             - coefficient (Frobenius norm of latent dynamics coefficients)
@@ -55,32 +56,25 @@ class Rollout_1_IC(Trainer):
             - stability (maximum eigenvalue of the symmetric part of the latent dynamics system matrix)
             - rollout (standard rollout loss)
             - IC_rollout (initial condition rollout loss)
+            - consistency (MSE between time derivative of latent/reconstructed displacements and latent/reconstructed velocity)
+            - chain_rule (MSE between jacobian vector product of displacement encoder/decoder with FOM/latent velocity and latent/reconstructed velocity)
 
         It can only be paired with Latent_Dynamics, Physics, and EncoderDecoder sub-classes which 
-        also have n_IC = 1.
+        also have n_IC = 2.
 
         **Configuration format**
 
-        This trainer follows the standard Higher-Order-LaSDI convention:
-
         - `config['trainer']` contains base trainer settings such as `n_iter`, `max_iter`,
           `max_greedy_iter`, `normalize`, and `device`.
-        - Subclass-specific hyperparameters live under `config['trainer']['Rollout_1_IC']`
+        - Subclass-specific hyperparameters live under `config['trainer']['Second_Order_Rollout']`
           (learning rate, rollout curriculum settings, and loss weights/types).
 
         **Coefficient semantics**
 
-        This trainer assumes coefficients are *trainable* by default. It stores a learnable
-        matrix `self.test_coefs` of shape `(n_test, n_coefs)`, i.e. a coefficient row for every
-        point in the test parameter space.
-
-        During training, the training set is a subset of the test set. For each training parameter
-        value, we locate its index in the test space and use the corresponding row of
-        `self.test_coefs` inside the loss. This means:
-
-        - gradients flow into `self.test_coefs` for rows corresponding to training parameters
-        - the *full* `self.test_coefs` matrix is checkpointed so that, after each training round,
-          the trainer can restore the best epoch's coefficients (used by greedy sampling / GP fits)
+        This trainer keeps a learnable matrix `self.test_coefs` of shape `(n_test, n_coefs)`.
+        Training uses the subset of rows corresponding to training parameters (which are required
+        to be contained in the test space). The full matrix is checkpointed so that after each
+        training round the coefficients are restored to the best epoch of that round.
 
         **Checkpointing**
 
@@ -119,22 +113,22 @@ class Rollout_1_IC(Trainer):
         """
         
         # Checks.
-        n_IC                        =  1;
+        n_IC                        =  2;
         assert latent_dynamics.n_IC == n_IC, "latent_dynamics.n_IC = %d, n_IC = %d" % (latent_dynamics.n_IC, n_IC);
         assert encoder_decoder.n_IC == n_IC, "encoder_decoder.n_IC = %d, n_IC = %d" % (encoder_decoder.n_IC, n_IC);
         assert physics.n_IC         == n_IC, "physics.n_IC = %d, n_IC = %d" % (physics.n_IC, n_IC);
         self.n_IC                   =  n_IC; 
 
-        assert 'trainer' in config,                         "config must contain a 'trainer' sub-dictionary";
-        assert 'type' in config['trainer'],                 "trainer dictionary must contain a 'type' attribute";
-        assert config['trainer']['type'] == "Rollout_1_IC", "config['trainer']['type'] = %s, should be Rollout_1_IC" % config['trainer']['type'];
-        assert "Rollout_1_IC" in config['trainer'],         "Rollout_1_IC must be in config['trainer']";
+        assert 'trainer' in config,                                 "config must contain a 'trainer' sub-dictionary";
+        assert 'type' in config['trainer'],                         "trainer dictionary must contain a 'type' attribute";
+        assert config['trainer']['type'] == "Second_Order_Rollout", "config['trainer']['type'] = %s, should be Second_Order_Rollout" % config['trainer']['type'];
+        assert "Second_Order_Rollout" in config['trainer'],         "Second_Order_Rollout must be in config['trainer']";
 
-        LOGGER.info("Initializing a Rollout_1_IC object"); 
+        LOGGER.info("Initializing a Second_Order_Rollout object"); 
 
         # Fetch the trainer sub-dictionary.
         trainer_config          : dict      = config['trainer'];
-        sub_config              : dict      = trainer_config['Rollout_1_IC'];
+        sub_config              : dict      = trainer_config['Second_Order_Rollout'];
 
         # Call the super class initializer.
         super().__init__(   n_IC            = n_IC,
@@ -163,7 +157,7 @@ class Rollout_1_IC(Trainer):
         # Randomly select `n_rollouts` rollable start frames per training trajectory per epoch,
         # rollout each one using the *true* absolute-time grid slice t[k:j], and compare full
         # predicted trajectories against the true trajectory slice (no interpolation).
-        assert 'n_rollouts' in sub_config, "Rollout_1_IC config must include `n_rollouts` (int > 0) for rollout supervision";
+        assert 'n_rollouts' in sub_config, "Second_Order_Rollout config must include `n_rollouts` (int > 0) for rollout supervision";
         self.n_rollouts             : int       = int(sub_config['n_rollouts']);
         assert self.n_rollouts > 0, "trainer.n_rollouts must be > 0";
         
@@ -311,42 +305,39 @@ class Rollout_1_IC(Trainer):
 
 
     # ---------------------------------------------------------------------------------------------
-    # Iterate.
+    # Iterate
     # ---------------------------------------------------------------------------------------------
-
 
     def Iterate(self, 
                 start_iter      : int, 
                 end_iter        : int) -> None:
         """
-        Run one training round for a first-order system (`n_IC = 1`).
+        Run one training round for a second-order system (`n_IC = 2`).
 
-        This method performs gradient-based training over the epoch range
-        `[start_iter, end_iter)`. Each epoch:
+        This trainer is designed for higher-order physics where the state is represented via
+        multiple time derivatives (e.g., displacement and velocity). Concretely, each training
+        trajectory provides two streams `U_D(t)` and `U_V(t)` and the EncoderDecoder is expected
+        to encode/decode these jointly (see `Autoencoder_Pair`).
 
-        1. Encodes the training trajectories to latent states `Z(t)` and decodes them back to
-           reconstructed states `U_hat(t)` (reconstruction loss).
-        2. Calls `latent_dynamics.calibrate(...)` to evaluate the latent-dynamics loss given the
-           current coefficient values (which are taken from `self.test_coefs` at the rows
-           corresponding to training parameters).
-        3. Optionally computes rollout-based losses by simulating the latent dynamics forward in
-           time and comparing decoded trajectories against either:
-              - trajectory slices (frame rollouts), and/or
-              - rollouts from true initial conditions (IC rollouts).
-        4. Aggregates the weighted loss, performs backpropagation, gradient clipping, and an
-           optimizer step.
+        Each epoch in `[start_iter, end_iter)` typically performs:
+
+        - Forward passes to obtain latent trajectories and reconstructions
+        - Latent dynamics calibration/loss evaluation via `latent_dynamics.calibrate(...)`
+        - Higher-order consistency losses (e.g., chain-rule and consistency penalties)
+        - Optional rollout and IC-rollout losses (curriculum-controlled)
+        - Backpropagation + gradient clipping + optimizer step
 
         **Checkpointing (important)**
 
-        Whenever this method finds a new best (lowest) loss *within this round*, it calls the
-        base-class `_Save_Checkpoint(...)` method. The checkpoint stores:
+        When a new best epoch is found within the round, this method calls
+        `Trainer._Save_Checkpoint(...)` to snapshot:
 
-        - the EncoderDecoder parameters
-        - the best training coefficients (`train_coefs`, shape `(n_train, n_coefs)`)
-        - the full test-space coefficient matrix (`self.test_coefs`, shape `(n_test, n_coefs)`)
+        - EncoderDecoder weights
+        - the per-training-point coefficient matrix (`train_coefs`)
+        - the full test-space coefficient matrix (`self.test_coefs`)
 
-        At the end of the round, `Trainer.train()` loads that checkpoint so that
-        `trainer.test_coefs` reflects the best epoch of the round (not necessarily the last epoch).
+        This ensures `Trainer.train()` can restore the model and coefficients from the best epoch
+        of the round, which is what greedy sampling should use.
 
         **Loss logging**
 
@@ -431,6 +422,7 @@ class Rollout_1_IC(Trainer):
 
         # -----------------------------------------------------------------------------------------
         # Run the iterations!
+
         for iter in range(start_iter, end_iter):
             self.timer.start("train_step");
             LOGGER.debug("=" * 80);
@@ -441,7 +433,7 @@ class Rollout_1_IC(Trainer):
             # Warmup the learning rate for the first few epochs after greedy sampling.
             # NOTE: epochs_in_round will be recalculated later for rollout updates.
 
-            epochs_in_round     : int = iter - self.restart_iter;  # Progress within current training round
+            epochs_in_round     : int = iter - start_iter;  # Progress within current training round
             if self.warmup_epochs > 0 and epochs_in_round < self.warmup_epochs:
                 # Reduce LR for warmup period
                 warmup_scale = 0.1 + 0.9 * (float(epochs_in_round) / float(self.warmup_epochs));
@@ -491,25 +483,35 @@ class Rollout_1_IC(Trainer):
 
 
             # -------------------------------------------------------------------------------------
-            # Set up losses
-            
+            # Setup losses
+
             # Initialize losses. 
-            loss_recon              : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
             loss_LD                 : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
             loss_stab               : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
-            loss_coef               : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
-            loss_rollout_FOM        : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
-            loss_rollout_ROM        : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
-            loss_IC_rollout_FOM     : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
-            loss_IC_rollout_ROM     : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
-
+            loss_coef              : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+            loss_recon_D            : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+            loss_recon_V            : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+            loss_consistency_Z      : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+            loss_consistency_U      : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+            loss_chain_rule_U       : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+            loss_chain_rule_Z       : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+            loss_rollout_FOM_D      : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+            loss_rollout_FOM_V      : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+            loss_rollout_ROM_D      : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+            loss_rollout_ROM_V      : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+            loss_IC_rollout_D       : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+            loss_IC_rollout_V       : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+            loss_IC_rollout_Z_D     : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+            loss_IC_rollout_Z_V     : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
             # Setup. 
-            Latent_States           : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_t_i, n_z) arrays.
+            Latent_States       : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 2 element list of (n_t_i, n_z) arrays.
 
-            # Cycle through the combinations of parameter values
+            # Cycle through the combinations of parameter values.
             for i in range(n_train):
                 # Setup. 
-                U_i         : torch.Tensor  = U_Train_device[i][0];
+                D_i         : torch.Tensor  = U_Train_device[i][0];
+                V_i         : torch.Tensor  = U_Train_device[i][1];
+
                 t_Grid_i    : torch.Tensor  = t_Train_device[i];
                 n_t_i       : int           = t_Grid_i.shape[0];
 
@@ -518,28 +520,38 @@ class Rollout_1_IC(Trainer):
                 # Forward pass
 
                 self.timer.start("Forward Pass");
-                LOGGER.debug("Forward Pass (Autoencoder) - start for parameter combination %d" % i);
+                LOGGER.debug("Forward Pass (Autoencoder_Pair) - start for parameter combination %d" % i);
 
                 # Run the forward pass. This results in an n_train element list whose i'th 
-                # element is a 1 element list whose only element is a tensor of shape 
+                # element is a 2 element list whose j'th element is a tensor of shape 
                 # (n_t(i), physics.Frame_Shape) whose [k, ...] slice holds our prediction for 
-                # the FOM solution at time t_Grid[i][k] when we use the i'th combination of 
-                # parameter values. Here, n_t(i) is the number of time steps in the solution 
-                # for the i'th combination of parameter values. 
-                Z_i         : torch.Tensor  = encoder_decoder_device.Encode(U_i)[0];
+                # the j'th time derivative of the FOM solution at time t_Grid[i][k] when we use 
+                # the i'th combination of parameter values. Here, n_t(i) is the number of time 
+                # steps in the solution for the i'th combination of parameter values. 
+                Z_i     : list[torch.Tensor]        = list(encoder_decoder_device.Encode(*U_Train_device[i]));
+                Z_D_i   : torch.Tensor              = Z_i[0];       # shape (n_t(i), n_z)
+                Z_V_i   : torch.Tensor              = Z_i[1];       # shape (n_t(i), n_z)
                 
                 # Log latent state statistics to diagnose potential autoencoder collapse
                 if iter % 100 == 0 or iter == start_iter:  # Log every 100 iters and first iter
-                    LOGGER.info("Epoch %d, Param %d: Z shape=%s, min=%.6e, max=%.6e, mean=%.6e, std=%.6e, device=%s" % (
-                        iter + 1, i, str(Z_i.shape), 
-                        float(Z_i.min().item()), float(Z_i.max().item()), 
-                        float(Z_i.mean().item()), float(Z_i.std().item()),
-                        str(Z_i.device)));
+                    LOGGER.info("Epoch %d, Param %d: Z_D shape=%s, min=%.6e, max=%.6e, mean=%.6e, std=%.6e, device=%s" % (
+                        iter + 1, i, str(Z_D_i.shape), 
+                        float(Z_D_i.min().item()), float(Z_D_i.max().item()), 
+                        float(Z_D_i.mean().item()), float(Z_D_i.std().item()),
+                        str(Z_D_i.device)));
+                    LOGGER.info("Epoch %d, Param %d: Z_V shape=%s, min=%.6e, max=%.6e, mean=%.6e, std=%.6e, device=%s" % (
+                        iter + 1, i, str(Z_V_i.shape), 
+                        float(Z_V_i.min().item()), float(Z_V_i.max().item()), 
+                        float(Z_V_i.mean().item()), float(Z_V_i.std().item()),
+                        str(Z_V_i.device)));
                 
-                Latent_States.append([Z_i]);
-                U_Pred_i    : torch.Tensor  = encoder_decoder_device.Decode(Z_i)[0];
+                Latent_States.append(Z_i);
 
-                LOGGER.debug("Forward Pass (Autoencoder) - complete for parameter combination %d" % i);
+                U_Pred_i    : list[torch.Tensor]    = list(encoder_decoder_device.Decode(*Z_i));
+                D_Pred_i    : torch.Tensor          = U_Pred_i[0];  # shape = (n_t(i), physics.Frame_Shape)
+                V_Pred_i    : torch.Tensor          = U_Pred_i[1];  # shape = (n_t(i), physics.Frame_Shape)
+
+                LOGGER.debug("Forward Pass (Autoencoder_Pair) - complete for parameter combination %d" % i);
                 self.timer.end("Forward Pass");
 
 
@@ -548,43 +560,157 @@ class Rollout_1_IC(Trainer):
 
                 if(self.loss_weights['recon'] > 0):
                     self.timer.start("Reconstruction Loss");
-                    LOGGER.debug("Reconstruction Loss (Autoencoder) - start for parameter combination %d" % i);
+                    LOGGER.debug("Reconstruction Loss (Autoencoder_Pair) - start for parameter combination %d" % i);
 
-                    # Reconstruction residual (data is either physical units or normalized).
-                    diff = (U_i - U_Pred_i);
+                    # Compute differences once
+                    diff_D = (D_i - D_Pred_i);
+                    diff_V = (V_i - V_Pred_i);
                     
-                    # Compute loss from normalized difference
+                    # Compute losses from normalized differences
                     if(self.loss_types['recon'] == "MSE"):
-                        recon_loss_ith_param = torch.mean(diff**2);
+                        recon_D_loss_ith_param = torch.mean(diff_D**2);
+                        recon_V_loss_ith_param = torch.mean(diff_V**2);
                     elif(self.loss_types['recon'] == "MAE"):
-                        recon_loss_ith_param = torch.mean(torch.abs(diff));
+                        recon_D_loss_ith_param = torch.mean(torch.abs(diff_D));
+                        recon_V_loss_ith_param = torch.mean(torch.abs(diff_V));
                     else:
-                        raise ValueError("Invalid reconstruction loss type: %s" % self.loss_types['recon']);
+                        recon_D_loss_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
+                        recon_V_loss_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
                     
-                    loss_recon += recon_loss_ith_param;
+                    loss_recon_D += recon_D_loss_ith_param;
+                    loss_recon_V += recon_V_loss_ith_param;
                     
-                    # Store recon loss for this parameter combination.
-                    ith_param_tuple = tuple(self.param_space.train_space[i, :]);
-                    self._store_loss_by_param('recon', ith_param_tuple, iter + 1, recon_loss_ith_param.item());
-                    
-                    LOGGER.debug("Reconstruction Loss (Autoencoder) - complete for parameter combination %d" % i);
+                    # Store per-parameter-combination loss
+                    param_tuple = tuple(self.param_space.train_space[i, :]);
+                    self._store_loss_by_param('recon_D', param_tuple, iter + 1, recon_D_loss_ith_param.item());
+                    self._store_loss_by_param('recon_V', param_tuple, iter + 1, recon_V_loss_ith_param.item());
+
+                    LOGGER.debug("Reconstruction Loss (Autoencoder_Pair) - complete for parameter combination %d" % i);
                     self.timer.end("Reconstruction Loss");
 
-            # Store total recon loss.
-            self._store_total_loss('recon', iter + 1, loss_recon.item());
+
+                # --------------------------------------------------------------------------------
+                # Consistency losses
+
+                if(self.loss_weights['consistency'] > 0):
+                    self.timer.start("Consistency Loss");
+                    LOGGER.debug("Consistency Loss (Autoencoder_Pair) - start for parameter combination %d" % i);
+
+                    # Make sure Z_V actually looks like the time derivative of Z_D. 
+                    if(self.physics.Uniform_t_Grid == True):
+                        h               : float             = t_Grid_i[1] - t_Grid_i[0];
+                        dZ_Di_dt        : torch.Tensor      = Derivative1_Order4(U = Z_D_i, h = h);
+                    else:
+                        dZ_Di_dt        : torch.Tensor      = Derivative1_Order2_NonUniform(U = Z_D_i, t_Grid = t_Grid_i);
+                    
+                    # Compute differences once
+                    diff_Z = dZ_Di_dt - Z_V_i;
+                    
+                    # Compute loss from difference
+                    consistency_Z_loss_ith_param = torch.mean(diff_Z**2) if self.loss_types['consistency'] == "MSE" else torch.mean(torch.abs(diff_Z));
+                    loss_consistency_Z          += consistency_Z_loss_ith_param;
+                    
+                    # Store per-parameter-combination loss
+                    param_tuple = tuple(self.param_space.train_space[i, :]);
+                    self._store_loss_by_param('consistency_Z', param_tuple, iter + 1, consistency_Z_loss_ith_param.item());
+
+                    # Next, make sure that V_Pred actually looks like the derivative of D_Pred. 
+                    if(self.physics.Uniform_t_Grid  == True):
+                        h               : float             = t_Grid_i[1] - t_Grid_i[0];
+                        dD_Pred_i_dt    : torch.Tensor      = Derivative1_Order4(U = D_Pred_i, h = h);
+                    else:
+                        dD_Pred_i_dt    : torch.Tensor      = Derivative1_Order2_NonUniform(U = D_Pred_i, t_Grid = t_Grid_i);
+
+                    # Compute difference once
+                    diff_U = dD_Pred_i_dt - V_Pred_i;
+                    
+                    # Compute loss from difference
+                    consistency_U_loss_ith_param = torch.mean(diff_U**2) if self.loss_types['consistency'] == "MSE" else torch.mean(torch.abs(diff_U));
+                    loss_consistency_U          += consistency_U_loss_ith_param;
+                    
+                    # Store per-parameter-combination loss
+                    self._store_loss_by_param('consistency_U', param_tuple, iter + 1, consistency_U_loss_ith_param.item());
+
+                    LOGGER.debug("Consistency Loss (Autoencoder_Pair) - complete for parameter combination %d" % i);
+                    self.timer.end("Consistency Loss");
+
+
+                # ----------------------------------------------------------------------------
+                # Chain Rule Losses
+
+                if(self.loss_weights['chain_rule'] > 0):
+                    self.timer.start("Chain Rule Loss");
+                    LOGGER.debug("Chain Rule Loss (Autoencoder_Pair) - start for parameter combination %d" % i);
+
+                    # First, we compute the U portion of the chain rule loss. This stems from the 
+                    # fact that 
+                    #       (d/dt)U(t) \approx (d/dt)\phi_D,D(Z_D(t)) 
+                    #                   = (d/dz)\phi_D,D(Z_D(t)) Z_V(t)
+                    # Here, \phi_D,D is the displacement portion of the decoder. We can use torch 
+                    # to compute jacobian-vector products. Note that the jvp function expects a 
+                    # function as its first arguments (to define the forward pass). It passes the 
+                    # inputs through func, then computes the jacobian-vector product (using 
+                    # reverse mode AD) of inputs with v. It returns the result of the forward pass 
+                    # and the associated jacobian-vector product. We only keep the latter.
+                    d_dz_D_Pred__Z_V_i  : torch.Tensor  = torch.autograd.functional.jvp(
+                                                                func    = lambda Z_D : encoder_decoder_device.Displacement_Autoencoder.Decode(Z_D)[0], 
+                                                                inputs  = Z_D_i, 
+                                                                v       = Z_V_i)[1];
+                    
+                    # Compute difference once
+                    diff_U = V_i - d_dz_D_Pred__Z_V_i;
+                    
+                    # Compute loss from difference
+                    chain_rule_U_loss_ith_param = torch.mean(diff_U**2) if self.loss_types['chain_rule'] == "MSE" else torch.mean(torch.abs(diff_U));
+                    loss_chain_rule_U          += chain_rule_U_loss_ith_param;
+                    
+                    # Store per-parameter-combination loss
+                    param_tuple = tuple(self.param_space.train_space[i, :]);
+                    self._store_loss_by_param('chain_rule_U', param_tuple, iter + 1, chain_rule_U_loss_ith_param.item());
+
+                    # Next, we compute the Z portion of the chain rule loss:
+                    #       (d/dt)Z(t) \approx (d/dt)\phi_E,D(D(t))
+                    #                   = (d/dX)\phi_E,D(D(t)) V(t)
+                    # Here, \phi_E,D is the displacement portion of the encoder.
+                    d_dx_Z_D__V         : torch.Tensor  = torch.autograd.functional.jvp(
+                                                                func    = lambda D : encoder_decoder_device.Displacement_Autoencoder.Encode(D)[0],
+                                                                inputs  = D_i, 
+                                                                v       = V_i)[1];
+                    
+                    # Compute difference once
+                    diff_Z = Z_V_i - d_dx_Z_D__V;
+                    
+                    # Compute loss from difference
+                    chain_rule_Z_loss_ith_param = torch.mean(diff_Z**2) if self.loss_types['chain_rule'] == "MSE" else torch.mean(torch.abs(diff_Z));
+                    loss_chain_rule_Z          += chain_rule_Z_loss_ith_param;
+                    
+                    # Store per-parameter-combination loss
+                    self._store_loss_by_param('chain_rule_Z', param_tuple, iter + 1, chain_rule_Z_loss_ith_param.item());
+
+                    LOGGER.debug("Chain Rule Loss (Autoencoder_Pair) - complete for parameter combination %d" % i);
+                    self.timer.end("Chain Rule Loss");
+
+            # Store the total recon, consistency, and chain rule losses.
+            self._store_total_loss('recon_D', iter + 1, loss_recon_D.item());
+            self._store_total_loss('recon_V', iter + 1, loss_recon_V.item());
+            self._store_total_loss('consistency_Z', iter + 1, loss_consistency_Z.item());
+            self._store_total_loss('consistency_U', iter + 1, loss_consistency_U.item());
+            self._store_total_loss('chain_rule_U', iter + 1, loss_chain_rule_U.item());
+            self._store_total_loss('chain_rule_Z', iter + 1, loss_chain_rule_Z.item());
 
 
             # --------------------------------------------------------------------------------
             # Latent Dynamics, Stability losses
 
             self.timer.start("Calibration");
+            LOGGER.debug("Calibration (Autoencoder_Pair) - start");
 
             # Compute the latent dynamics and stability losses. Also fetch the current latent
             # dynamics coefficients for each training point. The latter is stored in a 2d array 
-            # called "train_coefs" of shape (n_train, n_coefs), where n_train = number of 
-            # training combinations of parameters and n_coefs denotes the number of 
-            # coefficients in the latent dynamics model. 
-            train_coefs, loss_LD_list, loss_coef_list, loss_stab_list = self.latent_dynamics.calibrate(
+            # called "train_coefs" of shape (n_train, n_coefs), where n_train = number of training 
+            # parameter parameters and n_coefs denotes the number of coefficients in the latent
+            # dynamics model. 
+            train_coefs, loss_LD_list, loss_coef_list, loss_stab_list   = self.latent_dynamics.calibrate(   
                                                                             Latent_States    = Latent_States, 
                                                                             t_Grid           = t_Train_device,
                                                                             input_coefs      = train_coefs_list,
@@ -602,49 +728,48 @@ class Rollout_1_IC(Trainer):
             # Append the LD and stability losses to loss_by_param.
             for i in range(n_train):
                 param_tuple = tuple(self.param_space.train_space[i, :]);
-                self._store_loss_by_param('LD',   param_tuple, iter + 1, loss_LD_list[i].item());
+                self._store_loss_by_param('LD', param_tuple, iter + 1, loss_LD_list[i].item());
                 self._store_loss_by_param('stab', param_tuple, iter + 1, loss_stab_list[i].item());
                 self._store_loss_by_param('coef', param_tuple, iter + 1, loss_coef_list[i].item());
 
 
             # Compute the total loss.
-            loss_LD   = torch.sum(torch.stack(loss_LD_list));
-            loss_stab = torch.sum(torch.stack(loss_stab_list));
-            loss_coef = torch.sum(torch.stack(loss_coef_list));
+            loss_LD     = torch.sum(torch.stack(loss_LD_list));
+            loss_stab   = torch.sum(torch.stack(loss_stab_list));
+            loss_coef   = torch.sum(torch.stack(loss_coef_list));
 
             # Append the total loss to loss_by_param.
             self._store_total_loss('LD', iter + 1, loss_LD.item());
             self._store_total_loss('stab', iter + 1, loss_stab.item());
             self._store_total_loss('coef', iter + 1, loss_coef.item());
 
-
+            LOGGER.debug("Calibration (Autoencoder_Pair) - complete");
             self.timer.end("Calibration");
 
 
             # ---------------------------------------------------------------------------------
             # Rollout loss. Note that we need the coefficients before we can compute this.
-            
+
             if(self.loss_weights['rollout'] > 0 and p_rollout > 0):
                 self.timer.start("Rollout Loss");
-                LOGGER.debug("Rollout Loss (Autoencoder) - start");
+                LOGGER.debug("Rollout Loss (Autoencoder_Pair) - start");
 
                 # For each training parameter combination, randomly select a small number of
                 # rollable start frames, rollout each one on the *true* absolute time grid,
                 # and compare full trajectories (no interpolation / no random target points).
                 for i in range(n_train):
-                    t_i     : torch.Tensor  = t_Train_device[i];
-                    n_t_i   : int           = t_i.shape[0];
-
+                    t_i   : torch.Tensor = t_Train_device[i];
+                    n_t_i : int          = t_i.shape[0];
                     if n_t_i < 2:
                         continue;
 
                     # Rollout duration for this parameter combination.
-                    t0      : float = float(t_i[0].item());
-                    tf      : float = float(t_i[-1].item());
-                    dur     : float = float(p_rollout * (tf - t0));
+                    t0  : float = float(t_i[0].item());
+                    tf  : float = float(t_i[-1].item());
+                    dur : float = float(p_rollout * (tf - t0));
                     if dur <= 0.0:
                         continue;
-                    
+
                     # Find the set of rollable frames.
                     t_i_np      = t_i.detach().cpu().numpy();
                     rollable    = numpy.where(t_i_np + dur <= tf)[0];
@@ -652,16 +777,23 @@ class Rollout_1_IC(Trainer):
                         continue;
                     
                     # Pick out which frames we will roll out.
-                    n_roll_i    = min(int(self.n_rollouts), int(rollable.size));
-                    start_idx   = numpy.random.choice(rollable, size = n_roll_i, replace = False);
+                    n_roll_i  = min(int(self.n_rollouts), int(rollable.size));
+                    start_idx = numpy.random.choice(rollable, size = n_roll_i, replace = False);
 
                     # Set up
-                    loss_rollout_ROM_i : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
-                    loss_rollout_FOM_i : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                    loss_ROM_i_D : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                    loss_ROM_i_V : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                    loss_FOM_i_D : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
+                    loss_FOM_i_V : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
 
-                    param_i     = self.param_space.train_space[i, :].reshape(1, -1);
-                    coef_i      = train_coefs[i, :].reshape(1, -1);
+                    param_i = self.param_space.train_space[i, :].reshape(1, -1);
+                    coef_i  = train_coefs[i, :].reshape(1, -1);
 
+                    Z_D_i : torch.Tensor = Latent_States[i][0];
+                    Z_V_i : torch.Tensor = Latent_States[i][1];
+                    D_i   : torch.Tensor = U_Train_device[i][0];
+                    V_i   : torch.Tensor = U_Train_device[i][1];
+                    
                     # Cycle through the frames we plan to rollout.
                     for k in start_idx:
                         k_int           : int   = int(k);
@@ -681,159 +813,193 @@ class Rollout_1_IC(Trainer):
                         # Pick out the times we will rollout over.
                         t_win : torch.Tensor = t_i[k_int:(j_int + 1)];
 
-                        # Targets (ROM + FOM) on the same time grid slice.
-                        Z_tgt_list : list[torch.Tensor] = [];
-                        U_tgt_list : list[torch.Tensor] = [];
-                        Z0_list    : list[torch.Tensor] = [];
-                        for d in range(self.n_IC):
-                            Z_d = Latent_States[i][d];                      # (n_t_i, n_z)
-                            U_d = U_Train_device[i][d];                     # (n_t_i, ...)
-                            Z_tgt_list.append(Z_d[k_int:(j_int + 1), :]);
-                            U_tgt_list.append(U_d[k_int:(j_int + 1), ...]);
-                            Z0_list.append(Z_d[k_int:(k_int + 1), :]);      # (1, n_z)
+                        # Fetch the targets
+                        Z_D_tgt : torch.Tensor = Z_D_i[k_int:(j_int + 1), :];
+                        Z_V_tgt : torch.Tensor = Z_V_i[k_int:(j_int + 1), :];
+                        D_tgt   : torch.Tensor = D_i[k_int:(j_int + 1), ...];
+                        V_tgt   : torch.Tensor = V_i[k_int:(j_int + 1), ...];
 
-                        # Simulate latent dynamics using the absolute-time grid slice.
-                        Z_pred_list_all : list[list[torch.Tensor]] = self.latent_dynamics.simulate(
+                        # Get the model's prediction (in the latent space)
+                        Z_D0 : torch.Tensor = Z_D_i[k_int:(k_int + 1), :];
+                        Z_V0 : torch.Tensor = Z_V_i[k_int:(k_int + 1), :];
+
+                        Z_pred_all : list[list[torch.Tensor]] = self.latent_dynamics.simulate(
                             coefs  = coef_i,
-                            IC     = [Z0_list],      # one param -> list[list[tensor]] of len n_IC
+                            IC     = [[Z_D0, Z_V0]],
                             t_Grid = [t_win],
                             params = param_i);
+                        Z_D_pred = Z_pred_all[0][0].squeeze(1);
+                        Z_V_pred = Z_pred_all[0][1].squeeze(1);
 
-                        # Prepare trajectory for decoding
-                        Z_pred_comp : list[torch.Tensor] = [];
-                        for d in range(self.n_IC):
-                            Z_pd = Z_pred_list_all[0][d];
-                            assert Z_pd.ndim == 3 and Z_pd.shape[1] == 1, f"Expected (n_t, 1, n_z), got {tuple(Z_pd.shape)}";
-                            Z_pred_comp.append(Z_pd.squeeze(1));  # (n_t_win, n_z)
+                        # Decode the predictions.
+                        D_pred, V_pred = encoder_decoder_device.Decode(Z_D_pred, Z_V_pred);
 
-                        # Decoded predicted trajectory.
-                        U_pred_tuple : tuple[torch.Tensor, ...] = encoder_decoder_device.Decode(*Z_pred_comp);
+                        # Compute differences between true and predicted value.
+                        diff_Z_D = Z_D_tgt - Z_D_pred;
+                        diff_Z_V = Z_V_tgt - Z_V_pred;
+                        diff_D   = D_pred - D_tgt;
+                        diff_V   = V_pred - V_tgt;
 
-                        # Accumulate losses over all IC components.
-                        for d in range(self.n_IC):
-                            diff_ROM = Z_tgt_list[d] - Z_pred_comp[d];
-                            diff_FOM = U_pred_tuple[d] - U_tgt_list[d];
+                        # Update loss.
+                        if self.loss_types['rollout'] == "MSE":
+                            loss_ROM_i_D = loss_ROM_i_D + torch.mean(diff_Z_D**2);
+                            loss_ROM_i_V = loss_ROM_i_V + torch.mean(diff_Z_V**2);
+                            loss_FOM_i_D = loss_FOM_i_D + torch.mean(diff_D**2);
+                            loss_FOM_i_V = loss_FOM_i_V + torch.mean(diff_V**2);
+                        elif self.loss_types['rollout'] == "MAE":
+                            loss_ROM_i_D = loss_ROM_i_D + torch.mean(torch.abs(diff_Z_D));
+                            loss_ROM_i_V = loss_ROM_i_V + torch.mean(torch.abs(diff_Z_V));
+                            loss_FOM_i_D = loss_FOM_i_D + torch.mean(torch.abs(diff_D));
+                            loss_FOM_i_V = loss_FOM_i_V + torch.mean(torch.abs(diff_V));
+                        else:
+                            raise ValueError("Invalid rollout loss type: %s" % self.loss_types['rollout']);
 
-                            if self.loss_types['rollout'] == "MSE":
-                                loss_rollout_ROM_i = loss_rollout_ROM_i + torch.mean(diff_ROM**2);
-                                loss_rollout_FOM_i = loss_rollout_FOM_i + torch.mean(diff_FOM**2);
-                            elif self.loss_types['rollout'] == "MAE":
-                                loss_rollout_ROM_i = loss_rollout_ROM_i + torch.mean(torch.abs(diff_ROM));
-                                loss_rollout_FOM_i = loss_rollout_FOM_i + torch.mean(torch.abs(diff_FOM));
-                            else:
-                                raise ValueError("Invalid rollout loss type: %s" % self.loss_types['rollout']);
+                    # Normalize losses based on number of rollouts.
+                    rollout_ROM_D_loss_ith_param = loss_ROM_i_D / float(n_roll_i);
+                    rollout_ROM_V_loss_ith_param = loss_ROM_i_V / float(n_roll_i);
+                    rollout_FOM_D_loss_ith_param = loss_FOM_i_D / float(n_roll_i);
+                    rollout_FOM_V_loss_ith_param = loss_FOM_i_V / float(n_roll_i);
 
-                    # Average across sampled rollouts (and across components implicitly by summation).
-                    loss_rollout_ROM_ith_param = loss_rollout_ROM_i / float(n_roll_i)
-                    loss_rollout_FOM_ith_param = loss_rollout_FOM_i / float(n_roll_i)
+                    # Update total.
+                    loss_rollout_ROM_D += rollout_ROM_D_loss_ith_param;
+                    loss_rollout_ROM_V += rollout_ROM_V_loss_ith_param;
+                    loss_rollout_FOM_D += rollout_FOM_D_loss_ith_param;
+                    loss_rollout_FOM_V += rollout_FOM_V_loss_ith_param;
 
-                    # Accumulate totals.
-                    loss_rollout_ROM += loss_rollout_ROM_ith_param
-                    loss_rollout_FOM += loss_rollout_FOM_ith_param
+                    # Store results for this combination of parameters
+                    param_tuple = tuple(self.param_space.train_space[i, :]);
+                    self._store_loss_by_param('rollout_ROM_D', param_tuple, iter + 1, rollout_ROM_D_loss_ith_param.item());
+                    self._store_loss_by_param('rollout_ROM_V', param_tuple, iter + 1, rollout_ROM_V_loss_ith_param.item());
+                    self._store_loss_by_param('rollout_FOM_D', param_tuple, iter + 1, rollout_FOM_D_loss_ith_param.item());
+                    self._store_loss_by_param('rollout_FOM_V', param_tuple, iter + 1, rollout_FOM_V_loss_ith_param.item());
 
-                    # Log loss for this combination of parameters
-                    param_tuple = tuple(self.param_space.train_space[i, :])
-                    self._store_loss_by_param('rollout_ROM', param_tuple, iter + 1, loss_rollout_ROM_ith_param.item())
-                    self._store_loss_by_param('rollout_FOM', param_tuple, iter + 1, loss_rollout_FOM_ith_param.item())
+                # Store total rollout loss.
+                self._store_total_loss('rollout_ROM_D', iter + 1, loss_rollout_ROM_D.item());
+                self._store_total_loss('rollout_ROM_V', iter + 1, loss_rollout_ROM_V.item());
+                self._store_total_loss('rollout_FOM_D', iter + 1, loss_rollout_FOM_D.item());
+                self._store_total_loss('rollout_FOM_V', iter + 1, loss_rollout_FOM_V.item());
 
-                # Log total rollout loss.
-                self._store_total_loss('rollout_ROM', iter + 1, loss_rollout_ROM.item());
-                self._store_total_loss('rollout_FOM', iter + 1, loss_rollout_FOM.item());
-
-                LOGGER.debug("Rollout Loss (Autoencoder) - complete");
+                LOGGER.debug("Rollout Loss (Autoencoder_Pair) - complete");
                 self.timer.end("Rollout Loss");
 
 
-            # --------------------------------------------------------------------------------
+            # ---------------------------------------------------------------------------------
             # IC Rollout loss. This simulates forward from the FOM initial conditions.
 
-            # Cycle through the training examples for IC rollout
             if(self.loss_weights['IC_rollout'] > 0 and p_IC_rollout > 0):
                 self.timer.start("IC Rollout Loss");
-                LOGGER.debug("IC Rollout Loss (Autoencoder) - start");
+                LOGGER.debug("IC Rollout Loss (Autoencoder_Pair) - start");
 
+                # Cycle through the training examples for IC rollout
                 for i in range(n_train):
                     # Fetch the FOM initial conditions for this combination of parameters
-                    param_i           : numpy.ndarray             = self.param_space.train_space[i, :]; 
-                    FOM_IC_i          : list[numpy.ndarray]       = self.physics.initial_condition(param_i);    # len = 1
-
+                    param_i           : numpy.ndarray             = self.param_space.train_space[i, :];
+                    FOM_IC_i          : list[numpy.ndarray]       = self.physics.initial_condition(param_i);
+                    
                     # Convert to tensors and reshape for encoding
-                    U_IC_i            : torch.Tensor              = torch.tensor(FOM_IC_i[0], dtype = torch.float32, device = device).reshape((1,) + FOM_IC_i[0].shape);
+                    D_IC_i            : torch.Tensor              = torch.tensor(FOM_IC_i[0], dtype = torch.float32, device = device).reshape((1,) + FOM_IC_i[0].shape);
+                    V_IC_i            : torch.Tensor              = torch.tensor(FOM_IC_i[1], dtype = torch.float32, device = device).reshape((1,) + FOM_IC_i[1].shape);
                     if self.has_normalization():
-                        U_IC_i = self.normalize_tensor(U_IC_i, 0);
+                        D_IC_i = self.normalize_tensor(D_IC_i, 0);
+                        V_IC_i = self.normalize_tensor(V_IC_i, 1);
                     
                     # Encode the FOM initial conditions
-                    Z_IC_i : torch.Tensor = encoder_decoder_device.Encode(U_IC_i)[0];
+                    Z_D_IC_i, Z_V_IC_i = encoder_decoder_device.Encode(D_IC_i, V_IC_i);
                     
                     # Get the coefficients for this combination of parameters
                     train_coef_i            : torch.Tensor              = train_coefs[i, :].reshape(1, -1);
                     
                     # Simulate the latent dynamics forward in time
                     Z_IC_Rollout_i    : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(  coefs   = train_coef_i, 
-                                                                                                    IC      = [[Z_IC_i]], 
+                                                                                                    IC      = [[Z_D_IC_i, Z_V_IC_i]], 
                                                                                                     t_Grid  = [t_Grid_IC_rollout[i]], 
                                                                                                     params  = param_i.reshape(1, -1));
                     
-                    # Extract the predicted trajectory, remove the singleton dimension
-                    Z_IC_Predict_i      : torch.Tensor              = Z_IC_Rollout_i[0][0].squeeze(1);    # shape = (n_t_IC_rollout[i], n_z)
+                    # Extract the predicted trajectory
+                    Z_D_IC_Predict_i  : torch.Tensor              = Z_IC_Rollout_i[0][0];  # shape = (n_t_IC_rollout[i], 1, n_z)
+                    Z_V_IC_Predict_i  : torch.Tensor              = Z_IC_Rollout_i[0][1];  # shape = (n_t_IC_rollout[i], 1, n_z)
+                    
+                    # Remove the singleton dimension
+                    Z_D_IC_Predict_i  : torch.Tensor              = Z_D_IC_Predict_i.squeeze(1);  # shape = (n_t_IC_rollout[i], n_z)
+                    Z_V_IC_Predict_i  : torch.Tensor              = Z_V_IC_Predict_i.squeeze(1);  # shape = (n_t_IC_rollout[i], n_z)
 
                     # Decode the predicted trajectory to get FOM predictions
-                    U_IC_Predict_i      : torch.Tensor              = encoder_decoder_device.Decode(Z_IC_Predict_i)[0];
+                    D_IC_Predict_i, V_IC_Predict_i = encoder_decoder_device.Decode(Z_D_IC_Predict_i, Z_V_IC_Predict_i);
                     
                     # Get the corresponding FOM targets
-                    U_IC_Target_i       : list[torch.Tensor]        = U_IC_Rollout_Targets[i][0];         # shape = (n_t_IC_rollout[i], physics.Frame_Shape)
+                    U_IC_Target_i     : list[torch.Tensor]        = U_IC_Rollout_Targets[i];
+                    D_IC_Target_i     : torch.Tensor              = U_IC_Target_i[0];  # shape = (n_t_IC_rollout[i], physics.Frame_Shape)
+                    V_IC_Target_i     : torch.Tensor              = U_IC_Target_i[1];  # shape = (n_t_IC_rollout[i], physics.Frame_Shape)
 
                     # Encode the FOM targets for latent space comparison
-                    Z_IC_Target_i : torch.Tensor = encoder_decoder_device.Encode(U_IC_Target_i)[0];
+                    Z_D_IC_Target_i, Z_V_IC_Target_i = encoder_decoder_device.Encode(D_IC_Target_i, V_IC_Target_i);
 
                     # Compute differences once
-                    diff_ROM = Z_IC_Target_i - Z_IC_Predict_i;
-                    diff_FOM = (U_IC_Predict_i - U_IC_Target_i);
+                    diff_Z_D = Z_D_IC_Target_i - Z_D_IC_Predict_i;
+                    diff_Z_V = Z_V_IC_Target_i - Z_V_IC_Predict_i;
+                    diff_D = (D_IC_Target_i - D_IC_Predict_i);
+                    diff_V = (V_IC_Target_i - V_IC_Predict_i);
                     
                     # Compute losses from normalized differences
                     if(self.loss_types['IC_rollout'] == "MSE"):
-                        loss_IC_rollout_ROM_ith_param = torch.mean(diff_ROM**2);
-                        loss_IC_rollout_FOM_ith_param = torch.mean(diff_FOM**2);
+                        IC_rollout_Z_D_loss_ith_param = torch.mean(diff_Z_D**2);
+                        IC_rollout_Z_V_loss_ith_param = torch.mean(diff_Z_V**2);
+                        IC_rollout_D_loss_ith_param = torch.mean(diff_D**2);
+                        IC_rollout_V_loss_ith_param = torch.mean(diff_V**2);
                     elif(self.loss_types['IC_rollout'] == "MAE"):
-                        loss_IC_rollout_ROM_ith_param = torch.mean(torch.abs(diff_ROM));
-                        loss_IC_rollout_FOM_ith_param = torch.mean(torch.abs(diff_FOM));
+                        IC_rollout_Z_D_loss_ith_param = torch.mean(torch.abs(diff_Z_D));
+                        IC_rollout_Z_V_loss_ith_param = torch.mean(torch.abs(diff_Z_V));
+                        IC_rollout_D_loss_ith_param = torch.mean(torch.abs(diff_D));
+                        IC_rollout_V_loss_ith_param = torch.mean(torch.abs(diff_V));
                     else:
-                        loss_IC_rollout_ROM_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
-                        loss_IC_rollout_FOM_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
+                        IC_rollout_Z_D_loss_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
+                        IC_rollout_Z_V_loss_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
+                        IC_rollout_D_loss_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
+                        IC_rollout_V_loss_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
                     
-                    loss_IC_rollout_ROM += loss_IC_rollout_ROM_ith_param;
-                    loss_IC_rollout_FOM += loss_IC_rollout_FOM_ith_param;
+                    loss_IC_rollout_Z_D  += IC_rollout_Z_D_loss_ith_param;
+                    loss_IC_rollout_Z_V  += IC_rollout_Z_V_loss_ith_param;
+                    loss_IC_rollout_D    += IC_rollout_D_loss_ith_param;
+                    loss_IC_rollout_V    += IC_rollout_V_loss_ith_param;
                     
                     # Store per-parameter-combination loss
                     param_tuple = tuple(self.param_space.train_space[i, :]);
-                    self._store_loss_by_param('IC_rollout_ROM', param_tuple, iter + 1, loss_IC_rollout_ROM_ith_param.item());
-                    self._store_loss_by_param('IC_rollout_FOM', param_tuple, iter + 1, loss_IC_rollout_FOM_ith_param.item());
+                    self._store_loss_by_param('IC_rollout_Z_D', param_tuple, iter + 1, IC_rollout_Z_D_loss_ith_param.item());
+                    self._store_loss_by_param('IC_rollout_Z_V', param_tuple, iter + 1, IC_rollout_Z_V_loss_ith_param.item());
+                    self._store_loss_by_param('IC_rollout_D', param_tuple, iter + 1, IC_rollout_D_loss_ith_param.item());
+                    self._store_loss_by_param('IC_rollout_V', param_tuple, iter + 1, IC_rollout_V_loss_ith_param.item());
 
                 # Store total IC rollout loss.
-                self._store_total_loss('IC_rollout_ROM', iter + 1, loss_IC_rollout_ROM.item());
-                self._store_total_loss('IC_rollout_FOM', iter + 1, loss_IC_rollout_FOM.item());
+                self._store_total_loss('IC_rollout_Z_D', iter + 1, loss_IC_rollout_Z_D.item());
+                self._store_total_loss('IC_rollout_Z_V', iter + 1, loss_IC_rollout_Z_V.item());
+                self._store_total_loss('IC_rollout_D', iter + 1, loss_IC_rollout_D.item());
+                self._store_total_loss('IC_rollout_V', iter + 1, loss_IC_rollout_V.item());
 
-                LOGGER.debug("IC Rollout Loss (Autoencoder) - complete");
+                LOGGER.debug("IC Rollout Loss (Autoencoder_Pair) - complete");
                 self.timer.end("IC Rollout Loss");
 
 
             # --------------------------------------------------------------------------------
             # Total loss
 
-            loss_rollout    : torch.Tensor  = loss_rollout_ROM    + loss_rollout_FOM;
-            loss_IC_rollout : torch.Tensor  = loss_IC_rollout_ROM + loss_IC_rollout_FOM;
-
+            loss_recon          : torch.Tensor  = loss_recon_D          + loss_recon_V;
+            loss_consistency    : torch.Tensor  = loss_consistency_Z    + loss_consistency_U;
+            loss_chain_rule     : torch.Tensor  = loss_chain_rule_U     + loss_chain_rule_Z;
+            loss_rollout        : torch.Tensor  = loss_rollout_FOM_D    + loss_rollout_FOM_V + loss_rollout_ROM_D + loss_rollout_ROM_V;
+            loss_IC_rollout     : torch.Tensor  = loss_IC_rollout_D     + loss_IC_rollout_V + loss_IC_rollout_Z_D + loss_IC_rollout_Z_V;
 
             # Compute the final loss.
-            LOGGER.debug("Computing total loss (Autoencoder)");
-            loss = (self.loss_weights['recon']      * loss_recon + 
-                    self.loss_weights['LD']         * loss_LD + 
-                    self.loss_weights['rollout']    * loss_rollout + 
-                    self.loss_weights['IC_rollout'] * loss_IC_rollout + 
-                    self.loss_weights['stab']       * loss_stab + 
-                    self.loss_weights['coef']       * loss_coef);
+            LOGGER.debug("Computing total loss (Autoencoder_Pair)");
+            loss = (self.loss_weights['recon']          * loss_recon + 
+                    self.loss_weights['consistency']    * loss_consistency +
+                    self.loss_weights['chain_rule']     * loss_chain_rule + 
+                    self.loss_weights['rollout']        * loss_rollout +
+                    self.loss_weights['IC_rollout']     * loss_IC_rollout +
+                    self.loss_weights['LD']             * loss_LD + 
+                    self.loss_weights['stab']           * loss_stab + 
+                    self.loss_weights['coef']           * loss_coef);
             self._store_total_loss('total', iter + 1, loss.item());
-            LOGGER.debug("Total loss (Autoencoder) computed: %f" % loss.item());
+            LOGGER.debug("Total loss (Autoencoder_Pair) computed: %f" % loss.item());
 
 
 
@@ -873,22 +1039,18 @@ class Rollout_1_IC(Trainer):
             # the iteration number. 
             # NOTE: Skip checkpointing during warmup period to avoid saving "lucky" early epochs
             # that benefit from distribution shift before encoder_decoder has adapted.
-            
             if loss.item() < best_loss:
                 if epochs_in_round >= self.warmup_epochs:
                     LOGGER.info("Got a new lowest loss (%f) on epoch %d" % (loss.item(), iter + 1));
-
-                    # Save the full checkpoint (model state + train/test coefficients).
                     self._Save_Checkpoint(encoder_decoder = encoder_decoder_device,
                                           train_coefs     = train_coefs_detached,
                                           test_coefs      = self.test_coefs,
                                           iter            = int(iter));
-                    checkpoint_saved        = True;
+                    checkpoint_saved      = True;
 
-                    # Update the best set of parameters. 
-                    self.best_train_coefs   = train_coefs_detached.copy();     # Shape = (n_train, n_coefs).
-                    self.best_epoch         = int(iter);
-                    best_loss               = loss.item();
+                    self.best_train_coefs = train_coefs_detached.copy();
+                    self.best_epoch       = int(iter);
+                    best_loss             = loss.item();
                 else:
                     LOGGER.debug("Skipping checkpoint during warmup period (epoch %d/%d in round, warmup ends at %d)" % 
                                (epochs_in_round, end_iter - start_iter, self.warmup_epochs));
@@ -903,13 +1065,15 @@ class Rollout_1_IC(Trainer):
             self.timer.start("Report");
 
             # Report the current iteration number and losses
-            info_str : str = "Iter: %05d/%d, Total: %3.10f" % (iter + 1, self.max_iter, loss.item());
-            if(self.loss_weights['recon'] > 0):         info_str += ", Recon: %3.6f"                            % loss_recon.item();
-            if(self.loss_weights['rollout'] > 0):       info_str += ", Roll FOM: %3.6f, Roll ROM: %3.6f"        % (loss_rollout_FOM.item(),    loss_rollout_ROM.item());
-            if(self.loss_weights['IC_rollout'] > 0):    info_str += ", IC Roll FOM: %3.6f, IC Roll ROM: %3.6f"  % (loss_IC_rollout_FOM.item(), loss_IC_rollout_ROM.item());
-            if(self.loss_weights['LD'] > 0):            info_str += ", LD: %3.6f"                               % loss_LD.item();
-            if(self.loss_weights['stab'] > 0):          info_str += ", Stab: %3.6f"                             % loss_stab.item();
-            if(self.loss_weights['coef'] > 0):          info_str += ", Coef: %3.6f"                             % loss_coef.item();
+            info_str : str = "Iter: %05d/%d, Total: %3.6f" % (iter + 1, self.max_iter, loss.item());
+            if(self.loss_weights['recon'] > 0):         info_str += ", Recon D: %3.6f, Recon V: %3.6f"                                              % (loss_recon_D.item(),       loss_recon_V.item());
+            if(self.loss_weights['consistency'] > 0):   info_str += ", Consistency Z: %3.6f, Consistency U: %3.6f"                                  % (loss_consistency_Z.item(), loss_consistency_U.item());
+            if(self.loss_weights['chain_rule'] > 0):    info_str += ", CR U: %3.6f, CR Z: %3.6f"                                                    % (loss_chain_rule_U.item(),  loss_chain_rule_Z.item());
+            if(self.loss_weights['rollout'] > 0):       info_str += ", Roll FOM D: %3.6f, Roll FOM V: %3.6f, Roll ROM D: %3.6f, Roll ROM V: %3.6f"  % (loss_rollout_FOM_D.item(), loss_rollout_FOM_V.item(),  loss_rollout_ROM_D.item(),  loss_rollout_ROM_V.item());
+            if(self.loss_weights['IC_rollout'] > 0):    info_str += ", IC Roll D: %3.6f, IC Roll V: %3.6f, IC Roll ZD: %3.6f, IC Roll ZV: %3.6f"    % (loss_IC_rollout_D.item(),  loss_IC_rollout_V.item(),   loss_IC_rollout_Z_D.item(), loss_IC_rollout_Z_V.item());
+            if(self.loss_weights['LD'] > 0):            info_str += ", LD: %3.6f"                                                                   % loss_LD.item();
+            if(self.loss_weights['stab'] > 0):          info_str += ", Stab: %3.6f"                                                                 % loss_stab.item();
+            if(self.loss_weights['coef'] > 0):          info_str += ", Coef: %3.6f"                                                                 % loss_coef.item();
             info_str += ", max|c|: %.3f" % max_train_coef;
             LOGGER.info(info_str);
 
@@ -932,3 +1096,4 @@ class Rollout_1_IC(Trainer):
 
         # All done!
         return;
+    
