@@ -518,7 +518,8 @@ def main():
                             param_space     = param_space, 
                             title           = title,
                             save_file_name  = save_file_name,
-                            show_plot       = False);
+                            show_plot       = False,
+                            annotate_cells  = False);
 
             title           : str   = "Coefficient %d std" % d;
             save_file_name  : str   = config["physics"]["type"] + "Coefficient_%d_std.png" % d;
@@ -527,7 +528,8 @@ def main():
                             param_space     = param_space, 
                             title           = title,
                             save_file_name  = save_file_name,
-                            show_plot       = False);
+                            show_plot       = False,
+                            annotate_cells  = False);
 
     # All done!
     LOGGER.info("All done!");
