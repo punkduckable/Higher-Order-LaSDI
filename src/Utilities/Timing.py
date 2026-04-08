@@ -2,8 +2,10 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-from time import perf_counter;
+from    time        import perf_counter;
+import  logging;
 
+LOGGER : logging.Logger = logging.getLogger(__name__);
 
 
 # -------------------------------------------------------------------------------------------------
@@ -118,8 +120,7 @@ class Timer:
 
     def print(self) -> None:
         """
-        This function reports information on every timer in self. It has no arguments and returns 
-        nothing.
+        This function prints information on every timer in self. 
         """
         
         # Header
@@ -131,8 +132,24 @@ class Timer:
         
         # All done!
         return;
-    
 
+
+
+    def log(self) -> None:
+        """
+        This function logs information on every timer in self.
+        """
+
+        LOGGER.info("Function name" + " "*(self.Max_Name_Length - 13) + "\tCalls\tTotal time\tTime/call\n");
+        
+        # Cycle through timers.
+        for name, idx in self.names.items():
+            LOGGER.info("%s\t%d\t%.3e\t%.3e\n" % (name + " "*(self.Max_Name_Length - len(name)), self.calls[idx], self.times[idx], self.times[idx] / self.calls[idx]));
+        
+        # All done!
+        return;
+
+    
 
     def export(self) -> dict:
         """

@@ -1,98 +1,96 @@
 trainer:
-  lr:                     0.001
-  gradient_clip:          10.0      # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
+  type:                   "First_Order_Rollout"
+
+  max_iter:               6000
+  n_iter:                 1500
+  max_greedy_iter:        6000
 
   # If true, compute a single global mean/std from TRAINING data only, and normalize
   # all training/testing trajectories using these values.
   normalize:              true
 
-  # p_rollout grows from p_rollout_init by dp_per_update every rollout_update_freq epochs, capped at max_p_rollout.
-  p_rollout_init:         0.01
-  rollout_update_freq:    10
-  dp_per_update:          0.01
-  max_p_rollout:          0.5       # Maximum proportion of the time window used for rollout loss.
-  n_rollouts:             5         # Frame-rollout mode: number of rollable start frames to rollout per training parameter per epoch.
+  device:                 'cpu'
 
-  p_IC_rollout_init:      0.01
-  IC_rollout_update_freq: 10
-  IC_dp_per_update:       0.01
-  max_p_IC_rollout:       0.75      # Maximum proportion of the time window used for IC rollout loss.
+  First_Order_Rollout:       
+    lr:                     0.001
+    gradient_clip:          10.0      # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
 
-  max_iter:               8000
-  n_iter:                 2000
-  max_greedy_iter:        8000
+    # p_rollout grows from p_rollout_init by dp_per_update every rollout_update_freq epochs, capped at max_p_rollout.
+    p_rollout_init:         0.01
+    rollout_update_freq:    10
+    dp_per_update:          0.005
+    max_p_rollout:          0.375       # Maximum proportion of the time window used for rollout loss.
+    n_rollouts:             13          # Frame-rollout mode: number of rollable start frames to rollout per training parameter per epoch.
 
-  warmup_epochs:          40    # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
+    p_IC_rollout_init:      0.01
+    IC_rollout_update_freq: 10
+    IC_dp_per_update:       0.0075
+    max_p_IC_rollout:       0.75      # Maximum proportion of the time window used for IC rollout loss.
 
-  loss_weights:
-    recon:                1.0
-    LD:                   10.0
-    rollout:              0.5
-    IC_rollout:           0.5
-    stab:                 0.1
-    coef:                 0.05
+    warmup_epochs:          40        # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
 
-  loss_types:
-    recon:                "MSE"
-    LD:                   "MSE"
-    rollout:              "MSE"
-    IC_rollout:           "MSE"
+    loss_weights:
+      recon:                1.0
+      LD:                   10.0
+      rollout:              1.0
+      IC_rollout:           0.0
+      stab:                 0.01
+      coef:                 1.0
 
-  learnable_coefs:        true
-
+    loss_types:
+      recon:                "MSE"
+      LD:                   "MSE"
+      rollout:              "MSE"
+      IC_rollout:           "MSE"
+    
 workflow:
-  use_restart:            False
-  restart_file:             
-  plot_train_rel_errors:  False
+  use_restart:              False
+  restart_file:           
+  plot_train_rel_errors:    False
 
 sampler: 
-  type:                   'FOM_Rollout'
+  type:                     'FOM_Rollout'
   FOM_Rollout:
-    n_samples:            20              # Number of samples to compute avg rollout loss.
-    normalized_FOM:       True            # Compute absolute errors using normalized or de-normalized values?
-    error_normalization:  none            # none | global_std | trajectory_std
+    n_samples:              20              # Number of samples to compute avg rollout loss.
+    normalized_FOM:         True            # Compute absolute errors using normalized or de-normalized values?
+    error_normalization:    none            # none | global_std | trajectory_std
 
 parameter_space:
   parameters:
-    - name:               laser powers
-      test_space_type:    file
-      file:               /p/lustre1/robertrs/AI4NS/Generate_Data/9x9 dataset/metadata.txt
-    - name:               scan speed
-      test_space_type:    file
-      file:               /p/lustre1/robertrs/AI4NS/Generate_Data/9x9 dataset/metadata.txt
+    - name:                 laser powers
+      test_space_type:      file
+      file:                 /p/lustre1/robertrs/AI4NS/Generate_Data/9x9 dataset/metadata.txt
+    - name:                 scan speed
+      test_space_type:      file
+      file:                 /p/lustre1/robertrs/AI4NS/Generate_Data/9x9 dataset/metadata.txt
   test_space:
-    type:                 grid
+    type:                   grid
 
 EncoderDecoder:
-  type:                   cnn_3d
-  ae:
-    hidden_widths:        [1000, 300, 100]
-    activations:          ["tanh", "tanh", "tanh"]
-    latent_dimension:     10
-  
+  type:                     cnn_3d
   cnn_3d:
     # Fully-connected (FC) part
-    hidden_widths_fc:     [500, 100]
-    activations_fc:       ["tanh", "tanh"]
-    latent_dimension:     10
+    hidden_widths_fc:       [500, 100]
+    activations_fc:         ["tanh", "tanh"]
+    latent_dimension:       5
 
     # Convolutional part (3D)
-    conv_channels:        [1, 16, 32, 64]            # Includes input channel.
-    conv_kernel_sizes:    3
-    conv_strides:         2 
-    conv_paddings:        1
-    conv_activations:     ["relu", "relu", "relu"]
+    conv_channels:          [1, 16, 32, 64]            # Includes input channel.
+    conv_kernel_sizes:      3
+    conv_strides:           2 
+    conv_paddings:          1
+    conv_activations:       ["relu", "relu", "relu"]
 
 latent_dynamics:
-  type:                   switch
-  lstsq_reg:              0.5           # Ridge-regression regularization for SINDy coefficient initialization (prevents blow-up for new greedy-sampled points).
+  type:                     switch
+  lstsq_reg:                0.5           # Ridge-regression regularization for SINDy coefficient initialization (prevents blow-up for new greedy-sampled points).
   switch:
 
 physics:
-  type:                   Thermal
+  type:                     Thermal
   
   Thermal:
-    hdf5_dir:             /p/lustre1/robertrs/AI4NS/Generate_Data/9x9 dataset/
-    use_cnn:              True
-    threshold:            1900.0
+    hdf5_dir:               /p/lustre1/robertrs/AI4NS/Generate_Data/9x9 dataset/
+    use_cnn:                True
+    threshold:              1900.0
 

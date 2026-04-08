@@ -76,7 +76,7 @@ def main():
         config      = yaml.safe_load(f);
     
     # Report the configuration settings.
-    Log_Dictionary(LOGGER = LOGGER, D = config, level = logging.DEBUG);
+    Log_Dictionary(LOGGER = LOGGER, D = config, level = logging.INFO);
 
     # Check if we are loading from a restart or not. If so, load it.
     use_restart         : bool  = config['workflow']['use_restart'];
@@ -518,7 +518,8 @@ def main():
                             param_space     = param_space, 
                             title           = title,
                             save_file_name  = save_file_name,
-                            show_plot       = False);
+                            show_plot       = False,
+                            annotate_cells  = False);
 
             title           : str   = "Coefficient %d std" % d;
             save_file_name  : str   = config["physics"]["type"] + "Coefficient_%d_std.png" % d;
@@ -527,7 +528,8 @@ def main():
                             param_space     = param_space, 
                             title           = title,
                             save_file_name  = save_file_name,
-                            show_plot       = False);
+                            show_plot       = False,
+                            annotate_cells  = False);
 
     # All done!
     LOGGER.info("All done!");
@@ -803,7 +805,7 @@ def count_parameters(   encoder_decoder : EncoderDecoder,
     
 
     # Count learnable coefficients from trainer (only applies if we are learning the latent 
-    #dynamics coefficients)
+    # dynamics coefficients)
     coef_params = 0;
     if hasattr(trainer, 'test_coefs') and trainer.test_coefs is not None:
         coef_params = trainer.test_coefs.numel();

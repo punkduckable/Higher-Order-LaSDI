@@ -140,7 +140,7 @@ def average_rom(encoder_decoder : EncoderDecoder,
     LOGGER.info("simulating initial conditions for %d combinations of parameters forward in time" % n_param);
     Zis : list[list[numpy.ndarray]] = latent_dynamics.simulate( coefs   = post_mean, 
                                                                 IC      = Z0, 
-                                                                t_Grid  = t_Grid,
+                                                                t_Grid  = t_Grid_np,
                                                                 params  = param_grid);
     
     # At this point, Zis[i][j] has shape (n_t_i, 1, n_z). We remove the extra dimension.

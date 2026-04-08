@@ -186,7 +186,9 @@ class Autoencoder(EncoderDecoder):
         assert len(Z.shape)   == 2, "Z.shape = %s, must have length 2." % str(Z.shape);
     
         # Decode the frames!
-        return self.decoder(Z);
+        # NOTE: Return a tuple for consistency with the EncoderDecoder interface and with
+        # Autoencoder.Encode(...), which returns a 1-tuple.
+        return (self.decoder(Z),);
 
 
 

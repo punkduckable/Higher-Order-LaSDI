@@ -272,7 +272,7 @@ class Sampler:
             # Initialize coefficients for newly added training points!
             # When greedy sampling adds a point from the test set, its test_coefs row may be zero/untrained.
             # We compute physics-based least-squares coefficients by encoding the trajectory and using SINDy.
-            if hasattr(trainer, 'learnable_coefs') and trainer.learnable_coefs and len(new_U_Train) > 0:
+            if len(new_U_Train) > 0:
                 n_train_old = len(trainer.U_Train);
                 LOGGER.info("Initializing coefficients for %d newly added training points using least-squares fit" % len(new_U_Train));
                 
@@ -318,8 +318,8 @@ class Sampler:
                         
                         # Extract the computed coefficients and assign to test_coefs
                         with torch.no_grad():
-                            computed_coefs                      = output_coefs[0, :].to(trainer.device);  # Shape: (n_coefs,)
-                            trainer.test_coefs[test_idx, :]     = computed_coefs;
+                            computed_coefs                       = output_coefs[0, :].to(trainer.device);  # Shape: (n_coefs,)
+                            trainer.test_coefs[test_idx, :] = computed_coefs;
                             coef_norm                            = float(torch.norm(trainer.test_coefs[test_idx, :]).item());
                             LOGGER.info("  New training point %d (test idx %d): initialized coefficients from least-squares fit: coef norm = %.6e" % (i, test_idx, coef_norm));
 

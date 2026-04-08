@@ -8,9 +8,12 @@ import  os;
 LD_Path             : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
 Physics_Path        : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
 EncoderDecoder_Path : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "EncoderDecoder"));
+Trainer_Path        : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "Trainer"));
+
 sys.path.append(LD_Path); 
 sys.path.append(Physics_Path); 
 sys.path.append(EncoderDecoder_Path); 
+sys.path.append(Trainer_Path);
 
 import  logging;
 
@@ -18,25 +21,28 @@ import  numpy;
 import  torch; 
 
 
-from    LatentDynamics      import  LatentDynamics;
-from    SINDy               import  SINDy;
-from    SwitchSINDy         import  SwitchSINDy;
-from    DampedSpring        import  DampedSpring;
+from    LatentDynamics          import  LatentDynamics;
+from    SINDy                   import  SINDy;
+from    SwitchSINDy             import  SwitchSINDy;
+from    DampedSpring            import  DampedSpring;
 
-from    ParameterSpace      import  ParameterSpace;
-from    Trainer             import  Trainer;
+from    ParameterSpace          import  ParameterSpace;
 
-from    EncoderDecoder      import  EncoderDecoder;
-from    Autoencoder         import  Autoencoder, load_Autoencoder;
-from    Autoencoder_Pair    import  Autoencoder_Pair, load_Autoencoder_Pair;
-from    CNN_3D_Autoencoder  import  CNN_3D_Autoencoder, load_CNN_3D_Autoencoder;
+from    Trainer                 import  Trainer;
+from    First_Order_Rollout     import  First_Order_Rollout;
+from    Second_Order_Rollout    import  Second_Order_Rollout;
 
-from    Physics             import  Physics;
-#from    NonlinearElasticity import  NonlinearElasticity;
-#from    Advection           import  Advection;
-#from    WaveEquation        import  WaveEquation;
-#from    KleinGordon         import  KleinGordon;
-#from    Telegraphers        import  Telegraphers;
+from    EncoderDecoder          import  EncoderDecoder;
+from    Autoencoder             import  Autoencoder, load_Autoencoder;
+from    Autoencoder_Pair        import  Autoencoder_Pair, load_Autoencoder_Pair;
+from    CNN_3D_Autoencoder      import  CNN_3D_Autoencoder, load_CNN_3D_Autoencoder;
+
+from    Physics                 import  Physics;
+#from    NonlinearElasticity     import  NonlinearElasticity;
+#from    Advection               import  Advection;
+#from    WaveEquation            import  WaveEquation;
+#from    KleinGordon             import  KleinGordon;
+#from    Telegraphers            import  Telegraphers;
 import  Burgers2D;
 import  Thermal;
 import  Burgers;
@@ -44,9 +50,9 @@ import  BurgersSecondOrder;
 import  Explicit;
 import  ExplicitSecondOrder;
 
-from    Sampler             import  Sampler;
-from    FOM_Rollout         import  FOM_Rollout;
-from    FOM_Variance        import  FOM_Variance;
+from    Sampler                 import  Sampler;
+from    FOM_Rollout             import  FOM_Rollout;
+from    FOM_Variance            import  FOM_Variance;
 
 # Set up logger.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
@@ -70,6 +76,8 @@ encoder_decoder_load_dict = {   'ae'                    : load_Autoencoder,
 ld_dict = {                     'sindy'                 : SINDy, 
                                 'spring'                : DampedSpring,
                                 'switch'                : SwitchSINDy};
+trainer_dict = {                'First_Order_Rollout'   : First_Order_Rollout, 
+                                'Second_Order_Rollout'  : Second_Order_Rollout}
 sampler_dict = {                'FOM_Rollout'           : FOM_Rollout,
                                 'FOM_Variance'          : FOM_Variance};
 physics_dict = {                'Burgers'               : Burgers.Burgers,
@@ -193,13 +201,18 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer
 
     # Initialize the trainer object. If we are using a restart file, then load the 
     # trainer from that file.
-    trainer                 = Trainer(physics, encoder_decoder, latent_dynamics, param_space, config);
+    trainer_type            = config['trainer']['type'];
+    trainer                 = trainer_dict[trainer_type](physics, encoder_decoder, latent_dynamics, param_space, config);
+    
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
         trainer.load(restart_dict['trainer']);
 
     # If we are loading from a restart file, make a checkpoint using the current encoder_decoder parameters.
     if (bool(restart_dict) == True): 
-        torch.save(encoder_decoder.cpu().state_dict(), trainer.path_checkpoint + '/' + 'checkpoint.pt');
+        trainer._Save_Checkpoint(   encoder_decoder = encoder_decoder, 
+                                    train_coefs     = trainer.best_train_coefs, 
+                                    test_coefs      = trainer.test_coefs, 
+                                    iter            = trainer.restart_iter);
 
     # Load the sampler.
     sampler_type    : str       = config['sampler']['type'];

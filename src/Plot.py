@@ -19,16 +19,18 @@ import  logging;
 
 import  torch;
 import  numpy;
-import  matplotlib.pyplot           as      plt;
-import  matplotlib                  as      mpl;
-from    sklearn.gaussian_process    import  GaussianProcessRegressor;
+import  matplotlib.pyplot               as      plt;
+import  matplotlib                      as      mpl;
+from    matplotlib.figure               import  Figure;
+from    matplotlib.backends.backend_agg import FigureCanvasAgg;
+from    sklearn.gaussian_process        import  GaussianProcessRegressor;
 
-from    EncoderDecoder              import  EncoderDecoder;
-from    Physics                     import  Physics;
-from    LatentDynamics              import  LatentDynamics;
-from    SolveROMs                   import  sample_roms;
-from    ParameterSpace              import  ParameterSpace;
-from    Trainer                     import  Trainer;
+from    EncoderDecoder                  import  EncoderDecoder;
+from    Physics                         import  Physics;
+from    LatentDynamics                  import  LatentDynamics;
+from    SolveROMs                       import  sample_roms;
+from    ParameterSpace                  import  ParameterSpace;
+from    Trainer                         import  Trainer;
 
 
 # Set up the logger
@@ -242,7 +244,8 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
                     figsize         : tuple[int]    = (10, 10), 
                     title           : str           = '',
                     save_file_name  : str           = "Heatmap",
-                    show_plot       : bool          = True) -> None:
+                    show_plot       : bool          = True,
+                    annotate_cells  : bool          = True) -> None:
     """
     This plot makes a "heatmap". Specifically, we assume that values represents the samples of 
     a function which depends on two parameters, p1 and p2 (the two variables in the 
@@ -281,6 +284,10 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     show_plot : bool
         If true, we will display the plot after saving it. Otherwise, we will not (save only). 
     
+    annotate_cells : bool
+        If true, we add labels to each cell of the plot. If not, then we do not (though you 
+        can still approximate the cell's value based on its color). Disabling this can 
+        considerably speed up plotting.
 
 
     -----------------------------------------------------------------------------------------------
@@ -318,7 +325,15 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     # Make the heatmap!
 
     # Set up the subplots.
-    fig, ax = plt.subplots(1, 1, figsize = figsize);
+    if(show_plot == True):
+        fig, ax = plt.subplots(1, 1, figsize = figsize);
+    else:
+        # When not showing the plot, render via the Agg canvas to avoid GUI/X11 overhead.
+        # This keeps interactive plots working elsewhere in the run, while making save-only
+        # plots fast and backend-independent.
+        fig = Figure(figsize = figsize);
+        FigureCanvasAgg(fig);  # attach an Agg canvas so fig.savefig works as expected
+        ax = fig.add_subplot(1, 1, 1);
     LOGGER.debug("Making the initial heatmap");
 
     # Set up the color map.
@@ -345,10 +360,11 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
 
     # Add the value itself (as text) to the center of each "pixel".
     LOGGER.debug("Adding values to the center of each pixel");
-    for i in range(n1):
-        for j in range(n2):
-            label_ij : str = f"{values[i, j]:.3g}";
-            ax.text(i, j, label_ij, fontsize = 10, ha = 'center', va = 'center', color = 'k');
+    if(annotate_cells):
+        for i in range(n1):
+            for j in range(n2):
+                label_ij : str = f"{values[i, j]:.3g}";
+                ax.text(i, j, label_ij, fontsize = 10, ha = 'center', va = 'center', color = 'k');
 
 
     # ---------------------------------------------------------------------------------------------
