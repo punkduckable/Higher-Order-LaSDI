@@ -331,15 +331,20 @@ PyMFEM can be challenging to install. Below is a step-by-step guide to avoid com
 
 ### 1. Create/Activate a venv (project-local)
 
-PyMFEM can not run on the latest versions of python. Ideally, you should be running python 3.11.
-If you aren't already, just set up a new virtual environment:
+PyMFEM (via `numba-scipy`/SciPy constraints) does not work on the latest Python versions. For this
+guide, use Python 3.11.
+
+If you aren't already, set up a new virtual environment:
 
 ```bash
 python3.11 -m venv venv_mfem
 source venv_mfem/bin/activate
 
 python -m pip install --upgrade pip setuptools wheel
-python -m pip install -r requirements.txt 
+# Install Higher-Order-LaSDI Python dependencies into this venv
+python -m pip install -r requirements.txt
+
+python -m pip install torch==2.5.1
 ```
 
 PyMFEM should be installed into the same `Higher-Order-LaSDI/venv_mfem`.
@@ -348,8 +353,10 @@ PyMFEM should be installed into the same `Higher-Order-LaSDI/venv_mfem`.
 ### 2. Clone and Checkout PyMFEM
 
 ```bash
-git clone git@github.com:mfem/PyMFEM.git
-ggit checkout v_4.7.0.1
+cd ..
+git clone https://github.com/mfem/PyMFEM.git
+cd ./PyMFEM
+git checkout v_4.7.0.1
 ```
 
 ### 3. Install Dependencies
@@ -357,7 +364,7 @@ ggit checkout v_4.7.0.1
 Install all dependencies using the requirements file:
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 
@@ -366,8 +373,8 @@ pip install -r requirements.txt
 PyMFEM v_4.7.0.1 requires cmake < 4.0:
 
 ```bash
-pip uninstall cmake
-pip install cmake==3.31.10
+python -m pip uninstall cmake
+python -m pip install cmake==3.31.10
 ```
 
 ### 5. Install MPI
@@ -388,7 +395,7 @@ sudo yum install openmpi openmpi-devel
 
 **On LC:**
 
-Note that you may need to use a different version for `intel-classic` and `openmpi` 
+Note that you may need to use a different version for `intel-classic` and `openmpi`.
 
 ```bash
 module --force purge
@@ -476,9 +483,6 @@ echo "$MPI_SO"
 
 readelf -d "$MPI_SO" | egrep 'NEEDED.*libmpi|RPATH|RUNPATH'
 ldd "$MPI_SO" | egrep 'libmpi|open-rte|open-pal|anaconda|not found'
-
-# test import
-python -c "from mpi4py import MPI; print(MPI.Get_library_version())"
 ```
 
 The `readelf` output should include:
@@ -496,12 +500,34 @@ patchelf --remove-needed libmpi.so.12 "$MPI_SO"
 readelf -d "$MPI_SO" | egrep 'NEEDED.*libmpi|RPATH|RUNPATH'
 ```
 
-When running on some nodes you may see OpenMPI warnings about OpenFabrics/InfiniBand initialization.
-These are often benign for single-process runs. To silence them, you can force TCP for the process:
+Now run a test import:
+```bash
+python -c "from mpi4py import MPI; print(MPI.Get_library_version())"
+```
+
+This should print something like the following: 
+
+`Open MPI v4.1.2, package: Open MPI sly1@rzwhippet7 Distribution, ident: 4.1.2, repo rev: v4.1.2, Nov 24, 2021`
+
+If so, mpi4py is now installed and linked correctly. Change back to the PyMFEM directory:
 
 ```bash
-export OMPI_MCA_btl="self,tcp"
+cd <path to PyMFEM directory>
 ```
+
+
+**Suppressing warnings on LC:**
+
+When running on some nodes, you may see OpenMPI warnings about OpenFabrics/InfiniBand initialization.
+These are often benign for single-process runs. One way to silence the warning is:
+
+```bash
+export OMPI_MCA_btl_openib_warn_no_device_params_found=0
+export OMPI_MCA_btl_openib_allow_ib=0
+```
+
+Avoid hard-coding `OMPI_MCA_btl="self,tcp"` unless you know your system provides the `btl:tcp`
+component; on some systems it can cause `MPI_Init` failures on compute nodes.
 
 
 ### 7. Build PyMFEM
@@ -512,6 +538,8 @@ python setup.py install -v --with-parallel --with-gslib \
 ```
 **Note**: On some systems you may need to adjust compiler names (e.g., `gcc-11`, `g++-11`).
 
+If this works, you have now installed PyMFEM!
+
 ### LC note: “Do I need to redo this every login?”
 
 - The **venv is persistent**: once `venv_mfem` (and the patched `mpi4py` inside it) is created, it
@@ -519,8 +547,11 @@ python setup.py install -v --with-parallel --with-gslib \
 - Your **module environment is not persistent**: you generally need to `module load intel-classic`
   and `module load openmpi` again in each new shell / batch job.
 - Any **environment variables** (e.g. `OMPI_MCA_btl`) must be set each session/job if you want them.
+  (e.g. `OMPI_MCA_btl_openib_allow_ib`, `OMPI_MCA_btl_openib_warn_no_device_params_found`).
 
-A simple solution is to create a small helper script (e.g. `env_lc.sh`) with the following contents:
+A simple solution is to create a small helper script (e.g. `env_lc.sh` in Higher-Order-LaSDI repo) with the following contents:
+
+
 ```bash
 # env_lc.sh (example)
 module --force purge
@@ -528,12 +559,13 @@ module load StdEnv
 module load intel-classic/2021.6.0
 module load openmpi/4.1.2
 source ./venv_mfem/bin/activate
-export OMPI_MCA_btl="self,tcp"
+export OMPI_MCA_btl_openib_warn_no_device_params_found=0
+export OMPI_MCA_btl_openib_allow_ib=0
 ```
 
 Before running LaSDI, `source` the script:
 ```bash
-source ./env_lc.sh
+source env_lc.sh
 ```
 
 
