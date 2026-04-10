@@ -25,6 +25,8 @@ from    LatentDynamics          import  LatentDynamics;
 from    SINDy                   import  SINDy;
 from    SwitchSINDy             import  SwitchSINDy;
 from    DampedSpring            import  DampedSpring;
+from    DampedSpring_weak       import  DampedSpring_weak;
+
 
 from    ParameterSpace          import  ParameterSpace;
 
@@ -75,6 +77,7 @@ encoder_decoder_load_dict = {   'ae'                    : load_Autoencoder,
                                 'cnn_3d_autoencoder'    : load_CNN_3D_Autoencoder};
 ld_dict = {                     'sindy'                 : SINDy, 
                                 'spring'                : DampedSpring,
+                                'spring_w'              : DampedSpring_weak,
                                 'switch'                : SwitchSINDy};
 trainer_dict = {                'First_Order_Rollout'   : First_Order_Rollout, 
                                 'Second_Order_Rollout'  : Second_Order_Rollout}

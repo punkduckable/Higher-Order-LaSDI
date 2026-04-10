@@ -129,6 +129,10 @@ class Second_Order_Rollout(Trainer):
         # Fetch the trainer sub-dictionary.
         trainer_config          : dict      = config['trainer'];
         sub_config              : dict      = trainer_config['Second_Order_Rollout'];
+        weak_config             : dict | None = None;
+        if ('latent_dynamics' in config) and (config['latent_dynamics'].get('type', None) == 'spring_w'):
+            assert 'spring_w' in config['latent_dynamics'], "config['latent_dynamics'] must contain a 'spring_w' sub-dictionary when type == 'spring_w'";
+            weak_config = config['latent_dynamics']['spring_w'];
 
         # Call the super class initializer.
         super().__init__(   n_IC            = n_IC,
@@ -136,7 +140,8 @@ class Second_Order_Rollout(Trainer):
                             encoder_decoder = encoder_decoder,
                             latent_dynamics = latent_dynamics,
                             param_space     = param_space,
-                            trainer_config  = trainer_config);
+                            trainer_config  = trainer_config,
+                            trainer_config_w = weak_config);
 
 
         # Fetch training hyperparameters 
@@ -710,8 +715,19 @@ class Second_Order_Rollout(Trainer):
             # called "train_coefs" of shape (n_train, n_coefs), where n_train = number of training 
             # parameter parameters and n_coefs denotes the number of coefficients in the latent
             # dynamics model. 
-            train_coefs, loss_LD_list, loss_coef_list, loss_stab_list   = self.latent_dynamics.calibrate(   
-                                                                            Latent_States    = Latent_States, 
+            if self.use_weak_form:
+                train_coefs, loss_LD_list, loss_coef_list, loss_stab_list = self.latent_dynamics.calibrate(
+                                                                            Phis             = self.Phis,
+                                                                            dPhis            = self.dPhis,
+                                                                            d2Phis           = self.d2Phis,
+                                                                            Latent_States    = Latent_States,
+                                                                            t_Grid           = t_Train_device,
+                                                                            input_coefs      = train_coefs_list,
+                                                                            loss_type        = self.loss_types['LD'],
+                                                                            params           = self.param_space.train_space);
+            else:
+                train_coefs, loss_LD_list, loss_coef_list, loss_stab_list = self.latent_dynamics.calibrate(
+                                                                            Latent_States    = Latent_States,
                                                                             t_Grid           = t_Train_device,
                                                                             input_coefs      = train_coefs_list,
                                                                             loss_type        = self.loss_types['LD'],

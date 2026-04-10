@@ -135,6 +135,10 @@ class First_Order_Rollout(Trainer):
         # Fetch the trainer sub-dictionary.
         trainer_config          : dict      = config['trainer'];
         sub_config              : dict      = trainer_config['First_Order_Rollout'];
+        weak_config             : dict | None = None;
+        if ('latent_dynamics' in config) and (config['latent_dynamics'].get('type', None) == 'spring_w'):
+            assert 'spring_w' in config['latent_dynamics'], "config['latent_dynamics'] must contain a 'spring_w' sub-dictionary when type == 'spring_w'";
+            weak_config = config['latent_dynamics']['spring_w'];
 
         # Call the super class initializer.
         super().__init__(   n_IC            = n_IC,
@@ -142,7 +146,8 @@ class First_Order_Rollout(Trainer):
                             encoder_decoder = encoder_decoder,
                             latent_dynamics = latent_dynamics,
                             param_space     = param_space,
-                            trainer_config  = trainer_config);
+                            trainer_config  = trainer_config,
+                            trainer_config_w = weak_config);
 
 
         # Fetch training hyperparameters 

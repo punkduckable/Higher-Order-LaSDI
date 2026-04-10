@@ -97,7 +97,8 @@ class Trainer:
                     encoder_decoder    : EncoderDecoder, 
                     latent_dynamics    : LatentDynamics, 
                     param_space        : ParameterSpace, 
-                    trainer_config     : dict):
+                    trainer_config     : dict,
+                    trainer_config_w   : dict = None):
         """
         Abstract base class for training strategies.
 
@@ -238,8 +239,168 @@ class Trainer:
         self.best_train_coefs   = None;
         self.restart_iter       = 0;                # Global iteration index at the start of the next training round
         self.best_epoch         = None;             # Optional: subclasses may set this when checkpointing
-        
+        self.use_weak_form      = False;
+        self.Phis               = [];
+        self.dPhis              = [];
+        self.d2Phis             = [];
+
+        if trainer_config_w is not None:
+            self.test_func          = trainer_config_w['test_func'];
+            self.test_func_width    = trainer_config_w['test_func_width'];
+            self.overlap            = trainer_config_w['overlap'];
+            self.pq                 = trainer_config_w['pq'];
+            self.LS_loss_type       = trainer_config_w['LS_loss_type'];
+
+            LOGGER.info("Weak form enabled with test_func=%s, LS_loss_type=%s" % (self.test_func, self.LS_loss_type));
+
         # All done!
+        return;
+
+
+
+    def getUniformGrid(self, T : float, L : float, s : float, p : int):
+        """
+        Generates a uniform grid of support intervals for compactly-supported test functions.
+
+        T : final time
+        L : test-function support width
+        s : overlap amount between adjacent supports
+        p : unused legacy argument kept for backward compatibility
+        """
+
+        overlap = s;
+        grid = [];
+        a = 0.0;
+        b = float(L);
+        grid.append([a, b]);
+        while (b - overlap + L) <= T:
+            a = b - overlap;
+            b = a + L;
+            grid.append([a, b]);
+
+        grid = numpy.asarray(grid, dtype = numpy.float64);
+        a_s = grid[:, 0];
+        b_s = grid[:, 1];
+        return a_s, b_s;
+
+
+
+    def get_test_functions(self,
+                           T               : float,
+                           n_t             : int,
+                           timesteps       : torch.Tensor,
+                           test_func_width : float,
+                           overlap         : float,
+                           pq              : int,
+                           test_func       : str = 'PC-poly',
+                           H               : int = 30) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Build compactly-supported weak-form test functions and their first/second derivatives.
+
+        Returns tensors of shape (H, n_t).
+        """
+
+        t       : torch.Tensor  = timesteps;
+        dtype   = t.dtype;
+        device  = t.device;
+
+        if test_func == 'bump':
+            L = float(test_func_width);
+            s = float(test_func_width) * float(overlap);
+            a_s, b_s = self.getUniformGrid(float(T), L, s, 1);
+
+            H_eff    : int = len(a_s);
+            LOGGER.info("Number of bump test functions: %d" % H_eff);
+
+            Phis    = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+            dPhis   = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+            d2Phis  = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+
+            eta     : float = 5.0;
+            a       : float = L / 2.0;
+            const   : float = eta;
+            nugget  : float = 1.0e-7;
+            a_space = numpy.linspace(-a + nugget, a - nugget, 1000);
+            bump    = numpy.exp(-eta / (1.0 - (a_space / a) ** 2));
+            C       : float = float(1.0 / numpy.trapz(bump, a_space) / numpy.exp(const));
+
+            h = torch.linspace(a, float(T) - a, H_eff, dtype = dtype, device = device);
+            for j, ji in enumerate(h):
+                for i, ti in enumerate(t):
+                    x       = (ti - ji) / a;
+                    denom   = 1.0 - x ** 2;
+                    f       = -eta / denom + const;
+                    fp      = -eta / (denom ** 2) * 2.0 * x / a;
+                    fpp     = (-eta / (denom ** 2) * 2.0 / (a * a)) + (-eta / (denom ** 3) * 2.0 * x / a * -2.0 * x / a * -2.0);
+                    if denom > 0:
+                        expf            = torch.exp(f);
+                        Phis[j, i]      = C * expf;
+                        dPhis[j, i]     = C * expf * fp;
+                        d2Phis[j, i]    = C * (expf * (fp ** 2) + expf * fpp);
+
+        elif test_func == 'PC-poly':
+            L = float(test_func_width);
+            s = float(test_func_width) * float(overlap);
+            a_s, b_s = self.getUniformGrid(float(T), L, s, 1);
+
+            H_eff    : int = len(a_s);
+            LOGGER.info("Number of PC-poly test functions: %d" % H_eff);
+
+            Phis    = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+            dPhis   = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+            d2Phis  = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+
+            p, q = pq, pq;
+            for h in range(H_eff):
+                a = float(a_s[h]);
+                b = float(b_s[h]);
+                C = 1.0 / (p ** p * q ** q) * ((p + q) / (b - a)) ** (p + q);
+                mask = (t >= a) * (t <= b);
+                Phis[h, :] = C * (t - a) ** p * (b - t) ** q * mask;
+                dPhis[h, :] = C * (p * (t - a) ** (p - 1) * (b - t) ** q - q * (t - a) ** p * (b - t) ** (q - 1)) * mask;
+                d2Phis[h, :] = C * (
+                    p * (p - 1) * (t - a) ** (p - 2) * (b - t) ** q
+                    - q * p * (t - a) ** (p - 1) * (b - t) ** (q - 1)
+                    - q * p * (t - a) ** (p - 1) * (b - t) ** (q - 1)
+                    + q * (q - 1) * (t - a) ** p * (b - t) ** (q - 2)
+                ) * mask;
+
+        else:
+            raise ValueError("Unsupported weak-form test function type: %s" % str(test_func));
+
+        return Phis, dPhis, d2Phis;
+
+
+
+    def _prepare_weak_form_data(self) -> None:
+        """
+        Build and cache weak-form test functions for the current training trajectories.
+
+        This is called once per training round so that greedy-sampling updates to the training set
+        are reflected immediately in the weak-form data.
+        """
+
+        assert hasattr(self, 'test_func'), "Weak form requested but no weak-form config was provided to the trainer";
+        self.Phis   = [];
+        self.dPhis  = [];
+        self.d2Phis = [];
+
+        for i in range(len(self.t_Train)):
+            t_i : torch.Tensor = self.t_Train[i].to(self.device);
+            T_i : float        = float(t_i[-1].detach().cpu().item());
+            Phi_i, dPhi_i, d2Phi_i = self.get_test_functions(
+                T               = T_i,
+                n_t             = int(t_i.shape[0]),
+                timesteps       = t_i,
+                test_func_width = self.test_func_width,
+                overlap         = self.overlap,
+                pq              = self.pq,
+                test_func       = self.test_func);
+            self.Phis.append(Phi_i);
+            self.dPhis.append(dPhi_i);
+            self.d2Phis.append(d2Phi_i);
+
+        LOGGER.info("Prepared weak-form test functions for %d training trajectories" % len(self.Phis));
         return;
 
 
@@ -622,7 +783,8 @@ class Trainer:
 
 
 
-    def train(self) -> None:
+    def train(self,
+              weak:   bool = False) -> None:
         """
         Runs one round of training and restores the in-memory state to the best checkpoint
         produced during that round.
@@ -675,6 +837,18 @@ class Trainer:
                 self.loss_by_param = {};
         
         
+        # -----------------------------------------------------------------------------------------
+        # Weak-form setup (if enabled).
+
+        self.use_weak_form = bool(weak or hasattr(self, 'test_func'));
+        if self.use_weak_form:
+            self._prepare_weak_form_data();
+        else:
+            self.Phis   = [];
+            self.dPhis  = [];
+            self.d2Phis = [];
+
+
         # -----------------------------------------------------------------------------------------
         # Run the iterations!
 
