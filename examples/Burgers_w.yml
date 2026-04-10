@@ -1,7 +1,7 @@
 trainer:
   type:                   "Second_Order_Rollout"
 
-  max_iter:               20000
+  max_iter:               5000
   # n_iter:                 2500
   # max_greedy_iter:        20000
   n_iter:                 30000
@@ -15,7 +15,7 @@ trainer:
 
   Second_Order_Rollout:
     lr:                     0.001
-    gradient_clip:          150000.0      # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
+    gradient_clip:          50.0      # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
 
     # p_rollout grows from p_rollout_init by dp_per_update every rollout_update_freq epochs, capped at max_p_rollout.
     p_rollout_init:         0.01
@@ -42,12 +42,12 @@ trainer:
       consistency:          1.0
 
     loss_types:
-      recon:                "MAE"
-      chain_rule:           "MAE"
-      LD:                   "MAE"
-      rollout:              "MAE"
-      IC_rollout:           "MAE"
-      consistency:          "MAE"
+      recon:                "MSE"
+      chain_rule:           "MSE"
+      LD:                   "MSE"
+      rollout:              "MSE"
+      IC_rollout:           "MSE"
+      consistency:          "MSE"
 
 workflow:
   use_restart:              false
@@ -84,6 +84,13 @@ EncoderDecoder:
     latent_dimension:       5
     activations:            ["sin", "sin", "sin", "sin"]
 
+# EncoderDecoder:
+#   type:                     pair
+#   pair:
+#     hidden_widths:          [100, 50]
+#     latent_dimension:       5
+#     activations:            ["softplus", "softplus"]
+
 # latent_dynamics:
 #   type:                     spring
 #   lstsq_reg:                1.0           # Ridge-regression regularization for SINDy coefficient initialization (prevents blow-up for new greedy-sampled points).
@@ -100,7 +107,7 @@ latent_dynamics:
     overlap:                0.8
     pq:                     8
     LS_loss_type:           'weak'
-    lstsq_reg:              1.0           # Ridge-regression regularization for SINDy coefficient initialization (prevents blow-up for new greedy-sampled points).
+    lstsq_reg:              0.0           # Ridge-regression regularization for SINDy coefficient initialization (prevents blow-up for new greedy-sampled points).
 
 physics:
   type:                     BurgersSecondOrder

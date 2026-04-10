@@ -317,22 +317,52 @@ class DampedSpring_weak(LatentDynamics):
             else:
                 coef_v : torch.Tensor  = torch.linalg.lstsq(Gk, bk).solution;
             coefs = coef_v.reshape((self.n_z, ZD_ZV_1.shape[-1])).T;                          # shape = (2*n_z + 1, n_z)
+        
+            LD_RHS  : torch.Tensor  = torch.matmul(ZD_ZV_1, coefs);
 
         else:
             # First, reshape input_coefs to have shape (2*n_z + 1, n_z).
             coefs = input_coefs[0].reshape(2*self.n_z + 1, self.n_z);                     # shape = (2*n_z + 1, n_z)
+        
+            E   : torch.Tensor  = coefs.T;
+            K   : torch.Tensor  = -E[:, 0:self.n_z];
+            C   : torch.Tensor  = -E[:, self.n_z:(2*self.n_z)];
+            b   : torch.Tensor  = E[:, 2*self.n_z].reshape(1, -1);
+        
+            LD_RHS              = b - torch.matmul(Z_V, C.T) - torch.matmul(Z_D, K.T);
 
         # Compute the weak residual used for the latent-dynamics loss.
-        weak_LHS    : torch.Tensor = 0.5 * (torch.matmul(d2Phis, Z_D) - torch.matmul(dPhis, Z_V));
-        weak_RHS    : torch.Tensor = torch.matmul(torch.matmul(Phis, ZD_ZV_1), coefs);
+        # weak_LHS    : torch.Tensor = 0.5 * (torch.matmul(d2Phis, Z_D) - torch.matmul(dPhis, Z_V));
+        # weak_LHS    : torch.Tensor =  - torch.matmul(dPhis, Z_V);
+        # lhs_D = torch.matmul(d2Phis, Z_D)
+        # lhs_V = -torch.matmul(dPhis, Z_V)
+        # weak_RHS    : torch.Tensor = torch.matmul(torch.matmul(Phis, ZD_ZV_1), coefs);
 
         # -----------------------------------------------------------------------------------------
         # Compute the stability losses and return.
 
+        # scale_D = torch.linalg.norm(d2Phis, dim=1, keepdim=True)
+        # scale_V = torch.linalg.norm(dPhis,  dim=1, keepdim=True)
+
+        # if loss_type == "MSE":
+        #     loss_D = self.MSE(lhs_D / scale_D, weak_RHS / scale_D)
+        #     loss_V = self.MSE(lhs_V / scale_V, weak_RHS / scale_V)
+        # elif loss_type == "MAE":
+        #     loss_D = self.MAE(lhs_D / scale_D, weak_RHS / scale_D)
+        #     loss_V = self.MAE(lhs_V / scale_V, weak_RHS / scale_V)
+
+        # Loss_LD = 0.5 * loss_D + 0.5 * loss_V
+        ## Loss_LD = 0.25 * loss_D + 0.75 * loss_V
+
+        # if(loss_type == "MSE"):
+        #     Loss_LD     = self.MSE(weak_LHS, weak_RHS);
+        # elif(loss_type == "MAE"):
+        #     Loss_LD     = self.MAE(weak_LHS, weak_RHS);
+
         if(loss_type == "MSE"):
-            Loss_LD     = self.MSE(weak_LHS, weak_RHS);
+            Loss_LD     = self.MSE(d2Z_dt2, LD_RHS);
         elif(loss_type == "MAE"):
-            Loss_LD     = self.MAE(weak_LHS, weak_RHS);
+            Loss_LD     = self.MAE(d2Z_dt2, LD_RHS);
 
         # Stability penalty on the equivalent first-order system y' = A y (+ f).
         # For z'' = -K z - C z' + b, define y = [z, z'] so A = [[0, I], [-K, -C]].
@@ -570,5 +600,20 @@ class DampedSpring_weak(LatentDynamics):
 
         bk = 0.5 * (d2Phi @ Zs[0] - dPhi @ Zs[1]);
         bk = bk.permute(1, 0).reshape((H * n_s, 1));
+
+        # lhs_D = d2Phi @ Zs[0]
+        # lhs_V = -(dPhi @ Zs[1])
+
+        # scale_D = torch.linalg.norm(d2Phi, dim=1, keepdim=True)
+        # scale_V = torch.linalg.norm(dPhi,  dim=1, keepdim=True)
+
+        # Gk_D = torch.kron(Ins, PhiTheta / scale_D)
+        # Gk_V = torch.kron(Ins, PhiTheta / scale_V)
+
+        # bk_D = (lhs_D / scale_D).permute(1, 0).reshape(H * n_s, 1)
+        # bk_V = (lhs_V / scale_V).permute(1, 0).reshape(H * n_s, 1)
+
+        # Gk = torch.cat([Gk_D, Gk_V], dim=0)
+        # bk = torch.cat([bk_D, bk_V], dim=0)
 
         return Gk, bk
