@@ -330,6 +330,17 @@ class Sampler:
 
 
         # ---------------------------------------------------------------------------------------------
+        # Noise injection (training data only).
+        #
+        # If the trainer has noise_ratio > 0, corrupt the training trajectories with additive
+        # Gaussian noise.  Test data is left clean so that evaluation compares predictions against
+        # noise-free references.  The first frame (IC) of every trajectory is preserved because we
+        # assume perfect initial conditions.  A clean copy is kept in trainer.U_Train_clean.
+        if hasattr(trainer, 'noise_ratio') and trainer.noise_ratio > 0.0:
+            trainer.apply_noise_to_U_Train();
+
+
+        # ---------------------------------------------------------------------------------------------
         # Global normalization setup (training-only stats)
         #
         # If enabled and stats are not set yet, compute mean/std from the (unnormalized) training data,
