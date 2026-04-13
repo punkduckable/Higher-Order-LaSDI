@@ -536,6 +536,9 @@ class Second_Order_Rollout(Trainer):
                 D_i         : torch.Tensor  = U_Train_device[i][0];
                 V_i         : torch.Tensor  = U_Train_device[i][1];
 
+                D_i         = torch.squeeze(D_i);  # shape (n_t(i), physics.Frame_Shape)
+                V_i         = torch.squeeze(V_i);  # shape (n_t(i), physics
+
                 t_Grid_i    : torch.Tensor  = t_Train_device[i];
                 n_t_i       : int           = t_Grid_i.shape[0];
 
@@ -572,8 +575,12 @@ class Second_Order_Rollout(Trainer):
                 Latent_States.append(Z_i);
 
                 U_Pred_i    : list[torch.Tensor]    = list(encoder_decoder_device.Decode(*Z_i));
-                D_Pred_i    : torch.Tensor          = U_Pred_i[0];  # shape = (n_t(i), physics.Frame_Shape)
-                V_Pred_i    : torch.Tensor          = U_Pred_i[1];  # shape = (n_t(i), physics.Frame_Shape)
+                #D_Pred_i    : torch.Tensor          = U_Pred_i[0];  # shape = (n_t(i), physics.Frame_Shape)
+                #V_Pred_i    : torch.Tensor          = U_Pred_i[1];  # shape = (n_t(i), physics.Frame_Shape)
+
+                D_Pred_i    : torch.Tensor          = torch.squeeze(U_Pred_i[0]);  # shape = (n_t(i), physics.Frame_Shape)
+                V_Pred_i    : torch.Tensor          = torch.squeeze(U_Pred_i[1]);  # shape = (n_t(i), physics.Frame_Shape)
+
 
                 LOGGER.debug("Forward Pass (Autoencoder_Pair) - complete for parameter combination %d" % i);
                 self.timer.end("Forward Pass");
