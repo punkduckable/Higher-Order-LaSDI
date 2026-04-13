@@ -40,11 +40,11 @@ from    Autoencoder_Pair        import  Autoencoder_Pair, load_Autoencoder_Pair;
 from    CNN_3D_Autoencoder      import  CNN_3D_Autoencoder, load_CNN_3D_Autoencoder;
 
 from    Physics                 import  Physics;
-#from    NonlinearElasticity     import  NonlinearElasticity;
-#from    Advection               import  Advection;
-#from    WaveEquation            import  WaveEquation;
-#from    KleinGordon             import  KleinGordon;
-#from    Telegraphers            import  Telegraphers;
+import  NonlinearElasticity;
+import  Advection;
+import  WaveEquation;
+import  KleinGordon;
+import  Telegraphers;
 import  Burgers2D;
 import  Thermal;
 import  Burgers;
@@ -88,14 +88,12 @@ physics_dict = {                'Burgers'               : Burgers.Burgers,
                                 'Burgers2D'             : Burgers2D.Burgers2D,
                                 'Explicit'              : Explicit.Explicit,
                                 'ExplicitSecondOrder'   : ExplicitSecondOrder.Explicit,
-                                'Thermal'               : Thermal.Thermal};
-"""
-                                'Advection'             : Advection,
-                                'NonlinearElasticity'   : NonlinearElasticity,
-                                'WaveEquation'          : WaveEquation,
-                                'KleinGordon'           : KleinGordon,
-                                'Telegraphers'          : Telegraphers};
-"""
+                                'Thermal'               : Thermal.Thermal
+                                'Advection'             : Advection.Advection,
+                                'NonlinearElasticity'   : NonlinearElasticity.NonlinearElasticity,
+                                'WaveEquation'          : WaveEquation.WaveEquation,
+                                'KleinGordon'           : KleinGordon.KleinGordon,
+                                'Telegraphers'          : Telegraphers.Telegraphers};
 
 
 
