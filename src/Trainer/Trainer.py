@@ -89,6 +89,13 @@ class Trainer:
     # The trainer's device
     device : str;
 
+    # Noise ratio for corrupting training data (0.0 = no noise).
+    noise_ratio : float;
+
+    # Clean (noise-free) training data, stored when noise_ratio > 0.
+    # Same structure as U_Train.
+    U_Train_clean : list;
+
 
 
     def __init__(   self, 
@@ -97,7 +104,8 @@ class Trainer:
                     encoder_decoder    : EncoderDecoder, 
                     latent_dynamics    : LatentDynamics, 
                     param_space        : ParameterSpace, 
-                    trainer_config     : dict):
+                    trainer_config     : dict,
+                    trainer_config_w   : dict = None):
         """
         Abstract base class for training strategies.
 
@@ -238,8 +246,251 @@ class Trainer:
         self.best_train_coefs   = None;
         self.restart_iter       = 0;                # Global iteration index at the start of the next training round
         self.best_epoch         = None;             # Optional: subclasses may set this when checkpointing
-        
+        self.use_weak_form      = False;
+        self.Phis               = [];
+        self.dPhis              = [];
+        self.d2Phis             = [];
+        self.U_Train_clean      = [];               # Stores clean training data when noise is applied.
+
+        # Noise configuration: ratio of noise std to signal RMS.
+        self.noise_ratio        : float = float(trainer_config.get('noise_ratio', 0.0));
+        if self.noise_ratio > 0.0:
+            LOGGER.info("Noise injection enabled: noise_ratio = %f" % self.noise_ratio);
+        else:
+            LOGGER.info("Noise injection disabled (noise_ratio = 0.0)");
+
+        if trainer_config_w is not None:
+            self.test_func          = trainer_config_w['test_func'];
+            self.test_func_width    = trainer_config_w['test_func_width'];
+            self.overlap            = trainer_config_w['overlap'];
+            self.pq                 = trainer_config_w['pq'];
+            self.LS_loss_type       = trainer_config_w['LS_loss_type'];
+
+            LOGGER.info("Weak form enabled with test_func=%s, LS_loss_type=%s" % (self.test_func, self.LS_loss_type));
+
         # All done!
+        return;
+
+
+
+    @staticmethod
+    def addNoise(x : torch.Tensor, noise_ratio : float) -> torch.Tensor:
+        """
+        Add Gaussian noise to a tensor, scaled by the signal's RMS power.
+
+        sigma = noise_ratio * sqrt(mean(x^2))
+        noise ~ N(0, sigma)
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        x : torch.Tensor
+            The clean signal to corrupt.
+
+        noise_ratio : float
+            The ratio of the noise standard deviation to the signal RMS.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        x_noisy : torch.Tensor
+            The corrupted signal (same shape and dtype as x).
+        """
+
+        if noise_ratio <= 0.0:
+            return x;
+        
+        signal_power    : float         = float(torch.sqrt(torch.mean(x**2)).item());
+        sigma           : float         = noise_ratio * signal_power;
+        noise           : torch.Tensor  = torch.normal(mean = 0.0, std = sigma, size = x.shape).to(dtype = x.dtype, device = x.device);
+        return x + noise;
+
+
+
+    def apply_noise_to_U_Train(self) -> None:
+        """
+        Apply Gaussian noise to the current training data (self.U_Train).
+
+        Before corrupting the data, a deep copy of the clean training data is saved in
+        self.U_Train_clean so that noise-free references remain available (e.g., for
+        initial conditions). Note that the first frame (IC) of every trajectory is left
+        untouched because we assume perfect initial conditions.
+        """
+
+        if self.noise_ratio <= 0.0:
+            return;
+
+        LOGGER.info("Applying noise (ratio = %f) to %d training trajectories" % (self.noise_ratio, len(self.U_Train)));
+
+        # Deep-copy clean data before corruption.
+        self.U_Train_clean = [];
+        for i in range(len(self.U_Train)):
+            self.U_Train_clean.append([u.clone() for u in self.U_Train[i]]);
+
+        # Corrupt each trajectory, each IC derivative, but preserve the first frame (IC).
+        for i in range(len(self.U_Train)):
+            for j in range(len(self.U_Train[i])):
+                clean_IC    : torch.Tensor  = self.U_Train[i][j][0:1, ...].clone();     # shape (1, ...)
+                noisy_data  : torch.Tensor  = self.addNoise(self.U_Train[i][j], self.noise_ratio);
+                noisy_data[0:1, ...]        = clean_IC;                                  # restore perfect IC
+                self.U_Train[i][j]          = noisy_data;
+                
+                LOGGER.debug("  Trajectory %d, IC %d: signal_rms=%.6e, noise_std=%.6e" % (
+                    i, j,
+                    float(torch.sqrt(torch.mean(self.U_Train_clean[i][j]**2)).item()),
+                    float(self.noise_ratio * torch.sqrt(torch.mean(self.U_Train_clean[i][j]**2)).item())));
+
+        LOGGER.info("Noise injection complete. Clean data saved in U_Train_clean.");
+        return;
+
+
+
+    def getUniformGrid(self, T : float, L : float, s : float, p : int):
+        """
+        Generates a uniform grid of support intervals for compactly-supported test functions.
+
+        T : final time
+        L : test-function support width
+        s : overlap amount between adjacent supports
+        p : unused legacy argument kept for backward compatibility
+        """
+
+        overlap = s;
+        grid = [];
+        a = 0.0;
+        b = float(L);
+        grid.append([a, b]);
+        while (b - overlap + L) <= T:
+            a = b - overlap;
+            b = a + L;
+            grid.append([a, b]);
+
+        grid = numpy.asarray(grid, dtype = numpy.float64);
+        a_s = grid[:, 0];
+        b_s = grid[:, 1];
+        return a_s, b_s;
+
+
+
+    def get_test_functions(self,
+                           T               : float,
+                           n_t             : int,
+                           timesteps       : torch.Tensor,
+                           test_func_width : float,
+                           overlap         : float,
+                           pq              : int,
+                           test_func       : str = 'PC-poly',
+                           H               : int = 30) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Build compactly-supported weak-form test functions and their first/second derivatives.
+
+        Returns tensors of shape (H, n_t).
+        """
+
+        t       : torch.Tensor  = timesteps;
+        dtype   = t.dtype;
+        device  = t.device;
+
+        if test_func == 'bump':
+            L = float(test_func_width);
+            s = float(test_func_width) * float(overlap);
+            a_s, b_s = self.getUniformGrid(float(T), L, s, 1);
+
+            H_eff    : int = len(a_s);
+            LOGGER.info("Number of bump test functions: %d" % H_eff);
+
+            Phis    = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+            dPhis   = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+            d2Phis  = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+
+            eta     : float = 5.0;
+            a       : float = L / 2.0;
+            const   : float = eta;
+            nugget  : float = 1.0e-7;
+            a_space = numpy.linspace(-a + nugget, a - nugget, 1000);
+            bump    = numpy.exp(-eta / (1.0 - (a_space / a) ** 2));
+            C       : float = float(1.0 / numpy.trapz(bump, a_space) / numpy.exp(const));
+
+            h = torch.linspace(a, float(T) - a, H_eff, dtype = dtype, device = device);
+            for j, ji in enumerate(h):
+                for i, ti in enumerate(t):
+                    x       = (ti - ji) / a;
+                    denom   = 1.0 - x ** 2;
+                    f       = -eta / denom + const;
+                    fp      = -eta / (denom ** 2) * 2.0 * x / a;
+                    fpp     = (-eta / (denom ** 2) * 2.0 / (a * a)) + (-eta / (denom ** 3) * 2.0 * x / a * -2.0 * x / a * -2.0);
+                    if denom > 0:
+                        expf            = torch.exp(f);
+                        Phis[j, i]      = C * expf;
+                        dPhis[j, i]     = C * expf * fp;
+                        d2Phis[j, i]    = C * (expf * (fp ** 2) + expf * fpp);
+
+        elif test_func == 'PC-poly':
+            L = float(test_func_width);
+            s = float(test_func_width) * float(overlap);
+            a_s, b_s = self.getUniformGrid(float(T), L, s, 1);
+
+            H_eff    : int = len(a_s);
+            LOGGER.info("Number of PC-poly test functions: %d" % H_eff);
+
+            Phis    = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+            dPhis   = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+            d2Phis  = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+
+            p, q = pq, pq;
+            for h in range(H_eff):
+                a = float(a_s[h]);
+                b = float(b_s[h]);
+                C = 1.0 / (p ** p * q ** q) * ((p + q) / (b - a)) ** (p + q);
+                mask = (t >= a) * (t <= b);
+                Phis[h, :] = C * (t - a) ** p * (b - t) ** q * mask;
+                dPhis[h, :] = C * (p * (t - a) ** (p - 1) * (b - t) ** q - q * (t - a) ** p * (b - t) ** (q - 1)) * mask;
+                d2Phis[h, :] = C * (
+                    p * (p - 1) * (t - a) ** (p - 2) * (b - t) ** q
+                    - q * p * (t - a) ** (p - 1) * (b - t) ** (q - 1)
+                    - q * p * (t - a) ** (p - 1) * (b - t) ** (q - 1)
+                    + q * (q - 1) * (t - a) ** p * (b - t) ** (q - 2)
+                ) * mask;
+
+        else:
+            raise ValueError("Unsupported weak-form test function type: %s" % str(test_func));
+
+        return Phis, dPhis, d2Phis;
+
+
+
+    def _prepare_weak_form_data(self) -> None:
+        """
+        Build and cache weak-form test functions for the current training trajectories.
+
+        This is called once per training round so that greedy-sampling updates to the training set
+        are reflected immediately in the weak-form data.
+        """
+
+        assert hasattr(self, 'test_func'), "Weak form requested but no weak-form config was provided to the trainer";
+        self.Phis   = [];
+        self.dPhis  = [];
+        self.d2Phis = [];
+
+        for i in range(len(self.t_Train)):
+            t_i : torch.Tensor = self.t_Train[i].to(self.device);
+            T_i : float        = float(t_i[-1].detach().cpu().item());
+            Phi_i, dPhi_i, d2Phi_i = self.get_test_functions(
+                T               = T_i,
+                n_t             = int(t_i.shape[0]),
+                timesteps       = t_i,
+                test_func_width = self.test_func_width,
+                overlap         = self.overlap,
+                pq              = self.pq,
+                test_func       = self.test_func);
+            self.Phis.append(Phi_i);
+            self.dPhis.append(dPhi_i);
+            self.d2Phis.append(d2Phi_i);
+
+        LOGGER.info("Prepared weak-form test functions for %d training trajectories" % len(self.Phis));
         return;
 
 
@@ -622,7 +873,8 @@ class Trainer:
 
 
 
-    def train(self) -> None:
+    def train(self,
+              weak:   bool = False) -> None:
         """
         Runs one round of training and restores the in-memory state to the best checkpoint
         produced during that round.
@@ -675,6 +927,18 @@ class Trainer:
                 self.loss_by_param = {};
         
         
+        # -----------------------------------------------------------------------------------------
+        # Weak-form setup (if enabled).
+
+        self.use_weak_form = bool(weak or hasattr(self, 'test_func'));
+        if self.use_weak_form:
+            self._prepare_weak_form_data();
+        else:
+            self.Phis   = [];
+            self.dPhis  = [];
+            self.d2Phis = [];
+
+
         # -----------------------------------------------------------------------------------------
         # Run the iterations!
 
@@ -754,7 +1018,9 @@ class Trainer:
                  'config'                   : self.config,
                  'normalize'                : self.normalize,
                  'data_mean'                : None if self.data_mean is None else [float(m.detach().cpu().item()) for m in self.data_mean],
-                 'data_std'                 : None if self.data_std  is None else [float(s.detach().cpu().item()) for s in self.data_std]};
+                 'data_std'                 : None if self.data_std  is None else [float(s.detach().cpu().item()) for s in self.data_std],
+                 'noise_ratio'              : self.noise_ratio,
+                 'U_Train_clean'            : self.U_Train_clean};
         return dict_;
 
 
@@ -819,6 +1085,10 @@ class Trainer:
 
         # Load the timer / optimizer. 
         self.timer.load(dict_['timer']);
+
+        # Restore noise configuration and clean training data.
+        self.noise_ratio    = float(dict_.get('noise_ratio', 0.0));
+        self.U_Train_clean  = dict_.get('U_Train_clean', []);
 
 
         # All done!

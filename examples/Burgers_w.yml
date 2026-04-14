@@ -1,0 +1,133 @@
+trainer:
+  type:                   "Second_Order_Rollout"
+
+  max_iter:               5000
+  # n_iter:                 2500
+  # max_greedy_iter:        20000
+  n_iter:                 30000
+  max_greedy_iter:        0
+  
+  # If true, compute a single global mean/std from TRAINING data only, and normalize
+  # all training/testing trajectories using these values.
+  normalize:              false
+
+  device:                 'cpu'
+
+  Second_Order_Rollout:
+    lr:                     0.001
+    gradient_clip:          50.0      # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
+
+    # p_rollout grows from p_rollout_init by dp_per_update every rollout_update_freq epochs, capped at max_p_rollout.
+    p_rollout_init:         0.01
+    rollout_update_freq:    20
+    dp_per_update:          0.01
+    max_p_rollout:          0.75      # Maximum proportion of the time window used for rollout loss.
+    n_rollouts:             4         # Number of rollable start frames to rollout per training parameter per epoch.
+
+    p_IC_rollout_init:      0.01
+    IC_rollout_update_freq: 20
+    IC_dp_per_update:       0.01
+    max_p_IC_rollout:       1.0       # Maximum proportion of the time window used for IC rollout loss.
+
+    warmup_epochs:          20    # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
+
+    loss_weights:
+      recon:                1.0
+      chain_rule:           1.0
+      LD:                   1.0
+      rollout:              0.0
+      # IC_rollout:           0.2
+      IC_rollout:           0.0
+      coef:                 0.0001
+      consistency:          1.0
+
+    loss_types:
+      recon:                "MSE"
+      chain_rule:           "MSE"
+      LD:                   "MSE"
+      rollout:              "MSE"
+      IC_rollout:           "MSE"
+      consistency:          "MSE"
+
+workflow:
+  use_restart:              false
+  restart_file:  
+  plot_train_rel_errors:    False
+
+sampler:
+  type:                   'FOM_Variance'
+  FOM_Variance:
+    n_samples:            20        # Number of samples used to compute rollout stds.   
+
+parameter_space:
+  parameters:
+    - name:                 a
+      min:                  0.45
+      max:                  0.55
+      test_space_type:      uniform
+      sample_size:          11
+      log_scale:            false
+    - name:                 w
+      test_space_type:      list
+      list:                 [.175, .18, .185, .19, .195, .2, .205, .21, .215, .22, .225]
+  test_space:
+    type:                   grid
+
+EncoderDecoder:
+  type:                     pair
+  autoencoder:
+    hidden_widths:          [250, 100, 100, 100]
+    latent_dimension:       5  
+    activations:            ["sin", "sin", "sin", "sin"]
+  pair:
+    hidden_widths:          [250, 100, 100, 100]
+    latent_dimension:       5
+    activations:            ["sin", "sin", "sin", "sin"]
+
+# EncoderDecoder:
+#   type:                     pair
+#   pair:
+#     hidden_widths:          [100, 50]
+#     latent_dimension:       5
+#     activations:            ["softplus", "softplus"]
+
+# latent_dynamics:
+#   type:                     spring
+#   lstsq_reg:                1.0           # Ridge-regression regularization for SINDy coefficient initialization (prevents blow-up for new greedy-sampled points).
+#   spring:
+
+  sindy:
+latent_dynamics:
+  # type:                     spring
+  type:                     spring_w
+  lstsq_reg:                0
+  spring_w:
+    test_func:              'PC-poly'
+    test_func_width:        .1 #50/(nt - 1) is a good default
+    overlap:                0.8
+    pq:                     8
+    LS_loss_type:           'weak'
+    lstsq_reg:              0.0           # Ridge-regression regularization for SINDy coefficient initialization (prevents blow-up for new greedy-sampled points).
+
+physics:
+  type:                     BurgersSecondOrder
+
+  Burgers:
+    n_t:                    501
+    t_max:                  1.
+    n_x:                    1001
+    x_min:                  -3.
+    x_max:                  3.
+    maxk:                   10
+    convergence_threshold:  0.00000001
+    uniform_t_grid:         false
+
+  BurgersSecondOrder:
+    n_t:                    501
+    t_max:                  1.
+    n_x:                    1001
+    x_min:                  -3.
+    x_max:                  3.
+    maxk:                   10
+    convergence_threshold:  0.00000001
+    uniform_t_grid:         false
