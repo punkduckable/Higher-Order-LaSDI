@@ -8,7 +8,6 @@
 #   intentionally omitted here.
 
 numpy
-torch
 scipy
 scikit-learn
 pyyaml

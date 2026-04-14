@@ -88,7 +88,7 @@ physics_dict = {                'Burgers'               : Burgers.Burgers,
                                 'Burgers2D'             : Burgers2D.Burgers2D,
                                 'Explicit'              : Explicit.Explicit,
                                 'ExplicitSecondOrder'   : ExplicitSecondOrder.Explicit,
-                                'Thermal'               : Thermal.Thermal
+                                'Thermal'               : Thermal.Thermal,
                                 'Advection'             : Advection.Advection,
                                 'NonlinearElasticity'   : NonlinearElasticity.NonlinearElasticity,
                                 'WaveEquation'          : WaveEquation.WaveEquation,

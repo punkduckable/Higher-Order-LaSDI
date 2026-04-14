@@ -291,11 +291,10 @@ Add optional dependencies to the same venv:
 # HDF5 data loading (Thermal example)
 python -m pip install h5py==3.14.0
 
-# PyMFEM prerequisites (see full PyMFEM build steps below)
-python -m pip install cmake==3.28.1 mpi4py==4.0.3
-
 # Jupyter for error diagnostics
 python -m pip install jupyter==1.0.0
+
+# PyMFEM: This one is tricky. Go to the PyMFEM build steps below.
 ```
 
 
@@ -327,41 +326,55 @@ deactivate
 
 ## Installing PyMFEM
 
-PyMFEM can be challenging to install. Below is a step-by-step guide to avoid common issues.
+PyMFEM can be challenging to install. Below is a step-by-step guide to avoid common issues. 
+
 
 ### 1. Create/Activate a venv (project-local)
 
-PyMFEM should be installed into the same `Higher-Order-LaSDI/venv` created above.
+PyMFEM (via `numba-scipy`/SciPy constraints) does not work on the latest Python versions. For this
+guide, use Python 3.11.
+
+If you aren't already, set up a new virtual environment:
 
 ```bash
-cd Higher-Order-LaSDI
-# If you haven't created the venv yet:
-python3 -m venv venv
-source venv/bin/activate
+python3.11 -m venv venv_mfem
+source venv_mfem/bin/activate
+
 python -m pip install --upgrade pip setuptools wheel
+# Install Higher-Order-LaSDI Python dependencies into this venv
+python -m pip install -r requirements.txt
+
+python -m pip install torch==2.5.1
 ```
+
+PyMFEM should be installed into the same `Higher-Order-LaSDI/venv_mfem`.
+
 
 ### 2. Clone and Checkout PyMFEM
 
 ```bash
-git clone git@github.com:mfem/PyMFEM.git
-cd ./PyMFEM/
-git checkout v4.7.0.1
+cd ..
+git clone https://github.com/mfem/PyMFEM.git
+cd ./PyMFEM
+git checkout v_4.7.0.1
 ```
 
 ### 3. Install Dependencies
 
+Install all dependencies using the requirements file:
+
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
+
 
 ### 4. Fix CMake Version
 
-PyMFEM v4.7.0.1 requires cmake < 4.0:
+PyMFEM v_4.7.0.1 requires cmake < 4.0:
 
 ```bash
-pip uninstall cmake
-pip install cmake==3.28
+python -m pip uninstall cmake
+python -m pip install cmake==3.31.10
 ```
 
 ### 5. Install MPI
@@ -380,11 +393,142 @@ sudo apt-get install openmpi-bin libopenmpi-dev
 sudo yum install openmpi openmpi-devel
 ```
 
+**On LC:**
+
+Note that you may need to use a different version for `intel-classic` and `openmpi`.
+
+```bash
+module --force purge
+module load StdEnv
+module load intel-classic/2021.6.0
+module load openmpi/4.1.2
+
+which mpicc
+mpicc --showme:link 2>/dev/null || mpicc -show
+```
+
 ### 6. Install mpi4py
 
+**On most systems:**
 ```bash
 pip install mpi4py==4.0.3
 ```
+
+**On LC:**
+
+On some LC systems, the Python toolchain injects an Anaconda-provided MPI (`libmpi.so.12`) into the
+link/runtime search path. If `mpi4py` links against that, but you load OpenMPI at runtime, imports
+can fail with missing OpenMPI symbols (e.g. `undefined symbol: ompi_mpi_real`).
+
+The procedure below forces `mpi4py` to link against the OpenMPI module you loaded above.
+
+First, install Cython and remove any existing `mpi4py`:
+```bash
+source ./venv_mfem/bin/activate
+
+python -m pip install --upgrade "cython>=3.0"
+pip uninstall -y mpi4py
+```
+
+Next, download the `mpi4py` source distribution:
+
+```bash
+cd /tmp
+rm -rf mpi4py-src && mkdir mpi4py-src && cd mpi4py-src
+python -m pip download --no-deps --no-binary=mpi4py mpi4py==4.0.3
+tar -xf mpi4py-4.0.3.tar.gz
+cd mpi4py-4.0.3
+```
+
+Create an `mpi.cfg` that points to your loaded OpenMPI `mpicc/mpicxx` and forces linkage against
+OpenMPI's `libmpi.so.40`:
+
+```bash
+OMPI_PREFIX="$(dirname "$(dirname "$(which mpicc)")")"
+OMPI_LIB="$OMPI_PREFIX/lib"
+
+cat > mpi.cfg <<EOF
+[mpi]
+mpicc  = $OMPI_PREFIX/bin/mpicc
+mpicxx = $OMPI_PREFIX/bin/mpicxx
+
+# key: do NOT link -lmpi
+libraries =
+
+# ensure OpenMPI runtime path is present
+runtime_library_dirs = $OMPI_LIB
+
+# force the exact OpenMPI SONAME
+extra_objects = $OMPI_LIB/libmpi.so.40
+EOF
+```
+
+Install from source using that config:
+```bash
+# make sure build tooling is up to date inside the venv
+python -m pip install -U pip setuptools wheel
+
+# tell mpi4py to use your mpi.cfg
+export MPI4PY_BUILD_MPICFG="$PWD/mpi.cfg"
+
+# build/install
+python -m pip install --no-build-isolation .
+```
+
+Verify the resulting `mpi4py` extension is linked only against OpenMPI (`libmpi.so.40`):
+
+```bash
+MPI_SO=$(python -c "import site,glob,os; sp=site.getsitepackages()[0]; print(glob.glob(os.path.join(sp,'mpi4py','MPI*.so'))[0])")
+echo "$MPI_SO"
+
+readelf -d "$MPI_SO" | egrep 'NEEDED.*libmpi|RPATH|RUNPATH'
+ldd "$MPI_SO" | egrep 'libmpi|open-rte|open-pal|anaconda|not found'
+```
+
+The `readelf` output should include:
+
+```
+... (NEEDED) Shared library: [libmpi.so.40]
+```
+
+If you also see `libmpi.so.12` under `NEEDED` (and `ldd` resolves it from an Anaconda path),
+imports may still fail. As a last resort, you can remove that unwanted dependency with `patchelf`:
+
+```bash
+cp -v "$MPI_SO" "${MPI_SO}.bak"
+patchelf --remove-needed libmpi.so.12 "$MPI_SO"
+readelf -d "$MPI_SO" | egrep 'NEEDED.*libmpi|RPATH|RUNPATH'
+```
+
+Now run a test import:
+```bash
+python -c "from mpi4py import MPI; print(MPI.Get_library_version())"
+```
+
+This should print something like the following: 
+
+`Open MPI v4.1.2, package: Open MPI sly1@rzwhippet7 Distribution, ident: 4.1.2, repo rev: v4.1.2, Nov 24, 2021`
+
+If so, mpi4py is now installed and linked correctly. Change back to the PyMFEM directory:
+
+```bash
+cd <path to PyMFEM directory>
+```
+
+
+**Suppressing warnings on LC:**
+
+When running on some nodes, you may see OpenMPI warnings about OpenFabrics/InfiniBand initialization.
+These are often benign for single-process runs. One way to silence the warning is:
+
+```bash
+export OMPI_MCA_btl_openib_warn_no_device_params_found=0
+export OMPI_MCA_btl_openib_allow_ib=0
+```
+
+Avoid hard-coding `OMPI_MCA_btl="self,tcp"` unless you know your system provides the `btl:tcp`
+component; on some systems it can cause `MPI_Init` failures on compute nodes.
+
 
 ### 7. Build PyMFEM
 
@@ -392,8 +536,38 @@ pip install mpi4py==4.0.3
 python setup.py install -v --with-parallel --with-gslib \
   --CC=gcc --CXX=g++ --MPICC=mpicc --MPICXX=mpic++ --with-lapack
 ```
-
 **Note**: On some systems you may need to adjust compiler names (e.g., `gcc-11`, `g++-11`).
+
+If this works, you have now installed PyMFEM!
+
+### LC note: “Do I need to redo this every login?”
+
+- The **venv is persistent**: once `venv_mfem` (and the patched `mpi4py` inside it) is created, it
+  will keep working across logins *as long as you don't reinstall/upgrade `mpi4py`* inside that venv.
+- Your **module environment is not persistent**: you generally need to `module load intel-classic`
+  and `module load openmpi` again in each new shell / batch job.
+- Any **environment variables** (e.g. `OMPI_MCA_btl`) must be set each session/job if you want them.
+  (e.g. `OMPI_MCA_btl_openib_allow_ib`, `OMPI_MCA_btl_openib_warn_no_device_params_found`).
+
+A simple solution is to create a small helper script (e.g. `env_lc.sh` in Higher-Order-LaSDI repo) with the following contents:
+
+
+```bash
+# env_lc.sh (example)
+module --force purge
+module load StdEnv
+module load intel-classic/2021.6.0
+module load openmpi/4.1.2
+source ./venv_mfem/bin/activate
+export OMPI_MCA_btl_openib_warn_no_device_params_found=0
+export OMPI_MCA_btl_openib_allow_ib=0
+```
+
+Before running LaSDI, `source` the script:
+```bash
+source env_lc.sh
+```
+
 
 ## Non-Uniform Time Grids
 
