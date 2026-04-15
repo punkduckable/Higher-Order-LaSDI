@@ -392,4 +392,3 @@ class Sampler:
         # We are now done. Since we now have the new FOM solutions, the next step is training.
         next_step = NextStep.Train;
         return next_step;
-

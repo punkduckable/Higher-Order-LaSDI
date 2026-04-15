@@ -27,7 +27,7 @@
 # ==================================================================================================
 
 trainer:
-  type:                   "Second_Order_Rollout"
+  type:                   "Second_Order_Weak"
 
   max_iter:               5000
   n_iter:                 30000
@@ -36,13 +36,12 @@ trainer:
   normalize:              false
   device:                 'cpu'
 
-  # ---- Noise injection ----
-  # Ratio of noise std to signal RMS.  Set to 0.0 to recover noise-free behaviour.
-  noise_ratio:            0.05
-
-  Second_Order_Rollout:
+  Second_Order_Weak:
     lr:                     0.001
     gradient_clip:          50.0
+
+    # Ratio of noise std to signal RMS.  Set to 0.0 to recover noise-free behaviour.
+    noise_ratio:            0.05
 
     p_rollout_init:         0.01
     rollout_update_freq:    20

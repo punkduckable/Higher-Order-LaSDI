@@ -33,6 +33,7 @@ from    ParameterSpace          import  ParameterSpace;
 from    Trainer                 import  Trainer;
 from    First_Order_Rollout     import  First_Order_Rollout;
 from    Second_Order_Rollout    import  Second_Order_Rollout;
+from    Second_Order_Weak       import  Second_Order_Weak;
 
 from    EncoderDecoder          import  EncoderDecoder;
 from    Autoencoder             import  Autoencoder, load_Autoencoder;
@@ -80,7 +81,8 @@ ld_dict = {                     'sindy'                 : SINDy,
                                 'spring_w'              : DampedSpring_weak,
                                 'switch'                : SwitchSINDy};
 trainer_dict = {                'First_Order_Rollout'   : First_Order_Rollout, 
-                                'Second_Order_Rollout'  : Second_Order_Rollout}
+                                'Second_Order_Rollout'  : Second_Order_Rollout,
+                                'Second_Order_Weak'     : Second_Order_Weak}
 sampler_dict = {                'FOM_Rollout'           : FOM_Rollout,
                                 'FOM_Variance'          : FOM_Variance};
 physics_dict = {                'Burgers'               : Burgers.Burgers,

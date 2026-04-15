@@ -88,14 +88,64 @@ class DampedSpring_weak(LatentDynamics):
         # Setup the loss function.
         self.MSE = torch.nn.MSELoss(reduction = 'mean');
         self.MAE = torch.nn.L1Loss(reduction = 'mean');
+
+        # Weak-form weight functions (set by the Trainer).
+        # These are dictionaries keyed by a parameter tuple (p0, p1, ..., p_{n_p-1}).
+        self.Phis_by_param   : dict[tuple, torch.Tensor] | None = None;
+        self.dPhis_by_param  : dict[tuple, torch.Tensor] | None = None;
+        self.d2Phis_by_param : dict[tuple, torch.Tensor] | None = None;
         return;
-    
+
+    @staticmethod
+    def _param_key(params_row: numpy.ndarray | torch.Tensor | list | tuple) -> tuple:
+        """
+        Convert a 1D parameter row into a stable, hashable tuple key.
+        """
+        if isinstance(params_row, torch.Tensor):
+            params_row = params_row.detach().cpu().tolist();
+        elif isinstance(params_row, numpy.ndarray):
+            params_row = params_row.tolist();
+        return tuple(float(x) for x in params_row);
+
+
+    # ---------------------------------------------------------------------------------------------
+    # Weak-form weight functions
+    # ---------------------------------------------------------------------------------------------
+
+    def set_weight_functions(self,
+                             Phis_by_param  : dict[tuple, torch.Tensor],
+                             dPhis_by_param : dict[tuple, torch.Tensor],
+                             d2Phis_by_param: dict[tuple, torch.Tensor]) -> None:
+        """
+        Store the weak-form test/weight functions internally.
+
+        The intended workflow is:
+            trainer builds (Phis, dPhis, d2Phis) for all relevant parameter combinations
+            -> calls latent_dynamics.set_weight_functions(...)
+            -> calls latent_dynamics.calibrate(...) (which looks them up by param tuple)
+        """
+        assert isinstance(Phis_by_param, dict) and isinstance(dPhis_by_param, dict) and isinstance(d2Phis_by_param, dict);
+        assert set(Phis_by_param.keys()) == set(dPhis_by_param.keys()) == set(d2Phis_by_param.keys()), (
+            "Weight function dictionaries must have identical key sets");
+
+        # Lightweight validation of shapes/types per key.
+        for k in Phis_by_param.keys():
+            Phi  = Phis_by_param[k];
+            dPhi = dPhis_by_param[k];
+            d2Phi= d2Phis_by_param[k];
+            assert isinstance(Phi, torch.Tensor),  "Phis_by_param[%s] must be a torch.Tensor" % str(k);
+            assert isinstance(dPhi, torch.Tensor), "dPhis_by_param[%s] must be a torch.Tensor" % str(k);
+            assert isinstance(d2Phi, torch.Tensor),"d2Phis_by_param[%s] must be a torch.Tensor" % str(k);
+            assert Phi.shape == dPhi.shape == d2Phi.shape, "Phi shapes must match for key %s" % str(k);
+
+        self.Phis_by_param  = Phis_by_param;
+        self.dPhis_by_param = dPhis_by_param;
+        self.d2Phis_by_param= d2Phis_by_param;
+        return;
+
 
 
     def calibrate(self,
-                  Phis          : list[torch.Tensor], 
-                  dPhis         : list[torch.Tensor],
-                  d2Phis        : list[torch.Tensor], 
                   Latent_States : list[torch.Tensor],
                   loss_type     : str,
                   t_Grid        : list[torch.Tensor],
@@ -193,6 +243,12 @@ class DampedSpring_weak(LatentDynamics):
         # Run checks on loss_type.
         assert(loss_type in ["MSE", "MAE"]);
 
+        # Weak-form weight functions must be set by the trainer before calibration.
+        assert self.Phis_by_param is not None and self.dPhis_by_param is not None and self.d2Phis_by_param is not None, (
+            "DampedSpring_weak requires weak-form weight functions. Call set_weight_functions(...) before calibrate().");
+        assert params is not None, (
+            "DampedSpring_weak requires `params` so it can look up weight functions by parameter tuple.");
+
         assert(isinstance(input_coefs, list));
         if(len(input_coefs) > 0):
             assert(isinstance(input_coefs, list));
@@ -218,23 +274,16 @@ class DampedSpring_weak(LatentDynamics):
             output_coefs_list : list[torch.Tensor] = [];
             
             for i in range(n_param):
-                # Extract params for this iteration (handle None case)
-                params_i = None if params is None else params[i, :].reshape(1, -1);
+                params_i = params[i, :].reshape(1, -1);
                 
                 # Calibrate on the i'th combination of parameter values.
                 if(len(input_coefs) == 0):
-                    output_coefs, loss_sindy_i, loss_coef_i, loss_stab_i = self.calibrate(  Phis          = [Phis[i]],
-                                                                                            dPhis         = [dPhis[i]],
-                                                                                            d2Phis        = [d2Phis[i]],
-                                                                                            Latent_States = [Latent_States[i]], 
+                    output_coefs, loss_sindy_i, loss_coef_i, loss_stab_i = self.calibrate(  Latent_States = [Latent_States[i]],
                                                                                             t_Grid        = [t_Grid[i]],
                                                                                             loss_type     = loss_type,
                                                                                             params        = params_i);
                 else:
-                    output_coefs, loss_sindy_i, loss_coef_i, loss_stab_i = self.calibrate(  Phis          = [Phis[i]],
-                                                                                            dPhis         = [dPhis[i]],
-                                                                                            d2Phis        = [d2Phis[i]],
-                                                                                            Latent_States = [Latent_States[i]], 
+                    output_coefs, loss_sindy_i, loss_coef_i, loss_stab_i = self.calibrate(  Latent_States = [Latent_States[i]],
                                                                                             t_Grid        = [t_Grid[i]],
                                                                                             input_coefs   = [input_coefs[i]],
                                                                                             loss_type     = loss_type,
@@ -249,7 +298,7 @@ class DampedSpring_weak(LatentDynamics):
             # Package everything to return!
             # Use cat instead of stack since each output_coefs already has shape (1, n_coefs)
             # cat along dim=0 gives (n_param, n_coefs) as expected
-            return torch.cat(output_coefs_list, dim=0), loss_sindy_list, loss_coef_list, loss_stab_list;
+            return torch.cat(output_coefs_list, dim = 0), loss_sindy_list, loss_coef_list, loss_stab_list;
         
 
 
@@ -266,9 +315,12 @@ class DampedSpring_weak(LatentDynamics):
         Z_D     : torch.Tensor  = Z[0];                     # shape = (n_t, n_z)
         Z_V     : torch.Tensor  = Z[1];                     # shape = (n_t, n_z)
 
-        Phis    : torch.Tensor  = Phis[0].to(device = Z_D.device, dtype = Z_D.dtype);
-        dPhis   : torch.Tensor  = dPhis[0].to(device = Z_D.device, dtype = Z_D.dtype);
-        d2Phis  : torch.Tensor  = d2Phis[0].to(device = Z_D.device, dtype = Z_D.dtype);
+        key0 : tuple = self._param_key(params[0, :]);
+        assert key0 in self.Phis_by_param, "No weight functions found for params=%s (key=%s)" % (str(params[0, :]), str(key0));
+
+        Phis    : torch.Tensor  = self.Phis_by_param[key0].to(device = Z_D.device, dtype = Z_D.dtype);
+        dPhis   : torch.Tensor  = self.dPhis_by_param[key0].to(device = Z_D.device, dtype = Z_D.dtype);
+        d2Phis  : torch.Tensor  = self.d2Phis_by_param[key0].to(device = Z_D.device, dtype = Z_D.dtype);
 
         # Concatenate Z_D, Z_V and a column of 1's. We will solve for the matrix, E, which gives 
         # the best fit for the system d2Z_dt2 = cat[Z_D, Z_V, 1] E. This matrix has the form 
@@ -341,8 +393,8 @@ class DampedSpring_weak(LatentDynamics):
         # -----------------------------------------------------------------------------------------
         # Compute the stability losses and return.
 
-        scale_D = torch.linalg.norm(d2Phis, dim=1, keepdim=True)
-        scale_V = torch.linalg.norm(dPhis,  dim=1, keepdim=True)
+        scale_D = torch.linalg.norm(d2Phis, dim=1, keepdim=True).clamp(min = 1.0e-10);
+        scale_V = torch.linalg.norm(dPhis,  dim=1, keepdim=True).clamp(min = 1.0e-10);
 
         if loss_type == "MSE":
             loss_D = self.MSE(lhs_D / scale_D, weak_RHS / scale_D)
@@ -603,8 +655,8 @@ class DampedSpring_weak(LatentDynamics):
         lhs_D = d2Phi @ Zs[0]
         lhs_V = -(dPhi @ Zs[1])
 
-        scale_D = torch.linalg.norm(d2Phi, dim=1, keepdim=True)
-        scale_V = torch.linalg.norm(dPhi,  dim=1, keepdim=True)
+        scale_D = torch.linalg.norm(d2Phi, dim=1, keepdim=True).clamp(min = 1.0e-10)
+        scale_V = torch.linalg.norm(dPhi,  dim=1, keepdim=True).clamp(min = 1.0e-10)
 
         Gk_D = torch.kron(Ins, PhiTheta / scale_D)
         Gk_V = torch.kron(Ins, PhiTheta / scale_V)

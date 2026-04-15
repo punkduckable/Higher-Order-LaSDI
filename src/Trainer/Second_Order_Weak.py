@@ -39,7 +39,14 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # Trainer class
 # -------------------------------------------------------------------------------------------------
 
-class Second_Order_Rollout(Trainer):
+class Second_Order_Weak(Trainer):
+    # Noise ratio for corrupting training data (0.0 = no noise).
+    noise_ratio : float;
+
+    # Clean (noise-free) training data, stored when noise_ratio > 0.
+    # Same structure as U_Train.
+    U_Train_clean : list;
+
     def __init__(self, 
                  physics            : Physics, 
                  encoder_decoder    : EncoderDecoder, 
@@ -66,7 +73,7 @@ class Second_Order_Rollout(Trainer):
 
         - `config['trainer']` contains base trainer settings such as `n_iter`, `max_iter`,
           `max_greedy_iter`, `normalize`, and `device`.
-        - Subclass-specific hyperparameters live under `config['trainer']['Second_Order_Rollout']`
+        - Subclass-specific hyperparameters live under `config['trainer']['Second_Order_Weak']`
           (learning rate, rollout curriculum settings, and loss weights/types).
 
         **Coefficient semantics**
@@ -121,14 +128,37 @@ class Second_Order_Rollout(Trainer):
 
         assert 'trainer' in config,                                 "config must contain a 'trainer' sub-dictionary";
         assert 'type' in config['trainer'],                         "trainer dictionary must contain a 'type' attribute";
-        assert config['trainer']['type'] == "Second_Order_Rollout", "config['trainer']['type'] = %s, should be Second_Order_Rollout" % config['trainer']['type'];
-        assert "Second_Order_Rollout" in config['trainer'],         "Second_Order_Rollout must be in config['trainer']";
+        assert config['trainer']['type'] == "Second_Order_Weak",    "config['trainer']['type'] = %s, should be Second_Order_Weak" % config['trainer']['type'];
+        assert "Second_Order_Weak" in config['trainer'],            "Second_Order_Weak must be in config['trainer']";
 
-        LOGGER.info("Initializing a Second_Order_Rollout object"); 
+        LOGGER.info("Initializing a Second_Order_Weak object"); 
+
+        # Set up weak form specific stuff
+        self.use_weak_form      = False;
+        self.Phis               = {};   # dict[param_tuple -> torch.Tensor(H, n_t)]
+        self.dPhis              = {};   # dict[param_tuple -> torch.Tensor(H, n_t)]
+        self.d2Phis             = {};   # dict[param_tuple -> torch.Tensor(H, n_t)]
+        self.U_Train_clean      = [];               # Stores clean training data when noise is applied.
 
         # Fetch the trainer sub-dictionary.
-        trainer_config          : dict      = config['trainer'];
-        sub_config              : dict      = trainer_config['Second_Order_Rollout'];
+        trainer_config          : dict          = config['trainer'];
+        sub_config              : dict          = trainer_config['Second_Order_Weak'];
+        weak_config             : dict | None   = None;
+        if ('latent_dynamics' in config) and (config['latent_dynamics'].get('type', None) == 'spring_w'):
+            assert 'spring_w' in config['latent_dynamics'], "config['latent_dynamics'] must contain a 'spring_w' sub-dictionary when type == 'spring_w'";
+            weak_config         = config['latent_dynamics']['spring_w'];
+            self.use_weak_form  = True;
+
+        # Set weak form specific settings.
+        if weak_config is not None:
+            self.test_func          = weak_config['test_func'];
+            self.test_func_width    = weak_config['test_func_width'];
+            self.overlap            = weak_config['overlap'];
+            self.pq                 = weak_config['pq'];
+            self.LS_loss_type       = weak_config['LS_loss_type'];
+
+            LOGGER.info("Weak form enabled with test_func=%s, LS_loss_type=%s" % (self.test_func, self.LS_loss_type));
+
 
         # Call the super class initializer.
         super().__init__(   n_IC            = n_IC,
@@ -157,7 +187,7 @@ class Second_Order_Rollout(Trainer):
         # Randomly select `n_rollouts` rollable start frames per training trajectory per epoch,
         # rollout each one using the *true* absolute-time grid slice t[k:j], and compare full
         # predicted trajectories against the true trajectory slice (no interpolation).
-        assert 'n_rollouts' in sub_config, "Second_Order_Rollout config must include `n_rollouts` (int > 0) for rollout supervision";
+        assert 'n_rollouts' in sub_config, "Second_Order_Weak config must include `n_rollouts` (int > 0) for rollout supervision";
         self.n_rollouts             : int       = int(sub_config['n_rollouts']);
         assert self.n_rollouts > 0, "trainer.n_rollouts must be > 0";
         
@@ -183,13 +213,256 @@ class Second_Order_Rollout(Trainer):
         self.MSE                            = torch.nn.MSELoss(reduction = 'mean');
         self.MAE                            = torch.nn.L1Loss(reduction = 'mean');
 
+        # Noise configuration: ratio of noise std to signal RMS.
+        self.noise_ratio        : float = float(sub_config.get('noise_ratio', 0.0));
+        if self.noise_ratio > 0.0:
+            LOGGER.info("Noise injection enabled: noise_ratio = %f" % self.noise_ratio);
+        else:
+            LOGGER.info("Noise injection disabled (noise_ratio = 0.0)");
+
         # All done!
         return;
 
 
 
     # ---------------------------------------------------------------------------------------------
-    # _IC_rollout_setup
+    # Method to add noise
+    # ---------------------------------------------------------------------------------------------
+
+    @staticmethod
+    def addNoise(x : torch.Tensor, noise_ratio : float) -> torch.Tensor:
+        """
+        Add Gaussian noise to a tensor, scaled by the signal's RMS power.
+
+        sigma = noise_ratio * sqrt(mean(x^2))
+        noise ~ N(0, sigma)
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        x : torch.Tensor
+            The clean signal to corrupt.
+
+        noise_ratio : float
+            The ratio of the noise standard deviation to the signal RMS.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        x_noisy : torch.Tensor
+            The corrupted signal (same shape and dtype as x).
+        """
+
+        if noise_ratio <= 0.0:
+            return x;
+        
+        signal_power    : float         = float(torch.sqrt(torch.mean(x**2)).item());
+        sigma           : float         = noise_ratio * signal_power;
+        noise           : torch.Tensor  = torch.normal(mean = 0.0, std = sigma, size = x.shape).to(dtype = x.dtype, device = x.device);
+        return x + noise;
+
+
+
+    def apply_noise_to_U_Train(self) -> None:
+        """
+        Apply Gaussian noise to the current training data (self.U_Train).
+
+        Before corrupting the data, a deep copy of the clean training data is saved in
+        self.U_Train_clean so that noise-free references remain available (e.g., for
+        initial conditions). Note that the first frame (IC) of every trajectory is left
+        untouched because we assume perfect initial conditions.
+        """
+
+        if self.noise_ratio <= 0.0:
+            return;
+
+        LOGGER.info("Applying noise (ratio = %f) to %d training trajectories" % (self.noise_ratio, len(self.U_Train)));
+
+        # Deep-copy clean data before corruption.
+        self.U_Train_clean = [];
+        for i in range(len(self.U_Train)):
+            self.U_Train_clean.append([u.clone() for u in self.U_Train[i]]);
+
+        # Corrupt each trajectory, each IC derivative, but preserve the first frame (IC).
+        for i in range(len(self.U_Train)):
+            for j in range(len(self.U_Train[i])):
+                clean_IC    : torch.Tensor  = self.U_Train[i][j][0:1, ...].clone();     # shape (1, ...)
+                noisy_data  : torch.Tensor  = self.addNoise(self.U_Train[i][j], self.noise_ratio);
+                noisy_data[0:1, ...]        = clean_IC;                                  # restore perfect IC
+                self.U_Train[i][j]          = noisy_data;
+                
+                LOGGER.debug("  Trajectory %d, IC %d: signal_rms=%.6e, noise_std=%.6e" % (
+                    i, j,
+                    float(torch.sqrt(torch.mean(self.U_Train_clean[i][j]**2)).item()),
+                    float(self.noise_ratio * torch.sqrt(torch.mean(self.U_Train_clean[i][j]**2)).item())));
+
+        LOGGER.info("Noise injection complete. Clean data saved in U_Train_clean.");
+        return;
+
+
+
+    # ---------------------------------------------------------------------------------------------
+    # Test function stuff
+    # ---------------------------------------------------------------------------------------------
+
+    def getUniformGrid(self, T : float, L : float, s : float, p : int):
+        """
+        Generates a uniform grid of support intervals for compactly-supported test functions.
+
+        T : final time
+        L : test-function support width
+        s : overlap amount between adjacent supports
+        p : unused legacy argument kept for backward compatibility
+        """
+
+        overlap = s;
+        grid = [];
+        a = 0.0;
+        b = float(L);
+        grid.append([a, b]);
+        while (b - overlap + L) <= T:
+            a = b - overlap;
+            b = a + L;
+            grid.append([a, b]);
+
+        grid = numpy.asarray(grid, dtype = numpy.float64);
+        a_s = grid[:, 0];
+        b_s = grid[:, 1];
+        return a_s, b_s;
+
+
+
+    def get_test_functions(self,
+                           T               : float,
+                           n_t             : int,
+                           timesteps       : torch.Tensor,
+                           test_func_width : float,
+                           overlap         : float,
+                           pq              : int,
+                           test_func       : str = 'PC-poly',
+                           H               : int = 30) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Build compactly-supported weak-form test functions and their first/second derivatives.
+
+        Returns tensors of shape (H, n_t).
+        """
+
+        t       : torch.Tensor  = timesteps;
+        dtype   = t.dtype;
+        device  = t.device;
+
+        if test_func == 'bump':
+            L = float(test_func_width);
+            s = float(test_func_width) * float(overlap);
+            a_s, b_s = self.getUniformGrid(float(T), L, s, 1);
+
+            H_eff    : int = len(a_s);
+            LOGGER.info("Number of bump test functions: %d" % H_eff);
+
+            Phis    = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+            dPhis   = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+            d2Phis  = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+
+            eta     : float = 5.0;
+            a       : float = L / 2.0;
+            const   : float = eta;
+            nugget  : float = 1.0e-7;
+            a_space = numpy.linspace(-a + nugget, a - nugget, 1000);
+            bump    = numpy.exp(-eta / (1.0 - (a_space / a) ** 2));
+            C       : float = float(1.0 / numpy.trapz(bump, a_space) / numpy.exp(const));
+
+            h = torch.linspace(a, float(T) - a, H_eff, dtype = dtype, device = device);
+            for j, ji in enumerate(h):
+                for i, ti in enumerate(t):
+                    x       = (ti - ji) / a;
+                    denom   = 1.0 - x ** 2;
+                    f       = -eta / denom + const;
+                    fp      = -eta / (denom ** 2) * 2.0 * x / a;
+                    fpp     = (-eta / (denom ** 2) * 2.0 / (a * a)) + (-eta / (denom ** 3) * 2.0 * x / a * -2.0 * x / a * -2.0);
+                    if denom > 0:
+                        expf            = torch.exp(f);
+                        Phis[j, i]      = C * expf;
+                        dPhis[j, i]     = C * expf * fp;
+                        d2Phis[j, i]    = C * (expf * (fp ** 2) + expf * fpp);
+
+        elif test_func == 'PC-poly':
+            L = float(test_func_width);
+            s = float(test_func_width) * float(overlap);
+            a_s, b_s = self.getUniformGrid(float(T), L, s, 1);
+
+            H_eff    : int = len(a_s);
+            LOGGER.info("Number of PC-poly test functions: %d" % H_eff);
+
+            Phis    = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+            dPhis   = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+            d2Phis  = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+
+            p, q = pq, pq;
+            for h in range(H_eff):
+                a = float(a_s[h]);
+                b = float(b_s[h]);
+                C = 1.0 / (p ** p * q ** q) * ((p + q) / (b - a)) ** (p + q);
+                mask = (t >= a) * (t <= b);
+                Phis[h, :] = C * (t - a) ** p * (b - t) ** q * mask;
+                dPhis[h, :] = C * (p * (t - a) ** (p - 1) * (b - t) ** q - q * (t - a) ** p * (b - t) ** (q - 1)) * mask;
+                d2Phis[h, :] = C * (
+                    p * (p - 1) * (t - a) ** (p - 2) * (b - t) ** q
+                    - q * p * (t - a) ** (p - 1) * (b - t) ** (q - 1)
+                    - q * p * (t - a) ** (p - 1) * (b - t) ** (q - 1)
+                    + q * (q - 1) * (t - a) ** p * (b - t) ** (q - 2)
+                ) * mask;
+
+        else:
+            raise ValueError("Unsupported weak-form test function type: %s" % str(test_func));
+
+        return Phis, dPhis, d2Phis;
+
+
+
+    def _prepare_weak_form_data(self) -> None:
+        """
+        Build and cache weak-form test functions keyed by parameter tuple.
+
+        Design choice: we key by parameter values (not by list index) so that downstream
+        components (including greedy sampling) can look up weight functions without relying on
+        list ordering.
+        """
+
+        assert hasattr(self, 'test_func'), "Weak form requested but no weak-form config was provided to the trainer";
+        assert len(self.t_Test) == self.param_space.n_test(), "t_Test is not initialized or has wrong length";
+
+        self.Phis   = {};
+        self.dPhis  = {};
+        self.d2Phis = {};
+
+        # Build weights for the *entire* test space once. Training parameters are a subset of the
+        # test space, so this covers all calibrations and avoids needing sampler-specific logic.
+        for i in range(self.param_space.n_test()):
+            key = tuple(self.param_space.test_space[i, :]);
+            t_i : torch.Tensor = self.t_Test[i].to(self.device);
+            T_i : float        = float(t_i[-1].detach().cpu().item());
+            Phi_i, dPhi_i, d2Phi_i = self.get_test_functions(
+                T               = T_i,
+                n_t             = int(t_i.shape[0]),
+                timesteps       = t_i,
+                test_func_width = self.test_func_width,
+                overlap         = self.overlap,
+                pq              = self.pq,
+                test_func       = self.test_func);
+            self.Phis[key]   = Phi_i;
+            self.dPhis[key]  = dPhi_i;
+            self.d2Phis[key] = d2Phi_i;
+
+        LOGGER.info("Prepared weak-form test functions for %d test trajectories" % len(self.Phis));
+        return;
+
+
+
+    # ---------------------------------------------------------------------------------------------
+    # IC Rollout setup
     # ---------------------------------------------------------------------------------------------
 
     def _IC_rollout_setup( self, 
@@ -365,6 +638,14 @@ class Second_Order_Rollout(Trainer):
         
         # -------------------------------------------------------------------------------------
         # Setup. 
+        
+        # Weak-form setup (only needed for weak-form latent dynamics).
+        if getattr(self, "use_weak_form", False):
+            self._prepare_weak_form_data();
+            assert hasattr(self.latent_dynamics, "set_weight_functions"), "To use weak forms, the latent dynamics class must have a 'set_weight_functions' method."
+            self.latent_dynamics.set_weight_functions(Phis_by_param  = self.Phis,
+                                                      dPhis_by_param = self.dPhis,
+                                                      d2Phis_by_param= self.d2Phis);
 
         # Reset optimizer.
         Reset_Optimizer(self.optimizer);
@@ -418,6 +699,25 @@ class Second_Order_Rollout(Trainer):
 
             # Make sure we found the training combination of parameters in the test space.
             assert(ith_train_in_test == True);
+
+
+        # -----------------------------------------------------------------------------------------
+        # Noise-related warnings.
+
+        if self.noise_ratio > 0.0 and not self.use_weak_form:
+            if self.loss_weights.get('consistency', 0.0) > 0.0:
+                LOGGER.warning(
+                    "noise_ratio = %f but consistency weight = %f and weak form is DISABLED. "
+                    "Finite-difference consistency losses are unreliable with noisy data; "
+                    "consider enabling the weak form or setting consistency weight to 0." % (self.noise_ratio, self.loss_weights['consistency']));
+            if self.loss_weights.get('chain_rule', 0.0) > 0.0:
+                LOGGER.warning(
+                    "noise_ratio = %f but chain_rule weight = %f and weak form is DISABLED. "
+                    "Strong-form chain-rule losses compare against noisy FOM velocity and use FD of noisy "
+                    "latent states; consider enabling the weak form or setting chain_rule weight to 0." % (self.noise_ratio, self.loss_weights['chain_rule']));
+        elif self.noise_ratio > 0.0 and self.use_weak_form:
+            LOGGER.info("noise_ratio = %f with weak form active. Consistency and chain-rule losses "
+                        "will use noise-tolerant weak-form variants (IBP, no finite differences)." % self.noise_ratio);
 
 
         # -----------------------------------------------------------------------------------------
@@ -512,6 +812,9 @@ class Second_Order_Rollout(Trainer):
                 D_i         : torch.Tensor  = U_Train_device[i][0];
                 V_i         : torch.Tensor  = U_Train_device[i][1];
 
+                D_i         = torch.squeeze(D_i);  # shape (n_t(i), physics.Frame_Shape)
+                V_i         = torch.squeeze(V_i);  # shape (n_t(i), physics
+
                 t_Grid_i    : torch.Tensor  = t_Train_device[i];
                 n_t_i       : int           = t_Grid_i.shape[0];
 
@@ -548,8 +851,12 @@ class Second_Order_Rollout(Trainer):
                 Latent_States.append(Z_i);
 
                 U_Pred_i    : list[torch.Tensor]    = list(encoder_decoder_device.Decode(*Z_i));
-                D_Pred_i    : torch.Tensor          = U_Pred_i[0];  # shape = (n_t(i), physics.Frame_Shape)
-                V_Pred_i    : torch.Tensor          = U_Pred_i[1];  # shape = (n_t(i), physics.Frame_Shape)
+                #D_Pred_i    : torch.Tensor          = U_Pred_i[0];  # shape = (n_t(i), physics.Frame_Shape)
+                #V_Pred_i    : torch.Tensor          = U_Pred_i[1];  # shape = (n_t(i), physics.Frame_Shape)
+
+                D_Pred_i    : torch.Tensor          = torch.squeeze(U_Pred_i[0]);  # shape = (n_t(i), physics.Frame_Shape)
+                V_Pred_i    : torch.Tensor          = torch.squeeze(U_Pred_i[1]);  # shape = (n_t(i), physics.Frame_Shape)
+
 
                 LOGGER.debug("Forward Pass (Autoencoder_Pair) - complete for parameter combination %d" % i);
                 self.timer.end("Forward Pass");
@@ -596,39 +903,67 @@ class Second_Order_Rollout(Trainer):
                     self.timer.start("Consistency Loss");
                     LOGGER.debug("Consistency Loss (Autoencoder_Pair) - start for parameter combination %d" % i);
 
-                    # Make sure Z_V actually looks like the time derivative of Z_D. 
-                    if(self.physics.Uniform_t_Grid == True):
-                        h               : float             = t_Grid_i[1] - t_Grid_i[0];
-                        dZ_Di_dt        : torch.Tensor      = Derivative1_Order4(U = Z_D_i, h = h);
+                    if self.use_weak_form:
+                        # ----------------------------------------------------------------
+                        # Weak-form consistency.
+                        #
+                        # The strong form enforces  dZ_D/dt = Z_V  via finite differences,
+                        # which amplifies noise.  Instead, integrate against test functions
+                        # and apply IBP (boundary terms vanish because φ_h is compactly
+                        # supported):
+                        #
+                        #   ∫ φ'_h(t) Z_D(t) dt  +  ∫ φ_h(t) Z_V(t) dt  =  0
+                        #
+                        # Matrix form:   dPhi @ Z_D  +  Phi @ Z_V  ≈  0
+                        # ----------------------------------------------------------------
+
+                        key = tuple(self.param_space.train_space[i, :]);
+                        Phi_i   : torch.Tensor = self.Phis[key].to(device = Z_D_i.device, dtype = Z_D_i.dtype);
+                        dPhi_i  : torch.Tensor = self.dPhis[key].to(device = Z_D_i.device, dtype = Z_D_i.dtype);
+
+                        # Row-wise normalization (one scale per test function) so that
+                        # test functions of different widths contribute equally.
+                        scale   : torch.Tensor = torch.linalg.norm(dPhi_i, dim = 1, keepdim = True).clamp(min = 1e-10);
+
+                        # Z-space:  dPhi @ Z_D + Phi @ Z_V ≈ 0
+                        weak_lhs_Z  : torch.Tensor = (dPhi_i @ Z_D_i + Phi_i @ Z_V_i) / scale;     # (H, n_z)
+                        consistency_Z_loss_ith_param = torch.mean(weak_lhs_Z**2) if self.loss_types['consistency'] == "MSE" else torch.mean(torch.abs(weak_lhs_Z));
+
+                        # U-space:  dPhi @ D_pred + Phi @ V_pred ≈ 0
+                        weak_lhs_U  : torch.Tensor = (dPhi_i @ D_Pred_i + Phi_i @ V_Pred_i) / scale;  # (H, n_x)
+                        consistency_U_loss_ith_param = torch.mean(weak_lhs_U**2) if self.loss_types['consistency'] == "MSE" else torch.mean(torch.abs(weak_lhs_U));
+
                     else:
-                        dZ_Di_dt        : torch.Tensor      = Derivative1_Order2_NonUniform(U = Z_D_i, t_Grid = t_Grid_i);
+                        # ----------------------------------------------------------------
+                        # Strong-form consistency (original finite-difference version).
+                        # ----------------------------------------------------------------
+
+                        # Make sure Z_V actually looks like the time derivative of Z_D. 
+                        if(self.physics.Uniform_t_Grid == True):
+                            h               : float             = t_Grid_i[1] - t_Grid_i[0];
+                            dZ_Di_dt        : torch.Tensor      = Derivative1_Order4(U = Z_D_i, h = h);
+                        else:
+                            dZ_Di_dt        : torch.Tensor      = Derivative1_Order2_NonUniform(U = Z_D_i, t_Grid = t_Grid_i);
+                        
+                        diff_Z = dZ_Di_dt - Z_V_i;
+                        consistency_Z_loss_ith_param = torch.mean(diff_Z**2) if self.loss_types['consistency'] == "MSE" else torch.mean(torch.abs(diff_Z));
+
+                        # Next, make sure that V_Pred actually looks like the derivative of D_Pred. 
+                        if(self.physics.Uniform_t_Grid  == True):
+                            h               : float             = t_Grid_i[1] - t_Grid_i[0];
+                            dD_Pred_i_dt    : torch.Tensor      = Derivative1_Order4(U = D_Pred_i, h = h);
+                        else:
+                            dD_Pred_i_dt    : torch.Tensor      = Derivative1_Order2_NonUniform(U = D_Pred_i, t_Grid = t_Grid_i);
+
+                        diff_U = dD_Pred_i_dt - V_Pred_i;
+                        consistency_U_loss_ith_param = torch.mean(diff_U**2) if self.loss_types['consistency'] == "MSE" else torch.mean(torch.abs(diff_U));
+
+                    # Accumulate and store.
+                    loss_consistency_Z += consistency_Z_loss_ith_param;
+                    loss_consistency_U += consistency_U_loss_ith_param;
                     
-                    # Compute differences once
-                    diff_Z = dZ_Di_dt - Z_V_i;
-                    
-                    # Compute loss from difference
-                    consistency_Z_loss_ith_param = torch.mean(diff_Z**2) if self.loss_types['consistency'] == "MSE" else torch.mean(torch.abs(diff_Z));
-                    loss_consistency_Z          += consistency_Z_loss_ith_param;
-                    
-                    # Store per-parameter-combination loss
                     param_tuple = tuple(self.param_space.train_space[i, :]);
                     self._store_loss_by_param('consistency_Z', param_tuple, iter + 1, consistency_Z_loss_ith_param.item());
-
-                    # Next, make sure that V_Pred actually looks like the derivative of D_Pred. 
-                    if(self.physics.Uniform_t_Grid  == True):
-                        h               : float             = t_Grid_i[1] - t_Grid_i[0];
-                        dD_Pred_i_dt    : torch.Tensor      = Derivative1_Order4(U = D_Pred_i, h = h);
-                    else:
-                        dD_Pred_i_dt    : torch.Tensor      = Derivative1_Order2_NonUniform(U = D_Pred_i, t_Grid = t_Grid_i);
-
-                    # Compute difference once
-                    diff_U = dD_Pred_i_dt - V_Pred_i;
-                    
-                    # Compute loss from difference
-                    consistency_U_loss_ith_param = torch.mean(diff_U**2) if self.loss_types['consistency'] == "MSE" else torch.mean(torch.abs(diff_U));
-                    loss_consistency_U          += consistency_U_loss_ith_param;
-                    
-                    # Store per-parameter-combination loss
                     self._store_loss_by_param('consistency_U', param_tuple, iter + 1, consistency_U_loss_ith_param.item());
 
                     LOGGER.debug("Consistency Loss (Autoencoder_Pair) - complete for parameter combination %d" % i);
@@ -642,49 +977,65 @@ class Second_Order_Rollout(Trainer):
                     self.timer.start("Chain Rule Loss");
                     LOGGER.debug("Chain Rule Loss (Autoencoder_Pair) - start for parameter combination %d" % i);
 
-                    # First, we compute the U portion of the chain rule loss. This stems from the 
-                    # fact that 
-                    #       (d/dt)U(t) \approx (d/dt)\phi_D,D(Z_D(t)) 
-                    #                   = (d/dz)\phi_D,D(Z_D(t)) Z_V(t)
-                    # Here, \phi_D,D is the displacement portion of the decoder. We can use torch 
-                    # to compute jacobian-vector products. Note that the jvp function expects a 
-                    # function as its first arguments (to define the forward pass). It passes the 
-                    # inputs through func, then computes the jacobian-vector product (using 
-                    # reverse mode AD) of inputs with v. It returns the result of the forward pass 
-                    # and the associated jacobian-vector product. We only keep the latter.
-                    d_dz_D_Pred__Z_V_i  : torch.Tensor  = torch.autograd.functional.jvp(
-                                                                func    = lambda Z_D : encoder_decoder_device.Displacement_Autoencoder.Decode(Z_D)[0], 
-                                                                inputs  = Z_D_i, 
-                                                                v       = Z_V_i)[1];
+                    if self.use_weak_form:
+                        # ----------------------------------------------------------------
+                        # Weak-form chain rule.
+                        #
+                        # U-space chain rule enforces  V_FOM(t) = (d/dt) dec(Z_D(t)).
+                        # Multiply by φ_h, integrate, apply IBP:
+                        #
+                        #   ∫ φ_h(t) V_FOM(t) dt  =  -∫ φ'_h(t) dec(Z_D(t)) dt
+                        #
+                        # i.e.   Phi @ V_FOM + dPhi @ D_pred ≈ 0
+                        #
+                        # This smooths the noisy V_FOM and avoids JVP entirely.
+                        #
+                        # Z-space chain rule (Z_V = (d/dt)enc(D)) yields the same
+                        # weak equation as consistency Z:  dPhi @ Z_D + Phi @ Z_V ≈ 0
+                        # so it is *structurally identical* when the weak form is active.
+                        # We still compute and log it for monitoring.
+                        # ----------------------------------------------------------------
+
+                        key = tuple(self.param_space.train_space[i, :]);
+                        Phi_i   : torch.Tensor = self.Phis[key].to(device = Z_D_i.device, dtype = Z_D_i.dtype);
+                        dPhi_i  : torch.Tensor = self.dPhis[key].to(device = Z_D_i.device, dtype = Z_D_i.dtype);
+                        scale   : torch.Tensor = torch.linalg.norm(dPhi_i, dim = 1, keepdim = True).clamp(min = 1e-10);
+
+                        # U-space:  Phi @ V_FOM + dPhi @ D_pred ≈ 0
+                        weak_cr_U  : torch.Tensor = (Phi_i @ V_i + dPhi_i @ D_Pred_i) / scale;
+                        chain_rule_U_loss_ith_param = torch.mean(weak_cr_U**2) if self.loss_types['chain_rule'] == "MSE" else torch.mean(torch.abs(weak_cr_U));
+
+                        # Z-space:  dPhi @ Z_D + Phi @ Z_V ≈ 0  (same as weak consistency Z)
+                        weak_cr_Z  : torch.Tensor = (dPhi_i @ Z_D_i + Phi_i @ Z_V_i) / scale;
+                        chain_rule_Z_loss_ith_param = torch.mean(weak_cr_Z**2) if self.loss_types['chain_rule'] == "MSE" else torch.mean(torch.abs(weak_cr_Z));
+
+                    else:
+                        # ----------------------------------------------------------------
+                        # Strong-form chain rule (original JVP version).
+                        # ----------------------------------------------------------------
+
+                        # U-space: V_FOM ≈ J_dec(Z_D) · Z_V
+                        d_dz_D_Pred__Z_V_i  : torch.Tensor  = torch.autograd.functional.jvp(
+                                                                    func    = lambda Z_D : encoder_decoder_device.Displacement_Autoencoder.Decode(Z_D)[0], 
+                                                                    inputs  = Z_D_i, 
+                                                                    v       = Z_V_i)[1];
+                        diff_U = V_i - d_dz_D_Pred__Z_V_i;
+                        chain_rule_U_loss_ith_param = torch.mean(diff_U**2) if self.loss_types['chain_rule'] == "MSE" else torch.mean(torch.abs(diff_U));
+
+                        # Z-space: Z_V ≈ J_enc(D) · V
+                        d_dx_Z_D__V         : torch.Tensor  = torch.autograd.functional.jvp(
+                                                                    func    = lambda D : encoder_decoder_device.Displacement_Autoencoder.Encode(D)[0],
+                                                                    inputs  = D_i, 
+                                                                    v       = V_i)[1];
+                        diff_Z = Z_V_i - d_dx_Z_D__V;
+                        chain_rule_Z_loss_ith_param = torch.mean(diff_Z**2) if self.loss_types['chain_rule'] == "MSE" else torch.mean(torch.abs(diff_Z));
+
+                    # Accumulate and store.
+                    loss_chain_rule_U += chain_rule_U_loss_ith_param;
+                    loss_chain_rule_Z += chain_rule_Z_loss_ith_param;
                     
-                    # Compute difference once
-                    diff_U = V_i - d_dz_D_Pred__Z_V_i;
-                    
-                    # Compute loss from difference
-                    chain_rule_U_loss_ith_param = torch.mean(diff_U**2) if self.loss_types['chain_rule'] == "MSE" else torch.mean(torch.abs(diff_U));
-                    loss_chain_rule_U          += chain_rule_U_loss_ith_param;
-                    
-                    # Store per-parameter-combination loss
                     param_tuple = tuple(self.param_space.train_space[i, :]);
                     self._store_loss_by_param('chain_rule_U', param_tuple, iter + 1, chain_rule_U_loss_ith_param.item());
-
-                    # Next, we compute the Z portion of the chain rule loss:
-                    #       (d/dt)Z(t) \approx (d/dt)\phi_E,D(D(t))
-                    #                   = (d/dX)\phi_E,D(D(t)) V(t)
-                    # Here, \phi_E,D is the displacement portion of the encoder.
-                    d_dx_Z_D__V         : torch.Tensor  = torch.autograd.functional.jvp(
-                                                                func    = lambda D : encoder_decoder_device.Displacement_Autoencoder.Encode(D)[0],
-                                                                inputs  = D_i, 
-                                                                v       = V_i)[1];
-                    
-                    # Compute difference once
-                    diff_Z = Z_V_i - d_dx_Z_D__V;
-                    
-                    # Compute loss from difference
-                    chain_rule_Z_loss_ith_param = torch.mean(diff_Z**2) if self.loss_types['chain_rule'] == "MSE" else torch.mean(torch.abs(diff_Z));
-                    loss_chain_rule_Z          += chain_rule_Z_loss_ith_param;
-                    
-                    # Store per-parameter-combination loss
                     self._store_loss_by_param('chain_rule_Z', param_tuple, iter + 1, chain_rule_Z_loss_ith_param.item());
 
                     LOGGER.debug("Chain Rule Loss (Autoencoder_Pair) - complete for parameter combination %d" % i);
@@ -710,12 +1061,12 @@ class Second_Order_Rollout(Trainer):
             # called "train_coefs" of shape (n_train, n_coefs), where n_train = number of training 
             # parameter parameters and n_coefs denotes the number of coefficients in the latent
             # dynamics model. 
-            train_coefs, loss_LD_list, loss_coef_list, loss_stab_list   = self.latent_dynamics.calibrate(   
-                                                                            Latent_States    = Latent_States, 
-                                                                            t_Grid           = t_Train_device,
-                                                                            input_coefs      = train_coefs_list,
-                                                                            loss_type        = self.loss_types['LD'],
-                                                                            params           = self.param_space.train_space);
+            train_coefs, loss_LD_list, loss_coef_list, loss_stab_list = self.latent_dynamics.calibrate(
+                                                                        Latent_States    = Latent_States,
+                                                                        t_Grid           = t_Train_device,
+                                                                        input_coefs      = train_coefs_list,
+                                                                        loss_type        = self.loss_types['LD'],
+                                                                        params           = self.param_space.train_space);
 
             # Log coefficient statistics to diagnose constant dynamics issue
             if iter % 100 == 0 or iter == start_iter:  # Log every 100 iters and first iter
@@ -1097,3 +1448,110 @@ class Second_Order_Rollout(Trainer):
         # All done!
         return;
     
+
+
+
+    # ---------------------------------------------------------------------------------------------
+    # Save, Load
+    # ---------------------------------------------------------------------------------------------
+
+    def export(self) -> dict:
+        """
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        dict_ : dict
+            A dictionary housing most of the internal variables in self. You can pass this 
+            dictionary to self (after initializing it using ParameterSpace, encoder_decoder, and 
+            LatentDynamics objects) to make a GLaSDI object whose internal state matches that of 
+            self.
+        """
+
+        dict_ = {'U_Train'                  : self.U_Train, 
+                 'U_Test'                   : self.U_Test,
+                 't_Train'                  : self.t_Train,
+                 't_Test'                   : self.t_Test,
+                 'best_train_coefs'         : self.best_train_coefs,                   # Shape = (n_train, n_coefs).
+                 # Store as numpy for portability across devices / torch versions.
+                 'test_coefs'               : self.test_coefs.detach().cpu().numpy(),  # Shape = (n_test, n_coefs).
+                 'restart_iter'             : self.restart_iter, 
+                 'timer'                    : self.timer.export(), 
+                 'config'                   : self.config,
+                 'normalize'                : self.normalize,
+                 'data_mean'                : None if self.data_mean is None else [float(m.detach().cpu().item()) for m in self.data_mean],
+                 'data_std'                 : None if self.data_std  is None else [float(s.detach().cpu().item()) for s in self.data_std],
+                 'noise_ratio'              : self.noise_ratio,
+                 'U_Train_clean'            : self.U_Train_clean};
+        return dict_;
+
+
+
+    def load(self, dict_ : dict) -> None:
+        """
+        Modifies self's internal state to match the one whose export method generated the dict_ 
+        dictionary.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments 
+        -------------------------------------------------------------------------------------------
+
+        dict_ : dict 
+            This should be a dictionary returned by calling the export method on another 
+            GLaSDI object. We use this to make self hav the same internal state as the object that 
+            generated dict_. 
+            
+
+        -------------------------------------------------------------------------------------------
+        Returns  
+        -------------------------------------------------------------------------------------------
+        
+        Nothing!
+        """
+
+        # Extract instance variables from dict_.
+        self.U_Train            : list[list[torch.Tensor]]  = dict_['U_Train'];             # len = n_train, i'th element is an n_IC element list.  
+        self.U_Test             : list[list[torch.Tensor]]  = dict_['U_Test'];              # len = n_test, i'th element is an n_IC element list.
+
+        self.t_Train            : list[torch.Tensor]        = dict_['t_Train'];             # len = n_train.
+        self.t_Test             : list[torch.Tensor]        = dict_['t_Test'];              # len = n_test.
+
+        self.best_train_coefs   : numpy.ndarray | None      = dict_['best_train_coefs'];    # Shape = (n_train, n_coefs).
+
+        # Restore test_coefs into the existing learnable Parameter (do not replace the Parameter
+        # object, since optimizers and downstream code expect it to remain a Parameter).
+        loaded_test_coefs = dict_['test_coefs'];     # numpy.ndarray or torch.Tensor
+        if isinstance(loaded_test_coefs, torch.Tensor):
+            test_coefs_t = loaded_test_coefs.detach().to(dtype = torch.float32, device = self.device);
+        else:
+            test_coefs_t = torch.tensor(loaded_test_coefs, dtype = torch.float32, device = self.device);
+        with torch.no_grad():
+            self.test_coefs.data.copy_(test_coefs_t);
+        self.restart_iter       : int                       = dict_['restart_iter'];
+
+        # Restore normalization stats (if present).
+        self.normalize = bool(dict_.get('normalize', False));
+        dm = dict_.get('data_mean', None);
+        ds = dict_.get('data_std', None);
+        if self.normalize and (dm is not None) and (ds is not None):
+            # Load scalar stats (handle both raw floats and scalar numpy arrays)
+            self.data_mean = [torch.tensor(float(x) if not isinstance(x, numpy.ndarray) else float(x.item()), dtype = torch.float32) for x in dm];
+            self.data_std  = [torch.tensor(float(x) if not isinstance(x, numpy.ndarray) else float(x.item()), dtype = torch.float32) for x in ds];
+        else:
+            self.data_mean = None;
+            self.data_std  = None;
+
+        # Next, compute n_IC.           
+        self.n_IC = len(self.U_Test[0]);
+
+        # Load the timer / optimizer. 
+        self.timer.load(dict_['timer']);
+
+        # Restore noise configuration and clean training data.
+        self.noise_ratio    = float(dict_.get('noise_ratio', 0.0));
+        self.U_Train_clean  = dict_.get('U_Train_clean', []);
+
+
+        # All done!
+        return;

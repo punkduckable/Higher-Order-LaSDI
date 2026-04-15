@@ -103,8 +103,8 @@ class LatentDynamics:
                     Latent_States   : list[list[torch.Tensor]], 
                     loss_type       : str,
                     t_Grid          : list[torch.Tensor], 
-                    params          : numpy.ndarray | None = None,
-                    input_coefs     : list[torch.Tensor] = []) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
+                    params          : numpy.ndarray | None  = None,
+                    input_coefs     : list[torch.Tensor]    = []) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
         """
         The user must implement this class on any latent dynamics sub-class. Each latent dynamics 
         object should implement a parameterized model for the dynamics in the latent space. A 
