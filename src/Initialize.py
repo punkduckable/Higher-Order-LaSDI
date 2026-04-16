@@ -9,11 +9,13 @@ LD_Path             : str = os.path.abspath(os.path.join(os.path.dirname(__file_
 Physics_Path        : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
 EncoderDecoder_Path : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "EncoderDecoder"));
 Trainer_Path        : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "Trainer"));
+Sample_Path         : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "Sample"));
 
 sys.path.append(LD_Path); 
 sys.path.append(Physics_Path); 
 sys.path.append(EncoderDecoder_Path); 
 sys.path.append(Trainer_Path);
+sys.path.append(Sample_Path);
 
 import  logging;
 
@@ -43,11 +45,11 @@ from    Autoencoder_Pair        import  Autoencoder_Pair, load_Autoencoder_Pair;
 from    CNN_3D_Autoencoder      import  CNN_3D_Autoencoder, load_CNN_3D_Autoencoder;
 
 from    Physics                 import  Physics;
-#import  NonlinearElasticity;
-#import  Advection;
-#import  WaveEquation;
-#import  KleinGordon;
-#import  Telegraphers;
+# import  NonlinearElasticity;   # mfem dependency (disabled by default)
+# import  Advection;             # mfem dependency (disabled by default)
+# import  WaveEquation;          # mfem dependency (disabled by default)
+# import  KleinGordon;           # mfem dependency (disabled by default)
+# import  Telegraphers;          # mfem dependency (disabled by default)
 import  Burgers2D;
 import  Thermal;
 import  Burgers;
@@ -99,11 +101,11 @@ physics_dict = {                'Burgers'                   : Burgers.Burgers,
                                 'Explicit'                  : Explicit.Explicit,
                                 'ExplicitSecondOrder'       : ExplicitSecondOrder.Explicit,
                                 'Thermal'                   : Thermal.Thermal,
-                                #'Advection'                 : Advection.Advection,
-                                #'NonlinearElasticity'       : NonlinearElasticity.NonlinearElasticity,
-                                #'WaveEquation'              : WaveEquation.WaveEquation,
-                                #'KleinGordon'               : KleinGordon.KleinGordon,
-                                #'Telegraphers'              : Telegraphers.Telegraphers
+                                # 'Advection'                 : Advection.Advection,                           # mfem dependency
+                                # 'NonlinearElasticity'       : NonlinearElasticity.NonlinearElasticity,       # mfem dependency
+                                # 'WaveEquation'              : WaveEquation.WaveEquation,                      # mfem dependency
+                                # 'KleinGordon'               : KleinGordon.KleinGordon,                        # mfem dependency
+                                # 'Telegraphers'              : Telegraphers.Telegraphers                       # mfem dependency
                                 };
 
 
