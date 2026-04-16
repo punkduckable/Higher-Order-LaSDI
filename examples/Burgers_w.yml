@@ -100,14 +100,13 @@ EncoderDecoder:
 latent_dynamics:
   # type:                     spring
   type:                     spring_w
-  lstsq_reg:                0
+  lstsq_reg:                0.0
   spring_w:
     test_func:              'PC-poly'
     test_func_width:        .1 #50/(nt - 1) is a good default
     overlap:                0.8
     pq:                     8
     LS_loss_type:           'weak'
-    lstsq_reg:              0.0           # Ridge-regression regularization for SINDy coefficient initialization (prevents blow-up for new greedy-sampled points).
 
 physics:
   type:                     BurgersSecondOrder

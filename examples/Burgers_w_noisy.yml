@@ -110,14 +110,13 @@ EncoderDecoder:
 
 latent_dynamics:
   type:                     spring_w
-  lstsq_reg:                0
+  lstsq_reg:                0.0
   spring_w:
     test_func:              'PC-poly'
     test_func_width:        .1
     overlap:                0.8
     pq:                     8
     LS_loss_type:           'weak'
-    lstsq_reg:              0   # Mild regularization to stabilize LS under noise.
 
 physics:
   type:                     BurgersSecondOrder
