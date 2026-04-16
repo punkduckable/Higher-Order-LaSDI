@@ -32,25 +32,73 @@ LOGGER  : logging.Logger    = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class EncoderDecoder(torch.nn.Module):
+    # i'th element is True if the i'th decoder is currently active, otherwise False.
+    # Defaults to an array whose 0 element is True and whose other elements are False (only the 
+    # first decoder is active).
+    Decoder_Active : numpy.ndarray;
+
+    # i,j element holds the weight of the j'th Decoder for the i'th IC. Defaults to an array of 
+    # 1's (all decoders get equal weight).
+    Decoder_Weight : numpy.ndarray;         # shape (n_IC, n_Decoders)
+
+
     def __init__(   self, 
-                    n_IC    : int, 
-                    n_z     : int) -> None:
+                    n_IC        : int, 
+                    n_z         : int,
+                    n_Decoders  : int,
+                    config      : bool) -> None:
         r"""
         Initializes a EncoderDecoder object. A EncoderDecoder object does two things. a) It can 
         encode FOM states (frames) to their latent encodings, and b) it can decode those latent
-        encodings back to the FOM state. An EncoderDecoder object is defined by two variables:
+        encodings back to the FOM state. In general, the encoder accepts n_IC elements of the 
+        FOM space, then encodes them into n_IC elements of the latent space (\\mathbb{R}^{n_z}). 
+        Likewise, the Decoder(s) accept n_IC elements of the latent space and decodes them to 
+        n_IC elements of the FOM space. 
+        
+        EncoderDecoder objects natively support using multiple decoders, which enables things 
+        like multi-stage training (mLaSDI). The actual decode method should return a weighted sum 
+        of these outputs. Thus, an EncoderDecoder object is defined by three variables:
 
             n_IC (the number of initial conditions)
             n_z (the latent space dimension)
+            n_decoders (the number of decoders)
         
-        The encoder must map n_IC elements of the FOM space to n_IC elements of \\mathbb{R}^{n_z}. 
-        The decoder must map n_IC elements of \\mathbb{R}^{n_z} to n_IC elements of the FOM space.
+        The encoder must map n_IC elements of the FOM space to n_IC elements of \mathbb{R}^{n_z}. 
+        Each decoder decoder must map n_IC elements of \mathbb{R}^{n_z} to n_IC elements of the 
+        FOM space, and the "Decode" method must return a weighted sum of the decoder outputs.
 
-        To implement a EncoderDecoder subclass, you must implement the Encode, Decode, forward, 
-        and latent_initial_conditions, and save methods. You should also implement a "load" 
-        function to load the encoded state from a save.
+        To implement a EncoderDecoder subclass, you must implement the Encode, Eval_Decoder, and
+        save/load methods. 
+        
+            - Encode should accept a set of n_IC inputs from the FOM space, encode them, and then 
+            return a tuple housing the encoded inputs. 
+            
+            - Eval_Decoder should accept an integer, i, and a set of n_IC inputs, evaluate the i'th 
+            Decoder on the specified inputs, then return a tuple housing the encodings of the inputs. 
+            The Decode method operates by returning a tuple of tensors, the j'th one of which holds
 
+                \sum_{i'th decoder is active} self.Decoder_Weight(i, j) * self.Eval_Decoder(i, *Z_i)[j]
+            
+            Thus, Eval_Decoder is quite important.
 
+        The base EncoderDecoder class defines the following methods:
+        
+            - latent_initial_conditions: Maps a set of initial conditions for a given set of physics 
+             to the latent space.
+              
+            - Set_Decoder_Active: Modifies the Decoder_Active attribute used by Decoder.
+
+            - Set_Decoder_Weight: Modifies the Decoder_Weight attribute used by Decoder.
+
+            - Decode: Computes and returns a weighted sum of the decoder outputs.
+             
+            - forward: Encodes, then Decodes a set of inputs.
+
+        You are welcome to override any of these in your sub-class, though they should have the 
+        same signatures (inputs and outputs) as the base class (otherwise, something will probably 
+        break elsewhere in the code).
+
+        
         
         -------------------------------------------------------------------------------------------
         Arguments
@@ -63,6 +111,12 @@ class EncoderDecoder(torch.nn.Module):
         n_z : int 
             The latent space dimension.
 
+        n_Decoders : int
+            The number of decoders.
+
+        config: dict
+            The "EncoderDecoder" sub dictionary of the configuration file.
+
 
         -------------------------------------------------------------------------------------------
         Returns
@@ -72,8 +126,12 @@ class EncoderDecoder(torch.nn.Module):
         """
 
         # Checks
-        assert n_IC > 0,    "n_IC = %d; must be positive" % n_IC;
-        assert n_z > 0,     "n_z = %d; must be positive" % n_z;
+        assert isinstance(n_IC, int),       "n_IC must be an int, not %s"       % str(type(n_IC));
+        assert isinstance(n_z, int),        "n_z must be an int, not %s"        % str(type(n_z));
+        assert isinstance(n_Decoders, int), "n_Decoders must be an int, not %s" % str(type(n_Decoders));
+        assert n_IC > 0,                    "n_IC = %d; must be positive"       % n_IC;
+        assert n_z > 0,                     "n_z = %d; must be positive"        % n_z;
+        assert n_Decoders > 0,              "n_Decoders = %d; must be positive" % n_Decoders;
 
         # Run the superclass initializer.
         super().__init__();
@@ -81,13 +139,92 @@ class EncoderDecoder(torch.nn.Module):
         # Store information (for return purposes).
         self.n_IC           : int       = n_IC;
         self.n_z            : int       = n_z;
+        self.n_Decoders     : int       = n_Decoders;
+        self.config         : dict      = config;
 
+        # Set up Decoder_Weight and Decoder_Active.
+        self.Decoder_Active     = numpy.empty((n_Decoders), dtype = numpy.bool);
+        self.Decoder_Active[0]  = True;
+        for i in range(1, n_Decoders):
+            self.Decoder_Active[i]  = False;
+        
+        self.Decoder_Weight     = numpy.ones((n_IC, n_Decoders), dtype = torch.float32);
+    
         # All done!
         return;
 
 
+    
+    # ---------------------------------------------------------------------------------------------
+    # Set_Decoder_Active and Set_Decoder_Weight.
+    # ---------------------------------------------------------------------------------------------
 
-    def Encode(self, X1 : torch.Tensor, Xn_IC : torch.Tensor) -> tuple[torch.Tensor]:
+    def Set_Decoder_Active(self, i_Decoder : int, active : bool) -> None:
+        """
+        Either actives (if active = True) or deactivates (if active = False) the i_Decoder'th 
+        decoder.
+
+
+        -------------------------------------------------------------------------------------------
+        Args:
+
+        i_Decoder : int 
+            The index of the decoder we want to active. Must be in {0, 1, ... , self.n_Decoders - 1}
+        
+        active : bool
+            Either activates (if True) or deactivates (if False) the i_Decoder'th Decoder.
+        """
+
+        # Checks
+        assert isinstance(i_Decoder, int),                              "i_Decoder must be an integer, not %s" % str(type(i_Decoder));
+        assert isinstance(active, bool),                                "active must be a boolean, not %s" % str(type(active));
+        assert (i_Decoder >= 0) and (i_Decoder < self.n_Decoders - 1),  "i_Decoder must be in {0, ... , %d}; got %d" % (self.n_Decoders - 1, i_Decoder)
+
+        # Do the thing!
+        self.Decoder_Active[i_Decoder] = active;
+    
+        # Make sure at least one decoder is active
+        assert numpy.sum(self.Decoder_Active) > 0,                      "No decoders active! Can not function!";
+
+
+
+    def Set_Decoder_Weight(self, i_IC : int, i_Decoder : int, weight : float) -> None:
+        """
+        Specifies the weight of the i_Decoder'th decoder for the i_IC'th component (often time 
+        derivative) of the FOM solution. 
+
+        -------------------------------------------------------------------------------------------
+        Args:
+        
+        i_IC : int 
+            The index of the decoder we want to active. Must be in {0, 1, ... , self.n_Decoders - 1}
+        
+        i_Decoder : int 
+            The index of the decoder we want to active. Must be in {0, 1, ... , self.n_Decoders - 1}
+
+        weight : bool
+            Specifies the weight of the i_Decoder'th decoder for the i_IC'th component of the FOM 
+            solution.
+        """
+
+        # Checks
+        assert isinstance(i_IC, int),                                   "i_IC must be an integer, not %s" % str(type(i_IC));
+        assert isinstance(i_Decoder, int),                              "i_Decoder must be an integer, not %s" % str(type(i_Decoder));
+        assert isinstance(weight, float),                               "weight must be a boolean, not %s" % str(type(float));
+        assert (i_IC >= 0) and (i_IC < self.n_Ic - 1),                  "i_IC must be in {0, ... , %d}; got %d" % (self.n_IC - 1, i_IC)
+        assert (i_Decoder >= 0) and (i_Decoder < self.n_Decoders - 1),  "i_Decoder must be in {0, ... , %d}; got %d" % (self.n_Decoder - 1, i_Decoder)
+
+        # Do the thing!
+        self.Decoder_Weight[i_IC, i_Decoder] = weight;
+
+
+
+    
+    # ---------------------------------------------------------------------------------------------
+    # Encode, Decode, forward.
+    # ---------------------------------------------------------------------------------------------
+
+    def Encode(self, *Xs : tuple[torch.Tensor]) -> tuple[torch.Tensor]:
         """
         In general, the Encode method should take n_IC positional arguments, each one containing 
         a batch of elements of the FOM space, and map them to n_IC elements of the latent space. 
@@ -99,8 +236,9 @@ class EncoderDecoder(torch.nn.Module):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        X1, ... , Xn_IC : torch.Tensor, shape = (n_inputs, ...)
-            The inputs to be encoded.
+        Xs : self.n_IC torch.Tensor's, each of shape (n_inputs, ...)
+            The inputs to be encoded. The i'th one should hold the i'th component of the FOM 
+            solution that we want to encode.
 
 
         -------------------------------------------------------------------------------------------
@@ -114,19 +252,61 @@ class EncoderDecoder(torch.nn.Module):
         raise RuntimeError("Abstract method EncoderDecoder.Encode!");
 
 
-
-    def Decode(self, Z1 : torch.Tensor, Xn_IC : torch.Tensor) -> tuple[torch.Tensor]:
+    def Eval_Decoder(self, i_Decoder : int, *Zs : tuple[torch.Tensor]) -> tuple[torch.Tensor]:
         """
-        This function should accept n_IC elements of the latent space and map them to n_IC elements 
-        of the FOM space. The output must be a tuple of tensors. The input should be n_IC tensors 
-        (as positional arguments), each with the same shape.
+        Passes the n_IC elements of Zs through the i_Decoder'th decoder, then returns the 
+        corresponding collection of n_IC elements of the FOM space. In general, the Eval_Decoder 
+        method should replace the *Zs argument with n_IC positional arguments, each one containing 
+        a batch of elements of the latent space, and map them to n_IC elements of the FOM space. 
+        The output must be a tuple of tensors.
 
         
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Z1, .. , Zn_IC : torch.Tensor, shape = (n_inputs, ...)
+        i_Decoder : int 
+            The index of the decoder we want to use to compute the decoding. Must be in {0, ... , 
+            self.n_Decoders - 1}
+
+        Zs : self.n_IC torch.Tensor's, each of shape (n_inputs, self.n_Z)
+            The encodings to be decoded. The i'th one should hold the i'th component of the latent 
+            state (often the i'th time derivative of the latent state) that we want to decoder 
+            through the i_Decoder'th decoder. 
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        Xs : tuple[torch.Tensor], len = self.n_IC
+            A List of n_IC elements of the FOM space.
+        """ 
+
+        raise RuntimeError("Abstract method EncoderDecoder.Eval_Decoder!");
+
+
+
+
+    def Decode(self, *Zs) -> tuple[torch.Tensor]:
+        """
+        Passes the n_IC elements of Zs through the active decoders, then sums the components 
+        of the resulting tensors according to the decoder weights. Specifically, the i'th 
+        component of the returned tensor holds the following sum:
+
+            \sum_{i'th decoder is active} self.Decoder_Weight(i, j) * self.Eval_Decoder(i, *Z_i)[j]
+        
+        Thus, this function decodes a batch of latent states (each consisting of n_IC components)
+        to a batch of FOM states (again, each one with n_IC components). We literally "decode"
+        the batch of latent states.
+
+
+        
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        Zs : n_IC torch.Tensors, each of shape = (n_inputs, ...)
             The latent states to be decoded.
 
 
@@ -138,36 +318,71 @@ class EncoderDecoder(torch.nn.Module):
             A List of n_IC elements of the FOM space 
         """
 
-        raise RuntimeError("Abstract method EncoderDecoder.Decode!");
+        # Checks.
+        assert len(Zs) == self.n_IC,                    "Decode must receive a tuple of %d Tensors, got a tuple of length %d" % (self.n_IC, len(Zs));
+        for i in range(self.n_IC):
+            assert isinstance(Zs[i], torch.Tensor),     "Each tensor to be Decoded must be a tensor. Component %d is a %s" % (i, str(type(torch.Tensor)));
+            assert len(Zs[i].shape) == 2,               "Each tensor to be Decoded be a tensor of shape (-1, %d), Component %d has shape %s" % (self.n_z, i, str(Zs[i].shape));
+            assert Zs[i].shape[1]   == self.n_z,        "Each tensor to be Decoded be a tensor of shape (-1, %d), Component %d has shape %s" % (self.n_z, i, str(Zs[i].shape));
+
+        # Decode!
+        Xs : tuple[torch.Tensor] = ();
+
+        for i in range(self.n_Decoders):
+            if(self.Decoder_Active[i] == True):
+                ith_Decodings : tuple[torch.Tensor] = self.Eval_Decoder(i_Decoder = i, *Zs);
+
+                for j in range(self.n_IC):
+                    if(len(Xs) < j):
+                        Xs.append(self.Decoder_Weight(j, i)*ith_Decodings[j]);
+                    else:
+                        Xs[j] += self.Decoder_Weight(j, i)*ith_Decodings[j];
+
+        # All done!
+        return Xs;
+                
 
 
-
-    def forward(self, X1 : torch.Tensor, Xn_IC : torch.Tensor) -> tuple[torch.Tensor]:
+    def forward(self, *Xs : tuple[torch.Tensor]) -> tuple[torch.Tensor]:
         """
         This function passes the X's through the encoder, producing a latent state, Z. It then 
-        passes Z through the decoder; hopefully producing a set of vectors that approximates X.
+        passes Z through the decoders; hopefully producing a set of vectors that approximates X.
         
 
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
 
-        X1, ... , Xn_IC : torch.Tensor, shape = (n_inputs, ...)
-            The inputs to be encoded.
+        Xs : n_IC torch.Tensors, each of shape (n_inputs, ...)
+            The inputs to be encoded and decoded.
 
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        Y : tuple[torch.Tensor], len = self.n_IC
+        Ys : tuple[torch.Tensor], len = self.n_IC
             A self.n_IC element tuple of torch.Tensors in the FOM space holding the image of X 
             under the encoder and decoder. 
         """
 
-        raise RuntimeError("Abstract method EncoderDecoder.forward!");
+        # Checks.
+        assert len(Xs) == self.n_IC,                    "forward must receive a tuple of %d Tensors, got a tuple of length %d" % (self.n_IC, len(Xs));
+        for i in range(self.n_IC):
+            assert isinstance(Xs[i], torch.Tensor),     "Each tensor to be Decoded must be a tensor. Component %d is a %s" % (i, str(type(torch.Tensor)));
+
+        # Encode and Decode!
+        Zs : tuple[torch.Tensor] = self.Encode(*Xs);
+        Ys : tuple[torch.Tensor] = self.Decode(*Zs);
+
+        # All done!
+        return Ys;
 
 
+
+    # ---------------------------------------------------------------------------------------------
+    # latent_initial_conditions
+    # ---------------------------------------------------------------------------------------------
 
     def latent_initial_conditions(  self,
                                     param_grid     : numpy.ndarray, 
