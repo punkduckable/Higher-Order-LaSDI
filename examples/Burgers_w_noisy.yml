@@ -27,7 +27,7 @@
 # ==================================================================================================
 
 trainer:
-  type:                   "Second_Order_Weak"
+  type:                   "Second_Order_Noise_Weak"
 
   max_iter:               5000
   n_iter:                 30000
@@ -36,7 +36,7 @@ trainer:
   normalize:              false
   device:                 'cpu'
 
-  Second_Order_Weak:
+  Second_Order_Noise_Weak:
     lr:                     0.001
     gradient_clip:          50.0
 

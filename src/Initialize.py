@@ -33,7 +33,9 @@ from    ParameterSpace          import  ParameterSpace;
 from    Trainer                 import  Trainer;
 from    First_Order_Rollout     import  First_Order_Rollout;
 from    Second_Order_Rollout    import  Second_Order_Rollout;
-from    Second_Order_Weak       import  Second_Order_Weak;
+from    Second_Order_Noise      import  Second_Order_Noise;
+from    Second_Order_Noise_Weak import  Second_Order_Noise_Weak;
+
 
 from    EncoderDecoder          import  EncoderDecoder;
 from    Autoencoder             import  Autoencoder, load_Autoencoder;
@@ -62,40 +64,46 @@ LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
 # Set up the dictionaries; we use this to allow the code to call different classes, functions 
 # depending on the settings.
-encoder_decoder_dict = {        'ae'                    : Autoencoder,
-                                'autoencoder'           : Autoencoder,
-                                'pair'                  : Autoencoder_Pair,
-                                'autoencoder_pair'      : Autoencoder_Pair,
-                                'cnn_3d'                : CNN_3D_Autoencoder,
-                                'cnn_3d_ae'             : CNN_3D_Autoencoder,
-                                'cnn_3d_autoencoder'    : CNN_3D_Autoencoder};
-encoder_decoder_load_dict = {   'ae'                    : load_Autoencoder,
-                                'autoencoder'           : load_Autoencoder,
-                                'pair'                  : load_Autoencoder_Pair,
-                                'autoencoder_pair'      : load_Autoencoder_Pair,
-                                'cnn_3d'                : load_CNN_3D_Autoencoder,
-                                'cnn_3d_ae'             : load_CNN_3D_Autoencoder,
-                                'cnn_3d_autoencoder'    : load_CNN_3D_Autoencoder};
-ld_dict = {                     'sindy'                 : SINDy, 
-                                'spring'                : DampedSpring,
-                                'spring_w'              : DampedSpring_weak,
-                                'switch'                : SwitchSINDy};
-trainer_dict = {                'First_Order_Rollout'   : First_Order_Rollout, 
-                                'Second_Order_Rollout'  : Second_Order_Rollout,
-                                'Second_Order_Weak'     : Second_Order_Weak}
-sampler_dict = {                'FOM_Rollout'           : FOM_Rollout,
-                                'FOM_Variance'          : FOM_Variance};
-physics_dict = {                'Burgers'               : Burgers.Burgers,
-                                'BurgersSecondOrder'    : BurgersSecondOrder.Burgers,
-                                'Burgers2D'             : Burgers2D.Burgers2D,
-                                'Explicit'              : Explicit.Explicit,
-                                'ExplicitSecondOrder'   : ExplicitSecondOrder.Explicit,
-                                'Thermal'               : Thermal.Thermal,
-                                'Advection'             : Advection.Advection,
-                                'NonlinearElasticity'   : NonlinearElasticity.NonlinearElasticity,
-                                'WaveEquation'          : WaveEquation.WaveEquation,
-                                'KleinGordon'           : KleinGordon.KleinGordon,
-                                'Telegraphers'          : Telegraphers.Telegraphers};
+encoder_decoder_dict = {        'ae'                        : Autoencoder,
+                                'autoencoder'               : Autoencoder,
+                                'pair'                      : Autoencoder_Pair,
+                                'autoencoder_pair'          : Autoencoder_Pair,
+                                'cnn_3d'                    : CNN_3D_Autoencoder,
+                                'cnn_3d_ae'                 : CNN_3D_Autoencoder,
+                                'cnn_3d_autoencoder'        : CNN_3D_Autoencoder};
+
+encoder_decoder_load_dict = {   'ae'                        : load_Autoencoder,
+                                'autoencoder'               : load_Autoencoder,
+                                'pair'                      : load_Autoencoder_Pair,
+                                'autoencoder_pair'          : load_Autoencoder_Pair,
+                                'cnn_3d'                    : load_CNN_3D_Autoencoder,
+                                'cnn_3d_ae'                 : load_CNN_3D_Autoencoder,
+                                'cnn_3d_autoencoder'        : load_CNN_3D_Autoencoder};
+
+ld_dict = {                     'sindy'                     : SINDy, 
+                                'spring'                    : DampedSpring,
+                                'spring_w'                  : DampedSpring_weak,
+                                'switch'                    : SwitchSINDy};
+
+trainer_dict = {                'First_Order_Rollout'       : First_Order_Rollout, 
+                                'Second_Order_Rollout'      : Second_Order_Rollout,
+                                'Second_Order_Noise'        : Second_Order_Noise,
+                                'Second_Order_Noise_Weak'   : Second_Order_Noise_Weak};
+
+sampler_dict = {                'FOM_Rollout'               : FOM_Rollout,
+                                'FOM_Variance'              : FOM_Variance};
+
+physics_dict = {                'Burgers'                   : Burgers.Burgers,
+                                'BurgersSecondOrder'        : BurgersSecondOrder.Burgers,
+                                'Burgers2D'                 : Burgers2D.Burgers2D,
+                                'Explicit'                  : Explicit.Explicit,
+                                'ExplicitSecondOrder'       : ExplicitSecondOrder.Explicit,
+                                'Thermal'                   : Thermal.Thermal,
+                                'Advection'                 : Advection.Advection,
+                                'NonlinearElasticity'       : NonlinearElasticity.NonlinearElasticity,
+                                'WaveEquation'              : WaveEquation.WaveEquation,
+                                'KleinGordon'               : KleinGordon.KleinGordon,
+                                'Telegraphers'              : Telegraphers.Telegraphers};
 
 
 

@@ -1,5 +1,5 @@
 trainer:
-  type:                   "Second_Order_Weak"
+  type:                   "Second_Order_Noise_Weak"
 
   max_iter:               5000
   # n_iter:                 2500
@@ -13,7 +13,7 @@ trainer:
 
   device:                 'cpu'
 
-  Second_Order_Weak:
+  Second_Order_Noise_Weak:
     lr:                     0.001
     gradient_clip:          50.0      # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
 

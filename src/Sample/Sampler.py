@@ -319,7 +319,7 @@ class Sampler:
                         # Extract the computed coefficients and assign to test_coefs
                         with torch.no_grad():
                             computed_coefs                       = output_coefs[0, :].to(trainer.device);  # Shape: (n_coefs,)
-                            trainer.test_coefs[test_idx, :] = computed_coefs;
+                            trainer.test_coefs[test_idx, :]      = computed_coefs;
                             coef_norm                            = float(torch.norm(trainer.test_coefs[test_idx, :]).item());
                             LOGGER.info("  New training point %d (test idx %d): initialized coefficients from least-squares fit: coef norm = %.6e" % (i, test_idx, coef_norm));
 
@@ -328,16 +328,6 @@ class Sampler:
 
         assert len(trainer.U_Train) == trainer.param_space.n_train(), "len(trainer.U_Train) = %d != trainer.param_space.n_train() = %d" % (len(trainer.U_Train), trainer.param_space.n_train());
 
-
-        # ---------------------------------------------------------------------------------------------
-        # Noise injection (training data only).
-        #
-        # If the trainer has noise_ratio > 0, corrupt the training trajectories with additive
-        # Gaussian noise.  Test data is left clean so that evaluation compares predictions against
-        # noise-free references.  The first frame (IC) of every trajectory is preserved because we
-        # assume perfect initial conditions.  A clean copy is kept in trainer.U_Train_clean.
-        if hasattr(trainer, 'noise_ratio') and trainer.noise_ratio > 0.0:
-            trainer.apply_noise_to_U_Train();
 
 
         # ---------------------------------------------------------------------------------------------

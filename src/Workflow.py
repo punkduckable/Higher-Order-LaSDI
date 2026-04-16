@@ -107,7 +107,6 @@ def main():
             LOGGER.error("Restart file (%s) does not exist. Stopping the workflow." % restart_path);
             exit();
         
-        # TODO(kevin): in long term, we should switch to hdf5 format.
         restart_dict    = numpy.load(restart_path, allow_pickle = True).item();
         next_step       = restart_dict['next_step'];
     else:
