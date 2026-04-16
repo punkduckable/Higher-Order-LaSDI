@@ -1,45 +1,70 @@
+# ==================================================================================================
+# Burgers Second-Order — Weak Form with Noisy Training Data
+# ==================================================================================================
+#
+# This config is identical to Burgers_w.yml except for noise-related changes:
+#
+#   1.  noise_ratio: 0.05  — adds Gaussian noise to training data (sigma = ratio * signal_rms).
+#       Test data is kept clean so that evaluation compares predictions against noise-free truth.
+#       The first frame (IC) of every training trajectory is preserved (perfect IC assumption).
+#
+#   2.  consistency and chain_rule losses are KEPT ACTIVE because the weak form
+#       (type: spring_w) automatically switches to noise-tolerant variants that
+#       use integration-by-parts instead of finite differences.
+#
+#       NOTE: If you disable the weak form (type: spring), you should set
+#       consistency: 0.0 and chain_rule: 0.0 since the strong-form FD versions
+#       amplify noise catastrophically.
+#
+#   3.  lstsq_reg: 1.0e-3  — mild Tikhonov regularization for the weak-form LS solve to
+#       stabilize coefficient estimation under noise.
+#
+# The weak-form LD loss (Phi-integrated) is inherently noise-tolerant: integration against
+# compactly-supported test functions acts as a smoother, so the LD loss remains reliable.
+#
+# Reconstruction loss trains against noisy data, but the ODE solver in latent space produces
+# smooth rollouts, so predictions are compared against clean test data at evaluation time.
+# ==================================================================================================
+
 trainer:
   type:                   "Second_Order_Noise_Weak"
 
   max_iter:               5000
-  # n_iter:                 2500
-  # max_greedy_iter:        20000
   n_iter:                 30000
   max_greedy_iter:        0
-  
-  # If true, compute a single global mean/std from TRAINING data only, and normalize
-  # all training/testing trajectories using these values.
-  normalize:              false
 
+  normalize:              false
   device:                 'cpu'
 
   Second_Order_Noise_Weak:
     lr:                     0.001
-    gradient_clip:          50.0      # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
+    gradient_clip:          50.0
 
-    # p_rollout grows from p_rollout_init by dp_per_update every rollout_update_freq epochs, capped at max_p_rollout.
+    # Ratio of noise std to signal RMS.  Set to 0.0 to recover noise-free behaviour.
+    noise_ratio:            0.05
+    
+
     p_rollout_init:         0.01
     rollout_update_freq:    20
     dp_per_update:          0.01
-    max_p_rollout:          0.75      # Maximum proportion of the time window used for rollout loss.
-    n_rollouts:             4         # Number of rollable start frames to rollout per training parameter per epoch.
+    max_p_rollout:          0.75
+    n_rollouts:             4
 
     p_IC_rollout_init:      0.01
     IC_rollout_update_freq: 20
     IC_dp_per_update:       0.01
-    max_p_IC_rollout:       1.0       # Maximum proportion of the time window used for IC rollout loss.
+    max_p_IC_rollout:       1.0
 
-    warmup_epochs:          20    # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
+    warmup_epochs:          20
 
     loss_weights:
       recon:                1.0
-      chain_rule:           1.0
+      chain_rule:           1.0       # Weak-form variant: Phi @ V_FOM + dPhi @ D_pred ≈ 0 (no JVP, no FD).
       LD:                   1.0
       rollout:              0.0
-      # IC_rollout:           0.2
       IC_rollout:           0.0
       coef:                 0.0001
-      consistency:          1.0
+      consistency:          1.0       # Weak-form variant: dPhi @ Z_D + Phi @ Z_V ≈ 0 (no FD).
 
     loss_types:
       recon:                "MSE"
@@ -57,7 +82,7 @@ workflow:
 sampler:
   type:                   'FOM_Variance'
   FOM_Variance:
-    n_samples:            20        # Number of samples used to compute rollout stds.   
+    n_samples:            20
 
 parameter_space:
   parameters:
@@ -77,33 +102,19 @@ EncoderDecoder:
   type:                     pair
   autoencoder:
     hidden_widths:          [250, 100, 100, 100]
-    latent_dimension:       5  
+    latent_dimension:       5
     activations:            ["sin", "sin", "sin", "sin"]
   pair:
     hidden_widths:          [250, 100, 100, 100]
     latent_dimension:       5
     activations:            ["sin", "sin", "sin", "sin"]
 
-# EncoderDecoder:
-#   type:                     pair
-#   pair:
-#     hidden_widths:          [100, 50]
-#     latent_dimension:       5
-#     activations:            ["softplus", "softplus"]
-
-# latent_dynamics:
-#   type:                     spring
-#   lstsq_reg:                1.0           # Ridge-regression regularization for SINDy coefficient initialization (prevents blow-up for new greedy-sampled points).
-#   spring:
-
-  sindy:
 latent_dynamics:
-  # type:                     spring
   type:                     spring_w
   lstsq_reg:                0.0
   spring_w:
     test_func:              'PC-poly'
-    test_func_width:        .1 #50/(nt - 1) is a good default
+    test_func_width:        .1
     overlap:                0.8
     pq:                     8
     LS_loss_type:           'weak'
