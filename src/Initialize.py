@@ -43,11 +43,11 @@ from    Autoencoder_Pair        import  Autoencoder_Pair, load_Autoencoder_Pair;
 from    CNN_3D_Autoencoder      import  CNN_3D_Autoencoder, load_CNN_3D_Autoencoder;
 
 from    Physics                 import  Physics;
-import  NonlinearElasticity;
-import  Advection;
-import  WaveEquation;
-import  KleinGordon;
-import  Telegraphers;
+#import  NonlinearElasticity;
+#import  Advection;
+#import  WaveEquation;
+#import  KleinGordon;
+#import  Telegraphers;
 import  Burgers2D;
 import  Thermal;
 import  Burgers;
@@ -99,11 +99,12 @@ physics_dict = {                'Burgers'                   : Burgers.Burgers,
                                 'Explicit'                  : Explicit.Explicit,
                                 'ExplicitSecondOrder'       : ExplicitSecondOrder.Explicit,
                                 'Thermal'                   : Thermal.Thermal,
-                                'Advection'                 : Advection.Advection,
-                                'NonlinearElasticity'       : NonlinearElasticity.NonlinearElasticity,
-                                'WaveEquation'              : WaveEquation.WaveEquation,
-                                'KleinGordon'               : KleinGordon.KleinGordon,
-                                'Telegraphers'              : Telegraphers.Telegraphers};
+                                #'Advection'                 : Advection.Advection,
+                                #'NonlinearElasticity'       : NonlinearElasticity.NonlinearElasticity,
+                                #'WaveEquation'              : WaveEquation.WaveEquation,
+                                #'KleinGordon'               : KleinGordon.KleinGordon,
+                                #'Telegraphers'              : Telegraphers.Telegraphers
+                                };
 
 
 
@@ -201,11 +202,11 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer
         latent_dynamics         = ld_dict[ld_type]( n_z             = encoder_decoder.n_z, 
                                                     Uniform_t_Grid  = physics.Uniform_t_Grid,
                                                     switch_time     = physics.switch_time,
-                                                    lstsq_reg       = config['latent_dynamics'].get('lstsq_reg', 1.0));
+                                                    config          = config['latent_dynamics']);
     else:
         latent_dynamics         = ld_dict[ld_type]( n_z             = encoder_decoder.n_z, 
                                                     Uniform_t_Grid  = physics.Uniform_t_Grid,
-                                                    lstsq_reg       = config['latent_dynamics'].get('lstsq_reg', 1.0));
+                                                    config          = config['latent_dynamics']);
     
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
         latent_dynamics.load(restart_dict['latent_dynamics']);
