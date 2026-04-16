@@ -32,6 +32,7 @@ class SINDy(LatentDynamics):
     def __init__(   self, 
                     n_z             : int,
                     Uniform_t_Grid  : bool,
+                    config          : dict,
                     lstsq_reg       : float = 1.0) -> None:
         r"""
         Initializes a SINDy object. This is a subclass of the LatentDynamics class which uses the 
@@ -57,10 +58,11 @@ class SINDy(LatentDynamics):
             specific parameter value). The value of this setting determines which finite difference 
             method we use to compute time derivatives. 
 
-        lstsq_reg : float, optional (default 1.0)
-            Ridge-regression regularization strength used when fitting SINDy coefficients from
-            scratch (i.e., when no input_coefs are supplied to calibrate). The least-squares
-            problem is replaced by the Tikhonov-regularized normal equations:
+        config : dict 
+            The "latent_dynamics" sub-dictionary of the config file. This can include a "lstsq_reg"
+            key which specifies the ridge-regression regularization strength used when fitting
+            SINDy coefficients from scratch (i.e., when no input_coefs are supplied to calibrate). 
+            The least-squares problem is replaced by the Tikhonov-regularized normal equations:
 
                 (Z^T Z + lstsq_reg * I) c = Z^T dZ/dt
 
@@ -82,8 +84,8 @@ class SINDy(LatentDynamics):
 
         # Run the base class initializer. The only thing this does is set the n_z and n_t 
         # attributes.
-        super().__init__(n_z = n_z, Uniform_t_Grid = Uniform_t_Grid);
-        self.lstsq_reg : float = lstsq_reg;
+        super().__init__(n_z = n_z, Uniform_t_Grid = Uniform_t_Grid, config = config);
+        self.lstsq_reg : float = config.get("lstsq_reg", 1.0);
         LOGGER.info("Initializing a SINDY object with n_z = %d, Uniform_t_Grid = %s, lstsq_reg = %s" % (  self.n_z, 
                                                                                                                 str(self.Uniform_t_Grid),
                                                                                                                 str(self.lstsq_reg)));
@@ -93,7 +95,6 @@ class SINDy(LatentDynamics):
         # latent state at some time, t, then the possible library terms are 1, z_1(t), ... , 
         # z_{n_z}(t). Since each component function gets its own set of coefficients, there must 
         # be n_z*(n_z + 1) total coefficients.
-        #TODO(kevin): generalize for high-order dynamics
         self.n_coefs    : int   = self.n_z*(self.n_z + 1);
         self.n_IC       : int   = 1;
 
@@ -102,6 +103,50 @@ class SINDy(LatentDynamics):
         self.MAE = torch.nn.L1Loss(reduction = 'mean');
         return;
     
+
+    def fit_coefficients(self,
+                         Latent_States   : list[list[torch.Tensor]],
+                         t_Grid          : list[torch.Tensor],
+                         params          : numpy.ndarray | None = None) -> torch.Tensor:
+        r"""
+        Fit SINDy coefficients from latent trajectories via (optionally ridge-regularized) least
+        squares.
+
+        This is intended for coefficient initialization (e.g., after greedy sampling adds a new
+        training point). See `LatentDynamics.fit_coefficients` for conventions.
+        """
+
+        assert isinstance(t_Grid, list);
+        assert isinstance(Latent_States, list);
+        assert len(Latent_States) == len(t_Grid);
+        n_param : int = len(t_Grid);
+
+        out_list : list[torch.Tensor] = [];
+        for i in range(n_param):
+            t_Grid0 : torch.Tensor = t_Grid[i];
+            Z       : torch.Tensor = Latent_States[i][0];
+            n_t     : int          = len(t_Grid0);
+
+            # dZ/dt
+            if(self.Uniform_t_Grid == True):
+                h       : float         = (t_Grid0[1] - t_Grid0[0]).item();
+                dZdt    : torch.Tensor  = Derivative1_Order4(Z, h);
+            else:
+                dZdt                    = Derivative1_Order2_NonUniform(Z, t_Grid = t_Grid0);
+
+            # Library: [1, Z]
+            Z_1 : torch.Tensor = torch.cat([torch.ones(n_t, 1, device = Z.device, dtype = Z.dtype), Z], dim = 1);
+            n_lib   : int           = Z_1.shape[1];
+            rhs     : torch.Tensor  = Z_1.T @ dZdt;
+            if self.lstsq_reg > 0.0:
+                gram    : torch.Tensor  = Z_1.T @ Z_1 + self.lstsq_reg * torch.eye(n_lib, device = Z_1.device, dtype = Z_1.dtype);
+                coefs   : torch.Tensor  = torch.linalg.solve(gram, rhs);
+            else:
+                coefs   : torch.Tensor  = torch.linalg.lstsq(Z_1, dZdt).solution;
+
+            out_list.append(coefs.reshape(1, -1));
+
+        return torch.cat(out_list, dim = 0);
 
 
     def calibrate(  self,  
@@ -138,11 +183,10 @@ class SINDy(LatentDynamics):
             value corresponding to the j'th frame when we use the i'th combination of parameter 
             values.
 
-        input_coefs : list[torch.Tensor], len = n_param, optional
-            The i'th element of this list is a 1d tensor of shape (n_coefs) holding the 
-            coefficients for the i'th combination of parameter values. If input_coefs is None, 
-            then we will learn the coefficients using Least Squares. If input_coefs is not None, 
-            then we will use the provided coefficients to compute the loss.
+        input_coefs : list[torch.Tensor], len = n_param
+            The i'th element of this list is a 1d tensor of shape (n_coefs) holding the
+            coefficients for the i'th combination of parameter values. This function assumes
+            coefficients are provided; to *fit* coefficients from data, use `fit_coefficients(...)`.
 
         params: numpy.ndarray, shape = (n_param, n_p), optional
             The i'th row holds the i'th combination of parameter values. This class doesn't use 
@@ -195,14 +239,12 @@ class SINDy(LatentDynamics):
         assert(loss_type in ["MSE", "MAE"]);
 
         # Run checks on input_coefs.
-        assert(isinstance(input_coefs, list));
-        if(len(input_coefs) > 0):
-            assert(isinstance(input_coefs, list));
-            assert(len(input_coefs) == n_param);
-            for i in range(n_param):
-                assert(isinstance(input_coefs[i], torch.Tensor));
-                assert(len(input_coefs[i].shape) == 1);
-                assert(input_coefs[i].shape[0] == self.n_coefs);
+        assert isinstance(input_coefs, list);
+        assert len(input_coefs) == n_param, "SINDy.calibrate requires coefficients. Expected len(input_coefs) == n_param (%d)" % n_param;
+        for i in range(n_param):
+            assert isinstance(input_coefs[i], torch.Tensor);
+            assert len(input_coefs[i].shape) == 1;
+            assert input_coefs[i].shape[0] == self.n_coefs;
 
 
         # -----------------------------------------------------------------------------------------
@@ -229,19 +271,12 @@ class SINDy(LatentDynamics):
                 # Extract params for this iteration (handle None case)
                 params_i = None if params is None else params[i, :].reshape(1, -1);
                 
-                if(len(input_coefs) == 0):
-                    output_coefs, loss_sindy_i, loss_coef_i, loss_stab_i = self.calibrate(   
-                                                                    Latent_States = [Latent_States[i]], 
-                                                                    t_Grid        = [t_Grid[i]],
-                                                                    loss_type     = loss_type, 
-                                                                    params        = params_i);
-                else:
-                    output_coefs, loss_sindy_i, loss_coef_i, loss_stab_i = self.calibrate(
-                                                                    Latent_States = [Latent_States[i]], 
-                                                                    t_Grid        = [t_Grid[i]],
-                                                                    input_coefs   = [input_coefs[i]],
-                                                                    loss_type     = loss_type, 
-                                                                    params        = params_i);
+                output_coefs, loss_sindy_i, loss_coef_i, loss_stab_i = self.calibrate(
+                                                                Latent_States = [Latent_States[i]],
+                                                                t_Grid        = [t_Grid[i]],
+                                                                input_coefs   = [input_coefs[i]],
+                                                                loss_type     = loss_type,
+                                                                params        = params_i);
 
                 # Package the results from this combination of parameter values.
                 output_coefs_list.append(output_coefs);
@@ -285,33 +320,11 @@ class SINDy(LatentDynamics):
 
         # Concatenate a column of ones. This will correspond to a constant term in the latent 
         # dynamics. Ensure the ones tensor is on the same device as Z.
-        Z_1     : torch.Tensor  = torch.cat([torch.ones(n_t, 1, device = Z.device, dtype =Z .dtype), Z], dim = 1);
+        Z_1     : torch.Tensor  = torch.cat([torch.ones(n_t, 1, device = Z.device, dtype = Z .dtype), Z], dim = 1);
         
-        if(len(input_coefs) == 0):
-            # Solve for SINDy coefficients using Tikhonov-regularized least squares (ridge
-            # regression).  Plain lstsq can return coefficients with magnitude in the hundreds
-            # when the Gram matrix Z_1^T Z_1 is ill-conditioned, which is common for newly-added
-            # greedy-sampling training points whose latent trajectory is unfamiliar to the encoder.
-            # Ridge regression caps ||coefs|| <= ||Z_1^T dZdt|| / lstsq_reg and is equivalent to
-            # the standard (unregularized) lstsq when lstsq_reg = 0.
-            #
-            # Normal equations:  (Z_1^T Z_1 + λ I) c = Z_1^T dZdt
-            #   where  λ = self.lstsq_reg
-            n_lib   : int           = Z_1.shape[1];    # number of library terms (n_z + 1)
-            rhs     : torch.Tensor  = Z_1.T @ dZdt;    # shape (n_lib, n_z)
-            if self.lstsq_reg > 0.0:
-                gram    : torch.Tensor  = Z_1.T @ Z_1 + self.lstsq_reg * torch.eye(n_lib, device = Z_1.device, dtype = Z_1.dtype);
-                coefs   : torch.Tensor  = torch.linalg.solve(gram, rhs);
-            else:
-                # lstsq_reg == 0: fall back to plain least squares (no regularization).
-                coefs   : torch.Tensor  = torch.linalg.lstsq(Z_1, dZdt).solution;
-            LOGGER.debug("SINDy calibration: Learned coefs (lstsq_reg=%.2e) min=%.6e, max=%.6e, mean=%.6e, abs_mean=%.6e" % (
-                self.lstsq_reg, float(coefs.min().item()), float(coefs.max().item()),
-                float(coefs.mean().item()), float(torch.abs(coefs).mean().item())));
-        else:
-            coefs   : torch.Tensor  = input_coefs[0].reshape(self.n_z + 1, self.n_z);
-            LOGGER.debug("SINDy calibration: Using input coefs min=%.6e, max=%.6e, mean=%.6e" % (
-                float(coefs.min().item()), float(coefs.max().item()), float(coefs.mean().item())));
+        coefs : torch.Tensor = input_coefs[0].reshape(self.n_z + 1, self.n_z);
+        LOGGER.debug("SINDy calibration: Using input coefs min=%.6e, max=%.6e, mean=%.6e" % (
+            float(coefs.min().item()), float(coefs.max().item()), float(coefs.mean().item())));
 
         # Compute the losses.
         if(loss_type == "MSE"):

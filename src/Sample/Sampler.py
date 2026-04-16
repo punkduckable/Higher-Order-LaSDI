@@ -308,12 +308,10 @@ class Sampler:
                         t_Grid_list = [t_new_i.cpu()];        # list[tensor], one time grid
                         params_array = new_param.reshape(1, -1);  # Shape: (1, n_p)
                         
-                        # Call calibrate with empty input_coefs to compute least-squares solution
-                        output_coefs, _, _, _ = trainer.latent_dynamics.calibrate(
+                        # Fit coefficients from data for initialization.
+                        output_coefs = trainer.latent_dynamics.fit_coefficients(
                                                 Latent_States   = Latent_States_list,
                                                 t_Grid          = t_Grid_list,
-                                                input_coefs     = [],  # Empty list triggers least-squares computation
-                                                loss_type       = trainer.loss_types['LD'],
                                                 params          = params_array);
                         
                         # Extract the computed coefficients and assign to test_coefs

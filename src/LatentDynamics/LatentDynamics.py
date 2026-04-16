@@ -29,7 +29,8 @@ class LatentDynamics:
 
     def __init__(   self, 
                     n_z             : int,
-                    Uniform_t_Grid  : bool) -> None:
+                    Uniform_t_Grid  : bool, 
+                    config          : dict) -> None:
         r"""
         Initializes a LatentDynamics object. Each LatentDynamics object needs to have a 
         dimensionality (n_z), a number of time steps, a model for the latent space dynamics, and 
@@ -54,6 +55,9 @@ class LatentDynamics:
             specific parameter value). The value of this setting determines which finite difference 
             method we use to compute time derivatives. 
 
+        config : dict
+            The "latent_dynamics" sub-dictionary of the config file. 
+
             
         -------------------------------------------------------------------------------------------
         Returns
@@ -65,12 +69,61 @@ class LatentDynamics:
         # Set class variables.
         self.n_z             = n_z;
         self.Uniform_t_Grid  = Uniform_t_Grid;
+        self.config          = config;
 
         # There must be at least one latent dimension and there must be at least 1 time step.
         assert(self.n_z > 0);
 
         # All done!
         return;
+
+
+
+    def fit_coefficients(self,
+                         Latent_States   : list[list[torch.Tensor]],
+                         t_Grid          : list[torch.Tensor],
+                         params          : numpy.ndarray | None = None) -> torch.Tensor:
+        r"""
+        Fit (initialize) latent dynamics coefficients from latent state data.
+
+        This method is intended for **coefficient initialization** (e.g., when greedy sampling
+        adds a new training parameter and we need a reasonable starting value for its coefficients).
+        It should return, for each parameter combination, a 1D coefficient vector of length
+        `self.n_coefs`.
+
+        Design rule:
+        - `calibrate(...)` computes the LD loss (and other regularizers) **given coefficients**.
+        - `fit_coefficients(...)` estimates coefficients **from data**.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        Latent_States : list[list[torch.Tensor]], len = n_param
+            The i'th list element is an `n_IC`-element list whose j'th entry is a 2D tensor of
+            shape (n_t(i), n_z) containing the j'th derivative of the latent state trajectory for
+            the i'th parameter combination.
+
+        t_Grid : list[torch.Tensor], len = n_param
+            The i'th element is a 1D tensor of shape (n_t(i)) holding the time grid for the i'th
+            parameter combination.
+
+        params : numpy.ndarray, shape = (n_param, n_p), optional
+            The i'th row holds the i'th combination of parameter values. Some latent dynamics
+            models may require these values (e.g., weak-form test-function lookup or parametric
+            forcing). Default is None for models that do not use parameters.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        coefs : torch.Tensor, shape = (n_param, n_coefs)
+            The i'th row holds the fitted coefficient vector for the i'th parameter combination.
+        """
+
+        raise RuntimeError("Abstract function LatentDynamics.fit_coefficients!");
     
 
 
@@ -137,11 +190,10 @@ class LatentDynamics:
             time value corresponding to the j'th frame when we use the i'th combination of 
             parameter values.
 
-        input_coefs : list[torch.Tensor], len = n_param, optional
-            The i'th element of this list is a 1d tensor of shape (n_coefs) holding the 
-            coefficients for the i'th combination of parameter values. If input_coefs is empty, 
-            then we will learn the coefficients using Least Squares. If input_coefs is not empty, 
-            then we will use the provided coefficients to compute the loss.
+        input_coefs : list[torch.Tensor], len = n_param
+            The i'th element of this list is a 1d tensor of shape (n_coefs) holding the
+            coefficients for the i'th combination of parameter values. This function assumes
+            coefficients are provided; to *fit* coefficients from data, use `fit_coefficients(...)`.
 
         params : numpy.ndarray, shape = (n_param, n_p), optional
             The i'th row holds the i'th combination of parameter values. This can be used by latent 
@@ -243,13 +295,12 @@ class LatentDynamics:
         param_dict = {'n_z'             : self.n_z, 
                       'n_coefs'         : self.n_coefs, 
                       'n_IC'            : self.n_IC,
+                      'config'          : self.config,
                       'Uniform_t_Grid'  : self.Uniform_t_Grid};
         return param_dict;
 
 
 
-    # SINDy does not need to load parameters.
-    # Other latent dynamics might need to.
     def load(self, dict_ : dict) -> None:
         assert(self.n_z             == dict_['n_z']);
         assert(self.n_coefs         == dict_['n_coefs']);

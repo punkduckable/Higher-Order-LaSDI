@@ -33,7 +33,7 @@ class DampedSpring_weak(LatentDynamics):
     def __init__(   self, 
                     n_z             :   int, 
                     Uniform_t_Grid  :   bool,
-                    lstsq_reg       :   float = 1.0) -> None:
+                    config          :   dict) -> None:
         r"""
         Initializes a DampedSpring_weak object. This is a subclass of the LatentDynamics class which 
         implements the following latent dynamics
@@ -57,9 +57,18 @@ class DampedSpring_weak(LatentDynamics):
             specific parameter value). The value of this setting determines which finite difference 
             method we use to compute time derivatives. 
 
-        lstsq_reg : float, optional (default 1.0)
-            Ridge-regression regularization strength used when fitting coefficients from scratch
-            (i.e., when no input_coefs are supplied to calibrate). Replaces plain lstsq with the
+        config : dict 
+            The "latent_dynamics" sub-dictionary of the config file. It should include the 
+            following keys:
+                - test_func: Specifies the kind of bump function. Either "bump" or "PC-poly" 
+                - test_func_width: The width of each bump.
+                - overlap: The amount of overlap between successive bumps.
+                - pq: Only required if test_fun = "PC-poly". This should specify the order of the 
+                polynomials?
+            
+            It may also include an optional "lstsq_reg" key, which specifies the ridge-regression 
+            regularization strength used when fitting coefficients from scratch (i.e., when no 
+            input_coefs are supplied to calibrate). Replaces plain lstsq with the 
             Tikhonov-regularized normal equations  (A^T A + λI) c = A^T b  where A = [Z_D, Z_V, 1]
             and b = d²Z/dt². Setting lstsq_reg = 0 falls back to plain least squares.
 
@@ -71,13 +80,20 @@ class DampedSpring_weak(LatentDynamics):
         Nothing!
         """
 
+        # Checks
+        assert 'type' in config;
+        assert config['type'] == "spring_w";
+        assert "spring_w" in config;
+
         # Run the base class initializer. The only thing this does is set the n_z and n_t 
         # attributes.;
-        super().__init__(n_z = n_z, Uniform_t_Grid = Uniform_t_Grid);
-        self.lstsq_reg : float = lstsq_reg;
-        LOGGER.info("Initializing a SINDY object with n_z = %d, Uniform_t_Grid = %s, lstsq_reg = %s" % (  self.n_z, 
-                                                                                                                str(self.Uniform_t_Grid),
-                                                                                                                str(self.lstsq_reg)));        
+        super().__init__(n_z = n_z, Uniform_t_Grid = Uniform_t_Grid, config = config);
+        self.lstsq_reg : float = config.get("lstsq_reg", 1.0);
+        LOGGER.info("Initializing a DampedSpring_weak object with n_z = %d, Uniform_t_Grid = %s, lstsq_reg = %s" % (
+            self.n_z,
+            str(self.Uniform_t_Grid),
+            str(self.lstsq_reg),
+        ));
         
         # Set n_coefs and n_IC.
         # Because K and C are n_z x n_z matrices, and b is in \mathbb{R}^n_z, there are 
@@ -94,7 +110,17 @@ class DampedSpring_weak(LatentDynamics):
         self.Phis_by_param   : dict[tuple, torch.Tensor] | None = None;
         self.dPhis_by_param  : dict[tuple, torch.Tensor] | None = None;
         self.d2Phis_by_param : dict[tuple, torch.Tensor] | None = None;
+
+        # Set weak form specific settings.
+        self.test_func          = config['spring_w']['test_func'];
+        self.test_func_width    = config['spring_w']['test_func_width'];
+        self.overlap            = config['spring_w']['overlap'];
+        # Only required for PC-poly.
+        self.pq                 = config['spring_w'].get('pq', None);
+        self.LS_loss_type       = config['spring_w']['LS_loss_type'];
         return;
+
+
 
     @staticmethod
     def _param_key(params_row: numpy.ndarray | torch.Tensor | list | tuple) -> tuple:
@@ -106,6 +132,7 @@ class DampedSpring_weak(LatentDynamics):
         elif isinstance(params_row, numpy.ndarray):
             params_row = params_row.tolist();
         return tuple(float(x) for x in params_row);
+
 
 
     # ---------------------------------------------------------------------------------------------
@@ -144,6 +171,224 @@ class DampedSpring_weak(LatentDynamics):
         return;
 
 
+
+    def getUniformGrid(self, T : float, L : float, s : float, p : int):
+        """
+        Generates a uniform grid of support intervals for compactly-supported test functions.
+
+        T : final time
+        L : test-function support width
+        s : overlap amount between adjacent supports
+        p : unused legacy argument kept for backward compatibility
+        """
+
+        overlap = s;
+        grid = [];
+        a = 0.0;
+        b = float(L);
+        grid.append([a, b]);
+        while (b - overlap + L) <= T:
+            a = b - overlap;
+            b = a + L;
+            grid.append([a, b]);
+
+        grid = numpy.asarray(grid, dtype = numpy.float64);
+        a_s = grid[:, 0];
+        b_s = grid[:, 1];
+        return a_s, b_s;
+
+
+
+    def get_test_functions(self,
+                           T               : float,
+                           n_t             : int,
+                           timesteps       : torch.Tensor,
+                           H               : int = 30) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Build compactly-supported weak-form test functions and their first/second derivatives.
+
+        Returns tensors of shape (H, n_t).
+        """
+
+        assert isinstance(timesteps, torch.Tensor), "timesteps must be a torch.Tensor";
+        assert timesteps.ndim == 1, "timesteps must be a 1D tensor";
+        assert int(timesteps.shape[0]) == int(n_t), "n_t does not match timesteps length";
+
+        t       : torch.Tensor  = timesteps;
+        dtype   = t.dtype;
+        device  = t.device;
+
+        if self.test_func == 'bump':
+            L = float(self.test_func_width);
+            s = float(self.test_func_width) * float(self.overlap);
+            a_s, b_s = self.getUniformGrid(float(T), L, s, 1);
+
+            H_eff    : int = len(a_s);
+            LOGGER.info("Number of bump test functions: %d" % H_eff);
+
+            Phis    = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+            dPhis   = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+            d2Phis  = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+
+            eta     : float = 5.0;
+            a       : float = L / 2.0;
+            const   : float = eta;
+            nugget  : float = 1.0e-7;
+            a_space = numpy.linspace(-a + nugget, a - nugget, 1000);
+            bump    = numpy.exp(-eta / (1.0 - (a_space / a) ** 2));
+            C       : float = float(1.0 / numpy.trapz(bump, a_space) / numpy.exp(const));
+
+            h = torch.linspace(a, float(T) - a, H_eff, dtype = dtype, device = device);
+            for j, ji in enumerate(h):
+                for i, ti in enumerate(t):
+                    x       = (ti - ji) / a;
+                    denom   = 1.0 - x ** 2;
+                    f       = -eta / denom + const;
+                    fp      = -eta / (denom ** 2) * 2.0 * x / a;
+                    fpp     = (-eta / (denom ** 2) * 2.0 / (a * a)) + (-eta / (denom ** 3) * 2.0 * x / a * -2.0 * x / a * -2.0);
+                    if denom > 0:
+                        expf            = torch.exp(f);
+                        Phis[j, i]      = C * expf;
+                        dPhis[j, i]     = C * expf * fp;
+                        d2Phis[j, i]    = C * (expf * (fp ** 2) + expf * fpp);
+
+        elif self.test_func == 'PC-poly':
+            assert self.pq is not None, "spring_w.pq must be provided in config when test_func == 'PC-poly'";
+            L = float(self.test_func_width);
+            s = float(self.test_func_width) * float(self.overlap);
+            a_s, b_s = self.getUniformGrid(float(T), L, s, 1);
+
+            H_eff    : int = len(a_s);
+            LOGGER.info("Number of PC-poly test functions: %d" % H_eff);
+
+            Phis    = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+            dPhis   = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+            d2Phis  = torch.zeros((H_eff, n_t), dtype = dtype, device = device);
+
+            p, q = self.pq, self.pq;
+            for h in range(H_eff):
+                a = float(a_s[h]);
+                b = float(b_s[h]);
+                C = 1.0 / (p ** p * q ** q) * ((p + q) / (b - a)) ** (p + q);
+                mask = (t >= a) * (t <= b);
+                Phis[h, :] = C * (t - a) ** p * (b - t) ** q * mask;
+                dPhis[h, :] = C * (p * (t - a) ** (p - 1) * (b - t) ** q - q * (t - a) ** p * (b - t) ** (q - 1)) * mask;
+                d2Phis[h, :] = C * (
+                    p * (p - 1) * (t - a) ** (p - 2) * (b - t) ** q
+                    - q * p * (t - a) ** (p - 1) * (b - t) ** (q - 1)
+                    - q * p * (t - a) ** (p - 1) * (b - t) ** (q - 1)
+                    + q * (q - 1) * (t - a) ** p * (b - t) ** (q - 2)
+                ) * mask;
+
+        else:
+            raise ValueError("Unsupported weak-form test function type: %s" % str(self.test_func));
+
+        return Phis, dPhis, d2Phis;
+
+
+
+    def _ensure_weight_functions(self,
+                                 t_Grid : list[torch.Tensor],
+                                 params : numpy.ndarray) -> None:
+        """
+        Ensure weak-form weight functions exist for each parameter combination in `params`.
+
+        If a Trainer has already called `set_weight_functions(...)`, this is a no-op. Otherwise,
+        we generate and store the test functions for missing keys using the weak-form settings
+        stored from `config` at initialization time.
+        """
+        if self.Phis_by_param is None:
+            self.Phis_by_param = {};
+            self.dPhis_by_param = {};
+            self.d2Phis_by_param = {};
+
+        assert self.dPhis_by_param is not None and self.d2Phis_by_param is not None;
+
+        for i in range(params.shape[0]):
+            key = self._param_key(params[i, :]);
+            if key in self.Phis_by_param:
+                continue;
+
+            assert self.test_func is not None and self.test_func_width is not None and self.overlap is not None, (
+                "Missing weak-form config. Call set_weight_functions(...) before fitting coefficients.");
+            if self.test_func == "PC-poly":
+                assert self.pq is not None, "spring_w.pq must be provided in config when test_func == 'PC-poly'";
+
+            t_i : torch.Tensor = t_Grid[i];
+            T_i : float = float(t_i[-1].detach().cpu().item());
+            Phi_i, dPhi_i, d2Phi_i = self.get_test_functions(
+                T               = T_i,
+                n_t             = int(t_i.shape[0]),
+                timesteps       = t_i);
+
+            self.Phis_by_param[key]  = Phi_i;
+            self.dPhis_by_param[key] = dPhi_i;
+            self.d2Phis_by_param[key]= d2Phi_i;
+
+        return;
+
+
+
+    # ---------------------------------------------------------------------------------------------
+    # fit_coefficients
+    # ---------------------------------------------------------------------------------------------
+
+    def fit_coefficients(self,
+                         Latent_States : list[list[torch.Tensor]],
+                         t_Grid        : list[torch.Tensor],
+                         params        : numpy.ndarray | None = None) -> torch.Tensor:
+        r"""
+        Fit coefficients for the weak-form damped-spring model using the weak-form normal
+        equations.
+
+        This is intended for coefficient initialization. Weight functions must be available
+        either via `set_weight_functions(...)` (Trainer-provided) or they will be generated
+        on-demand from the time grids using the weak-form settings stored from `config`.
+        """
+        assert params is not None, "DampedSpring_weak.fit_coefficients requires `params`";
+        assert isinstance(t_Grid, list) and isinstance(Latent_States, list);
+        assert len(Latent_States) == len(t_Grid) == params.shape[0];
+
+        # Ensure weight functions exist for all requested parameter combinations.
+        self._ensure_weight_functions(t_Grid = t_Grid, params = params);
+        assert self.Phis_by_param is not None and self.dPhis_by_param is not None and self.d2Phis_by_param is not None;
+
+        out_list : list[torch.Tensor] = [];
+        for i in range(params.shape[0]):
+            key = self._param_key(params[i, :]);
+            Phi  : torch.Tensor = self.Phis_by_param[key];
+            dPhi : torch.Tensor = self.dPhis_by_param[key];
+            d2Phi: torch.Tensor = self.d2Phis_by_param[key];
+
+            Z      = Latent_States[i];
+            Z_D    : torch.Tensor = Z[0];
+            Z_V    : torch.Tensor = Z[1];
+
+            ones    : torch.Tensor = torch.ones((Z_D.shape[0], 1), device = Z_D.device, dtype = Z_D.dtype);
+            Theta   : torch.Tensor = torch.cat([Z_D, Z_V, ones], dim = 1);          # (n_t, 2*n_z+1)
+
+            # Solve weak-form least squares system for vec(E^T), then reshape to E.
+            Gk, bk = self.compute_Gk_bk(self.n_z, Phi.to(Theta), dPhi.to(Theta), d2Phi.to(Theta), Theta, [Z_D, Z_V]);
+            n_lib      : int           = Gk.shape[1];
+            rhs        : torch.Tensor  = Gk.T @ bk;
+            if self.lstsq_reg > 0.0:
+                gram   : torch.Tensor  = Gk.T @ Gk + self.lstsq_reg * torch.eye(n_lib, device = Gk.device, dtype = Gk.dtype);
+                coef_v : torch.Tensor  = torch.linalg.solve(gram, rhs);
+            else:
+                coef_v : torch.Tensor  = torch.linalg.lstsq(Gk, bk).solution;
+            coefs = coef_v.reshape((self.n_z, Theta.shape[-1])).T;                  # (2*n_z+1, n_z)
+
+            out_list.append(coefs.reshape(1, -1));
+
+        return torch.cat(out_list, dim = 0);
+
+
+
+
+
+    # ---------------------------------------------------------------------------------------------
+    # Calibrate
+    # ---------------------------------------------------------------------------------------------
 
     def calibrate(self,
                   Latent_States : list[torch.Tensor],
@@ -187,11 +432,10 @@ class DampedSpring_weak(LatentDynamics):
             value corresponding to the j'th frame when we use the i'th combination of parameter 
             values.
 
-        input_coefs : list[torch.Tensor], len = n_param, optional
-            The i'th element of this list is a 1d tensor of shape (n_coefs) holding the 
-            coefficients for the i'th combination of parameter values. If input_coefs is empty, 
-            then we will learn the coefficients using Least Squares. If input_coefs is not empty, 
-            then we will use the provided coefficients to compute the loss.
+        input_coefs : list[torch.Tensor], len = n_param
+            The i'th element of this list is a 1d tensor of shape (n_coefs) holding the
+            coefficients for the i'th combination of parameter values. This function assumes
+            coefficients are provided; to *fit* coefficients from data, use `fit_coefficients(...)`.
         
         params: numpy.ndarray, shape = (n_param, n_p), optional
             The i'th row holds the i'th combination of parameter values. This class doesn't use 
@@ -243,20 +487,17 @@ class DampedSpring_weak(LatentDynamics):
         # Run checks on loss_type.
         assert(loss_type in ["MSE", "MAE"]);
 
-        # Weak-form weight functions must be set by the trainer before calibration.
-        assert self.Phis_by_param is not None and self.dPhis_by_param is not None and self.d2Phis_by_param is not None, (
-            "DampedSpring_weak requires weak-form weight functions. Call set_weight_functions(...) before calibrate().");
         assert params is not None, (
-            "DampedSpring_weak requires `params` so it can look up weight functions by parameter tuple.");
+            "DampedSpring_weak requires `params` so it can look up (or generate) weight functions by parameter tuple.");
+        self._ensure_weight_functions(t_Grid = t_Grid, params = params);
+        assert self.Phis_by_param is not None and self.dPhis_by_param is not None and self.d2Phis_by_param is not None;
 
-        assert(isinstance(input_coefs, list));
-        if(len(input_coefs) > 0):
-            assert(isinstance(input_coefs, list));
-            assert(len(input_coefs) == n_param);
-            for i in range(n_param):
-                assert(isinstance(input_coefs[i], torch.Tensor));
-                assert(len(input_coefs[i].shape) == 1);
-                assert(input_coefs[i].shape[0] == self.n_coefs);
+        assert isinstance(input_coefs, list);
+        assert len(input_coefs) == n_param, "DampedSpring_weak.calibrate requires coefficients. Expected len(input_coefs) == n_param (%d)" % n_param;
+        for i in range(n_param):
+            assert isinstance(input_coefs[i], torch.Tensor);
+            assert len(input_coefs[i].shape) == 1;
+            assert input_coefs[i].shape[0] == self.n_coefs;
 
 
 
@@ -277,17 +518,11 @@ class DampedSpring_weak(LatentDynamics):
                 params_i = params[i, :].reshape(1, -1);
                 
                 # Calibrate on the i'th combination of parameter values.
-                if(len(input_coefs) == 0):
-                    output_coefs, loss_sindy_i, loss_coef_i, loss_stab_i = self.calibrate(  Latent_States = [Latent_States[i]],
-                                                                                            t_Grid        = [t_Grid[i]],
-                                                                                            loss_type     = loss_type,
-                                                                                            params        = params_i);
-                else:
-                    output_coefs, loss_sindy_i, loss_coef_i, loss_stab_i = self.calibrate(  Latent_States = [Latent_States[i]],
-                                                                                            t_Grid        = [t_Grid[i]],
-                                                                                            input_coefs   = [input_coefs[i]],
-                                                                                            loss_type     = loss_type,
-                                                                                            params        = params_i);
+                output_coefs, loss_sindy_i, loss_coef_i, loss_stab_i = self.calibrate(  Latent_States = [Latent_States[i]],
+                                                                                        t_Grid        = [t_Grid[i]],
+                                                                                        input_coefs   = [input_coefs[i]],
+                                                                                        loss_type     = loss_type,
+                                                                                        params        = params_i);
 
                 # Package the results from this combination of parameter values.
                 output_coefs_list.append(output_coefs);
@@ -354,34 +589,16 @@ class DampedSpring_weak(LatentDynamics):
 
 
         # -----------------------------------------------------------------------------------------
-        # Set up coefs (either using Least Squares or using the provided coefficients).
+        # Set up coefs using the provided coefficients.
 
-        if(len(input_coefs) == 0):
-            # Solve the weak-form least-squares system
-            #   min || G_k vec(E^T) - b_k ||,
-            # where E^T = [-K, -C, b]. Use the same Tikhonov regularization as the strong form.
-            Gk, bk = self.compute_Gk_bk(self.n_z, Phis, dPhis, d2Phis, ZD_ZV_1, [Z_D, Z_V]);
-            n_lib      : int           = Gk.shape[1];
-            rhs        : torch.Tensor  = Gk.T @ bk;
-            if self.lstsq_reg > 0.0:
-                gram   : torch.Tensor  = Gk.T @ Gk + self.lstsq_reg * torch.eye(n_lib, device = Gk.device, dtype = Gk.dtype);
-                coef_v : torch.Tensor  = torch.linalg.solve(gram, rhs);
-            else:
-                coef_v : torch.Tensor  = torch.linalg.lstsq(Gk, bk).solution;
-            coefs = coef_v.reshape((self.n_z, ZD_ZV_1.shape[-1])).T;                          # shape = (2*n_z + 1, n_z)
-        
-            LD_RHS  : torch.Tensor  = torch.matmul(ZD_ZV_1, coefs);
-
-        else:
-            # First, reshape input_coefs to have shape (2*n_z + 1, n_z).
-            coefs = input_coefs[0].reshape(2*self.n_z + 1, self.n_z);                     # shape = (2*n_z + 1, n_z)
-        
-            E   : torch.Tensor  = coefs.T;
-            K   : torch.Tensor  = -E[:, 0:self.n_z];
-            C   : torch.Tensor  = -E[:, self.n_z:(2*self.n_z)];
-            b   : torch.Tensor  = E[:, 2*self.n_z].reshape(1, -1);
-        
-            LD_RHS              = b - torch.matmul(Z_V, C.T) - torch.matmul(Z_D, K.T);
+        coefs = input_coefs[0].reshape(2*self.n_z + 1, self.n_z);                     # shape = (2*n_z + 1, n_z)
+    
+        E   : torch.Tensor  = coefs.T;
+        K   : torch.Tensor  = -E[:, 0:self.n_z];
+        C   : torch.Tensor  = -E[:, self.n_z:(2*self.n_z)];
+        b   : torch.Tensor  = E[:, 2*self.n_z].reshape(1, -1);
+    
+        LD_RHS = b - torch.matmul(Z_V, C.T) - torch.matmul(Z_D, K.T);
 
         # Compute the weak residual used for the latent-dynamics loss.
         # weak_LHS    : torch.Tensor = 0.5 * (torch.matmul(d2Phis, Z_D) - torch.matmul(dPhis, Z_V));
@@ -633,7 +850,7 @@ class DampedSpring_weak(LatentDynamics):
     def compute_Gk_bk(self, n_s,Phi,dPhi,d2Phi,Theta,Zs):
 
 
-        '''
+        r'''
         n_s: reduced dim
         Phi: dimension (H,n_T)
         dPhi: dimension (H,n_T)

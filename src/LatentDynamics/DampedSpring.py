@@ -33,7 +33,7 @@ class DampedSpring(LatentDynamics):
     def __init__(   self, 
                     n_z             :   int, 
                     Uniform_t_Grid  :   bool,
-                    lstsq_reg       :   float = 1.0) -> None:
+                    config          :   dict) -> None:
         r"""
         Initializes a DampedSpring object. This is a subclass of the LatentDynamics class which 
         implements the following latent dynamics
@@ -57,11 +57,13 @@ class DampedSpring(LatentDynamics):
             specific parameter value). The value of this setting determines which finite difference 
             method we use to compute time derivatives. 
 
-        lstsq_reg : float, optional (default 1.0)
-            Ridge-regression regularization strength used when fitting coefficients from scratch
-            (i.e., when no input_coefs are supplied to calibrate). Replaces plain lstsq with the
-            Tikhonov-regularized normal equations  (A^T A + λI) c = A^T b  where A = [Z_D, Z_V, 1]
-            and b = d²Z/dt². Setting lstsq_reg = 0 falls back to plain least squares.
+        config : dict 
+            The "latent_dynamics" sub-dictionary of the config file. This can include "lstsq_reg", 
+            a float specifying the ridge-regression regularization strength used when fitting 
+            coefficients from scratch (i.e., when no input_coefs are supplied to calibrate). 
+            Replaces plain lstsq with theTikhonov-regularized normal equations 
+            (A^T A + λI) c = A^T b  where A = [Z_D, Z_V, 1] and b = d²Z/dt². Setting lstsq_reg = 0 
+            falls back to plain least squares.
 
             
         -------------------------------------------------------------------------------------------
@@ -73,8 +75,8 @@ class DampedSpring(LatentDynamics):
 
         # Run the base class initializer. The only thing this does is set the n_z and n_t 
         # attributes.;
-        super().__init__(n_z = n_z, Uniform_t_Grid = Uniform_t_Grid);
-        self.lstsq_reg : float = lstsq_reg;
+        super().__init__(n_z = n_z, Uniform_t_Grid = Uniform_t_Grid, config = config);
+        self.lstsq_reg : float = config.get("lstsq_reg", 1.0);
         LOGGER.info("Initializing a SINDY object with n_z = %d, Uniform_t_Grid = %s, lstsq_reg = %s" % (  self.n_z, 
                                                                                                                 str(self.Uniform_t_Grid),
                                                                                                                 str(self.lstsq_reg)));        
@@ -90,6 +92,60 @@ class DampedSpring(LatentDynamics):
         self.MAE = torch.nn.L1Loss(reduction = 'mean');
         return;
     
+
+
+    def fit_coefficients(self,
+                         Latent_States : list[list[torch.Tensor]],
+                         t_Grid        : list[torch.Tensor],
+                         params        : numpy.ndarray | None = None) -> torch.Tensor:
+        r"""
+        Fit coefficients for the damped-spring latent dynamics model from latent trajectories.
+
+        This returns the least-squares (optionally ridge-regularized) estimate of the coefficients
+        for each parameter combination, and is intended for initialization (e.g., after greedy
+        sampling adds a new training point).
+
+        See `LatentDynamics.fit_coefficients` for argument/return conventions.
+        """
+
+        # Checks.
+        assert isinstance(t_Grid, list);
+        assert isinstance(Latent_States, list);
+        assert len(Latent_States) == len(t_Grid);
+        n_param : int = len(t_Grid);
+
+        output_list : list[torch.Tensor] = [];
+        for i in range(n_param):
+            Z       = Latent_States[i];
+            t_Grid0 = t_Grid[i];
+            assert isinstance(Z, list) and len(Z) == 2;
+            Z_D : torch.Tensor = Z[0];
+            Z_V : torch.Tensor = Z[1];
+
+            # Library matrix [Z_D, Z_V, 1].
+            ones    : torch.Tensor  = torch.ones((Z_D.shape[0], 1), device = Z_D.device, dtype = Z_D.dtype);
+            ZD_ZV_1 : torch.Tensor  = torch.cat([Z_D, Z_V, ones], dim = 1);      # (n_t, 2*n_z + 1)
+
+            # Compute d2Z/dt2 (use d/dt of velocity stream).
+            if(self.Uniform_t_Grid  == True):
+                h : float = (t_Grid0[1] - t_Grid0[0]).item();
+                d2Z_dt2 : torch.Tensor = Derivative1_Order4(U = Z_V, h = h);
+            else:
+                d2Z_dt2 = Derivative1_Order2_NonUniform(U = Z_V, t_Grid = t_Grid0);
+
+            # Solve for E in ZD_ZV_1 @ E ≈ d2Z_dt2.
+            n_lib : int = ZD_ZV_1.shape[1];
+            rhs   : torch.Tensor = ZD_ZV_1.T @ d2Z_dt2;
+            if self.lstsq_reg > 0.0:
+                gram  : torch.Tensor = ZD_ZV_1.T @ ZD_ZV_1 + self.lstsq_reg * torch.eye(n_lib, device = ZD_ZV_1.device, dtype = ZD_ZV_1.dtype);
+                E     : torch.Tensor = torch.linalg.solve(gram, rhs);
+            else:
+                E     : torch.Tensor = torch.linalg.lstsq(ZD_ZV_1, d2Z_dt2).solution;
+
+            output_list.append(E.reshape(1, -1));
+
+        return torch.cat(output_list, dim = 0);
+
 
 
     def calibrate(self, 
@@ -134,11 +190,10 @@ class DampedSpring(LatentDynamics):
             value corresponding to the j'th frame when we use the i'th combination of parameter 
             values.
 
-        input_coefs : list[torch.Tensor], len = n_param, optional
-            The i'th element of this list is a 1d tensor of shape (n_coefs) holding the 
-            coefficients for the i'th combination of parameter values. If input_coefs is empty, 
-            then we will learn the coefficients using Least Squares. If input_coefs is not empty, 
-            then we will use the provided coefficients to compute the loss.
+        input_coefs : list[torch.Tensor], len = n_param
+            The i'th element of this list is a 1d tensor of shape (n_coefs) holding the
+            coefficients for the i'th combination of parameter values. This function assumes
+            coefficients are provided; to *fit* coefficients from data, use `fit_coefficients(...)`.
         
         params: numpy.ndarray, shape = (n_param, n_p), optional
             The i'th row holds the i'th combination of parameter values. This class doesn't use 
@@ -190,14 +245,12 @@ class DampedSpring(LatentDynamics):
         # Run checks on loss_type.
         assert(loss_type in ["MSE", "MAE"]);
 
-        assert(isinstance(input_coefs, list));
-        if(len(input_coefs) > 0):
-            assert(isinstance(input_coefs, list));
-            assert(len(input_coefs) == n_param);
-            for i in range(n_param):
-                assert(isinstance(input_coefs[i], torch.Tensor));
-                assert(len(input_coefs[i].shape) == 1);
-                assert(input_coefs[i].shape[0] == self.n_coefs);
+        assert isinstance(input_coefs, list);
+        assert len(input_coefs) == n_param, "DampedSpring.calibrate requires coefficients. Expected len(input_coefs) == n_param (%d)" % n_param;
+        for i in range(n_param):
+            assert isinstance(input_coefs[i], torch.Tensor);
+            assert len(input_coefs[i].shape) == 1;
+            assert input_coefs[i].shape[0] == self.n_coefs;
 
 
 
@@ -219,17 +272,11 @@ class DampedSpring(LatentDynamics):
                 params_i = None if params is None else params[i, :].reshape(1, -1);
                 
                 # Calibrate on the i'th combination of parameter values.
-                if(len(input_coefs) == 0):
-                    output_coefs, loss_sindy_i, loss_coef_i, loss_stab_i = self.calibrate(  Latent_States = [Latent_States[i]], 
-                                                                                                t_Grid        = [t_Grid[i]],
-                                                                                                loss_type     = loss_type,
-                                                                                                params        = params_i);
-                else:
-                    output_coefs, loss_sindy_i, loss_coef_i, loss_stab_i = self.calibrate(  Latent_States = [Latent_States[i]], 
-                                                                                                t_Grid        = [t_Grid[i]],
-                                                                                                input_coefs   = [input_coefs[i]],
-                                                                                                loss_type     = loss_type,
-                                                                                                params        = params_i);
+                output_coefs, loss_sindy_i, loss_coef_i, loss_stab_i = self.calibrate(  Latent_States = [Latent_States[i]],
+                                                                                        t_Grid        = [t_Grid[i]],
+                                                                                        input_coefs   = [input_coefs[i]],
+                                                                                        loss_type     = loss_type,
+                                                                                        params        = params_i);
 
                 # Package the results from this combination of parameter values.
                 output_coefs_list.append(output_coefs);
@@ -277,42 +324,19 @@ class DampedSpring(LatentDynamics):
 
 
         # -----------------------------------------------------------------------------------------
-        # Set up coefs (either using Least Squares or using the provided coefficients).
+        # Set up coefs using the provided coefficients.
 
-        if(len(input_coefs) == 0):
-            # Solve for coefficients via Tikhonov-regularized least squares (ridge regression).
-            # Normal equations:  (A^T A + λ I) c = A^T b  where A = ZD_ZV_1, b = d2Z_dt2.
-            # Setting lstsq_reg = 0 falls back to plain least squares (no regularization).
-            n_lib   : int           = ZD_ZV_1.shape[1];    # 2*n_z + 1
-            rhs     : torch.Tensor  = ZD_ZV_1.T @ d2Z_dt2; # shape = (2*n_z + 1, n_z)
-            if self.lstsq_reg > 0.0:
-                gram    : torch.Tensor  = ZD_ZV_1.T @ ZD_ZV_1 + self.lstsq_reg * torch.eye(n_lib, device = ZD_ZV_1.device, dtype = ZD_ZV_1.dtype);
-                coefs   : torch.Tensor  = torch.linalg.solve(gram, rhs);                                         # shape = (2*n_z + 1, n_z)
-            else:
-                coefs   : torch.Tensor  = torch.linalg.lstsq(ZD_ZV_1, d2Z_dt2).solution;                        # shape = (2*n_z + 1, n_z)
+        # First, reshape input_coefs to have shape (2*n_z + 1, n_z).
+        coefs = input_coefs[0].reshape(2*self.n_z + 1, self.n_z);                     # shape = (2*n_z + 1, n_z)
 
-            # Now compute the loss.
-            LD_RHS  : torch.Tensor  = torch.matmul(ZD_ZV_1, coefs);
-
-        else:
-            # First, reshape input_coefs to have shape (2*n_z + 1, n_z).
-            coefs                   = input_coefs[0].reshape(2*self.n_z + 1, self.n_z);                     # shape = (2*n_z + 1, n_z)
-
-            # Next, extract -K, -C, and b from coefs.
-            E   : torch.Tensor  = coefs.T;
-            K   : torch.Tensor  = -E[:, 0:self.n_z];
-            C   : torch.Tensor  = -E[:, self.n_z:(2*self.n_z)];
-            b   : torch.Tensor  = E[:, 2*self.n_z].reshape(1, -1);
-        
-            # Now compute the right hand side of the latent dynamics.
-            LD_RHS              = b - torch.matmul(Z_V, C.T) - torch.matmul(Z_D, K.T);
-            
-            """
-            # Now compute the right hand side of the latent dynamics.
-            LD_RHS  : torch.Tensor = torch.matmul(ZD_ZV_1, coefs);\
-            """
-
-
+        # Next, extract -K, -C, and b from coefs.
+        E   : torch.Tensor  = coefs.T;
+        K   : torch.Tensor  = -E[:, 0:self.n_z];
+        C   : torch.Tensor  = -E[:, self.n_z:(2*self.n_z)];
+        b   : torch.Tensor  = E[:, 2*self.n_z].reshape(1, -1);
+    
+        # Now compute the right hand side of the latent dynamics.
+        LD_RHS = b - torch.matmul(Z_V, C.T) - torch.matmul(Z_D, K.T);
         # -----------------------------------------------------------------------------------------
         # Compute the stability losses and return.
 
