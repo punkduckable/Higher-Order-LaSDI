@@ -1,9 +1,9 @@
 trainer:
   type:                   "First_Order_Rollout"
 
-  max_iter:               6000
+  max_iter:               3000
   n_iter:                 1500
-  max_greedy_iter:        6000
+  max_greedy_iter:        3000
 
   # If true, compute a single global mean/std from TRAINING data only, and normalize
   # all training/testing trajectories using these values.
@@ -13,19 +13,19 @@ trainer:
 
   First_Order_Rollout:       
     lr:                     0.001
-    gradient_clip:          10.0      # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
+    gradient_clip:          10.0        # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
 
     # p_rollout grows from p_rollout_init by dp_per_update every rollout_update_freq epochs, capped at max_p_rollout.
     p_rollout_init:         0.01
     rollout_update_freq:    10
     dp_per_update:          0.005
-    max_p_rollout:          0.375       # Maximum proportion of the time window used for rollout loss.
-    n_rollouts:             13          # Frame-rollout mode: number of rollable start frames to rollout per training parameter per epoch.
+    max_p_rollout:          0.25        # Maximum proportion of the time window used for rollout loss.
+    n_rollouts:             12          # Frame-rollout mode: number of rollable start frames to rollout per training parameter per epoch.
 
     p_IC_rollout_init:      0.01
     IC_rollout_update_freq: 10
-    IC_dp_per_update:       0.0075
-    max_p_IC_rollout:       0.75      # Maximum proportion of the time window used for IC rollout loss.
+    IC_dp_per_update:       0.01
+    max_p_IC_rollout:       1.0       # Maximum proportion of the time window used for IC rollout loss.
 
     warmup_epochs:          40        # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
 
@@ -33,9 +33,9 @@ trainer:
       recon:                1.0
       LD:                   10.0
       rollout:              1.0
-      IC_rollout:           0.0
+      IC_rollout:           0.1
       stab:                 0.01
-      coef:                 1.0
+      coef:                 2.0
 
     loss_types:
       recon:                "MSE"
@@ -69,6 +69,8 @@ parameter_space:
 EncoderDecoder:
   type:                     cnn_3d
   cnn_3d:
+    n_Decoders:             1
+
     # Fully-connected (FC) part
     hidden_widths_fc:       [500, 100]
     activations_fc:         ["tanh", "tanh"]

@@ -69,6 +69,7 @@ parameter_space:
 EncoderDecoder:
   type:                     autoencoder
   autoencoder:
+    n_Decoders:             1
     hidden_widths:          [250, 100, 100, 100]
     latent_dimension:       5  
     activations:            ["sin", "sin", "sin", "sin"]

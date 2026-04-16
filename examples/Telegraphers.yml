@@ -1,9 +1,9 @@
 trainer:
   type:                   "Second_Order_Rollout"
 
-  max_iter:               36000
+  max_iter:               18000
   n_iter:                 6000
-  max_greedy_iter:        36000
+  max_greedy_iter:        18000
 
   # If true, compute a single global mean/std from TRAINING data only, and normalize
   # all training/testing trajectories using these values.
@@ -13,21 +13,21 @@ trainer:
 
   Second_Order_Rollout:
     lr:                     0.001
-    gradient_clip:          15.0      # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
+    gradient_clip:          15.0        # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
 
     # p_rollout grows from p_rollout_init by dp_per_update every rollout_update_freq epochs, capped at max_p_rollout.
     p_rollout_init:         0.01
     rollout_update_freq:    20
     dp_per_update:          0.01
-    max_p_rollout:          0.75      # Maximum proportion of the time window used for rollout loss.
-    n_rollouts:             4         # Number of rollable start frames to rollout per training parameter per epoch.
+    max_p_rollout:          0.25        # Maximum proportion of the time window used for rollout loss.
+    n_rollouts:             12          # Number of rollable start frames to rollout per training parameter per epoch.
 
     p_IC_rollout_init:      0.01
     IC_rollout_update_freq: 20
     IC_dp_per_update:       0.01
-    max_p_IC_rollout:       1.0       # Maximum proportion of the time window used for IC rollout loss.
+    max_p_IC_rollout:       1.0         # Maximum proportion of the time window used for IC rollout loss.
 
-    warmup_epochs:          20    # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
+    warmup_epochs:          40          # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
 
     loss_weights:
       recon:                1.0
@@ -36,6 +36,7 @@ trainer:
       rollout:              1.0
       IC_rollout:           1.0
       coef:                 0.001
+      stab:                 0.1
       consistency:          1.0
 
     loss_types:
@@ -76,6 +77,7 @@ parameter_space:
 EncoderDecoder:
   type:                     pair
   pair:
+    n_Decoders:             1
     hidden_widths:          [250, 100, 100, 100]
     latent_dimension:       10
     activations:            ["sin", "sin", "sin", "sin"]
