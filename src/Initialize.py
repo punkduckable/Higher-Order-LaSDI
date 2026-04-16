@@ -270,8 +270,7 @@ def Initialize_Encoder_Decoder(physics : Physics, config : dict) -> EncoderDecod
         This encoder_decoder should have a latent space of some form. We learn a set of dynamics to 
         describe how this latent space evolves over time. 
     """
-
-
+    
     # First, determine what encoder_decoder we are using in the latent dynamics. Make sure the user 
     # included all the information that is necessary to initialize the corresponding dynamics.
     encoder_decoder_type : str = config['EncoderDecoder']['type'];
@@ -279,97 +278,8 @@ def Initialize_Encoder_Decoder(physics : Physics, config : dict) -> EncoderDecod
     assert(encoder_decoder_type in encoder_decoder_dict);
     LOGGER.info("Initializing EncoderDecoder (%s)" % encoder_decoder_type);
 
-    # Autoencoder, autoencoder pair case.
-    if(encoder_decoder_type == "ae" or encoder_decoder_type == "pair" or encoder_decoder_type == "autoencoder" or encoder_decoder_type == "autoencoder_pair"):
-        # Next, fetch the hidden widths and latent dimension (n_z). 
-        encoder_decoder_config  : dict              = config['EncoderDecoder'][encoder_decoder_type];
-        hidden_widths           : list[int]         = encoder_decoder_config['hidden_widths'];
-        n_z                     : int               = encoder_decoder_config['latent_dimension'];
-
-        # Fetch the activations. This can either be a string or a list of strings. If it's 
-        # a string, then we use that activation for all layers.
-        n_hidden_layers     : int               = len(hidden_widths);
-        if(isinstance(encoder_decoder_config['activations'], str)):
-            activations         : list[str]     = [encoder_decoder_config['activations']] * n_hidden_layers;   # The final layer has no activation.
-        elif(isinstance(encoder_decoder_config['activations'], list)):
-            activations         : list[str]     = encoder_decoder_config['activations'];
-            assert(len(activations) == n_hidden_layers);
-        else:
-            raise ValueError("Activations must be a string or a list of strings.");
-
-        # Now build the widths attribute + fetch Frame_Shape from physics.
-        Frame_Shape         : list[int]         = physics.Frame_Shape;
-        space_dim           : int               = numpy.prod(Frame_Shape).item();
-        widths              : list[int]         = [space_dim] + hidden_widths + [n_z];
-
-        # Now build the encoder_decoder!
-        encoder_decoder : EncoderDecoder        = encoder_decoder_dict[encoder_decoder_type](
-                                                        widths          = widths, 
-                                                        activations     = activations, 
-                                                        reshape_shape   = Frame_Shape);
-
-        # All done!
-        return encoder_decoder;
-
-
-    # Convolutional autoencoder case.
-    elif(encoder_decoder_type == "cnn_3d" or encoder_decoder_type == "cnn_3d_ae" or encoder_decoder_type == "cnn_3d_autoencoder"):
-        encoder_decoder_config  : dict              = config['EncoderDecoder'][encoder_decoder_type];
-
-        # FC configuration (analogous to the AE's hidden_widths/activations).
-        hidden_widths_fc        : list[int]         = encoder_decoder_config.get('hidden_widths_fc', encoder_decoder_config.get('hidden_widths'));
-        n_z                     : int               = encoder_decoder_config['latent_dimension'];
-
-        # FC activations can either be a string or a list of strings.
-        n_hidden_layers         : int               = len(hidden_widths_fc);
-        act_cfg = encoder_decoder_config.get('activations_fc', encoder_decoder_config.get('activations'));
-        if(isinstance(act_cfg, str)):
-            activations_fc      : list[str]        = [act_cfg] * n_hidden_layers;
-        elif(isinstance(act_cfg, list)):
-            activations_fc      : list[str]        = act_cfg;
-            assert(len(activations_fc) == n_hidden_layers);
-        else:
-            raise ValueError("activations_fc must be a string or a list of strings.");
-
-        # Conv configuration.
-        conv_channels       : list[int]         = encoder_decoder_config['conv_channels'];
-        conv_kernel_sizes   = encoder_decoder_config.get('conv_kernel_sizes', 3);
-        conv_strides        = encoder_decoder_config.get('conv_strides', 2);
-        conv_paddings       = encoder_decoder_config.get('conv_paddings', 1);
-
-        # Per-layer conv activations. This can be a string (use same activation for all conv layers)
-        # or a list of strings of length len(conv_channels) - 1.
-        conv_act_cfg = encoder_decoder_config.get('conv_activations', 'relu');
-        if(isinstance(conv_act_cfg, str)):
-            conv_activations : list[str] = [conv_act_cfg] * (len(conv_channels) - 1);
-        elif(isinstance(conv_act_cfg, list)):
-            conv_activations = conv_act_cfg;
-            assert(len(conv_activations) == len(conv_channels) - 1);
-        else:
-            raise ValueError("conv_activations must be a string or a list of strings.");
-
-        # Fetch Frame_Shape from physics (must be 3D for Conv3d).
-        Frame_Shape         : list[int]         = physics.Frame_Shape;
-        assert(len(Frame_Shape) == 4), "physics.Frame_Shape = %s; Conv_Autoencoder requires a 3D spatial shape" % str(Frame_Shape);
-        C               : int       = int(Frame_Shape[0]);
-        reshape_shape   : list[int] = [int(x) for x in Frame_Shape[1:]];
-        assert conv_channels[0] == C, "conv_chanels[0] = %d, but the data has %d channels. These must match" % (conv_channels[0], C);
-
-        encoder_decoder     : EncoderDecoder    = encoder_decoder_dict[encoder_decoder_type](
-                                                        reshape_shape        = reshape_shape,
-                                                        hidden_widths_fc     = hidden_widths_fc,
-                                                        activations_fc       = activations_fc,
-                                                        latent_dimension     = n_z,
-                                                        conv_channels        = conv_channels,
-                                                        conv_kernel_sizes    = conv_kernel_sizes,
-                                                        conv_strides         = conv_strides,
-                                                        conv_paddings        = conv_paddings,
-                                                        conv_activations     = conv_activations);
-
-        return encoder_decoder;
-
-    else:
-        raise ValueError("EncoderDecoder type %s not supported." % encoder_decoder_type);
+    encoder_decoder_dict[encoder_decoder_type]( Frame_Shape = physics.Frame_Shape,
+                                                config      = config['EncoderDecoder']);
 
 
 

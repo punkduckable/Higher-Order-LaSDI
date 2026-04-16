@@ -33,10 +33,9 @@ LOGGER  : logging.Logger    = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class Autoencoder(EncoderDecoder):
-    def __init__(   self,                     
-                    reshape_shape   : list[int],
-                    widths          : list[int], 
-                    activations     : list[str]) -> None:
+    def __init__(   self,         
+                    Frame_Shape     : list[int],    
+                    config          : dict) -> None:
         r"""
         Initializes an Autoencoder object. An Autoencoder consists of two networks, an encoder, 
         E : \mathbb{R}^F -> \mathbb{R}^L, and a decoder, D : \mathbb{R}^L -> \marthbb{R}^F. We 
@@ -53,21 +52,23 @@ class Autoencoder(EncoderDecoder):
         Arguments
         -------------------------------------------------------------------------------------------
         
-        reshape_shape : list[int]
-            This is a list of k integers specifying the final k dimensions of the shape of the 
-            input to the first layer (if reshape_index == 0) or the output of the last layer (if 
-            reshape_index == -1). 
+        Frame_Shape : list[int]
+            The shape of elements of the FOM space. This also specifies the final k dimensions of 
+            the shape of the input to the first layer (if reshape_index == 0) or the output of 
+            the last layer (if reshape_index == -1). 
         
-        widths : list[int]
-            A list of integers specifying the widths of the layers in the encoder. We use the 
-            revere of this list to specify the widths of the layers in the decoder. See the 
-            docstring for the MultiLayerPerceptron class for details on how Widths defines a 
-            network.
+        config: dict
+            The "EncoderDecoder" sub dictionary of the configuration file. This must contain 
+            a "type" key whose value is either "ae" or "autoencoder". It must also contain 
+            an item whose key matches the value of tye "type" key and whose value is a 
+            sub-dictionary specifying the configuration settings for the autoencoder object.
+            Namely, it must contain the following sub-keys:
+                - hidden_widths : A list of ints specifying the widths of the hidden layers
+                - latent_dimension : An integer specifying the latent dimension
+                - activations : A list of strings specifying the activation functions. It's 
+                length must match that of hidden_widths, and each element must belong to the act_dict.
+                - n_Decoders : an integer specifying the number of decoders we are to use.
 
-        activations : list[str], len = len(widths) - 2
-            i'th element specifies which activation function we want to use after the i'th layer 
-            in the encoder. The final layer has no activation function. We use the reversed list
-            for the decoder. 
 
 
 
@@ -77,32 +78,66 @@ class Autoencoder(EncoderDecoder):
 
         Nothing!
         """
+        
+        # Input checks.
+        assert 'type' in config;
+        assert (config['type'] == "ae") or (config['type'] == "autoencoder");
+        ae_key  : str = config['type'];
+        assert ae_key in config;
+        ae_config               : dict              = config[ae_key];
 
-        # Checks
-        assert isinstance(reshape_shape, list),             "type(reshape_shape) == %s, expected list" % (str(type(reshape_shape)));
-        for i in range(len(reshape_shape)):
-            assert isinstance(reshape_shape[i], int),           "type(reshape_shape[%d]) = %s, expected int" % (i, str(type(reshape_shape[i])));
-            assert reshape_shape[i] > 0,                        "reshape_shape[%d] = %d, needs to be positive" % (i, reshape_shape[i]);
-        assert isinstance(widths, list),                    "type(widths) = %s, expected list" % str(type(widths));
-        for i in range(len(widths)):
-            assert isinstance(widths[i], int),                  "type(widths[%d]) = %s, must be int" % (i, str(type(widths[i])));
-            assert widths[i] > 0,                               "widths[%d] = %d, must be positive" % (i, widths[i]);
-        assert isinstance(activations, list),               "type(activations) = %s, expected list" % str(type(activations));
-        assert len(activations) == len(widths) - 2,         "len(activations) = %d, len(widths) = %d; but we must have len(activations) = len(widths) - 2" % (len(activations), len(widths));
+        assert "hidden_widths"      in ae_config;
+        assert "latent_dimension"   in ae_config;
+        assert "activations"        in ae_config;
+        assert "n_Decoders"         in ae_config;
+        
+        assert isinstance(Frame_Shape, list),                 "type(Frame_Shape) == %s, expected list" % (str(type(reshape_shape)));
+        for i in range(len(Frame_Shape)):
+            assert isinstance(Frame_Shape[i], int),           "type(Frame_Shape[%d]) = %s, expected int" % (i, str(type(reshape_shape[i])));
+            assert Frame_Shape[i] > 0,                        "Frame_Shape[%d] = %d, needs to be positive" % (i, reshape_shape[i]);
+        
+
+
+        # Next, fetch the hidden widths and latent dimension (n_z). 
+        hidden_widths           : list[int]         = ae_config['hidden_widths'];
+        n_z                     : int               = ae_config['latent_dimension'];
+
+        # Fetch the activations. This can either be a string or a list of strings. If it's 
+        # a string, then we use that activation for all layers.
+        n_hidden_layers     : int               = len(hidden_widths);
+        if(isinstance(ae_config['activations'], str)):
+            activations         : list[str]     = [ae_config['activations']] * n_hidden_layers;   # The final layer has no activation.
+        elif(isinstance(ae_config['activations'], list)):
+            activations         : list[str]     = ae_config['activations'];
+            assert(len(activations) == n_hidden_layers);
+        else:
+            raise ValueError("Activations must be a string or a list of strings.");
+        
         for i in range(len(activations)):
             assert isinstance(activations[i], str),             "type(activations[%d]) = %s, must be str" % (i, str(type(activations[i])));
             assert activations[i].lower() in act_dict.keys(),   "activations[%d] = %s; not in act_dict keys" % (i, activations[i].lower());
-        assert numpy.prod(reshape_shape) == widths[0],      "numpy.prod(self.reshape_shape) = %d, widths[0] = %d; must be equal" % (numpy.prod(reshape_shape), widths[0]);
+        
+
+        # Now build the widths attribute + fetch Frame_Shape from physics.
+        space_dim           : int               = numpy.prod(Frame_Shape).item();
+        widths              : list[int]         = [space_dim] + hidden_widths + [n_z];
+        for i in range(len(widths)):
+            assert isinstance(widths[i], int),                  "type(widths[%d]) = %s, must be int" % (i, str(type(widths[i])));
+            assert widths[i] > 0,                               "widths[%d] = %d, must be positive" % (i, widths[i]);
+        assert numpy.prod(Frame_Shape) == widths[0],            "numpy.prod(self.reshape_shape) = %d, widths[0] = %d; must be equal" % (numpy.prod(reshape_shape), widths[0]);
+
+        # Extract the number of decoders.
+        n_Decoders = config[ae_key]['n_Decoders'];
 
         # Run the superclass initializer.
-        super().__init__(n_IC = 1, n_z = widths[-1]);
+        super().__init__(n_IC = 1, n_z = widths[-1], n_Decoders = n_Decoders, config = config);
         
         # Store information (for return purposes).
         self.widths         : list[int] = widths;
         self.activations    : list[str] = activations;
-        self.reshape_shape  : list[int] = reshape_shape;
+        self.reframe_shape  : list[int] = Frame_Shape;
         LOGGER.info("Initializing an Autoencoder with latent space dimension %d" % self.n_z);
-        LOGGER.info("  Reshape shape: %s" % str(reshape_shape));
+        LOGGER.info("  Reshape shape: %s" % str(Frame_Shape));
         LOGGER.info("  Widths: %s" % str(widths));
         LOGGER.info("  Activations: %s" % str(activations));
 
@@ -113,15 +148,16 @@ class Autoencoder(EncoderDecoder):
                             widths              = widths, 
                             activations         = activations,
                             reshape_index       = 0,                    # We need to flatten the spatial dimensions of each FOM frame.
-                            reshape_shape       = reshape_shape);
+                            reshape_shape       = Frame_Shape);
 
         LOGGER.info("Initializing the decoder...");
-        self.decoder = MultiLayerPerceptron(
-                            widths              = widths[::-1],         # Reverses the order for the decoder.
-                            activations         = activations[::-1],    # Reverses the order for the decoder.
-                            reshape_index       = -1,                   # We need to reshape the network output to a FOM frame.
-                            reshape_shape       = reshape_shape);       # We need to reshape the network output to a FOM frame.
-
+        self.decoders = torch.nn.ModuleList;
+        for i in range(n_Decoders):
+            self.decoders.append(MultiLayerPerceptron(
+                                    widths              = widths[::-1],         # Reverses the order for the decoder.
+                                    activations         = activations[::-1],    # Reverses the order for the decoder.
+                                    reshape_index       = -1,                   # We need to reshape the network output to a FOM frame.
+                                    reshape_shape       = Frame_Shape));      # We need to reshape the network output to a FOM frame.
 
         # All done!
         return;
@@ -160,7 +196,7 @@ class Autoencoder(EncoderDecoder):
 
 
 
-    def Decode(self, Z : torch.Tensor) -> tuple[torch.Tensor]:
+    def Eval_Decoder(self, i_Decoder : int, Z : torch.Tensor) -> tuple[torch.Tensor]:
         """
         This function decodes a set of latent frames.
 
@@ -169,6 +205,9 @@ class Autoencoder(EncoderDecoder):
         Arguments
         -------------------------------------------------------------------------------------------
 
+        i_Decoder : int
+            the index of the decoder we want to use to decode Z.
+        
         Z : torch.Tensor, shape = (n_Frames, self.n_z)
            i,j element holds the j'th component of the encoding of the i'th frame.
      
@@ -182,48 +221,14 @@ class Autoencoder(EncoderDecoder):
             + self.reshape_shape. R[i ...] represents the reconstruction of the i'th FOM frame.
         """
 
-        # Check that the input has the correct shape. 
-        assert len(Z.shape)   == 2, "Z.shape = %s, must have length 2." % str(Z.shape);
-    
+        # Checks 
+        assert len(Z.shape)   == 2,                                     "Z.shape = %s, must have length 2." % str(Z.shape);
+        assert (i_Decoder >= 0) and (i_Decoder < self.n_Decoders - 1),  "i_Decoder must be in {0, ... , %d}, got %d" % (self.n_Decoders - 1, i_Decoder);
+
         # Decode the frames!
         # NOTE: Return a tuple for consistency with the EncoderDecoder interface and with
         # Autoencoder.Encode(...), which returns a 1-tuple.
-        return (self.decoder(Z),);
-
-
-
-    def forward(self, X : torch.Tensor) -> tuple[torch.Tensor]:
-        """
-        This function passes X through the encoder, producing a latent state, Z. It then passes 
-        Z through the decoder; hopefully producing a vector that approximates X.
-        
-
-        -------------------------------------------------------------------------------------------
-        Arguments
-        -------------------------------------------------------------------------------------------
-
-        U : torch.Tensor, shape = (n_Frames,) + self.reshape_shape
-            A tensor holding a batch of inputs. We pass this tensor through the encoder + decoder 
-            and then return the result.
-
-
-        -------------------------------------------------------------------------------------------
-        Returns
-        -------------------------------------------------------------------------------------------
-
-        Y : tuple[torch.Tensor], len = 1
-            A single element tuple whose lone element is a torch.Tensor of shape = X.shape holding 
-            the image of X under the encoder and decoder. 
-        """
-
-        # Encoder the input
-        Z : torch.Tensor            = self.Encode(X)[0];
-
-        # Now decode z.
-        Y : tuple[torch.Tensor]     = self.Decode(Z);
-
-        # All done! Hopefully Y \approx X.
-        return Y;
+        return (self.decoder[i_Decoder](Z),);
 
 
 
@@ -244,11 +249,16 @@ class Autoencoder(EncoderDecoder):
         # TO DO: deep export which includes all information needed to re-initialize self from 
         # scratch. This would probably require changing the initializer.
 
-        dict_ = {   'encoder state'  : self.encoder.cpu().state_dict(),
-                    'decoder state'  : self.decoder.cpu().state_dict(),
+        decoder_states_list = [];
+        for i in range(self.n_Decoders):
+            decoder_states_list.append(self.decoder[i].cpu().state_dict());
+
+        dict_ = {   'encoder_state'  : self.encoder.cpu().state_dict(),
+                    'decoder_states' : decoder_states_list,
                     'widths'         : self.widths, 
                     'activations'    : self.activations, 
-                    'reshape_shape'  : self.reshape_shape};
+                    'reshape_shape'  : self.reshape_shape,
+                    'config'         : self.config};
         return dict_;
 
 
@@ -281,16 +291,19 @@ def load_Autoencoder(dict_ : dict) -> Autoencoder:
 
     # First, extract the parameters we need to initialize an Autoencoder object with the same 
     # architecture as the one that created dict_.
-    widths          : list[int] = dict_['widths'];
-    activations     : list[str] = dict_['activations'];
     reshape_shape   : list[int] = dict_['reshape_shape'];
+    config          : dict      = dict_['config'];
 
     # Now... initialize an Autoencoder object.
-    AE = Autoencoder(widths = widths, activations = activations, reshape_shape = reshape_shape);
+    AE = Autoencoder(reshape_shape = reshape_shape, config = config);
 
     # Now, update the encoder/decoder parameters.
-    AE.encoder.load_state_dict(dict_['encoder state']); 
-    AE.decoder.load_state_dict(dict_['decoder state']); 
+    AE.encoder.load_state_dict(dict_['encoder_state']); 
+
+    decoder_states  : list  = dict_['decoder_states'];
+    n_Decoders      : int   = len(decoder_states);
+    for i in range(n_Decoders):
+        AE.decoder[i].load_state_dict(decoder_states[i]); 
 
     # All done, AE is now identical to the Autoencoder object that created dict_.
     return AE;

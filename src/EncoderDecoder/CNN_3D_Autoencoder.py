@@ -98,15 +98,8 @@ def _conv3d_out_shape(   in_shape    : tuple[int, int, int],
 
 class CNN_3D_Autoencoder(EncoderDecoder):
     def __init__(   self,
-                    reshape_shape       : list[int],
-                    hidden_widths_fc    : list[int],
-                    activations_fc      : list[str],
-                    latent_dimension    : int,
-                    conv_channels       : list[int],
-                    conv_activations    : list[str],
-                    conv_kernel_sizes   : int | Sequence[int] | Sequence[Sequence[int]],
-                    conv_strides        : int | Sequence[int] | Sequence[Sequence[int]]  = 2,
-                    conv_paddings       : int | Sequence[int] | Sequence[Sequence[int]]  = 1) -> None:
+                    Frame_Shape         : list[int],
+                    config              : dict) -> None:
         r"""
         Initializes a convolutional autoencoder for 3D spatial data. This model applies a stack
         of 3D convolutions to a 3D image, flattens the resulting feature map, and then applies a
@@ -118,45 +111,55 @@ class CNN_3D_Autoencoder(EncoderDecoder):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        reshape_shape : list[int], len = 3
-            Specifies the spatial shape (I, J, K) of each input frame. Inputs to Encode/forward
-            can either  have shape (n_Frames, C, I, J, K) or (n_Frames, C, I*J*K), where 
-            C = conv_channels[0]. In the latter case, we reshape the input to have shape 
-            (n_Frames, C, I, J, K)
+        Frame_Shape : list[int], len = 3
+            The shape of elements of the FOM space. Specifies the spatial shape (C, I, J, K) of 
+            each input frame. Inputs to Encode/forward can either  have shape 
+            (n_Frames, C, I, J, K) or (n_Frames, C, I*J*K), where C = conv_channels[0]. In the 
+            latter case, we reshape the input to have shape (n_Frames, C, I, J, K).
 
-        hidden_widths_fc : list[int]
-            A list of integers specifying the widths of the hidden fully-connected layers. The
-            encoder's final fully-connected layer maps to the latent space of dimension
-            latent_dimension. The decoder uses the reversed widths.
+            
+        config: dict
+            The "EncoderDecoder" sub dictionary of the configuration file. It must contain a "type"
+            key whose value is either "cnn_3d", "cnn_3d_ae", or "cnn_3d_autoencoder". There must 
+            also be an item whose key matches the value of the "type" key and whose value is a 
+            dictionary specifying the settings to define the CNN_3D_Autoencoder object. Namely, 
+            it must contain the following keys:
 
-        activations_fc : list[str], len = len(hidden_widths_fc)
-            Activation(s) for the hidden fully-connected layers. The i'th element holds the name 
-            of the activation function we apply after the i'th fully-connected layer of the encoder.
-            Note that we do not apply an activation function to the output of the final fully c
-            connected layer. The decoder uses the reversed list.
 
-        latent_dimension : int
-            The dimension of the latent space.
+            hidden_widths_fc : list[int]
+                A list of integers specifying the widths of the hidden fully-connected layers. The
+                encoder's final fully-connected layer maps to the latent space of dimension
+                latent_dimension. The decoder uses the reversed widths.
 
-        conv_channels : list[int]
-            A list whose i'th element specifies the number of channels after the i-1'th convolution.
-            Equivalently, conv_channels[i] is the number of input channels to the i'th convolutional
-            layer. Thus, if this list has M entries then the conv encoder has M-1 layers mapping
-            conv_channels[i] -> conv_channels[i+1]. The decoder mirrors this structure.
+            activations_fc : list[str], len = len(hidden_widths_fc)
+                Activation(s) for the hidden fully-connected layers. The i'th element holds the name 
+                of the activation function we apply after the i'th fully-connected layer of the encoder.
+                Note that we do not apply an activation function to the output of the final fully c
+                connected layer. The decoder uses the reversed list.
 
-        conv_activations : list[str], len = len(conv_channels) - 1
-            i'th element specifies the activation function we apply after the i'th convolutional 
-            layer. The decoder uses the reversed list.
+            latent_dimension : int
+                The dimension of the latent space.
 
-        conv_kernel_sizes, conv_strides, conv_paddings:
-            Convolution hyperparameters. Each can be:
-                - an int (used for all layers in all three dimensions),
-                - a length-3 sequence (used for all layers),
-                - a list of length len(conv_channels) - 1 of length-3 sequences (one per layer).
+            conv_channels : list[int]
+                A list whose i'th element specifies the number of channels after the i-1'th convolution.
+                Equivalently, conv_channels[i] is the number of input channels to the i'th convolutional
+                layer. Thus, if this list has M entries then the conv encoder has M-1 layers mapping
+                conv_channels[i] -> conv_channels[i+1]. The decoder mirrors this structure.
 
-            Note: By default, conv_strides=2 (i.e., we downsample at every conv layer). This is
-            the "reduction operation" used by default.
+            conv_activations : list[str], len = len(conv_channels) - 1
+                i'th element specifies the activation function we apply after the i'th convolutional 
+                layer. The decoder uses the reversed list.
 
+            conv_kernel_sizes, conv_strides, conv_paddings:
+                Convolution hyperparameters. Each can be:
+                    - an int (used for all layers in all three dimensions),
+                    - a length-3 sequence (used for all layers),
+                    - a list of length len(conv_channels) - 1 of length-3 sequences (one per layer).
+
+                Note: By default, conv_strides=2 (i.e., we downsample at every conv layer). This is
+                the "reduction operation" used by default.
+
+            
 
         -------------------------------------------------------------------------------------------
         Returns
@@ -165,19 +168,18 @@ class CNN_3D_Autoencoder(EncoderDecoder):
         Nothing!
         """
 
-        # Checks: reshape_shape.
-        assert isinstance(reshape_shape, list),                 "type(reshape_shape) == %s, expected list" % (str(type(reshape_shape)));
-        assert len(reshape_shape) == 3,                         "len(reshape_shape) = %d, expected 3" % len(reshape_shape);
-        for i in range(len(reshape_shape)):
-            assert isinstance(reshape_shape[i], int),               "type(reshape_shape[%d]) = %s, expected int" % (i, str(type(reshape_shape[i])));
-            assert reshape_shape[i] > 0,                            "reshape_shape[%d] = %d, needs to be positive" % (i, reshape_shape[i]);
+        # Input checks.
+        assert 'type' in config;
+        assert (config['type'] == "cnn_3d") or (config['type'] == "cnn_3d_ae") or (config['type'] == "cnn_3d_autoencoder");
+        cnn_key  : str = config['type'];
+        assert cnn_key in config;
+        cnn_config              : dict              = config[cnn_key];
 
-        # Checks: conv params.
-        assert isinstance(conv_channels, list),                 "type(conv_channels) = %s, expected list" % str(type(conv_channels));
-        assert len(conv_channels) >= 2,                         "len(conv_channels) = %d; must be at least 2 (input + output channels)" % len(conv_channels);
-        for i in range(len(conv_channels)):
-            assert isinstance(conv_channels[i], int),               "type(conv_channels[%d]) = %s, must be int" % (i, str(type(conv_channels[i])));
-            assert conv_channels[i] > 0,                            "conv_channels[%d] = %d, must be positive" % (i, conv_channels[i]);
+
+
+        # FC configuration (analogous to the AE's hidden_widths/activations).
+        hidden_widths_fc        : list[int]         = cnn_config.get('hidden_widths_fc', cnn_config.get('hidden_widths'));
+        latent_dimension        : int               = cnn_config['latent_dimension'];
 
         # Checks: FC params.
         assert isinstance(hidden_widths_fc, list),              "type(hidden_widths_fc) = %s, expected list" % str(type(hidden_widths_fc));
@@ -187,15 +189,55 @@ class CNN_3D_Autoencoder(EncoderDecoder):
         assert isinstance(latent_dimension, int),               "type(latent_dimension) = %s, must be int" % str(type(latent_dimension));
         assert latent_dimension > 0,                            "latent_dimension = %d, must be positive" % latent_dimension;
 
-        # activations_fc
-        assert isinstance(activations_fc, list),                "type(activations_fc) = %s, must be list" % str(type(activations_fc));
+
+
+        # FC activations can either be a string or a list of strings.
+        n_hidden_layers         : int               = len(hidden_widths_fc);
+        act_cfg = cnn_config.get('activations_fc', cnn_config.get('activations'));
+        if(isinstance(act_cfg, str)):
+            activations_fc      : list[str]        = [act_cfg] * n_hidden_layers;
+        elif(isinstance(act_cfg, list)):
+            activations_fc      : list[str]        = act_cfg;
+            assert(len(activations_fc) == n_hidden_layers);
+        else:
+            raise ValueError("activations_fc must be a string or a list of strings.");
+
+        # Checks: activations_fc
         assert len(activations_fc) == len(hidden_widths_fc), \
             "len(activations_fc) = %d, len(hidden_widths_fc) = %d; must match" % (len(activations_fc), len(hidden_widths_fc));
         for i in range(len(activations_fc)):
             assert isinstance(activations_fc[i], str),             "type(activations_fc[%d]) = %s, must be str" % (i, str(type(activations_fc[i])));
             assert activations_fc[i].lower() in act_dict.keys(),   "activations_fc[%d] = %s; not in act_dict keys" % (i, activations_fc[i].lower());
 
-        # conv_activations
+
+
+        # Conv configuration.
+        conv_channels       : list[int]     = cnn_config['conv_channels'];
+        conv_kernel_sizes                   = cnn_config.get('conv_kernel_sizes', 3);
+        conv_strides                        = cnn_config.get('conv_strides', 2);
+        conv_paddings                       = cnn_config.get('conv_paddings', 1);
+
+        # Checks: conv params.
+        assert isinstance(conv_channels, list),                 "type(conv_channels) = %s, expected list" % str(type(conv_channels));
+        assert len(conv_channels) >= 2,                         "len(conv_channels) = %d; must be at least 2 (input + output channels)" % len(conv_channels);
+        for i in range(len(conv_channels)):
+            assert isinstance(conv_channels[i], int),               "type(conv_channels[%d]) = %s, must be int" % (i, str(type(conv_channels[i])));
+            assert conv_channels[i] > 0,                            "conv_channels[%d] = %d, must be positive" % (i, conv_channels[i]);
+
+
+
+        # Per-layer conv activations. This can be a string (use same activation for all conv layers)
+        # or a list of strings of length len(conv_channels) - 1.
+        conv_act_cfg = cnn_config.get('conv_activations', 'relu');
+        if(isinstance(conv_act_cfg, str)):
+            conv_activations : list[str] = [conv_act_cfg] * (len(conv_channels) - 1);
+        elif(isinstance(conv_act_cfg, list)):
+            conv_activations = conv_act_cfg;
+            assert(len(conv_activations) == len(conv_channels) - 1);
+        else:
+            raise ValueError("conv_activations must be a string or a list of strings.");
+
+        # Checks: conv_activations
         assert isinstance(conv_activations, list),                "type(conv_activations) = %s, must be list" % str(type(conv_activations));
         n_conv_layers : int = len(conv_channels) - 1;
         assert len(conv_activations) == n_conv_layers, \
@@ -205,11 +247,30 @@ class CNN_3D_Autoencoder(EncoderDecoder):
             assert conv_activations[i].lower() in act_dict.keys(),  "conv_activations[%d] = %s; not in act_dict keys" % (i, conv_activations[i].lower());
 
 
+
+        # Fetch Frame_Shape from physics (must be 3D for Conv3d).
+        assert(len(Frame_Shape) == 4), "physics.Frame_Shape = %s; Conv_Autoencoder requires a 3D spatial shape" % str(Frame_Shape);
+        C               : int       = int(Frame_Shape[0]);
+        reshape_shape   : list[int] = [int(x) for x in Frame_Shape[1:]];
+        
+        # Checks: Frame_Shape.
+        assert conv_channels[0] == C, "conv_chanels[0] = %d, but the data has %d channels. These must match" % (conv_channels[0], C);
+        assert len(reshape_shape) == 3,                             "len(reshape_shape) = %d, expected 3" % len(reshape_shape);
+        for i in range(len(reshape_shape)):
+            assert isinstance(reshape_shape[i], int),               "type(reshape_shape[%d]) = %s, expected int" % (i, str(type(reshape_shape[i])));
+            assert reshape_shape[i] > 0,                            "reshape_shape[%d] = %d, needs to be positive" % (i, reshape_shape[i]);
+        
+
+
+        # Extract n_Decoders
+        n_Decoders = config[cnn_key]['n_Decoders'];
+
         # Run the superclass initializer.
-        super().__init__(n_IC   = 1, n_z = latent_dimension);
+        super().__init__(n_IC   = 1, n_z = latent_dimension, n_Decoders = n_Decoders, config = config);
 
         # Store information (for return purposes).
         self.reshape_shape      : list[int]     = reshape_shape;
+        self.Frame_Shape        : list[int]     = Frame_Shape;
 
         self.conv_channels      : list[int]     = conv_channels;
         self.conv_activations   : list[str]     = conv_activations;
@@ -269,11 +330,13 @@ class CNN_3D_Autoencoder(EncoderDecoder):
                             reshape_index       = 1,
                             reshape_shape       = []);
 
-        self.decoder_fc = MultiLayerPerceptron(
-                            widths              = widths_fc_decoder,
-                            activations         = self.activations_fc[::-1],
-                            reshape_index       = 1,
-                            reshape_shape       = []);
+        self.fc_decoders = torch.nn.ModuleList([]);
+        for i in range(self.n_Decoders):
+            self.fc_decoders.append(MultiLayerPerceptron(
+                                widths              = widths_fc_decoder,
+                                activations         = self.activations_fc[::-1],
+                                reshape_index       = 1,
+                                reshape_shape       = []));
 
         # Build decoder conv stack (transpose convs), mirroring encoder.
         self.decoder_convs      = torch.nn.ModuleList([]);
@@ -302,13 +365,16 @@ class CNN_3D_Autoencoder(EncoderDecoder):
             output_padding : tuple[int, int, int] = (op[0], op[1], op[2]);
             self._output_paddings.append(output_padding);
 
-            self.decoder_convs.append(torch.nn.ConvTranspose3d(
-                                        in_channels     = in_c,
-                                        out_channels    = out_c,
-                                        kernel_size     = k,
-                                        stride          = st,
-                                        padding         = p,
-                                        output_padding  = output_padding));
+            ith_decoder_convs = torch.nn.ModuleList([]);
+            for j in range(self.n_Decoders):
+                ith_decoder_convs.append(torch.nn.ConvTranspose3d(
+                                            in_channels     = in_c,
+                                            out_channels    = out_c,
+                                            kernel_size     = k,
+                                            stride          = st,
+                                            padding         = p,
+                                            output_padding  = output_padding));
+            self.decoder_convs.append(ith_decoder_convs);
 
         # Cache activation functions.
         self._encoder_conv_act_fns : list[Callable] = [];
@@ -373,7 +439,7 @@ class CNN_3D_Autoencoder(EncoderDecoder):
 
 
 
-    def Decode(self, Z : torch.Tensor) -> tuple[torch.Tensor]:
+    def Eval_Decoder(self, i_Decoder : int, Z : torch.Tensor) -> tuple[torch.Tensor]:
         """
         This function decodes a set of latent frames.
 
@@ -381,6 +447,9 @@ class CNN_3D_Autoencoder(EncoderDecoder):
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
+
+        i_Decoder : int
+            the index of the decoder we want to use to decode Z.
 
         Z : torch.Tensor, shape = (n_Frames, self.n_z)
            i,j element holds the j'th component of the encoding of the i'th frame.
@@ -397,50 +466,21 @@ class CNN_3D_Autoencoder(EncoderDecoder):
 
         # Checks.
         assert isinstance(Z, torch.Tensor), "type(Z) = %s, must be torch.Tensor" % str(type(Z));
-        assert len(Z.shape) == 2,          "Z.shape = %s, must have length 2" % str(Z.shape);
-        assert Z.shape[1] == self.n_z,     "Z.shape[1] = %d, self.n_z = %d; must match" % (Z.shape[1], self.n_z);
+        assert len(Z.shape) == 2,           "Z.shape = %s, must have length 2" % str(Z.shape);
+        assert Z.shape[1] == self.n_z,      "Z.shape[1] = %d, self.n_z = %d; must match" % (Z.shape[1], self.n_z);
+        assert (i_Decoder >= 0) and (i_Decoder < self.n_Decoders - 1),  "i_Decoder must be in {0, ... , %d}, got %d" % (self.n_Decoders - 1, i_Decoder);
 
         # FC decoder.
-        U : torch.Tensor = self.decoder_fc(Z);
+        U : torch.Tensor = self.fc_decoders[i_Decoder](Z);
         U = U.view((U.shape[0], self._conv_latent_channels) + self._conv_latent_shape);
 
         # Conv transpose decoder.
         for i in range(self.n_conv_layers):
-            U = self.decoder_convs[i](self._decoder_conv_act_fns[i](U));
+            U = self.decoder_convs[i_Decoder][i](self._decoder_conv_act_fns[i](U));
 
         assert list(U.shape[-3:]) == self.reshape_shape, "Decoded output shape mismatch: got %s, expected (n_Frames, %s)" % (str(U.shape), str(self.reshape_shape));
         assert U.shape[1] == self.conv_channels[0], "Decoded channel mismatch: got %d, expected %d" % (U.shape[1], self.conv_channels[0]);
         return (U,);
-
-
-
-    def forward(self, X : torch.Tensor) -> tuple[torch.Tensor]:
-        """
-        This function passes X through the encoder, producing a latent state, Z. It then passes 
-        Z through the decoder; hopefully producing a vector that approximates X.
-        
-
-        -------------------------------------------------------------------------------------------
-        Arguments
-        -------------------------------------------------------------------------------------------
-
-        U : torch.Tensor, shape = (n_Frames,) + self.reshape_shape
-            A tensor holding a batch of inputs. We pass this tensor through the encoder + decoder 
-            and then return the result.
-
-
-        -------------------------------------------------------------------------------------------
-        Returns
-        -------------------------------------------------------------------------------------------
-
-        Y : tuple[torch.Tensor], len = 1
-            A single element tuple whose lone element is a torch.Tensor of shape = X.shape holding 
-            the image of X under the encoder and decoder. 
-        """
-
-        Z : torch.Tensor        = self.Encode(X)[0];
-        Y : tuple[torch.Tensor] = self.Decode(Z);
-        return Y;
 
 
 
@@ -461,7 +501,9 @@ class CNN_3D_Autoencoder(EncoderDecoder):
                     'conv_kernel_sizes'   : self.conv_kernel_sizes,
                     'conv_strides'        : self.conv_strides,
                     'conv_paddings'       : self.conv_paddings,
-                    'conv_activations'    : self.conv_activations};
+                    'conv_activations'    : self.conv_activations,
+                    'Frame_Shape'         : self.Frame_Shape,
+                    'config'              : self.config};
         return dict_;
 
 
@@ -485,19 +527,14 @@ def load_CNN_3D_Autoencoder(dict_ : dict) -> CNN_3D_Autoencoder:
     conv_paddings                       = dict_['conv_paddings'];
     conv_activations    : list[str]     = dict_['conv_activations'];
 
-    model = CNN_3D_Autoencoder( reshape_shape        = reshape_shape,
-                                hidden_widths_fc     = hidden_widths_fc,
-                                activations_fc       = activations_fc,
-                                latent_dimension     = latent_dimension,
-                                conv_channels        = conv_channels,
-                                conv_kernel_sizes    = conv_kernel_sizes,
-                                conv_strides         = conv_strides,
-                                conv_paddings        = conv_paddings,
-                                conv_activations     = conv_activations);
+    model = CNN_3D_Autoencoder( Frame_Shape     = dict_['Frame_Shape'],
+                                config          = dict_['config']);
 
     model.encoder_convs.load_state_dict(dict_['encoder conv state']);
-    model.decoder_convs.load_state_dict(dict_['decoder conv state']);
-    model.encoder_fc.load_state_dict(dict_['encoder fc state']);
-    model.decoder_fc.load_state_dict(dict_['decoder fc state']);
+    model.encoder_fc[i].load_state_dict(dict_['encoder fc state']);
+
+    for i in range(model.n_Decoders):
+        model.decoder_convs[i].load_state_dict(dict_['decoder conv state']);
+        model.decoder_fc[i].load_state_dict(dict_['decoder fc state']);
 
     return model;
