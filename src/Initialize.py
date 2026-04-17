@@ -278,8 +278,11 @@ def Initialize_Encoder_Decoder(physics : Physics, config : dict) -> EncoderDecod
     assert(encoder_decoder_type in encoder_decoder_dict);
     LOGGER.info("Initializing EncoderDecoder (%s)" % encoder_decoder_type);
 
-    encoder_decoder_dict[encoder_decoder_type]( Frame_Shape = physics.Frame_Shape,
+    encoder_decoder = encoder_decoder_dict[encoder_decoder_type]( 
+                                                Frame_Shape = physics.Frame_Shape,
                                                 config      = config['EncoderDecoder']);
+
+    return encoder_decoder;
 
 
 

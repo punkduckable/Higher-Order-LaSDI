@@ -92,10 +92,10 @@ class Autoencoder_Pair(EncoderDecoder):
         assert "activations"        in pair_config;
         assert "n_Decoders"         in pair_config;
         
-        assert isinstance(Frame_Shape, list),                 "type(Frame_Shape) == %s, expected list" % (str(type(reshape_shape)));
+        assert isinstance(Frame_Shape, list),                 "type(Frame_Shape) == %s, expected list" % (str(type(Frame_Shape)));
         for i in range(len(Frame_Shape)):
-            assert isinstance(Frame_Shape[i], int),           "type(Frame_Shape[%d]) = %s, expected int" % (i, str(type(reshape_shape[i])));
-            assert Frame_Shape[i] > 0,                        "Frame_Shape[%d] = %d, needs to be positive" % (i, reshape_shape[i]);
+            assert isinstance(Frame_Shape[i], int),           "type(Frame_Shape[%d]) = %s, expected int" % (i, str(type(Frame_Shape[i])));
+            assert Frame_Shape[i] > 0,                        "Frame_Shape[%d] = %d, needs to be positive" % (i, Frame_Shape[i]);
         
 
 
@@ -125,7 +125,7 @@ class Autoencoder_Pair(EncoderDecoder):
         for i in range(len(widths)):
             assert isinstance(widths[i], int),                  "type(widths[%d]) = %s, must be int" % (i, str(type(widths[i])));
             assert widths[i] > 0,                               "widths[%d] = %d, must be positive" % (i, widths[i]);
-        assert numpy.prod(Frame_Shape) == widths[0],            "numpy.prod(self.reshape_shape) = %d, widths[0] = %d; must be equal" % (numpy.prod(reshape_shape), widths[0]);
+        assert numpy.prod(Frame_Shape) == widths[0],            "numpy.prod(self.Frame_Shape) = %d, widths[0] = %d; must be equal" % (numpy.prod(Frame_Shape), widths[0]);
 
         # Extract the number of decoders.
         n_Decoders = config[pair_key]['n_Decoders'];
@@ -136,7 +136,7 @@ class Autoencoder_Pair(EncoderDecoder):
 
         # In general, the FOM solution may be vector valued and have multiple spatial dimensions. 
         # We need to know the shape of each FOM frame. 
-        self.reshape_shape  : list[int]     = Frame_Shape; 
+        self.Frame_Shape    : list[int]     = Frame_Shape; 
         
         # Fetch information about the domain/co-domain.
         self.widths         : list[int]     = widths;
@@ -146,20 +146,17 @@ class Autoencoder_Pair(EncoderDecoder):
 
         # Make a config for the AE.
         ae_config = deepcopy(config);
-        ae_config['ae'] = deepcopy(config[pair_key]);
+        ae_config['type']   = 'ae';
+        ae_config['ae']     = deepcopy(config[pair_key]);
         del ae_config[pair_key];
 
         # Next, build the velocity and displacement auto-encoders.
         LOGGER.info("Initializing the Displacement Autoencoder...");
-        self.Displacement_Autoencoder   = Autoencoder(  widths          = widths, 
-                                                        activations     = activations, 
-                                                        reshape_shape   = self.reshape_shape,
+        self.Displacement_Autoencoder   = Autoencoder(  Frame_Shape     = self.Frame_Shape,
                                                         config          = ae_config);
 
         LOGGER.info("Initializing the Velocity Autoencoder...");
-        self.Velocity_Autoencoder       = Autoencoder(  widths          = widths, 
-                                                        activations     = activations,
-                                                        reshape_shape   = self.reshape_shape,
+        self.Velocity_Autoencoder       = Autoencoder(  Frame_Shape     = self.Frame_Shape,
                                                         config          = ae_config);
 
 
@@ -175,15 +172,15 @@ class Autoencoder_Pair(EncoderDecoder):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        Displacement_Frames : torch.Tensor, shape = (N_Frames,) + self.reshape_shape
+        Displacement_Frames : torch.Tensor, shape = (N_Frames,) + self.Frame_Shape
             Displacement_Frames[i, ...] represents the displacement portion of the i'th FOM frame.
-            Here, N_Frames is the number of frames we want to encode and reshape_shape specifies 
+            Here, N_Frames is the number of frames we want to encode and Frame_Shape specifies 
             the shape of each frame. 
 
-        Velocity_Frames : torch.Tensor, shape = (N_Frames,) + self.reshape_shape
+        Velocity_Frames : torch.Tensor, shape = (N_Frames,) + self.Frame_Shape
             Velocity_Frames[i, ...] represents the velocity portion of the i'th FOM frame. Here, 
             N_Frames is the number of frames we want to encode for each parameter combination and 
-            reshape_shape specifies the shape of each frame. 
+            Frame_Shape specifies the shape of each frame. 
         
 
         -------------------------------------------------------------------------------------------
@@ -204,9 +201,9 @@ class Autoencoder_Pair(EncoderDecoder):
         # Check that we have the same number of displacement, velocity frames.
         assert isinstance(Displacement_Frames, torch.Tensor),   "type(Displacement_Frames) = %s; must be torch.Tensor" % str(type(Displacement_Frames));
         assert isinstance(Velocity_Frames, torch.Tensor),       "type(Velocity_Frames) = %s; must be torch.Tensor" % str(type(Velocity_Frames));
-        assert len(Displacement_Frames.shape)       ==  len(self.reshape_shape) + 1,    "Displacement_Frames.shape = %s, length must be len(self.reshape_shape) (self.reshape_shape = %s) + 1" % (str(Displacement_Frames.shape), str(self.reshape_shape));
+        assert len(Displacement_Frames.shape)       ==  len(self.Frame_Shape) + 1,    "Displacement_Frames.shape = %s, length must be len(self.Frame_Shape) (self.Frame_Shape = %s) + 1" % (str(Displacement_Frames.shape), str(self.Frame_Shape));
         assert Displacement_Frames.shape            ==  Velocity_Frames.shape,          "Displacement_Frames.shape = %s, Velocity_Frames.shape = %s" % (str(Displacement_Frames.shape), str(Velocity_Frames.shape));
-        assert list(Displacement_Frames.shape[1:])  ==  self.reshape_shape,             "list(Displacement_Frames.shape[1:]) = %s, self.reshape_shape = %s; must be equal" % (str(list(Displacement_Frames.shape[1:])), str(self.reshape_shape));
+        assert list(Displacement_Frames.shape[1:])  ==  self.Frame_Shape,             "list(Displacement_Frames.shape[1:]) = %s, self.Frame_Shape = %s; must be equal" % (str(list(Displacement_Frames.shape[1:])), str(self.Frame_Shape));
     
         # Encode the displacement frames.
         Latent_Displacement : torch.Tensor = self.Displacement_Autoencoder.Encode( Displacement_Frames)[0];
@@ -247,11 +244,11 @@ class Autoencoder_Pair(EncoderDecoder):
 
         Reconstructed_Displacement, Reconstructed_Velocity
          
-        Reconstructed_Displacement : torch.Tensor, shape = (N_Frames,) + self.reshape_shape
+        Reconstructed_Displacement : torch.Tensor, shape = (N_Frames,) + self.Frame_Shape
             Reconstructed_Displacement[i, ...] represents the reconstruction of the displacement 
             portion of the i'th FOM frame. 
 
-        Reconstructed_Velocity : torch.Tensor, shape = (N_Frames,) + self.reshape_shape
+        Reconstructed_Velocity : torch.Tensor, shape = (N_Frames,) + self.Frame_Shape
             Reconstructed_Velocity[i, ...] represents the reconstruction of the velocity portion 
             of i'th FOM frame.
         """
@@ -261,7 +258,7 @@ class Autoencoder_Pair(EncoderDecoder):
         assert isinstance(Latent_Velocity, torch.Tensor),       "type(Latent_Velocity) = %s; must be torch.Tensor" % str(type(Latent_Velocity));
         assert len(Latent_Displacement.shape)   == 2,           "Latent_Displacement.shape = %s; must have length 2" % str(Latent_Displacement.shape);
         assert Latent_Velocity.shape            == Latent_Displacement.shape,   "Latent_Velocity.shape = %s, Latent_Displacement.shape = %s; must be equal" % (str(Latent_Displacement.shape), str(Latent_Velocity.shape));
-        assert (i_Decoder >= 0) and (i_Decoder < self.n_Decoders - 1),          "i_Decoder must be in {0, ... , %d}, got %d" % (self.n_Decoders - 1, i_Decoder);
+        assert (i_Decoder >= 0) and (i_Decoder < self.n_Decoders),              "i_Decoder must be in {0, ... , %d}, got %d" % (self.n_Decoders - 1, i_Decoder);
 
         # Encode the displacement frames.
         Reconstructed_Displacement  : torch.Tensor  = self.Displacement_Autoencoder.Eval_Decoder( i_Decoder, Latent_Displacement)[0];
@@ -281,18 +278,19 @@ class Autoencoder_Pair(EncoderDecoder):
 
         This function extracts everything we need to recreate self from scratch. Specifically, we 
         extract the encoder/decoder state dictionaries, self's architecture, activation function 
-        and reshape_shape. We store and return this information in a dictionary.
+        and Frame_Shape. We store and return this information in a dictionary.
          
         You can pass the returned dictionary to the load_Autoencoder_Pair method to generate an 
         Autoencoder object that is identical to self.
         """
 
-        dict_ = {   'reshape_shape'     : self.reshape_shape,
-                    'widths'            : self.widths,
-                    'activations'       : self.activations,
-                    'Displacement dict' : self.cpu().Displacement_Autoencoder.export(),
-                    'Velocity dict'     : self.cpu().Velocity_Autoencoder.export(),
-                    'config'            : self.config};
+        dict_ = {   'EncoderDecoder dict'   : super().export(),
+                    'Frame_Shape'           : self.Frame_Shape,
+                    'widths'                : self.widths,
+                    'activations'           : self.activations,
+                    'Displacement dict'     : self.cpu().Displacement_Autoencoder.export(),
+                    'Velocity dict'         : self.cpu().Velocity_Autoencoder.export(),
+                    'config'                : self.config};
         return dict_;
     
 
@@ -327,13 +325,16 @@ def load_Autoencoder_Pair(dict_ : dict) -> Autoencoder_Pair:
 
     # First, extract the information we need to initialize a Autoencoder_Pair object with the same 
     # architecture as the one that created dict_.
-    reshape_shape   : list[int] = dict_['reshape_shape'];
+    Frame_Shape   : list[int] = dict_['Frame_Shape'];
     config          : dict      = dict_['config'];
 
     # Now initialize the Autoencoder_Pair.
-    AEP                     = Autoencoder_Pair( reshape_shape   = reshape_shape,
+    AEP                     = Autoencoder_Pair( Frame_Shape     = Frame_Shape,
                                                 config          = config);
     
+    # Set the Decoder_Weights, Active.
+    AEP.load(dict_ = dict_['EncoderDecoder dict']);
+
     # Now replace its auto-encoders.
     AEP.Displacement_Autoencoder    = load_Autoencoder(dict_['Displacement dict']);
     AEP.Velocity_Autoencoder        = load_Autoencoder(dict_['Velocity dict']);

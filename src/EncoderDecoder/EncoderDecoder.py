@@ -46,7 +46,7 @@ class EncoderDecoder(torch.nn.Module):
                     n_IC        : int, 
                     n_z         : int,
                     n_Decoders  : int,
-                    config      : bool) -> None:
+                    config      : dict) -> None:
         r"""
         Initializes a EncoderDecoder object. A EncoderDecoder object does two things. a) It can 
         encode FOM states (frames) to their latent encodings, and b) it can decode those latent
@@ -77,7 +77,7 @@ class EncoderDecoder(torch.nn.Module):
             Decoder on the specified inputs, then return a tuple housing the encodings of the inputs. 
             The Decode method operates by returning a tuple of tensors, the j'th one of which holds
 
-                \sum_{i'th decoder is active} self.Decoder_Weight(i, j) * self.Eval_Decoder(i, *Z_i)[j]
+                \sum_{d'th decoder is active} Decoder_Weight[j, d] * Eval_Decoder(d, *Zs)[j]
             
             Thus, Eval_Decoder is quite important.
 
@@ -143,12 +143,12 @@ class EncoderDecoder(torch.nn.Module):
         self.config         : dict      = config;
 
         # Set up Decoder_Weight and Decoder_Active.
-        self.Decoder_Active     = numpy.empty((n_Decoders), dtype = numpy.bool);
+        self.Decoder_Active     = numpy.empty((n_Decoders), dtype = numpy.bool_);
         self.Decoder_Active[0]  = True;
         for i in range(1, n_Decoders):
             self.Decoder_Active[i]  = False;
         
-        self.Decoder_Weight     = numpy.ones((n_IC, n_Decoders), dtype = torch.float32);
+        self.Decoder_Weight     = numpy.ones((n_IC, n_Decoders), dtype = numpy.float32);
     
         # All done!
         return;
@@ -178,7 +178,7 @@ class EncoderDecoder(torch.nn.Module):
         # Checks
         assert isinstance(i_Decoder, int),                              "i_Decoder must be an integer, not %s" % str(type(i_Decoder));
         assert isinstance(active, bool),                                "active must be a boolean, not %s" % str(type(active));
-        assert (i_Decoder >= 0) and (i_Decoder < self.n_Decoders - 1),  "i_Decoder must be in {0, ... , %d}; got %d" % (self.n_Decoders - 1, i_Decoder)
+        assert (i_Decoder >= 0) and (i_Decoder < self.n_Decoders),      "i_Decoder must be in {0, ... , %d}; got %d" % (self.n_Decoders - 1, i_Decoder)
 
         # Do the thing!
         self.Decoder_Active[i_Decoder] = active;
@@ -202,7 +202,7 @@ class EncoderDecoder(torch.nn.Module):
         i_Decoder : int 
             The index of the decoder we want to active. Must be in {0, 1, ... , self.n_Decoders - 1}
 
-        weight : bool
+        weight : float | int
             Specifies the weight of the i_Decoder'th decoder for the i_IC'th component of the FOM 
             solution.
         """
@@ -210,9 +210,9 @@ class EncoderDecoder(torch.nn.Module):
         # Checks
         assert isinstance(i_IC, int),                                   "i_IC must be an integer, not %s" % str(type(i_IC));
         assert isinstance(i_Decoder, int),                              "i_Decoder must be an integer, not %s" % str(type(i_Decoder));
-        assert isinstance(weight, float),                               "weight must be a boolean, not %s" % str(type(float));
-        assert (i_IC >= 0) and (i_IC < self.n_Ic - 1),                  "i_IC must be in {0, ... , %d}; got %d" % (self.n_IC - 1, i_IC)
-        assert (i_Decoder >= 0) and (i_Decoder < self.n_Decoders - 1),  "i_Decoder must be in {0, ... , %d}; got %d" % (self.n_Decoder - 1, i_Decoder)
+        assert isinstance(weight, float) or isinstance(weight, int),    "weight must be numeric, not %s" % str(type(float));
+        assert (i_IC >= 0) and (i_IC < self.n_IC),                      "i_IC must be in {0, ... , %d}; got %d" % (self.n_IC - 1, i_IC)
+        assert (i_Decoder >= 0) and (i_Decoder < self.n_Decoders),      "i_Decoder must be in {0, ... , %d}; got %d" % (self.n_Decoders - 1, i_Decoder)
 
         # Do the thing!
         self.Decoder_Weight[i_IC, i_Decoder] = weight;
@@ -289,12 +289,12 @@ class EncoderDecoder(torch.nn.Module):
 
 
     def Decode(self, *Zs) -> tuple[torch.Tensor]:
-        """
+        r"""
         Passes the n_IC elements of Zs through the active decoders, then sums the components 
-        of the resulting tensors according to the decoder weights. Specifically, the i'th 
+        of the resulting tensors according to the decoder weights. Specifically, the j'th 
         component of the returned tensor holds the following sum:
 
-            \sum_{i'th decoder is active} self.Decoder_Weight(i, j) * self.Eval_Decoder(i, *Z_i)[j]
+            \sum_{d'th decoder is active} Decoder_Weight[j, d] * Eval_Decoder(d, *Z)[j]
         
         Thus, this function decodes a batch of latent states (each consisting of n_IC components)
         to a batch of FOM states (again, each one with n_IC components). We literally "decode"
@@ -326,20 +326,23 @@ class EncoderDecoder(torch.nn.Module):
             assert Zs[i].shape[1]   == self.n_z,        "Each tensor to be Decoded be a tensor of shape (-1, %d), Component %d has shape %s" % (self.n_z, i, str(Zs[i].shape));
 
         # Decode!
-        Xs : tuple[torch.Tensor] = ();
+        Xs : list[torch.Tensor | None] = [None]*self.n_IC;
 
-        for i in range(self.n_Decoders):
-            if(self.Decoder_Active[i] == True):
-                ith_Decodings : tuple[torch.Tensor] = self.Eval_Decoder(i_Decoder = i, *Zs);
+        for d in range(self.n_Decoders):
+            if(self.Decoder_Active[d] == True):
+                dth_Decodings : tuple[torch.Tensor] = self.Eval_Decoder(d, *Zs);
 
                 for j in range(self.n_IC):
-                    if(len(Xs) < j):
-                        Xs.append(self.Decoder_Weight(j, i)*ith_Decodings[j]);
+                    w       = float(self.Decoder_Weight[j, d])
+                    term    = w* dth_Decodings[j];
+                    
+                    if Xs[j] is None:
+                        Xs[j] = term;
                     else:
-                        Xs[j] += self.Decoder_Weight(j, i)*ith_Decodings[j];
+                        Xs[j] = Xs[j] + term;
 
         # All done!
-        return Xs;
+        return tuple(Xs);
                 
 
 
@@ -472,6 +475,10 @@ class EncoderDecoder(torch.nn.Module):
 
 
 
+    # ---------------------------------------------------------------------------------------------
+    # Save, Load
+    # ---------------------------------------------------------------------------------------------
+
     def export(self) -> dict:
         """
         -------------------------------------------------------------------------------------------
@@ -481,6 +488,28 @@ class EncoderDecoder(torch.nn.Module):
         This function extracts everything we need to recreate self from scratch.
         """
 
-        raise RuntimeError("Abstract method EncoderDecoder.export!");
+        dict_ =     {   "Decoder_Weight"    : self.Decoder_Weight,
+                        "Decoder_Active"    : self.Decoder_Active,
+                        "n_z"               : self.n_z,
+                        "n_IC"              : self.n_IC,
+                        "n_Decoders"        : self.n_Decoders };
+    
+        return dict_;
+
+
+    
+    def load(self, dict_):
+        """
+        dict_: Should be the dict returned by the export method.
+        """
+        
+        # Load the decoder weights/which ones are active.
+        self.Decoder_Weight     = dict_['Decoder_Weight'];
+        self.Decoder_Active     = dict_['Decoder_Active'];
+        
+        # Make sure n_z, n_IC, and n_Decoders match what we just set up.
+        assert self.n_z         == dict_['n_z'];
+        assert self.n_IC        == dict_['n_IC'];
+        assert self.n_Decoders  == dict_['n_Decoders'];
 
 

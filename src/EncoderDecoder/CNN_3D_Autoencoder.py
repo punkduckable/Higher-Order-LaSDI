@@ -285,7 +285,7 @@ class CNN_3D_Autoencoder(EncoderDecoder):
         self.conv_paddings      : list[tuple[int, int, int]] = _expand_3tuple_param(conv_paddings,     self.n_conv_layers, "conv_paddings");
 
         LOGGER.info("Initializing a CNN_3D_Autoencoder with latent space dimension %d" % self.n_z);
-        LOGGER.info("  Reshape shape:       %s" % str(self.reshape_shape));
+        LOGGER.info("  Frame shape:         %s" % str(self.Frame_Shape));
         LOGGER.info("  Conv channels:       %s" % str(self.conv_channels));
         LOGGER.info("  Conv kernels:        %s" % str(self.conv_kernel_sizes));
         LOGGER.info("  Conv strides:        %s" % str(self.conv_strides));
@@ -339,7 +339,7 @@ class CNN_3D_Autoencoder(EncoderDecoder):
                                 reshape_shape       = []));
 
         # Build decoder conv stack (transpose convs), mirroring encoder.
-        self.decoder_convs      = torch.nn.ModuleList([]);
+        self.decoder_convs      = torch.nn.ModuleList([]);          # shape (n_conv_layers, n_Decoders)
         self._output_paddings   : list[tuple[int, int, int]] = [];
 
         # Encoder shapes: s0 -> s1 -> ... -> sL, where L = n_conv_layers.
@@ -468,7 +468,7 @@ class CNN_3D_Autoencoder(EncoderDecoder):
         assert isinstance(Z, torch.Tensor), "type(Z) = %s, must be torch.Tensor" % str(type(Z));
         assert len(Z.shape) == 2,           "Z.shape = %s, must have length 2" % str(Z.shape);
         assert Z.shape[1] == self.n_z,      "Z.shape[1] = %d, self.n_z = %d; must match" % (Z.shape[1], self.n_z);
-        assert (i_Decoder >= 0) and (i_Decoder < self.n_Decoders - 1),  "i_Decoder must be in {0, ... , %d}, got %d" % (self.n_Decoders - 1, i_Decoder);
+        assert (i_Decoder >= 0) and (i_Decoder < self.n_Decoders),  "i_Decoder must be in {0, ... , %d}, got %d" % (self.n_Decoders - 1, i_Decoder);
 
         # FC decoder.
         U : torch.Tensor = self.fc_decoders[i_Decoder](Z);
@@ -476,7 +476,7 @@ class CNN_3D_Autoencoder(EncoderDecoder):
 
         # Conv transpose decoder.
         for i in range(self.n_conv_layers):
-            U = self.decoder_convs[i_Decoder][i](self._decoder_conv_act_fns[i](U));
+            U = self.decoder_convs[i][i_Decoder](self._decoder_conv_act_fns[i](U));
 
         assert list(U.shape[-3:]) == self.reshape_shape, "Decoded output shape mismatch: got %s, expected (n_Frames, %s)" % (str(U.shape), str(self.reshape_shape));
         assert U.shape[1] == self.conv_channels[0], "Decoded channel mismatch: got %d, expected %d" % (U.shape[1], self.conv_channels[0]);
@@ -488,11 +488,15 @@ class CNN_3D_Autoencoder(EncoderDecoder):
         """
         This function extracts everything we need to recreate self from scratch.
         """
-
-        dict_ = {   'encoder conv state'  : self.encoder_convs.cpu().state_dict(),
+        decoders_list = [];
+        for i in range(self.n_Decoders):
+            decoders_list.append(self.fc_decoders[i].cpu().state_dict());
+        
+        dict_ = {   'EncoderDecoder dict' : super().export(),
+                    'encoder conv state'  : self.encoder_convs.cpu().state_dict(),
                     'decoder conv state'  : self.decoder_convs.cpu().state_dict(),
                     'encoder fc state'    : self.encoder_fc.cpu().state_dict(),
-                    'decoder fc state'    : self.decoder_fc.cpu().state_dict(),
+                    'fc decoders state'   : decoders_list,
                     'reshape_shape'       : self.reshape_shape,
                     'latent_dimension'    : self.n_z,
                     'hidden_widths_fc'    : self.hidden_widths_fc,
@@ -516,25 +520,21 @@ def load_CNN_3D_Autoencoder(dict_ : dict) -> CNN_3D_Autoencoder:
 
     LOGGER.info("De-serializing a CNN_3D_Autoencoder..." );
 
-    reshape_shape       : list[int]     = dict_['reshape_shape'];
-    latent_dimension    : int           = dict_['latent_dimension'];
-    hidden_widths_fc    : list[int]     = dict_['hidden_widths_fc'];
-    activations_fc      : list[str]     = dict_['activations_fc'];
-
-    conv_channels       : list[int]     = dict_['conv_channels'];
-    conv_kernel_sizes                   = dict_['conv_kernel_sizes'];
-    conv_strides                        = dict_['conv_strides'];
-    conv_paddings                       = dict_['conv_paddings'];
-    conv_activations    : list[str]     = dict_['conv_activations'];
-
-    model = CNN_3D_Autoencoder( Frame_Shape     = dict_['Frame_Shape'],
+    # Build the model.
+    CNN = CNN_3D_Autoencoder( Frame_Shape     = dict_['Frame_Shape'],
                                 config          = dict_['config']);
 
-    model.encoder_convs.load_state_dict(dict_['encoder conv state']);
-    model.encoder_fc[i].load_state_dict(dict_['encoder fc state']);
+    
+    # Set the decoder weights/active.
+    CNN.load(dict_ = dict_['EncoderDecoder dict']);
 
-    for i in range(model.n_Decoders):
-        model.decoder_convs[i].load_state_dict(dict_['decoder conv state']);
-        model.decoder_fc[i].load_state_dict(dict_['decoder fc state']);
+    # Load the state dictionaries
+    CNN.encoder_convs.load_state_dict(dict_['encoder conv state']);
+    CNN.encoder_fc.load_state_dict(dict_['encoder fc state']);
+    CNN.decoder_convs.load_state_dict(dict_['decoder conv state'])
 
-    return model;
+    for i in range(CNN.n_Decoders):
+        CNN.fc_decoders[i].load_state_dict(dict_['fc decoders state'][i]);
+
+    # All done!
+    return CNN;
