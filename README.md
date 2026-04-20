@@ -1,6 +1,12 @@
 # Higher-Order LaSDI
 
-Higher-Order LaSDI provides tools for building reduced-order models (ROMs) from full-order simulations using latent-space dynamics identification with Gaussian Process-based greedy sampling. The library supports physics that require multiple time derivatives (e.g., displacement and velocity for second-order systems) and handles time series with either uniform or non-uniform time grids. Latent dynamics models such as SINDy and damped-spring systems are provided, and new EncoderDecoders can be added easily.
+Higher-Order LaSDI provides tools for building reduced-order models (ROMs) from full-order (FOM) simulations using latent-space dynamics identification with Gaussian Process-based greedy sampling. Higher-Order LaSDI is designed to be incredibly flexible. At its core, a reduced-order model (ROM) consists of:
+1. A parameterized collection of time series that live in some high-dimensional, FOM space (Physics).
+2. An Encoder/Decoder pair which can map elements from the FOM space to a lower dimensional latent space (EncoderDecoder).
+3. A parameterized set of latent dynamics to describe how the encodings of a particular time series evolves (LatentDynamics).
+4. A procedure to learn an encoder/decoder/latent dynamics given training data (Trainer).
+5. A method to greedily pick new training elements (Sampler).
+Higher-Order LaSDI implements a modular framework that allows the user to customize each one of these steps. Each one has an associated base class (specified by parentheses in the list) which defines the interface the rest of the code uses when interacting with that portion of the workflow. The library includes a few subclasses for each step, but you can customize any of them by defining a subclass of the corresponding base class. As long as the subclass interface matches what the library expects, it should integrate cleanly. Want to embed a domain-specific inductive bias into the latent dynamics? Define a `LatentDynamics` subclass. Need an EncoderDecoder structure tailored to your data? Define an `EncoderDecoder` subclass. Want to use a custom physics-inspired loss? Implement it in a `Physics` subclass. Higher-Order LaSDI is designed to be flexible, extensible, and modular.
 
 ## Key Features
 
@@ -8,10 +14,10 @@ Higher-Order LaSDI provides tools for building reduced-order models (ROMs) from 
 - **Higher-Order Dynamics**: Native support for systems requiring multiple time derivatives
 - **Flexible Time Grids**: Handles both uniform and non-uniform temporal discretizations with automatic finite difference scheme selection
 - **Multiple Loss Functions**: Reconstruction, latent dynamics, rollout, IC rollout, chain rule, and consistency losses with configurable weights
-- **Autoencoder Architectures**: Standard autoencoder and paired autoencoder for higher-order systems
+- **EncoderDecoder Architectures**: Standard autoencoder, paired autoencoder for higher-order systems
 - **Rich Activation Functions**: Support for 20+ activation functions including sine, ReLU, tanh, GELU, and more
 - **Visualization Tools**: Automated plotting of latent trajectories, error heatmaps, and solution animations
-- **Training stability & diagnostics**: Gradient clipping (config: `trainer.gradient_clip`) to prevent exploding gradients, and per-parameter loss logging to `results/*_loss_by_param.pkl` for post-hoc analysis
+- **Training stability & diagnostics**: Gradient clipping (typically configured under `trainer.<TrainerType>.gradient_clip`) to prevent exploding gradients, and per-parameter loss logging to `results/*_loss_by_param.pkl` for post-hoc analysis
 
 ## Getting Started
 
@@ -46,7 +52,7 @@ The `examples/` directory contains configuration files for various physics probl
 | Example | Physics Type | Order | Grid Type |
 |---------|-------------|-------|-----------|
 | `Explicit.yml` | Custom explicit solver | 1st | Uniform |
-| `Burgers.yml` | Burgers equation | 1st | Uniform |
+| `Burgers.yml` | Burgers equation (second-order formulation) | 2nd | Uniform |
 | `Burgers2D.yml` | 2D Burgers equation | 1st | Uniform |
 | `Thermal.yml` | Thermal diffusion (HDF5) | 1st | Uniform |
 | `Advection.yml` | Advection equation (PyMFEM) | 1st | Uniform |
@@ -59,18 +65,50 @@ The `examples/` directory contains configuration files for various physics probl
 
 ## Repository Layout
 
+### EncoderDecoders and $n_{IC}$
+
+Higher-Order LaSDI supports higher-order latent dynamics (via multiple time derivatives) and multi-stage training (via multiple decoders).
+
+The key hyperparameters for an `EncoderDecoder` are:
+- $n_{IC}$: the number of initial-condition components used by the latent dynamics. Practically, this means we treat the training data as a tuple containing the FOM frame and its first $n_{IC}-1$ time derivatives:
+  \[
+    \left(u,\ \dot{u},\ \ddot{u},\ \ldots,\ u^{(n_{IC}-1)}\right).
+  \]
+- $n_z$ (sometimes written $n_{latent}$): latent-space dimension, so each latent component lives in $\mathbb{R}^{n_z}$.
+- $n_{Decoders}$: number of decoder *stages* used to enable multi-stage training (mLaSDI-style).
+
+**Interface.** An `EncoderDecoder` is a `torch.nn.Module` with the following core methods:
+- `Encode(*Xs) -> tuple[torch.Tensor, ...]`  
+  Takes `n_IC` tensors `Xs = (X0, X1, ..., X_{n_IC-1})` (the FOM frame and its derivatives) and returns `n_IC` latent tensors `Zs = (Z0, Z1, ..., Z_{n_IC-1})`, each typically shaped `(batch, n_z)`.
+- `Eval_Decoder(i_Decoder, *Zs) -> tuple[torch.Tensor, ...]`  
+  Evaluates the *i-th* decoder stage on the latent tuple, returning a tuple of `n_IC` decoded tensors in FOM space.
+- `Decode(*Zs)` (implemented in the base class)  
+  Produces the decoded tuple by taking a **weighted sum** over the active decoder stages. Concretely, for each component index `j`:
+  \[
+    X_j \;=\; \sum_{d\ \text{active}} w_{j,d}\, \mathrm{Eval\_Decoder}(d, Z_0,\ldots,Z_{n_{IC}-1})_j.
+  \]
+  The weights $w_{j,d}$ live in `Decoder_Weight[j, d]`, and which decoders participate is controlled by `Decoder_Active[d]`. These settings are included in `export()`/`load()` so multi-stage state can be checkpointed and restored.
+
+If you set `n_Decoders = 1` (the default/common case), this reduces to the original single-decoder behavior: `Decode(*Zs)` is exactly `Eval_Decoder(0, *Zs)` (up to the default unit weight).
+
+In general, every Physics, EncoderDecoder, and Trainer object expects a specific $n_{IC}$ value. These must match for the code to work. Thus, for instance, if your Physics sub-class defines time series consisting of some time series and its first time derivative, then $n_{IC} = 2$ and you must select a Trainer and LatentDynamics model that also use $n_{IC} = 2$. 
+
 ### Core Components
 
 - **`src/Workflow.py`** – Main command-line driver that loads configuration files, initializes components, and runs the training pipeline
-- **`src/Trainer/Trainer.py`** – Base `Trainer` class: normalization helpers, checkpointing, loss logging, timing, and round-based training orchestration
-- **`src/Trainer/Rollout_1_IC.py`** – `Trainer` subclass for first-order systems (`n_IC = 1`): reconstruction + latent-dynamics + rollout losses
-- **`src/Trainer/Rollout_2_IC.py`** – `Trainer` subclass for second-order systems (`n_IC = 2`): paired-derivative training (includes chain rule + consistency losses)
-- **`src/Initialize.py`** – Factory functions for initializing trainers, EncoderDecoders, physics solvers, and latent dynamics from config files
+- **`src/Trainer/`** - The class which defines how the encoder/decoder/latent dynamics train using the available data
+    - `Trainer.py` – Base `Trainer` class: normalization helpers, checkpointing, loss logging, timing, and round-based training orchestration
+    - `First_Order_Rollout.py` – `Trainer` subclass for first-order systems (`n_IC = 1`)
+    - `Second_Order_Rollout.py` – `Trainer` subclass for second-order systems (`n_IC = 2`)
+    - `Second_Order_Noise.py` – Similar to `Second_Order_Rollout` but can add noise to the data
+    - `Second_Order_Noise_Weak.py` – Similar to `Second_Order_Noise`, but intended for weak-form latent dynamics
+- **`src/Initialize.py`** – Factory functions for initializing trainers, EncoderDecoders, physics solvers, and latent dynamics from config files. You must register all new sub-classes in this file.
 - **`src/EncoderDecoder`** – Neural network architectures:
   - `EncoderDecoder.py`: Base `EncoderDecoder` class.
   - `MLP.py`: Flexible MLP with customizable activations
   - `Autoencoder.py`: Standard autoencoder for first-order systems
   - `Autoencoder_Pair.py`: Paired autoencoder for higher-order systems (encodes multiple derivatives)
+  - `CNN_3D_Autoencoder.py`: 3D convolutional autoencoder variant
 - **`src/ParameterSpace.py`** – Parameter space management, grid generation, and train/test split utilities
 - **`src/SolveROMs.py`** – ROM simulation functions:
   - `average_rom()`: Simulate using GP mean predictions
@@ -143,14 +181,14 @@ The `examples/` directory contains configuration files for various physics probl
 Configuration files are YAML-based and specify:
 
 ### Trainer Settings (`trainer`)
-- `trainer.type` selects the concrete `Trainer` subclass to use (e.g., `Rollout_1_IC`, `Rollout_2_IC`).
+- `trainer.type` selects the concrete `Trainer` subclass to use (e.g., `First_Order_Rollout`, `Second_Order_Rollout`, `Second_Order_Noise`, `Second_Order_Noise_Weak`).
 - Round scheduling / greedy sampling limits:
   - `trainer.n_iter`, `trainer.max_iter`, `trainer.max_greedy_iter`
 - Normalization:
   - `trainer.normalize` (if enabled, the library computes global mean/std and normalizes train/test data)
 - Device placement:
   - `trainer.device` (optional; `"cpu"` by default)
-- Subclass-specific settings live under `trainer.<TypeName>`. Example (`Rollout_2_IC`):
+- Subclass-specific settings live under `trainer.<TypeName>`. Example (`Second_Order_Rollout`):
   - learning rate + stability: `lr`, `gradient_clip`, `warmup_epochs`
   - rollout curriculum: `p_rollout_init`, `rollout_update_freq`, `dp_per_update`, `max_p_rollout`
   - rollout sampling: `n_rollouts`
@@ -174,10 +212,11 @@ Configuration files are YAML-based and specify:
 - Test space configuration (grid, random, or file-based)
 
 ### EncoderDecoder Architecture (`EncoderDecoder`)
-- EncoderDecoder type: `ae` (Autoencoder), `pair` (Autoencoder_Pair), or `3d CNN` (CNN_3D).
+- EncoderDecoder type: `ae`/`autoencoder` (Autoencoder), `pair`/`autoencoder_pair` (Autoencoder_Pair), or `cnn_3d`/`cnn_3d_ae`/`cnn_3d_autoencoder` (CNN_3D_Autoencoder).
 - Hidden layer widths
 - Activation functions
 - Latent dimension
+- Number of decoder stages: `n_Decoders`
 
 ### Latent Dynamics (`latent_dynamics`)
 - Type: `sindy`, `spring`, or `switch sindy`.
@@ -202,7 +241,7 @@ Create a new file under `src/Trainer/`, for example `src/Trainer/MyTrainer.py`, 
 - `__init__(physics, encoder_decoder, latent_dynamics, param_space, config)`
 - `Iterate(start_iter, end_iter)` (the actual per-epoch training logic)
 
-Follow the existing trainers (`Rollout_1_IC`, `Rollout_2_IC`) as templates. In particular, your
+Follow the existing trainers (`First_Order_Rollout`, `Second_Order_Rollout`, `Second_Order_Noise`, `Second_Order_Noise_Weak`) as templates. In particular, your
 `Iterate(...)` method should:
 
 - Log losses via `_store_loss_by_param(...)` / `_store_total_loss(...)`
@@ -222,8 +261,10 @@ from MyTrainer import MyTrainer
 
 ```python
 trainer_dict = {
-    'Rollout_1_IC': Rollout_1_IC,
-    'Rollout_2_IC': Rollout_2_IC,
+    'First_Order_Rollout'      : First_Order_Rollout,
+    'Second_Order_Rollout'     : Second_Order_Rollout,
+    'Second_Order_Noise'       : Second_Order_Noise,
+    'Second_Order_Noise_Weak'  : Second_Order_Noise_Weak,
     'MyTrainer'  : MyTrainer,
 }
 ```
@@ -258,7 +299,7 @@ Tested with the following versions:
 - scipy (1.14.1)
 - matplotlib (3.9.2)
 
-These pacakages are listed in the "requirements.txt" file
+These packages are listed in the `requirements.txt` file.
 
 
 ### Installing with venv (recommended)
@@ -312,7 +353,7 @@ deactivate
 - Install via your system package manager/module (e.g., `apt-get install ffmpeg`, `brew install ffmpeg`, or `module load ffmpeg`)
 
 **For HDF5 data loading (Thermal example):**
-- hdf5 (the system HDF5 library, not a python pacakage; 1.14.5)
+- hdf5 (the system HDF5 library, not a Python package; 1.14.5)
 - h5py (3.14.0)
 
 **For PyMFEM examples:**
@@ -644,13 +685,29 @@ parameter point(s) to add to the training set after each training round.
 
 ### Adding a New EncoderDecoder Architecture
 
-1. **Create a subclass** of `EncoderDecoder` which should be placed in a file in `src/EncoderDecoder`
-2. **Implement required methods**:
-   - `Encode(self, X(1), ... , X(n_IC))`: Encode full-order state to latent space
-   - `Decode(self, Z(1), ... , Z(n_IC))`: Decode latent state to full-order space
-   - `forward(self, X(1), ... , X(n_IC))`: Encode and then Decode the FOM states.
-   - `export()`: Returns a dictionary that can be used to serialize the EncoderDecoder.
-3. **Register in `Initialize.py`**:
+1. **Create a subclass** of `EncoderDecoder` in `src/EncoderDecoder/YourEncoderDecoder.py`.
+2. **Implement the required interface** (minimal set):
+   - `__init__(self, Frame_Shape: list[int], config: dict)`:
+     - Parse `config['type']` and your type-specific sub-config.
+     - Call `super().__init__(n_IC=..., n_z=..., n_Decoders=..., config=config)`.
+     - Construct the encoder module(s) and the per-stage decoder module(s) (e.g., a `torch.nn.ModuleList` of length `n_Decoders`).
+   - `Encode(self, *Xs) -> tuple[torch.Tensor, ...]`:
+     - Accept `n_IC` FOM tensors (frame + derivatives) and return `n_IC` latent tensors.
+   - `Eval_Decoder(self, i_Decoder: int, *Zs) -> tuple[torch.Tensor, ...]`:
+     - Run the requested decoder stage `i_Decoder` and return `n_IC` decoded tensors in FOM space.
+   - `export(self) -> dict`:
+     - Return a dict that includes `super().export()` (so `Decoder_Active`/`Decoder_Weight` are checkpointed) plus your module state dicts and any architecture metadata needed to reconstruct the model.
+   - A corresponding `load_YourEncoderDecoder(dict_) -> YourEncoderDecoder` free function:
+     - Instantiate the model (using saved `Frame_Shape`/`config`/architecture metadata),
+     - call `model.load(dict_['EncoderDecoder dict'])` to restore `Decoder_Active`/`Decoder_Weight`,
+     - load module parameters from state dicts.
+
+3. **Optional overrides** (only if you need custom behavior):
+   - `Decode(self, *Zs)` if you want a non-linear combination of decoder stages (the base class implements a weighted sum over active stages).
+   - `forward(self, *Xs)` (the base class calls `Encode` then `Decode`).
+   - `latent_initial_conditions(...)` if you need custom IC handling (the base class provides a default implementation).
+   - `Set_Decoder_Active` / `Set_Decoder_Weight` if you want custom validation or semantics.
+4. **Register in `Initialize.py`**:
    ```python
    encoder_decoder_dict = {
        ...
@@ -661,7 +718,9 @@ parameter point(s) to add to the training set after each training round.
        'your_encoder_decoder': load_YourEncoderDecoder,
    }
    ```
-4. **Define how to train your architecture**: Import your new EncoderDecoder sub-class in `Trainer.py`. Either add the new class to one of the existing cases (using the pre-selected loss functions) in the `Trainer` class' `train` method, or define a new case to handle your new class.
+5. **Define how to train your architecture**:
+   - If your model follows the standard `Encode` / `Decode` contract (and your losses don’t rely on architecture-specific internals), you may be able to reuse an existing trainer (e.g., `First_Order_Rollout` or `Second_Order_Rollout`).
+   - If you need architecture-specific losses or training logic, implement a new `Trainer` subclass and register it in `trainer_dict` in `src/Initialize.py`.
 
 
 ## Testing and Development
@@ -684,11 +743,11 @@ Training produces several outputs:
 
 ### Gradient clipping
 
-To prevent exploding gradients during training, `Trainer` applies global gradient-norm clipping via `torch.nn.utils.clip_grad_norm_` (threshold: `trainer.gradient_clip`, default: `15.0`). When clipping activates, a warning is logged.
+To prevent exploding gradients during training, Trainer subclasses apply global gradient-norm clipping via `torch.nn.utils.clip_grad_norm_`. The threshold is typically configured under `trainer.<TrainerType>.gradient_clip` (default varies by trainer; see the corresponding trainer subclass). When clipping activates, a warning is logged.
 
 ### Per-parameter loss logging (`*_loss_by_param.pkl`)
 
-During training, `src/Trainer.py` writes a pickle file:
+During training, the trainer writes a pickle file (see `src/Trainer/Trainer.py`):
 
 - Path: `results/<physics_type>_loss_by_param.pkl` (where `<physics_type>` is `config['physics']['type']`)
 - Type: nested Python dictionaries
