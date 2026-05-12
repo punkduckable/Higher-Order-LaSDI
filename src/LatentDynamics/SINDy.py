@@ -2,7 +2,6 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-# Add the main directory to the search path.
 import  os;
 import  sys;
 src_Path        : str   = os.path.dirname(os.path.dirname(__file__));
@@ -19,7 +18,6 @@ from    LatentDynamics      import  LatentDynamics;
 from    FiniteDifference    import  Derivative1_Order4, Derivative1_Order2_NonUniform;
 from    FirstOrderSolvers   import  RK4;
 
-# Setup logger.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
 
@@ -35,107 +33,183 @@ class SINDy(LatentDynamics):
                     config          : dict,
                     lstsq_reg       : float = 1.0) -> None:
         r"""
-        Initializes a SINDy object. This is a subclass of the LatentDynamics class which uses the 
-        SINDy algorithm as its model for the ODE governing the latent state. Specifically, we 
-        assume there is a library of functions, f_1(z), ... , f_N(z), each one of which is a 
-        monomial of the components of the latent space, z, and a set of coefficients c_{i,j}, 
-        i = 1, 2, ... , n_z and j = 1, 2, ... , N such that
+        Initializes a SINDy latent-dynamics object.
 
-            z_i'(t) = \sum_{j = 1}^{N} c_{i,j} f_j(z)
-        
-        In this case, we assume that f_1, ... , f_N consists of the set of order <= 1 monomials. 
-        That is, f_1(z), ... , f_N(z) = 1, z_1, ... , z_{n_z}.
-            
+        This model assumes a first-order autonomous latent ODE with an affine right-hand side
+
+            z'(t) = A z(t) + b,
+
+        where A is an n_z x n_z matrix and b is an n_z-vector. Historically this class stored the
+        same information as one flattened coefficient vector whose underlying matrix was
+        [b; A^T]. The new coefficient ownership model stores coefficients in their native form
+        under each training parameter in `self.train_coefs`:
+
+            self.train_coefs[_param_key] = {"A": A, "b": b}.
+
 
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
 
         n_z : int
-            The number of dimensions in the latent space, where the latent dynamics takes place.
-            frame corresponds to time t0, the second to t0 + h, the k'th to t0 + (k - 1)h, etc 
-            (note that h may depend on the parameter value, but it needs to be constant for a 
-            specific parameter value). The value of this setting determines which finite difference 
-            method we use to compute time derivatives. 
+            The number of latent dimensions.
 
-        config : dict 
-            The "latent_dynamics" sub-dictionary of the config file. This can include a "lstsq_reg"
-            key which specifies the ridge-regression regularization strength used when fitting
-            SINDy coefficients from scratch (i.e., when no input_coefs are supplied to calibrate). 
-            The least-squares problem is replaced by the Tikhonov-regularized normal equations:
+        Uniform_t_Grid : bool
+            If True, each trajectory has uniform time spacing and we can use the higher-order
+            finite-difference stencil. Otherwise, nonuniform-grid finite differences are used.
 
-                (Z^T Z + lstsq_reg * I) c = Z^T dZ/dt
+        config : dict
+            The latent-dynamics configuration dictionary. The optional `lstsq_reg` entry controls
+            ridge regularization used by `fit_coefficients(...)` when initializing coefficients
+            from encoded trajectories.
 
-            Plain least-squares (lstsq_reg = 0) can produce arbitrarily large coefficients when
-            the Gram matrix Z^T Z is ill-conditioned, which commonly happens for newly-added
-            greedy-sampling training points whose latent trajectory hasn't been seen by the encoder
-            before. Setting lstsq_reg > 0 bounds ||c|| <= ||Z^T dZ/dt|| / lstsq_reg and prevents
-            the coefficient explosion that would otherwise blow up the training loss on the next
-            round. A value of 1.0 is a reasonable starting point; increase it (e.g., 10 or 100)
-            if you still see large initial coefficients for new training points.
+        lstsq_reg : float
+            Kept for compatibility with the previous constructor signature; the config value takes
+            precedence when present.
 
-            
+
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
-        
+
         Nothing!
         """
 
-        # Run the base class initializer. The only thing this does is set the n_z and n_t 
-        # attributes.
+        # Run the base class initializer. This sets `n_z`, the time-grid convention, the config,
+        # and the LD-owned `train_coefs` dictionary.
         super().__init__(n_z = n_z, Uniform_t_Grid = Uniform_t_Grid, config = config);
         self.lstsq_reg : float = config.get("lstsq_reg", 1.0);
-        LOGGER.info("Initializing a SINDY object with n_z = %d, Uniform_t_Grid = %s, lstsq_reg = %s" % (  self.n_z, 
-                                                                                                                str(self.Uniform_t_Grid),
-                                                                                                                str(self.lstsq_reg)));
+        LOGGER.info("Initializing a SINDY object with n_z = %d, Uniform_t_Grid = %s, lstsq_reg = %s" % (self.n_z, str(self.Uniform_t_Grid), str(self.lstsq_reg)));
 
-        # Set n_IC and n_coefs.
-        # We only allow library terms of order <= 1. If we let z(t) \in \mathbb{R}^{n_z} denote the 
-        # latent state at some time, t, then the possible library terms are 1, z_1(t), ... , 
-        # z_{n_z}(t). Since each component function gets its own set of coefficients, there must 
-        # be n_z*(n_z + 1) total coefficients.
+        # We keep `n_coefs` as the flattened count because several diagnostics/plotting utilities
+        # still report the total scalar coefficient count. The storage itself is native: A and b.
         self.n_coefs    : int   = self.n_z*(self.n_z + 1);
         self.n_IC       : int   = 1;
 
-        # TODO(kevin): other loss functions
+        # Setup the loss functions used by calibrate.
         self.MSE = torch.nn.MSELoss(reduction = 'mean');
         self.MAE = torch.nn.L1Loss(reduction = 'mean');
         return;
-    
+
+
+    def _native_from_matrix(self, coefs : torch.Tensor) -> dict[str, torch.Tensor]:
+        r"""
+        Convert the least-squares coefficient matrix into native trainable tensors.
+
+        The least-squares solve naturally returns the legacy matrix with shape (n_z + 1, n_z),
+        where the first row is the constant forcing and the remaining rows are A^T. We immediately
+        convert that representation into {"A", "b"} and make both tensors detached trainable leaves
+        so the optimizer can update them directly through `self.train_coefs`.
+        """
+
+        assert coefs.shape == (self.n_z + 1, self.n_z), "SINDy coefficient matrix shape mismatch";
+        # Old flattened matrix convention was [b; A^T]. Native convention is z' = A z + b.
+        b : torch.Tensor = coefs[0, :].detach().clone().requires_grad_(True);
+        A : torch.Tensor = coefs[1:, :].T.detach().clone().requires_grad_(True);
+        return {"A": A, "b": b};
+
+
+    def _matrix_from_native(self, coefs : dict[str, torch.Tensor]) -> torch.Tensor:
+        r"""
+        Reconstruct the legacy [b; A^T] matrix from native coefficients.
+
+        This helper is mainly useful for diagnostics and for maintaining the old scalar coefficient
+        ordering in plots. The simulation/calibration code below operates directly on A and b.
+        """
+
+        assert isinstance(coefs, dict);
+        A : torch.Tensor = coefs["A"];
+        b : torch.Tensor = coefs["b"];
+        assert A.shape == (self.n_z, self.n_z);
+        assert b.shape == (self.n_z,);
+        return torch.cat([b.reshape(1, self.n_z), A.T], dim = 0);
+
+
+    def train_coef_tensors(self) -> list[torch.Tensor]:
+        r"""
+        Return the actual coefficient tensors that should be passed to torch optimizers.
+
+        These are not copies. They are the same tensors stored in `self.train_coefs`, so optimizer
+        updates modify the LD-owned coefficient dictionaries used by calibrate/simulate.
+        """
+
+        tensors : list[torch.Tensor] = [];
+        for coef_dict in self.train_coefs.values():
+            tensors.extend([coef_dict["A"], coef_dict["b"]]);
+        return tensors;
+
+
+    def flatten_coefficients(self, coefs : dict[str, torch.Tensor] | list[dict[str, torch.Tensor]]) -> numpy.ndarray:
+        r"""Flatten SINDy coefficients in the legacy [b; A^T] ordering."""
+
+        coefs_list = [coefs] if isinstance(coefs, dict) else coefs;
+        assert isinstance(coefs_list, list);
+        rows : list[numpy.ndarray] = [];
+        for coef_dict in coefs_list:
+            mat = self._matrix_from_native(coef_dict);
+            rows.append(mat.detach().cpu().numpy().reshape(1, -1));
+        return numpy.concatenate(rows, axis = 0);
+
 
     def fit_coefficients(self,
                          Latent_States   : list[list[torch.Tensor]],
                          t_Grid          : list[torch.Tensor],
-                         params          : numpy.ndarray | None = None) -> torch.Tensor:
+                         params          : numpy.ndarray | None = None) -> None:
         r"""
-        Fit SINDy coefficients from latent trajectories via (optionally ridge-regularized) least
-        squares.
+        Fit and store SINDy coefficients for one or more training parameters.
 
-        This is intended for coefficient initialization (e.g., after greedy sampling adds a new
-        training point). See `LatentDynamics.fit_coefficients` for conventions.
+        This method is used for coefficient initialization, especially when the sampler adds a new
+        training point. Unlike the previous interface, it does not return a flattened coefficient
+        matrix. Instead, each fitted coefficient set is converted to native form and stored in
+        `self.train_coefs` under the exact tuple key associated with the corresponding row of
+        `params`.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        Latent_States : list[list[torch.Tensor]], len = n_param
+            The i'th entry contains one tensor with shape (n_t(i), n_z), holding the encoded latent
+            trajectory for the i'th parameter.
+
+        t_Grid : list[torch.Tensor], len = n_param
+            Time grid for each latent trajectory.
+
+        params : numpy.ndarray, shape = (n_param, n_p)
+            Parameter rows used as keys in `self.train_coefs`. This is required; omitting it is a
+            bookkeeping error and should stop the run.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        None. Coefficients are stored in `self.train_coefs`.
         """
 
+        # Checks.
+        assert params is not None, "SINDy.fit_coefficients requires params so coefficients can be stored";
         assert isinstance(t_Grid, list);
         assert isinstance(Latent_States, list);
-        assert len(Latent_States) == len(t_Grid);
-        n_param : int = len(t_Grid);
+        assert len(Latent_States) == len(t_Grid) == params.shape[0];
 
-        out_list : list[torch.Tensor] = [];
-        for i in range(n_param):
+        # Cycle through each parameter independently. Each parameter may have its own time grid.
+        for i in range(len(t_Grid)):
             t_Grid0 : torch.Tensor = t_Grid[i];
             Z       : torch.Tensor = Latent_States[i][0];
             n_t     : int          = len(t_Grid0);
 
-            # dZ/dt
+            # Approximate dZ/dt using the finite-difference stencil appropriate for this time grid.
             if(self.Uniform_t_Grid == True):
                 h       : float         = (t_Grid0[1] - t_Grid0[0]).item();
                 dZdt    : torch.Tensor  = Derivative1_Order4(Z, h);
             else:
                 dZdt                    = Derivative1_Order2_NonUniform(Z, t_Grid = t_Grid0);
 
-            # Library: [1, Z]
+            # Build the affine SINDy library [1, z_1, ..., z_n].
             Z_1 : torch.Tensor = torch.cat([torch.ones(n_t, 1, device = Z.device, dtype = Z.dtype), Z], dim = 1);
+            # Solve the regularized normal equations for the coefficient matrix.
             n_lib   : int           = Z_1.shape[1];
             rhs     : torch.Tensor  = Z_1.T @ dZdt;
             if self.lstsq_reg > 0.0:
@@ -144,25 +218,25 @@ class SINDy(LatentDynamics):
             else:
                 coefs   : torch.Tensor  = torch.linalg.lstsq(Z_1, dZdt).solution;
 
-            out_list.append(coefs.reshape(1, -1));
-
-        return torch.cat(out_list, dim = 0);
+            # Store the result in native form. This intentionally overwrites the coefficient entry
+            # for this exact parameter if it already exists.
+            self.set_train_coefs(params[i, :], self._native_from_matrix(coefs));
+        return None;
 
 
     def calibrate(  self,  
                     Latent_States   : list[list[torch.Tensor]], 
                     loss_type       : str,
                     t_Grid          : list[torch.Tensor], 
-                    params          : numpy.ndarray | None = None,
-                    input_coefs     : list[torch.Tensor] = []) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
+                    params          : numpy.ndarray | None = None) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
         r"""
-        This function computes the SINDy and stability losses for a given combination of 
-        parameter values. If no input_coefs are provided, then we learn the coefficients using 
-        Least Squares. Otherwise we use the passed values. Once we have the coefficients, we 
-        subsitue the passed latent states into the governing ODE (defined by the SINDy model). 
-        The SINDy loss is simply the mean (across time values) squared error between the computed 
-        time derivative and the right hand side of the governing equation. The stability loss is 
-        the L1 norm of the coefficients. 
+        Evaluate the SINDy latent-dynamics loss using LD-owned native coefficients.
+
+        `calibrate` no longer receives coefficient tensors from the Trainer. Instead, it looks up
+        the coefficient dictionary for each parameter row in `self.train_coefs`. Missing entries
+        raise a KeyError through `get_train_coefs`, which is intentional: by the time training
+        starts, the sampler/initialization path should already have fitted coefficients for every
+        training parameter.
 
 
         -------------------------------------------------------------------------------------------
@@ -170,345 +244,165 @@ class SINDy(LatentDynamics):
         -------------------------------------------------------------------------------------------
 
         Latent_States : list[list[torch.Tensor]], len = n_param
-            The i'th list element is a one element list whose only element is a 2d numpy array of 
-            shape (n_t(i), n_z) whose p, q element holds the q'th component of the latent state 
-            during the p'th time step (whose time value corresponds to the p'th element of t_Grid) 
-            when we use the i'th combination of parameter values. 
-        
+            Encoded latent trajectories. The i'th entry contains one tensor of shape (n_t(i), n_z).
+
         loss_type : str
-            The type of loss function to use. Must be either "MSE" or "MAE".
+            Either "MSE" or "MAE".
 
         t_Grid : list[torch.Tensor], len = n_param
-            i'th element should be a 1d tensor of shape (n_t(i)) whose j'th element holds the time 
-            value corresponding to the j'th frame when we use the i'th combination of parameter 
-            values.
+            Time grids corresponding to the latent trajectories.
 
-        input_coefs : list[torch.Tensor], len = n_param
-            The i'th element of this list is a 1d tensor of shape (n_coefs) holding the
-            coefficients for the i'th combination of parameter values. This function assumes
-            coefficients are provided; to *fit* coefficients from data, use `fit_coefficients(...)`.
+        params : numpy.ndarray, shape = (n_param, n_p)
+            Parameter rows used to fetch native coefficient dictionaries.
 
-        params: numpy.ndarray, shape = (n_param, n_p), optional
-            The i'th row holds the i'th combination of parameter values. This class doesn't use 
-            parameters, so it ignores this argument. Default is None.
 
-            
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        output_coefs, loss_sindy, loss_stab. 
-        
-        output_coefs : torch.Tensor, shape = (n_param, n_coef)
-            A matrix of shape (n_param, n_coef). The i,j entry of this array holds the value of 
-            the j'th coefficient when we use the i'th combination of parameter values.
-
-        loss_sindy : list[torch.Tensor], len = n_param
-            The i'th element of this list is a 0-dimensional tensor whose lone element holds the 
-            sum of the SINDy losses from the i'th combination of parameter values. 
-
-        loss_coef : list[torch.Tensor], len = n_para
-            The i'th element of this list is a 0-dimensional tensor whose lone element holds the
-            coefficient loss (Frobenius norm) of the coefficients for the i'th combination 
-            of parameter values.      
-
-        loss_stab : list[torch.Tensor], len = n_param
-            The i'th element of this list is a 0-dimensional tensor whose lone element holds the
-            stability penalty for the i'th combination of parameter values (see
-            LatentDynamics.stability_penalty).
+        loss_LD_list, loss_coef_list, loss_stab_list
+            Three lists of scalar tensors, one scalar per parameter.
         """
 
-        # Run checks.
-        assert(isinstance(t_Grid, list));
-        assert(isinstance(Latent_States, list));
-        assert(len(Latent_States)   == len(t_Grid));
+        # Checks.
+        assert params is not None, "SINDy.calibrate requires params to look up train_coefs";
+        assert isinstance(t_Grid, list);
+        assert isinstance(Latent_States, list);
+        assert len(Latent_States) == len(t_Grid) == params.shape[0];
+        assert loss_type in ["MSE", "MAE"];
 
-        n_param : int   = len(t_Grid);
-        n_IC    : int   = 1;
-        n_z     : int   = self.n_z;
-        for i in range(n_param):
-            assert(isinstance(Latent_States[i], list));
-            assert(len(Latent_States[i]) == n_IC);
+        # Prepare lists for per-parameter losses. The Trainer is responsible for applying weights
+        # and summing these scalar losses into the total objective.
+        loss_LD_list : list[torch.Tensor] = [];
+        loss_coef_list : list[torch.Tensor] = [];
+        loss_stab_list : list[torch.Tensor] = [];
 
-            for j in range(n_IC):
-                assert(isinstance(Latent_States[i][j], torch.Tensor));
-                assert(len(Latent_States[i][j].shape)   == 2);
-                assert(Latent_States[i][j].shape[-1]    == n_z);
+        for i in range(len(t_Grid)):
+            t_Grid0 : torch.Tensor  = t_Grid[i];
+            Z       : torch.Tensor  = Latent_States[i][0];
+            n_t     : int           = len(t_Grid0);
 
-        # Run checks on loss_type.
-        assert(loss_type in ["MSE", "MAE"]);
+            if(self.Uniform_t_Grid == True):
+                h       : float         = (t_Grid0[1] - t_Grid0[0]).item();
+                dZdt    : torch.Tensor  = Derivative1_Order4(Z, h);
+            else:
+                dZdt                    = Derivative1_Order2_NonUniform(Z, t_Grid = t_Grid0);
 
-        # Run checks on input_coefs.
-        assert isinstance(input_coefs, list);
-        assert len(input_coefs) == n_param, "SINDy.calibrate requires coefficients. Expected len(input_coefs) == n_param (%d)" % n_param;
-        for i in range(n_param):
-            assert isinstance(input_coefs[i], torch.Tensor);
-            assert len(input_coefs[i].shape) == 1;
-            assert input_coefs[i].shape[0] == self.n_coefs;
+            # Fetch native trainable coefficients. This direct lookup is deliberately strict.
+            coef_dict = self.get_train_coefs(params[i, :]);
+            A = coef_dict["A"].to(device = Z.device, dtype = Z.dtype);
+            b = coef_dict["b"].to(device = Z.device, dtype = Z.dtype);
+            # Evaluate the affine latent dynamics z' = A z + b on the encoded trajectory.
+            RHS = Z @ A.T + b.reshape(1, -1);
 
+            if(loss_type == "MSE"):
+                loss_LD = self.MSE(dZdt, RHS);
+            else:
+                loss_LD = self.MAE(dZdt, RHS);
+            loss_stab = self.stability_penalty(A);
+            loss_coef = torch.norm(A, 'fro') + torch.norm(b);
 
-        # -----------------------------------------------------------------------------------------
-        # If there are multiple combinations of parameter values, loop through them.
-        
-        if (n_param > 1):
-            # Prepare an array to house the flattened coefficient matrices for each combination of
-            # parameter values.
-            output_coefs_list : list[torch.Tensor] = [];
+            loss_LD_list.append(loss_LD);
+            loss_coef_list.append(loss_coef);
+            loss_stab_list.append(loss_stab);
 
-            # Compute the losses, coefficients for each combination of parameter values.
-            loss_sindy_list : list[torch.Tensor]    = [];
-            loss_stab_list  : list[torch.Tensor]    = [];
-            loss_coef_list  : list[torch.Tensor]    = [];
-            for i in range(n_param):
-                """"
-                Get the optimal SINDy coefficients for the i'th combination of parameter values. 
-                Remember that Latent_States[i][0] is a tensor of shape (n_t(j), n_z) whose (j, k) 
-                entry holds the k'th component of the j'th frame of the latent trajectory for the 
-                i'th combination of parameter values. 
-                
-                Note that Result a 3 element tuple.
-                """
-                # Extract params for this iteration (handle None case)
-                params_i = None if params is None else params[i, :].reshape(1, -1);
-                
-                output_coefs, loss_sindy_i, loss_coef_i, loss_stab_i = self.calibrate(
-                                                                Latent_States = [Latent_States[i]],
-                                                                t_Grid        = [t_Grid[i]],
-                                                                input_coefs   = [input_coefs[i]],
-                                                                loss_type     = loss_type,
-                                                                params        = params_i);
-
-                # Package the results from this combination of parameter values.
-                output_coefs_list.append(output_coefs);
-                loss_sindy_list.append(loss_sindy_i[0]);
-                loss_stab_list.append(loss_stab_i[0]);
-                loss_coef_list.append(loss_coef_i[0]);
-            
-            # Package everything to return!
-            # Use cat instead of stack since each output_coefs already has shape (1, n_coefs)
-            # cat along dim=0 gives (n_param, n_coefs) as expected
-            return torch.cat(output_coefs_list, dim = 0), loss_sindy_list, loss_coef_list, loss_stab_list;
-            
-
-        # -----------------------------------------------------------------------------------------
-        # Evaluate for one combination of parameter values case.
-
-        t_Grid0 : torch.Tensor  = t_Grid[0];
-        Z       : torch.Tensor  = Latent_States[0][0];
-        n_t     : int           = len(t_Grid0);
-
-        # First, compute the time derivatives. Which method we use depends on if we have a uniform 
-        # grid spacing or not. If so, we use an O(h^4) method. Otherwise, we use an O(h^2) one. In
-        # either case, this yields a 2d torch.Tensor object of shape (n_t, n_z) whose i,j element 
-        # holds the holds an approximation of (d/dt) Z_j(t_Grid0[i]).
-        if(self.Uniform_t_Grid == True):
-            h       : float         = (t_Grid0[1] - t_Grid0[0]).item();
-            dZdt    : torch.Tensor  = Derivative1_Order4(Z, h);
-        else:
-            dZdt                    = Derivative1_Order2_NonUniform(Z, t_Grid = t_Grid0);
-
-        # Log diagnostics to check for time scaling or derivative issues
-        LOGGER.debug("SINDy calibration: Z shape=%s, min=%.6e, max=%.6e, std=%.6e" % (
-            str(Z.shape), float(Z.min().item()), float(Z.max().item()), float(Z.std().item())));
-        LOGGER.debug("SINDy calibration: dZ/dt min=%.6e, max=%.6e, mean=%.6e, std=%.6e" % (
-            float(dZdt.min().item()), float(dZdt.max().item()), 
-            float(dZdt.mean().item()), float(dZdt.std().item())));
-        LOGGER.debug("SINDy calibration: t_Grid min=%.6e, max=%.6e, range=%.6e, mean_dt=%.6e" % (
-            float(t_Grid0.min().item()), float(t_Grid0.max().item()),
-            float((t_Grid0.max() - t_Grid0.min()).item()),
-            float((t_Grid0[1:] - t_Grid0[:-1]).mean().item()) if n_t > 1 else 0.0));
-
-        # Concatenate a column of ones. This will correspond to a constant term in the latent 
-        # dynamics. Ensure the ones tensor is on the same device as Z.
-        Z_1     : torch.Tensor  = torch.cat([torch.ones(n_t, 1, device = Z.device, dtype = Z .dtype), Z], dim = 1);
-        
-        coefs : torch.Tensor = input_coefs[0].reshape(self.n_z + 1, self.n_z);
-        LOGGER.debug("SINDy calibration: Using input coefs min=%.6e, max=%.6e, mean=%.6e" % (
-            float(coefs.min().item()), float(coefs.max().item()), float(coefs.mean().item())));
-
-        # Compute the losses.
-        if(loss_type == "MSE"):
-            loss_sindy = self.MSE(dZdt, Z_1 @ coefs);
-        elif(loss_type == "MAE"):
-            loss_sindy = self.MAE(dZdt, Z_1 @ coefs);
-        A           = coefs[1:, :].T;  # linear term in z' = b + A z
-        loss_stab   = self.stability_penalty(A);
-        loss_coef   = torch.norm(coefs, 'fro');
-
-        # Prepare coefs and the losses to return. Note that we flatten the coefficient matrix.
-        # Note: output of lstsq is not contiguous in memory.
-        output_coefs   : torch.Tensor  = coefs.reshape(1, -1);
-        return output_coefs, [loss_sindy], [loss_coef], [loss_stab]
-
+        return loss_LD_list, loss_coef_list, loss_stab_list;
 
 
     def simulate(   self,
-                    coefs   : numpy.ndarray           | torch.Tensor, 
+                    coefs   : dict[str, numpy.ndarray | torch.Tensor] | list[dict[str, numpy.ndarray | torch.Tensor]], 
                     IC      : list[list[numpy.ndarray | torch.Tensor]],
                     t_Grid  : list[numpy.ndarray      | torch.Tensor],
                     params  : numpy.ndarray | None = None) -> list[list[numpy.ndarray | torch.Tensor]]:
-        """
-        Time integrates the latent dynamics from multiple initial conditions for each combination
-        of coefficients in coefs. 
- 
+        r"""
+        Time-integrate the native SINDy latent dynamics.
+
+        The coefficient argument is now either a single native dictionary {"A", "b"} or a list of
+        such dictionaries. This lets callers pass coefficients returned by `Interpolate.sample`,
+        `Interpolate.mean`, or direct `train_coefs` lookups without any flattened unpacking.
+
 
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
-        
-        coefs : numpy.ndarray or torch.Tensor, shape = (n_param, n_coef)
-            i'th row represents the optimal set of coefficients when we use the i'th combination 
-            of parameter values. We inductively call simulate on each row of coefs. 
 
-        IC : list[list[numpy.ndarray]] or list[list[torch.Tensor]], len = n_param
-            i'th element is an n_IC element list whose j'th element is a 2d numpy.ndarray or 
-            torch.Tensor object of shape (n(i), n_z). Here, n(i) is the number of initial 
-            conditions (for a fixed set of coefficients) we want to simulate forward using the i'th 
-            set of coefficients. Further, n_z is the latent dimension. If you want to simulate a 
-            single IC, for the i'th set of coefficients, then n(i) == 1. IC[i][j][k, :] should hold 
-            the k'th initial condition for the j'th derivative of the latent state when we use the 
-            i'th combination of parameter values. 
+        coefs : dict or list[dict]
+            Native coefficient dictionary/dictionaries. For SINDy each dictionary must contain
+            `A` with shape (n_z, n_z) and `b` with shape (n_z,).
 
-        t_Grid : list[numpy.ndarray] or list[torch.Tensor], len = n_param
-            i'th entry is a 2d numpy.ndarray or torch.Tensor whose shape is either (n(i), n_t(i)) 
-            or shape (n_t(i)). The shape should be 2d if we want to use different times for each 
-            initial condition and 1d if we want to use the same times for all initial conditions. 
-        
-            In the former case, the j,k array entry specifies k'th time value at which we solve for 
-            the latent state when we use the j'th initial condition and the i'th set of 
-            coefficients. Each row should be in ascending order. 
-        
-            In the latter case, the j'th entry should specify the j'th time value at which we solve 
-            for each latent state when we use the i'th combination of parameter values.
+        IC : list[list[numpy.ndarray | torch.Tensor]], len = n_param
+            Initial latent states for each coefficient set. SINDy has one IC component.
 
-        params: numpy.ndarray, shape = (n_param, n_p), optional
-            The i'th row holds the i'th combination of parameter values. This class doesn't use 
-            parameters, so it ignores this argument. Default is None.
+        t_Grid : list[numpy.ndarray | torch.Tensor], len = n_param
+            Time grids for simulation.
+
+        params : numpy.ndarray, optional
+            Accepted for API consistency with parameter-dependent LD subclasses; unused here.
 
 
         -------------------------------------------------------------------------------------------
         Returns
-        -------------------------------------------------------------------------------------------        
-        
-        Z : list[list[numpy.ndarray]] or list[list[torch.Tensor]], len = n_parm
-            i'th element is a list of length n_IC whose j'th entry is a 3d array of shape 
-            (n_t(i), n(i), n_z). The p, q, r entry of this array should hold the r'th component of 
-            the p'th frame of the j'th tine derivative of the solution to the latent dynamics when 
-            we use the q'th initial condition for the i'th combination of parameter values.
+        -------------------------------------------------------------------------------------------
+
+        Z : list[list[numpy.ndarray | torch.Tensor]]
+            Simulated latent trajectories. Z[i][0] has shape (n_t(i), n_initial_conditions, n_z).
         """
 
-        # Run checks.
-        assert(len(coefs.shape)     == 2);
-        n_param : int = coefs.shape[0];
-        assert(isinstance(t_Grid, list));
-        assert(isinstance(IC, list));
-        assert(len(IC)              == n_param);
-        assert(len(t_Grid)          == n_param);
-        
-        assert(isinstance(IC[0], list));
-        n_IC : int = len(IC[0]);
-        assert(n_IC == 1);
-        for i in range(n_param):
-            assert isinstance(IC[i], list),                                     "IC[%d] is not a list" % i;
-            assert len(IC[i]) == n_IC,                                          "len(IC[%d]) = %d, n_IC = %d" % (i, len(IC[i]), n_IC);
-            assert len(t_Grid[i].shape) == 2 or len(t_Grid[i].shape) == 1,      "len(t_Grid[%d].shape) = %d" % (i, len(t_Grid[i].shape));
-            for j in range(n_IC):
-                assert len(IC[i][j].shape) == 2,                                "IC[%d][%d].shape = %s" % (i, j, str(IC[i][j].shape));
-                assert type(coefs)          == type(IC[i][j]),                  "type(coefs) = %s, type(IC[%d][%d]) = %s" % (str(type(coefs)), i, j, str(type(IC[i][j])));
-                assert IC[i][j].shape[1]    == self.n_z,                        "IC[%d][%d].shape[1] = %d, self.n_z = %d" % (i, j, IC[i][j].shape[1], self.n_z);
-                if(len(t_Grid[i].shape) == 2):
-                    assert t_Grid[i].shape[0] == IC[i][j].shape[0];
+        # Normalize the coefficient input to a list so the multi-parameter and single-parameter
+        # cases share the same bookkeeping.
+        if isinstance(coefs, dict):
+            coefs_list = [coefs];
+        else:
+            coefs_list = coefs;
+        assert isinstance(coefs_list, list);
+        n_param : int = len(coefs_list);
+        assert isinstance(t_Grid, list) and isinstance(IC, list);
+        assert len(IC) == n_param and len(t_Grid) == n_param;
 
+        # If multiple coefficient sets are provided, recurse on each one so all validation and
+        # backend-specific setup only needs to be written once.
+        if n_param > 1:
+            return [self.simulate(coefs = coefs_list[i], IC = [IC[i]], t_Grid = [t_Grid[i]], params = None if params is None else params[i, :].reshape(1, -1))[0] for i in range(n_param)];
 
-        # -----------------------------------------------------------------------------------------
-        # If there are multiple combinations of coefficients, loop through them.
-        
-        if(n_param > 1):
-            LOGGER.debug("Simulating with %d parameter combinations" % n_param);
-
-            # Cycle through the parameter combinations
-            Z   : list[list[numpy.ndarray | torch.Tensor]]  = [];
-            for i in range(n_param): 
-                # Fetch the i'th set of coefficients, the corresponding collection of initial
-                # conditions, and the set of time values.
-                ith_coefs   : numpy.ndarray             | torch.Tensor              = coefs[i, :].reshape(1, -1);
-                ith_IC      : list[list[numpy.ndarray   | torch.Tensor]]            = [IC[i]];
-                ith_t_Grid  : list[numpy.ndarray | torch.Tensor]                    = [t_Grid[i]];
-                ith_params  = None if params is None else params[i, :].reshape(1, -1);
-
-                # Call this function using them. This should return a 1 element holding the 
-                # the solution for the i'th combination of parameter values.
-                ith_Results : list[numpy.ndarray | torch.Tensor]    = self.simulate(coefs   = ith_coefs, 
-                                                                                    IC      = ith_IC, 
-                                                                                    t_Grid  = ith_t_Grid, 
-                                                                                    params  = ith_params)[0];
-
-                # Add these results to Z.
-                Z.append(ith_Results);
-
-            # All done.
-            return Z;
-        
-
-        # -----------------------------------------------------------------------------------------
-        # Evaluate for one combination of parameter values case.
-
-        # In this case, there is just one parameter. Extract t_Grid, which has shape 
-        # (n(i), n_t(i)) or (n_t(i)).
+        assert isinstance(IC[0], list) and len(IC[0]) == 1;
         t_Grid0  : numpy.ndarray | torch.Tensor  = t_Grid[0];
         if(isinstance(t_Grid0, torch.Tensor)):
-            # Support CUDA/MPS tensors by moving to CPU before NumPy conversion.
             t_Grid0 = t_Grid0.detach().cpu().numpy();
-        n_t_i   : int           = t_Grid0.shape[-1];
-        if(len(t_Grid0.shape) == 1):
-            Same_t_Grid : bool  = True;
+        Same_t_Grid : bool = (len(t_Grid0.shape) == 1);
+        Z0  : numpy.ndarray | torch.Tensor  = IC[0][0];
+        n_i : int = Z0.shape[0];
+
+        # Fetch native coefficients for the single-parameter case.
+        coef_dict = coefs_list[0];
+        A = coef_dict["A"];
+        b = coef_dict["b"];
+        # Match the coefficient backend to the initial-condition backend. This keeps the solver
+        # purely NumPy for NumPy inputs and differentiable PyTorch for tensor inputs.
+        if isinstance(Z0, numpy.ndarray):
+            if isinstance(A, torch.Tensor):
+                A = A.detach().cpu().numpy();
+                b = b.detach().cpu().numpy();
+            b = b.reshape(1, -1);
+            f = lambda t, z: b + numpy.matmul(z, A.T);
         else:
-            Same_t_Grid         = False;
+            if isinstance(A, numpy.ndarray):
+                A = torch.tensor(A, dtype = Z0.dtype, device = Z0.device);
+                b = torch.tensor(b, dtype = Z0.dtype, device = Z0.device);
+            else:
+                A = A.to(device = Z0.device, dtype = Z0.dtype);
+                b = b.to(device = Z0.device, dtype = Z0.dtype);
+            b = b.reshape(1, -1);
+            f = lambda t, z: b + torch.matmul(z, A.T);
 
-        # coefs has shape (1, n_coefs). Each element of IC should have shape (n(i), n_z). 
-        Z0  : numpy.ndarray | torch.Tensor  = IC[0][0]; 
-        n_i : int                           = Z0.shape[0];
-
-        # First, we need to extract the matrix of coefficients. We know that coefs is the least 
-        # squares solution to dZ_dt = hstack[1, Z] E^T. 
-        E   : numpy.ndarray | torch.Tensor = coefs.reshape([self.n_z + 1, self.n_z]).T;
-
-        # Extract A and b. Note that we need to reshape b to have shape (1, n_z) to enable
-        # broadcasting.
-        b   : numpy.ndarray | torch.Tensor = E[:, 0 ].reshape(1, -1);
-        A   : numpy.ndarray | torch.Tensor = E[:, 1:];
-
-
-        # Set up a lambda function to approximate 
-        #   z'(t) \approx b + A z(t)
-        # In this case, we expect dz_dt and z to have shape (n(i), n_z). Thus, matmul(z, A.T) will 
-        # have shape (n(i), n_z). The i'th row of this should hold the z portion of the rhs of the 
-        # latent dynamics for the i'th IC. Similar results hold for dot(dz_dt, C.T). The final 
-        # result should have shape (n, n_z). The i'th row should hold the rhs of the latent 
-        # dynamics for the i'th IC.
-        if(isinstance(coefs, numpy.ndarray)):
-            f   = lambda t, z: b + numpy.matmul(z, A.T);
-        if(isinstance(coefs, torch.Tensor)):
-            f   = lambda t, z: b + torch.matmul(z, A.T);
-
-        # Solve the ODE forward in time. U should have shape (n_t, n(i), n_z). If we use the 
-        # same t values for each IC, then we can exploit the fact that the latent dynamics are 
-        # autonomous to solve using each IC simultaneously. Otherwise, we need to run the latent
-        # dynamics one IC at a time. 
         if(Same_t_Grid == True):
             Z = [[RK4(f = f, y0 = Z0, t_Grid = t_Grid0)]]; 
         else:
-            # Cycle through the ICs.
             Z_list : list[torch.Tensor | numpy.ndarray] = [];   
             for j in range(n_i):
-                Z_j         = RK4(f = f, y0 = Z0[j, :].reshape(1, -1), t_Grid = t_Grid0[j, :]);
+                Z_j = RK4(f = f, y0 = Z0[j, :].reshape(1, -1), t_Grid = t_Grid0[j, :]);
                 Z_list.append(Z_j);
-
-            # Stack the results.
-            if(isinstance(coefs, numpy.ndarray)):
-                Z = [[numpy.concatenate(Z_list, axis = 1)]];    # shape = (n_t, n_i, n_z)
-            elif(isinstance(coefs, torch.Tensor)):
-                Z = [[torch.cat(Z_list, dim = 1)]];            # shape = (n_t, n_i, n_z)
-        
-        # All done!
+            if(isinstance(Z0, numpy.ndarray)):
+                Z = [[numpy.concatenate(Z_list, axis = 1)]];
+            else:
+                Z = [[torch.cat(Z_list, dim = 1)]];
         return Z;

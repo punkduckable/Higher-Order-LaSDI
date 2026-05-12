@@ -22,7 +22,6 @@ import  time;
 import  numpy;
 import  torch;
 import  matplotlib.pyplot           as      plt;
-from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 from    pathlib                     import  Path;
 
 from    EncoderDecoder              import  EncoderDecoder;
@@ -31,7 +30,7 @@ from    Physics                     import  Physics;
 from    Enums                       import  NextStep;
 from    LatentDynamics              import  LatentDynamics;
 from    Trainer                     import  Trainer;
-from    GaussianProcess             import  fit_gps;
+from    Interpolate                 import  Interpolate;
 from    Initialize                  import  Initialize_Trainer;
 from    Sampler                     import  Sampler;
 from    Logging                     import  Initialize_Logger, Log_Dictionary;
@@ -148,11 +147,10 @@ def main():
     # Plot Setup
     # ---------------------------------------------------------------------------------------------
 
-    # Set up gaussian processes. 
+    # Set up coefficient interpolator. 
     encoder_decoder.cpu();
-
-    # Get a GP for each coefficient in the latent dynamics.
-    gp_list         : list[GaussianProcessRegressor]    = fit_gps(param_space.train_space, trainer.best_train_coefs);
+    trainer._check_train_coefficients();
+    interpolator : Interpolate = Interpolate(latent_dynamics.train_coefs);
 
     # Number of coefficient/ROM samples used for plotting + uncertainty metrics.
     # Most samplers expose this as an attribute; fall back to 20 for custom samplers.
@@ -165,7 +163,7 @@ def main():
                                                                                         physics         = physics,
                                                                                         param_space     = param_space,
                                                                                         latent_dynamics = latent_dynamics,
-                                                                                        gp_list         = gp_list,
+                                                                                        interpolator    = interpolator,
                                                                                         t_Test          = trainer.t_Test,
                                                                                         U_Test          = trainer.U_Test,
                                                                                         n_samples       = n_samples_plot,
@@ -180,7 +178,7 @@ def main():
     Plot_Latent_Trajectories(  physics         = physics,
                                encoder_decoder = encoder_decoder,
                                latent_dynamics = latent_dynamics,
-                               gp_list         = gp_list,
+                               interpolator    = interpolator,
                                param_grid      = param_space.test_space[i_worst, :].reshape(1, -1),
                                n_samples       = n_samples_plot,
                                U_True          = [trainer.U_Test[i_worst]],
@@ -335,7 +333,7 @@ def main():
         Zi_mean_np     : list[numpy.ndarray]   = average_rom(   encoder_decoder = encoder_decoder, # n_IC element list whose j'th element has shape (n_t(i), n_z)
                                                                 physics         = physics, 
                                                                 latent_dynamics = latent_dynamics, 
-                                                                gp_list         = gp_list, 
+                                                                interpolator    = interpolator, 
                                                                 param_grid      = param_worst, 
                                                                 t_Grid          = [t_worst],
                                                                 trainer         = trainer)[0];   # shape = (n_t, n_IC, n_z)
@@ -805,9 +803,7 @@ def count_parameters(   encoder_decoder : EncoderDecoder,
 
     # Count learnable coefficients from trainer (only applies if we are learning the latent 
     # dynamics coefficients)
-    coef_params = 0;
-    if hasattr(trainer, 'test_coefs') and trainer.test_coefs is not None:
-        coef_params = trainer.test_coefs.numel();
+    coef_params = sum(t.numel() for t in latent_dynamics.train_coef_tensors());
     
     # Print summary
     LOGGER.info("=" * 80);

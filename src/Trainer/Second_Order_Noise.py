@@ -250,8 +250,7 @@ class Second_Order_Noise(Second_Order_Rollout):
         `Trainer._Save_Checkpoint(...)` to snapshot:
 
         - EncoderDecoder weights
-        - the per-training-point coefficient matrix (`train_coefs`)
-        - the full test-space coefficient matrix (`self.test_coefs`)
+        - the LatentDynamics state, including native training coefficient dictionaries
 
         This ensures `Trainer.train()` can restore the model and coefficients from the best epoch
         of the round, which is what greedy sampling should use.

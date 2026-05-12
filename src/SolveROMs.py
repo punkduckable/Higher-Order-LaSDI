@@ -15,9 +15,7 @@ sys.path.append(Utilities_Path);
 
 import  torch;
 import  numpy;
-from    sklearn.gaussian_process    import  GaussianProcessRegressor;
-
-from    GaussianProcess             import  eval_gp, sample_coefs, fit_gps;
+from    Interpolate                 import  Interpolate;
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
 from    ParameterSpace              import  ParameterSpace;
@@ -36,7 +34,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 def average_rom(encoder_decoder : EncoderDecoder, 
                 physics         : Physics, 
                 latent_dynamics : LatentDynamics, 
-                gp_list         : list[GaussianProcessRegressor], 
+                interpolator    : Interpolate, 
                 param_grid      : numpy.ndarray,
                 t_Grid          : list[numpy.ndarray | torch.Tensor],
                 trainer         : Trainer) -> list[list[numpy.ndarray]]:
@@ -65,9 +63,9 @@ def average_rom(encoder_decoder : EncoderDecoder,
         physics, latent_dynamics, and EncoderDecoder all have the same number of initial 
         conditions.
 
-    gp_list : list[], len = n_coef
-        An n_coef element list of trained GP regressor objects. The i'th element of this list is 
-        a GP regressor object that predicts the i'th coefficient. 
+    interpolator : Interpolate
+        Interpolator object that returns native latent-dynamics coefficient dictionaries from the
+        posterior mean, posterior standard deviation, or posterior samples.
 
     param_grid : numpy.ndarray, shape = (n_param, n_p)
         i,j element holds the value of the j'th parameter in the i'th combination of parameter 
@@ -103,7 +101,6 @@ def average_rom(encoder_decoder : EncoderDecoder,
     n_param : int   = param_grid.shape[0];
     n_p     : int   = param_grid.shape[1];
 
-    assert isinstance(gp_list, list),               "type(gp_list) = %s, expected list" % (type(gp_list) == list);
     assert isinstance(t_Grid, list),                "type(t_Grid) = %s, expected list" % (type(t_Grid) == list);
     assert len(t_Grid)  == n_param,                 "len(t_Grid) = %d, n_param %d" % (len(t_Grid), n_param);
 
@@ -118,12 +115,8 @@ def average_rom(encoder_decoder : EncoderDecoder,
     LOGGER.debug("Fetching latent space initial conditions for %d combinations of parameters." % n_param);
     Z0      : list[list[numpy.ndarray]] = encoder_decoder.latent_initial_conditions(param_grid, physics, trainer = trainer);
 
-    # Evaluate each GP at each combination of parameter values. This returns two arrays, the 
-    # first of which is a 2d array of shape (n_param, n_coef) whose i,j element specifies the mean 
-    # of the posterior distribution for the j'th coefficient at the i'th combination of parameter 
-    # values.
-    LOGGER.debug("Finding the mean of each GP's posterior distribution");
-    post_mean, _ = eval_gp(gp_list, param_grid);
+    LOGGER.debug("Finding native coefficient means from the interpolator");
+    coef_means = [interpolator.mean(param_grid[i, :]) for i in range(n_param)];
 
     # Make each element of t_Grid into a numpy.ndarray of shape (1, n_t(i)). This is what 
     # simulate expects.
@@ -138,7 +131,7 @@ def average_rom(encoder_decoder : EncoderDecoder,
     # Simulate the laten dynamics! For each testing parameter, use the mean value of each posterior 
     # distribution to define the coefficients. 
     LOGGER.info("simulating initial conditions for %d combinations of parameters forward in time" % n_param);
-    Zis : list[list[numpy.ndarray]] = latent_dynamics.simulate( coefs   = post_mean, 
+    Zis : list[list[numpy.ndarray]] = latent_dynamics.simulate( coefs   = coef_means, 
                                                                 IC      = Z0, 
                                                                 t_Grid  = t_Grid_np,
                                                                 params  = param_grid);
@@ -157,7 +150,7 @@ def average_rom(encoder_decoder : EncoderDecoder,
 def sample_roms(encoder_decoder : EncoderDecoder, 
                 physics         : Physics, 
                 latent_dynamics : LatentDynamics, 
-                gp_list         : list[GaussianProcessRegressor], 
+                interpolator    : Interpolate, 
                 param_grid      : numpy.ndarray, 
                 t_Grid          : list[numpy.ndarray | torch.Tensor],
                 n_samples       : int,
@@ -185,8 +178,9 @@ def sample_roms(encoder_decoder : EncoderDecoder,
         to simulate the latent dynamics forward in time. physics, latent_dynamics, and 
         encoder_decoder should have the same number of initial conditions.
 
-    gp_list : list[GaussianProcessRegressor], len = n_coef
-        i'th element is a trained GP regressor object that predicts the i'th coefficient. 
+    interpolator : Interpolate
+        Interpolator object that samples native latent-dynamics coefficient dictionaries at each
+        requested parameter value.
 
     param_grid : numpy.ndarray, shape = (n_param, n_p)
         i,j element of holds the value of the j'th parameter in the i'th combination of parameter 
@@ -217,7 +211,6 @@ def sample_roms(encoder_decoder : EncoderDecoder,
     """
     
     # Checks
-    assert isinstance(gp_list, list), "type(gp_list) = %s, expected list" % (type(gp_list) == list);
     assert isinstance(t_Grid, list), "type(t_Grid) = %s, expected list" % (type(t_Grid) == list);
     assert isinstance(n_samples, int), "type(n_samples) = %s, expected int" % (type(n_samples) == int);
 
@@ -230,7 +223,6 @@ def sample_roms(encoder_decoder : EncoderDecoder,
     for i in range(n_param):
         assert isinstance(t_Grid[i], numpy.ndarray) or isinstance(t_Grid[i], torch.Tensor), "type(t_Grid[%d]) = %s, expected numpy.ndarray or torch.Tensor" % (i, type(t_Grid[i]));
 
-    n_coef      : int               = len(gp_list);
     n_IC        : int               = latent_dynamics.n_IC;
     n_z         : int               = encoder_decoder.n_z;
     assert physics.n_IC             == n_IC, "physics.n_IC = %d, n_IC %d" % (physics.n_IC, n_IC);
@@ -308,9 +300,9 @@ def sample_roms(encoder_decoder : EncoderDecoder,
                 );
 
                 # Generate the remaining samples even if they might diverge
-                n_needed_coefs = sample_coefs(gp_list = gp_list, Input = param_grid[i, :], n_samples = n_needed);
+                coef_samples_needed = [interpolator.sample(param_grid[i, :]) for _ in range(n_needed)];
                 for sample_idx in range(n_needed):
-                    coef_sample = n_needed_coefs[sample_idx, :].reshape(1, -1);
+                    coef_sample = coef_samples_needed[sample_idx];
                     Z0_i = [Z0[i][j] for j in range(n_IC)];
                     traj = latent_dynamics.simulate( 
                                             coefs   = coef_sample, 
@@ -321,14 +313,14 @@ def sample_roms(encoder_decoder : EncoderDecoder,
                 break;
             
             # Sample n_needed coefficient sets for this parameter
-            coef_samples = sample_coefs(gp_list = gp_list, Input = param_grid[i, :], n_samples = n_needed);
+            coef_samples = [interpolator.sample(param_grid[i, :]) for _ in range(n_needed)];
             
             # Simulate each coefficient set individually and check for divergence
             for sample_idx in range(n_needed):
                 total_resample_attempts += 1;
                 
-                # Extract this sample's coefficients (reshape to (1, n_coef) for simulate())
-                coef_sample = coef_samples[sample_idx, :].reshape(1, -1);
+                # Extract this sample's native coefficient dictionary.
+                coef_sample = coef_samples[sample_idx];
                 
                 # Get IC for this parameter (list of n_IC arrays, each shape (1, n_z))
                 Z0_i = [Z0[i][j] for j in range(n_IC)];
@@ -373,7 +365,7 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
                             physics         : Physics,
                             param_space     : ParameterSpace,
                             latent_dynamics : LatentDynamics,
-                            gp_list         : list[GaussianProcessRegressor],
+                            interpolator    : Interpolate,
                             t_Test          : list[torch.Tensor],
                             U_Test          : list[list[torch.Tensor]],
                             trainer         : Trainer,
@@ -425,12 +417,10 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
         The LatentDynamics object we use to generate the latent space data. For each combination 
         of parameter values, we fetch the corresponding coefficients to define the latent dynamics.
     
-    gp_list : list, len = c_coefs
-        A set of trained gaussian project objects. The i'th one represents a gaussian process that
-        maps a combination of parameter values to a sample for the i'th coefficient in the latent
-        dynamics. For each combination of parameter values, we sample the posterior distribution of
-        each GP; we use these samples to build samples of the latent dynamics, which we can use 
-        to sample the predicted dynamics produced by that combination of parameter values.
+    interpolator : Interpolate
+        Interpolator object for the native latent-dynamics coefficients. For each combination of
+        parameter values, we sample coefficient dictionaries from this object and use them to sample
+        the predicted dynamics produced by that combination of parameter values.
 
     t_Test : list[torch.Tensor], len = n_test
         i'th element is a 1d numpy.ndarray object of length n_t(i) whose j'th element holds the 
@@ -446,7 +436,7 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
         A Trainer object.
 
     n_samples : int
-        The number of samples we draw from each GP's posterior distribution. Each sample gives us 
+        The number of coefficient samples we draw from the Interpolate posterior. Each sample gives us 
         a set of coefficients which we can use to define the latent dynamics that we then solve 
         forward in time. 
 
@@ -486,13 +476,11 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
     """ 
 
     # Run checks
-    assert isinstance(gp_list,          list),      "type(gp_list) = %s, expected list" % (type(gp_list));
+    assert isinstance(interpolator,      Interpolate), "type(interpolator) = %s, expected Interpolate" % (type(interpolator));
     assert isinstance(t_Test,           list),      "type(t_Test) = %s, expected list" % (type(t_Test));
     assert isinstance(U_Test,           list),      "type(U_Test) = %s, expected list" % (type(U_Test));
     assert isinstance(n_samples,        int),       "type(n_samples) = %s, expected int" % (type(n_samples));
     assert len(t_Test)  == len(U_Test),             "len(t_Test) = %d, len(U_Test) %d" % (len(t_Test), len(U_Test));
-    assert len(gp_list) == latent_dynamics.n_coefs, "len(gp_list) = %d, expected %d" % (len(gp_list), latent_dynamics.n_coefs);
-
     
     # Fetch the number of testing parameter combinations.
     n_Test  : int   = len(U_Test);   
@@ -516,10 +504,13 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
             assert isinstance(U_Test[i][j], torch.Tensor),  "type(U_Test[%d][%d]) = %s, expected torch.Tensor" % (i, j, type(U_Test[i][j]));
             assert U_Test[i][j].shape[0]    == n_t_i,       "U_Test[%d][%d].shape = %s, n_t_i = %d" % (i, j, str(U_Test[i][j].shape), n_t_i);
     
-    # ---------------------------------------------------------------------------------------------
-    # Compute the posterior means, stds.
-
-    coef_means, coef_stds = eval_gp(gp_list = gp_list, Inputs = param_test);
+    # Evaluate posterior means/stds through the Interpolate interface in native coefficient format,
+    # then flatten to the legacy matrix shape used by heatmap plotting. SolveROMs should not
+    # access GP objects directly; GP details are localized inside Interpolate.
+    coef_means_native : list[dict[str, torch.Tensor]] = [interpolator.mean(param_test[i, :]) for i in range(n_Test)];
+    coef_stds_native  : list[dict[str, torch.Tensor]] = [interpolator.std(param_test[i, :])  for i in range(n_Test)];
+    coef_means = latent_dynamics.flatten_coefficients(coef_means_native);
+    coef_stds  = latent_dynamics.flatten_coefficients(coef_stds_native);
 
 
     # ---------------------------------------------------------------------------------------------
@@ -528,10 +519,10 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
     # For each combination of parameter values in the testing set, sample the latent coefficients 
     # and solve the latent dynamics forward in time. 
     LOGGER.info("Generating latent dynamics trajectories for %d samples of the coefficients for %d combinations of testing parameter" % (n_samples, n_Test));
-    Zis_samples     : list[list[numpy.ndarray]] = sample_roms(encoder_decoder, physics, latent_dynamics, gp_list, param_test, t_Test, n_samples, trainer = trainer);    # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_samples, n_z)
+    Zis_samples     : list[list[numpy.ndarray]] = sample_roms(encoder_decoder, physics, latent_dynamics, interpolator, param_test, t_Test, n_samples, trainer = trainer);    # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_samples, n_z)
 
     LOGGER.info("Generating latent dynamics trajectories using posterior distribution means for %d combinations of testing parameter" % (n_Test));
-    Zis_mean        : list[list[numpy.ndarray]] = average_rom(encoder_decoder, physics, latent_dynamics, gp_list, param_test, t_Test, trainer = trainer);               # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_z)
+    Zis_mean        : list[list[numpy.ndarray]] = average_rom(encoder_decoder, physics, latent_dynamics, interpolator, param_test, t_Test, trainer = trainer);               # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_z)
         
 
     # ---------------------------------------------------------------------------------------------

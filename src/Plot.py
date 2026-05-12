@@ -11,6 +11,8 @@ Figures_Path        : str   = os.path.join(os.path.abspath(os.path.dirname(os.pa
 Physics_Path        : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
 LD_Path             : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
 EncoderDecoder_Path : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "EncoderDecoder"));
+Utilities_Path      : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
+sys.path.append(Utilities_Path);
 sys.path.append(Physics_Path);
 sys.path.append(LD_Path);
 sys.path.append(EncoderDecoder_Path);
@@ -23,7 +25,6 @@ import  matplotlib.pyplot               as      plt;
 import  matplotlib                      as      mpl;
 from    matplotlib.figure               import  Figure;
 from    matplotlib.backends.backend_agg import FigureCanvasAgg;
-from    sklearn.gaussian_process        import  GaussianProcessRegressor;
 
 from    EncoderDecoder                  import  EncoderDecoder;
 from    Physics                         import  Physics;
@@ -31,6 +32,7 @@ from    LatentDynamics                  import  LatentDynamics;
 from    SolveROMs                       import  sample_roms;
 from    ParameterSpace                  import  ParameterSpace;
 from    Trainer                         import  Trainer;
+from    Interpolate                     import  Interpolate;
 
 
 # Set up the logger
@@ -59,7 +61,7 @@ mpl.rcParams['ytick.direction'] = 'in';
 def Plot_Latent_Trajectories(physics         : Physics,
                              encoder_decoder : EncoderDecoder,
                              latent_dynamics : LatentDynamics,
-                             gp_list         : list[GaussianProcessRegressor],
+                             interpolator    : Interpolate,
                              param_grid      : numpy.ndarray,
                              U_True          : list[list[torch.Tensor]],
                              t_Grid          : list[torch.Tensor],
@@ -70,9 +72,9 @@ def Plot_Latent_Trajectories(physics         : Physics,
     """
     This function plots the latent trajectories of the latent dynamics model for a combination of 
     parameter values. Specifically, we fetch the FOM IC for the given parameter values, encode then, 
-    and then sample the GP posterior distribution to get samples of the latent dynamics, solve and 
-    plot each resulting dynamical solution, and then plot the encodings of 
-    the FOM trajectory. 
+    and then use the Interpolate object to sample native latent-dynamics coefficient dictionaries,
+    solve and plot each resulting dynamical solution, and then plot the encodings of the FOM
+    trajectory. 
 
 
     -----------------------------------------------------------------------------------------------
@@ -88,10 +90,9 @@ def Plot_Latent_Trajectories(physics         : Physics,
     latent_dynamics : LatentDynamics
         The LatentDynamics model we use to simulate the latent dynamics forward in time.
 
-    gp_list : list[GaussianProcessRegressor], len = n_coef
-        A list of GaussianProcessRegressor objects which hold the GP posterior distributions for 
-        each latent dynamics coefficient. We use these to sample from the GP posterior distribution
-        to get samples of the latent dynamics.
+    interpolator : Interpolate
+        An Interpolate object that returns native coefficient dictionaries via `sample(...)`,
+        `mean(...)`, and `std(...)`. We use it to draw coefficient samples for latent rollouts.
 
     param_grid : numpy.ndarray, shape = (n_param, n_p)
         A numpy array whose rows holds the parameter values whose latent dynamics we want to plot.
@@ -110,8 +111,8 @@ def Plot_Latent_Trajectories(physics         : Physics,
         The prefix of the file name we use to save the plots. Usually the name of the FOM model.
     
     n_samples : int
-        The number of samples we want to draw from the GP posterior distribution for each 
-        combination of parameter values.
+        The number of coefficient samples we want to draw from `interpolator` for each combination
+        of parameter values.
         
     figsize : tuple[int], len = 2
         A two element tuple specifying the size of the overall figure size. 
@@ -128,10 +129,7 @@ def Plot_Latent_Trajectories(physics         : Physics,
     assert isinstance(physics, Physics),                "type(physics) = %s" % type(physics);
     assert isinstance(encoder_decoder, EncoderDecoder), "type(encoder_decoder) = %s" % type(EncoderDecoder);
     assert isinstance(latent_dynamics, LatentDynamics), "type(latent_dynamics) = %s" % type(latent_dynamics);
-    assert isinstance(gp_list, list),                   "type(gp_list) = %s" % type(gp_list);
-    assert len(gp_list)     == latent_dynamics.n_coefs, "len(gp_list) = %d != latent_dynamics.n_coefs = %d" % (len(gp_list), latent_dynamics.n_coefs);
-    for i in range(latent_dynamics.n_coefs):
-        assert isinstance(gp_list[i], GaussianProcessRegressor), "type(gp_list[%d]) = %s" % (i, type(gp_list[i]));
+    assert isinstance(interpolator, Interpolate), "type(interpolator) = %s" % type(interpolator);
 
     assert isinstance(param_grid, numpy.ndarray),        "type(param_grid) = %s" % type(param_grid);
     assert param_grid.ndim     == 2,                     "param_grid.ndim = %d != 2" % param_grid.ndim;
@@ -169,7 +167,7 @@ def Plot_Latent_Trajectories(physics         : Physics,
                                                                     encoder_decoder = encoder_decoder, 
                                                                     physics         = physics, 
                                                                     latent_dynamics = latent_dynamics, 
-                                                                    gp_list         = gp_list, 
+                                                                    interpolator    = interpolator, 
                                                                     param_grid      = param_grid,
                                                                     t_Grid          = t_Grid,
                                                                     n_samples       = n_samples,

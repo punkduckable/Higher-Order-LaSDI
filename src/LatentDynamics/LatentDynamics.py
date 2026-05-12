@@ -70,6 +70,7 @@ class LatentDynamics:
         self.n_z             = n_z;
         self.Uniform_t_Grid  = Uniform_t_Grid;
         self.config          = config;
+        self.train_coefs     : dict[tuple[float, ...], dict[str, torch.Tensor]] = {};
 
         # There must be at least one latent dimension and there must be at least 1 time step.
         assert(self.n_z > 0);
@@ -119,12 +120,180 @@ class LatentDynamics:
         Returns
         -------------------------------------------------------------------------------------------
 
-        coefs : torch.Tensor, shape = (n_param, n_coefs)
-            The i'th row holds the fitted coefficient vector for the i'th parameter combination.
+        None. Subclasses store native coefficient dictionaries in `self.train_coefs`.
         """
 
         raise RuntimeError("Abstract function LatentDynamics.fit_coefficients!");
     
+
+
+
+    @staticmethod
+    def _param_key(params_row : numpy.ndarray | torch.Tensor | list | tuple) -> tuple[float, ...]:
+        r"""
+        Convert one row of parameter values into the exact key used by `train_coefs`.
+
+        This helper intentionally does not round values or perform fuzzy matching. The parameter
+        tuple returned here must match the key stored in `self.train_coefs`; otherwise, subsequent
+        dictionary lookups should raise a KeyError.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        params_row : numpy.ndarray or torch.Tensor or list or tuple
+            A one-dimensional collection of parameter values. If a 2D row-like array/tensor is
+            supplied, it is flattened before conversion.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        key : tuple[float, ...]
+            A hashable tuple of Python floats. This tuple is used as the key in `self.train_coefs`.
+        """
+        if isinstance(params_row, torch.Tensor):
+            params_row = params_row.detach().cpu().reshape(-1).tolist();
+        elif isinstance(params_row, numpy.ndarray):
+            params_row = params_row.reshape(-1).tolist();
+        else:
+            params_row = list(params_row);
+        return tuple(float(x) for x in params_row);
+
+
+
+    def get_train_coefs(self, params_row : numpy.ndarray | torch.Tensor | list | tuple) -> dict[str, torch.Tensor]:
+        r"""
+        Fetch the native coefficient dictionary for one parameter combination.
+
+        This method deliberately performs a direct dictionary lookup using `_param_key(...)`. If the
+        requested parameter is missing, Python raises a KeyError. This is intentional: all training
+        coefficients should be initialized before training starts.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        params_row : numpy.ndarray or torch.Tensor or list or tuple
+            The parameter values whose coefficient dictionary we want to fetch.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        coefs : dict[str, torch.Tensor]
+            A native coefficient dictionary for the requested parameter. The exact keys depend on
+            the concrete LatentDynamics subclass. For example, SINDy uses `A` and `b`, while the
+            damped-spring models use `K`, `C`, and `b`.
+        """
+
+        key = self._param_key(params_row);
+        return self.train_coefs[key];
+
+
+
+    def set_train_coefs(self, params_row : numpy.ndarray | torch.Tensor | list | tuple, coefs : dict[str, torch.Tensor]) -> None:
+        r"""
+        Store a native coefficient dictionary for one parameter combination.
+
+        The values in `coefs` are converted to detached trainable leaf tensors unless they already
+        are trainable leaves. This ensures that `train_coef_tensors()` can pass these exact tensor
+        objects to a torch optimizer and that optimizer updates modify the coefficients stored in
+        `self.train_coefs`.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        params_row : numpy.ndarray or torch.Tensor or list or tuple
+            The parameter values associated with the coefficient dictionary. These values are
+            converted to a tuple key using `_param_key(...)`.
+
+        coefs : dict[str, torch.Tensor]
+            Native coefficient dictionary. Keys must be strings and values must be tensors. The
+            expected keys are subclass-specific.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        Nothing!
+        """
+
+        assert isinstance(coefs, dict), "coefs must be a dict[str, torch.Tensor]";
+        for name, value in coefs.items():
+            assert isinstance(name, str), "coefficient names must be strings";
+            assert isinstance(value, torch.Tensor), "coefficient %s must be a torch.Tensor" % name;
+            if value.requires_grad and value.is_leaf:
+                coefs[name] = value;
+            else:
+                coefs[name] = value.detach().clone().requires_grad_(True);
+        self.train_coefs[self._param_key(params_row)] = coefs;
+        return;
+
+
+
+    def train_coef_tensors(self) -> list[torch.Tensor]:
+        r"""
+        Return the trainable coefficient tensors owned by this LatentDynamics object.
+
+        Concrete subclasses define the ordering because the native coefficient names and tensor
+        counts differ between latent-dynamics models. The returned tensors should be the actual
+        tensors stored in `self.train_coefs`, not detached copies, so they can be passed directly to
+        torch optimizers.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        None.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        tensors : list[torch.Tensor]
+            A list containing all trainable coefficient tensors stored in `self.train_coefs`.
+        """
+
+        raise RuntimeError("Abstract function LatentDynamics.train_coef_tensors!");
+
+
+
+    def flatten_coefficients(self, coefs : dict[str, torch.Tensor] | list[dict[str, torch.Tensor]]) -> numpy.ndarray:
+        r"""
+        Flatten native coefficient dictionaries into this model's legacy coefficient ordering.
+
+        This is used only at compatibility boundaries, such as coefficient heatmap output. Internal
+        training and simulation should use native dictionaries.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        coefs : dict[str, torch.Tensor] or list[dict[str, torch.Tensor]]
+            One native coefficient dictionary or a list of native coefficient dictionaries.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        coef_matrix : numpy.ndarray, shape = (n_param, n_coefs)
+            Flattened coefficient matrix using the concrete subclass's legacy scalar ordering.
+        """
+
+        raise RuntimeError("Abstract function LatentDynamics.flatten_coefficients!");
+
 
 
     @staticmethod
@@ -156,8 +325,7 @@ class LatentDynamics:
                     Latent_States   : list[list[torch.Tensor]], 
                     loss_type       : str,
                     t_Grid          : list[torch.Tensor], 
-                    params          : numpy.ndarray | None  = None,
-                    input_coefs     : list[torch.Tensor]    = []) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
+                    params          : numpy.ndarray | None  = None) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
         """
         The user must implement this class on any latent dynamics sub-class. Each latent dynamics 
         object should implement a parameterized model for the dynamics in the latent space. A 
@@ -189,11 +357,6 @@ class LatentDynamics:
             The i'th element should be a 1d tensor of shape (n_t(i)) whose j'th element holds the 
             time value corresponding to the j'th frame when we use the i'th combination of 
             parameter values.
-
-        input_coefs : list[torch.Tensor], len = n_param
-            The i'th element of this list is a 1d tensor of shape (n_coefs) holding the
-            coefficients for the i'th combination of parameter values. This function assumes
-            coefficients are provided; to *fit* coefficients from data, use `fit_coefficients(...)`.
 
         params : numpy.ndarray, shape = (n_param, n_p), optional
             The i'th row holds the i'th combination of parameter values. This can be used by latent 
@@ -292,19 +455,55 @@ class LatentDynamics:
 
 
     def export(self) -> dict:
+        r"""
+        Export latent-dynamics metadata and LD-owned training coefficients.
+
+        Coefficients are detached and moved to CPU for portable checkpoint/restart files. Loading
+        re-creates trainable leaf tensors, so optimizer construction after load still works.
+        """
+
+        train_coefs_cpu : dict[tuple[float, ...], dict[str, torch.Tensor]] = {};
+        for key, coef_dict in self.train_coefs.items():
+            assert isinstance(coef_dict, dict), "train_coefs values must be dictionaries";
+            train_coefs_cpu[key] = {};
+            for name, tensor in coef_dict.items():
+                assert isinstance(name, str);
+                assert isinstance(tensor, torch.Tensor);
+                train_coefs_cpu[key][name] = tensor.detach().cpu().clone();
+
         param_dict = {'n_z'             : self.n_z, 
                       'n_coefs'         : self.n_coefs, 
                       'n_IC'            : self.n_IC,
                       'config'          : self.config,
-                      'Uniform_t_Grid'  : self.Uniform_t_Grid};
+                      'Uniform_t_Grid'  : self.Uniform_t_Grid,
+                      'train_coefs'     : train_coefs_cpu};
         return param_dict;
 
 
 
     def load(self, dict_ : dict) -> None:
+        r"""
+        Load latent-dynamics metadata and replace `self.train_coefs`.
+
+        Shape/model metadata are checked against the already-constructed object. Coefficients are
+        restored as trainable leaf tensors rather than raw checkpoint tensors.
+        """
+
         assert(self.n_z             == dict_['n_z']);
         assert(self.n_coefs         == dict_['n_coefs']);
         assert(self.n_IC            == dict_['n_IC']);
         assert(self.Uniform_t_Grid  == dict_['Uniform_t_Grid']);
+
+        loaded_train_coefs = dict_.get('train_coefs', {});
+        assert isinstance(loaded_train_coefs, dict), "train_coefs must be a dictionary";
+        self.train_coefs = {};
+        for key, coef_dict in loaded_train_coefs.items():
+            assert isinstance(key, tuple), "train_coefs keys must be parameter tuples";
+            assert isinstance(coef_dict, dict), "train_coefs values must be dictionaries";
+            self.train_coefs[key] = {};
+            for name, tensor in coef_dict.items():
+                assert isinstance(name, str), "coefficient names must be strings";
+                assert isinstance(tensor, torch.Tensor), "coefficient values must be tensors";
+                self.train_coefs[key][name] = tensor.detach().clone().requires_grad_(True);
         return;
     

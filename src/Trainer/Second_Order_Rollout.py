@@ -71,10 +71,9 @@ class Second_Order_Rollout(Trainer):
 
         **Coefficient semantics**
 
-        This trainer keeps a learnable matrix `self.test_coefs` of shape `(n_test, n_coefs)`.
-        Training uses the subset of rows corresponding to training parameters (which are required
-        to be contained in the test space). The full matrix is checkpointed so that after each
-        training round the coefficients are restored to the best epoch of that round.
+        This trainer optimizes native coefficient tensors stored in `latent_dynamics.train_coefs`
+        for the current training parameters. The LatentDynamics state is checkpointed so that after
+        each training round the coefficients are restored to the best epoch of that round.
 
         **Checkpointing**
 
@@ -177,9 +176,8 @@ class Second_Order_Rollout(Trainer):
         if 'stab' not in self.loss_weights.keys():
             self.loss_weights['stab'] = 0.0;
 
-        # Set up the optimizer and loss function.
+        # Set up the loss functions.
         LOGGER.info("Setting up the optimizer with a learning rate of %f" % (self.lr));
-        self.optimizer          : Optimizer = torch.optim.Adam(list(encoder_decoder.parameters()) + [self.test_coefs], lr = self.lr, weight_decay = 1.0e-5);
         self.MSE                            = torch.nn.MSELoss(reduction = 'mean');
         self.MAE                            = torch.nn.L1Loss(reduction = 'mean');
 
@@ -333,8 +331,7 @@ class Second_Order_Rollout(Trainer):
         `Trainer._Save_Checkpoint(...)` to snapshot:
 
         - EncoderDecoder weights
-        - the per-training-point coefficient matrix (`train_coefs`)
-        - the full test-space coefficient matrix (`self.test_coefs`)
+        - the LatentDynamics state, including native training coefficient dictionaries
 
         This ensures `Trainer.train()` can restore the model and coefficients from the best epoch
         of the round, which is what greedy sampling should use.
@@ -367,6 +364,8 @@ class Second_Order_Rollout(Trainer):
         # Setup. 
 
         # Reset optimizer.
+        self._check_train_coefficients();
+        self.optimizer = torch.optim.Adam(self._optimizer_parameters(), lr = self.lr, weight_decay = 1.0e-5);
         Reset_Optimizer(self.optimizer);
 
         # Fetch parameters. Note that p_rollout and p_IC_rollout can be negative.
@@ -378,7 +377,7 @@ class Second_Order_Rollout(Trainer):
         p_IC_rollout            : float             = min(self.max_p_IC_rollout, self.p_IC_rollout_init + self.IC_dp_per_update*(epochs_in_round//self.IC_rollout_update_freq));
         best_loss               : float             = numpy.inf;                    # Stores the lowest loss we get in this round of training.
         checkpoint_saved        : bool              = False;                        # Ensure we save at least one checkpoint per round.
-        last_train_coefs_detached : numpy.ndarray | None = None;
+        
         last_iter_idx             : int | None         = None;
 
         # Map everything to self's device.
@@ -402,23 +401,6 @@ class Second_Order_Rollout(Trainer):
             t_Grid_IC_rollout, n_IC_rollout_frames, U_IC_Rollout_Targets = self._IC_rollout_setup(  t            = t_Train_device, 
                                                                                                     p_IC_rollout = p_IC_rollout);
             self.timer.end("IC Rollout Setup"); 
-
-        # If we are learning the latent dynamics coefficients, then we need to determine 
-        # which combinations of parameters are in the training set. Specifically, each 
-        # element of the train space should also be in the test space. We need to figure out 
-        # the index of each train space element within the test space.
-        train_coefs_list : list[torch.Tensor] = [];
-        for i in range(n_train):
-            ith_train_in_test : bool = False;
-            for j in range(self.param_space.n_test()):
-                if(numpy.allclose(self.param_space.test_space[j, :], self.param_space.train_space[i, :], rtol = 1e-12, atol = 1e-14)):
-                    train_coefs_list.append(self.test_coefs[j, :]);
-                    ith_train_in_test = True;
-                    break;
-
-            # Make sure we found the training combination of parameters in the test space.
-            assert(ith_train_in_test == True);
-
 
         # -----------------------------------------------------------------------------------------
         # Run the iterations!
@@ -710,20 +692,21 @@ class Second_Order_Rollout(Trainer):
             # called "train_coefs" of shape (n_train, n_coefs), where n_train = number of training 
             # parameter parameters and n_coefs denotes the number of coefficients in the latent
             # dynamics model. 
-            train_coefs, loss_LD_list, loss_coef_list, loss_stab_list   = self.latent_dynamics.calibrate(   
+            loss_LD_list, loss_coef_list, loss_stab_list   = self.latent_dynamics.calibrate(   
                                                                             Latent_States    = Latent_States, 
                                                                             t_Grid           = t_Train_device,
-                                                                            input_coefs      = train_coefs_list,
                                                                             loss_type        = self.loss_types['LD'],
                                                                             params           = self.param_space.train_space);
 
             # Log coefficient statistics to diagnose constant dynamics issue
             if iter % 100 == 0 or iter == start_iter:  # Log every 100 iters and first iter
-                LOGGER.info("Epoch %d: Coefs shape=%s, min=%.6e, max=%.6e, mean=%.6e, std=%.6e, abs_mean=%.6e" % (
-                    iter + 1, str(train_coefs.shape),
-                    float(train_coefs.min().item()), float(train_coefs.max().item()),
-                    float(train_coefs.mean().item()), float(train_coefs.std().item()),
-                    float(torch.abs(train_coefs).mean().item())));
+                coef_tensors = self.latent_dynamics.train_coef_tensors();
+                train_coefs_flat = torch.cat([c.reshape(-1) for c in coef_tensors]);
+                LOGGER.info("Epoch %d: Coefs numel=%d, min=%.6e, max=%.6e, mean=%.6e, std=%.6e, abs_mean=%.6e" % (
+                    iter + 1, int(train_coefs_flat.numel()),
+                    float(train_coefs_flat.min().item()), float(train_coefs_flat.max().item()),
+                    float(train_coefs_flat.mean().item()), float(train_coefs_flat.std().item()),
+                    float(torch.abs(train_coefs_flat).mean().item())));
 
             # Append the LD and stability losses to loss_by_param.
             for i in range(n_train):
@@ -787,7 +770,7 @@ class Second_Order_Rollout(Trainer):
                     loss_FOM_i_V : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
 
                     param_i = self.param_space.train_space[i, :].reshape(1, -1);
-                    coef_i  = train_coefs[i, :].reshape(1, -1);
+                    coef_i  = self.latent_dynamics.get_train_coefs(self.param_space.train_space[i, :]);
 
                     Z_D_i : torch.Tensor = Latent_States[i][0];
                     Z_V_i : torch.Tensor = Latent_States[i][1];
@@ -907,7 +890,7 @@ class Second_Order_Rollout(Trainer):
                     Z_D_IC_i, Z_V_IC_i = encoder_decoder_device.Encode(D_IC_i, V_IC_i);
                     
                     # Get the coefficients for this combination of parameters
-                    train_coef_i            : torch.Tensor              = train_coefs[i, :].reshape(1, -1);
+                    train_coef_i            : dict[str, torch.Tensor]     = self.latent_dynamics.get_train_coefs(param_i);
                     
                     # Simulate the latent dynamics forward in time
                     Z_IC_Rollout_i    : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(  coefs   = train_coef_i, 
@@ -1003,13 +986,12 @@ class Second_Order_Rollout(Trainer):
 
 
 
-            # Convert coefs to numpy and find the maximum element.
-            # Store a detached copy for reporting (needed after backprop), but keep original for gradient flow
+            # Record coefficient scale and the most recent epoch index for fallback checkpointing.
             with torch.no_grad():
-                train_coefs_detached    : numpy.ndarray = train_coefs.detach().cpu().numpy();                # Shape = (n_train, n_coefs).
-                max_train_coef          : numpy.float32 = numpy.abs(train_coefs_detached).max();
-                last_train_coefs_detached = train_coefs_detached;
-                last_iter_idx             = int(iter);
+                coef_tensors_report = self.latent_dynamics.train_coef_tensors();
+                train_coefs_flat_report = torch.cat([c.reshape(-1) for c in coef_tensors_report]);
+                max_train_coef = float(torch.abs(train_coefs_flat_report).max().item());
+            last_iter_idx = int(iter);
 
 
 
@@ -1043,12 +1025,9 @@ class Second_Order_Rollout(Trainer):
                 if epochs_in_round >= self.warmup_epochs:
                     LOGGER.info("Got a new lowest loss (%f) on epoch %d" % (loss.item(), iter + 1));
                     self._Save_Checkpoint(encoder_decoder = encoder_decoder_device,
-                                          train_coefs     = train_coefs_detached,
-                                          test_coefs      = self.test_coefs,
                                           iter            = int(iter));
                     checkpoint_saved      = True;
 
-                    self.best_train_coefs = train_coefs_detached.copy();
                     self.best_epoch       = int(iter);
                     best_loss             = loss.item();
                 else:
@@ -1085,13 +1064,10 @@ class Second_Order_Rollout(Trainer):
         # Ensure we wrote a checkpoint for this round. If warmup prevented checkpointing, fall
         # back to saving the final epoch of this round.
         if checkpoint_saved == False:
-            assert last_train_coefs_detached is not None and last_iter_idx is not None;
+            assert last_iter_idx is not None;
             LOGGER.warning("No checkpoint saved during this round (likely warmup-only). Saving final epoch checkpoint instead.");
             self._Save_Checkpoint(encoder_decoder = encoder_decoder_device,
-                                  train_coefs     = last_train_coefs_detached,
-                                  test_coefs      = self.test_coefs,
                                   iter            = int(last_iter_idx));
-            self.best_train_coefs = last_train_coefs_detached.copy();
             self.best_epoch       = int(last_iter_idx);
 
         # All done!

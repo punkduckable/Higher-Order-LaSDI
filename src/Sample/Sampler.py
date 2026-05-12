@@ -269,60 +269,9 @@ class Sampler:
                     float(new_sample.mean().item()), float(new_sample.std().item()),
                     float(new_sample.min().item()), float(new_sample.max().item())));
             
-            # Initialize coefficients for newly added training points!
-            # When greedy sampling adds a point from the test set, its test_coefs row may be zero/untrained.
-            # We compute physics-based least-squares coefficients by encoding the trajectory and using SINDy.
-            if len(new_U_Train) > 0:
-                n_train_old = len(trainer.U_Train);
-                LOGGER.info("Initializing coefficients for %d newly added training points using least-squares fit" % len(new_U_Train));
-                
-                # For each new training point, find its index in test_space and initialize its coefficients
-                for i in range(len(new_U_Train)):
-                    new_param = new_train_params[i];
-                    
-                    # Find this parameter in test_space
-                    test_idx = None;
-                    for j in range(trainer.param_space.n_test()):
-                        if numpy.allclose(trainer.param_space.test_space[j, :], new_param, rtol=1e-12, atol=1e-14):
-                            test_idx = j;
-                            break;
-                    
-                    if test_idx is not None:
-                        # New coefficients will be untrained, so we should initialize them using least-squares fit.
-                        U_new_i = new_U_Train[i];  # List of tensors (one per IC)
-                        t_new_i = new_t_Train[i];  # Time grid tensor
-                        
-                        # Move encoder_decoder to CPU for encoding (calibrate expects CPU tensors)
-                        original_device = next(trainer.encoder_decoder.parameters()).device;
-                        encoder_decoder_cpu = trainer.encoder_decoder.cpu();
-                        with torch.no_grad():
-                            # Encode trajectory 
-                            Z_new_i_tuple = encoder_decoder_cpu.Encode(*[u.cpu() for u in U_new_i]);
-                            Z_new_i_list = list(Z_new_i_tuple);  # Convert tuple to list
-                        
-                        # Move encoder_decoder back to original device
-                        trainer.encoder_decoder.to(original_device);
-                        
-                        # Prepare inputs for calibrate: expects list[list[tensor]] where inner list has n_IC elements
-                        Latent_States_list = [Z_new_i_list];  # list[list[tensor]], one param combination
-                        t_Grid_list = [t_new_i.cpu()];        # list[tensor], one time grid
-                        params_array = new_param.reshape(1, -1);  # Shape: (1, n_p)
-                        
-                        # Fit coefficients from data for initialization.
-                        output_coefs = trainer.latent_dynamics.fit_coefficients(
-                                                Latent_States   = Latent_States_list,
-                                                t_Grid          = t_Grid_list,
-                                                params          = params_array);
-                        
-                        # Extract the computed coefficients and assign to test_coefs
-                        with torch.no_grad():
-                            computed_coefs                       = output_coefs[0, :].to(trainer.device);  # Shape: (n_coefs,)
-                            trainer.test_coefs[test_idx, :]      = computed_coefs;
-                            coef_norm                            = float(torch.norm(trainer.test_coefs[test_idx, :]).item());
-                            LOGGER.info("  New training point %d (test idx %d): initialized coefficients from least-squares fit: coef norm = %.6e" % (i, test_idx, coef_norm));
-
             trainer.U_Train         = trainer.U_Train + new_U_Train;
             trainer.t_Train         = trainer.t_Train + new_t_Train;
+
 
         assert len(trainer.U_Train) == trainer.param_space.n_train(), "len(trainer.U_Train) = %d != trainer.param_space.n_train() = %d" % (len(trainer.U_Train), trainer.param_space.n_train());
 
@@ -372,6 +321,30 @@ class Sampler:
                         LOGGER.warning("  WARNING: Normalized data has large mean! This suggests normalization stats may not be appropriate for this data!");
                     if abs(float(last_train_data.std().item()) - 1.0) > 3.0:
                         LOGGER.warning("  WARNING: Normalized data std is far from 1.0! This suggests normalization stats may not be appropriate for this data!");
+
+        # Initialize latent-dynamics coefficients for all newly added training points.
+        # Missing coefficients are considered a hard error later in Trainer._check_train_coefficients.
+        if len(new_U_Train) > 0:
+            LOGGER.info("Initializing coefficients for %d newly added training points using latent-dynamics fit_coefficients" % len(new_U_Train));
+            original_device = next(trainer.encoder_decoder.parameters()).device;
+            encoder_decoder_cpu = trainer.encoder_decoder.cpu();
+            Latent_States_list : list[list[torch.Tensor]] = [];
+            with torch.no_grad():
+                for i in range(len(new_U_Train)):
+                    Z_tuple = encoder_decoder_cpu.Encode(*[u.cpu() for u in new_U_Train[i]]);
+                    Latent_States_list.append(list(Z_tuple));
+            trainer.encoder_decoder.to(original_device);
+            trainer.latent_dynamics.fit_coefficients(
+                Latent_States   = Latent_States_list,
+                t_Grid          = [t.cpu() for t in new_t_Train],
+                params          = new_train_params);
+
+            # Move initialized coefficient tensors to the trainer device while keeping them trainable leaves.
+            for i in range(new_train_params.shape[0]):
+                coef_dict = trainer.latent_dynamics.get_train_coefs(new_train_params[i, :]);
+                for name, tensor in list(coef_dict.items()):
+                    coef_dict[name] = tensor.detach().to(dtype = torch.float32, device = trainer.device).clone().requires_grad_(True);
+
 
 
         # ---------------------------------------------------------------------------------------------

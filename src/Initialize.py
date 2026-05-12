@@ -224,8 +224,6 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer
     # If we are loading from a restart file, make a checkpoint using the current encoder_decoder parameters.
     if (bool(restart_dict) == True): 
         trainer._Save_Checkpoint(   encoder_decoder = encoder_decoder, 
-                                    train_coefs     = trainer.best_train_coefs, 
-                                    test_coefs      = trainer.test_coefs, 
                                     iter            = trainer.restart_iter);
 
     # Load the sampler.
