@@ -89,6 +89,7 @@ class SwitchSINDy(LatentDynamics):
         return;
 
 
+
     def _native_from_matrices(self, before : torch.Tensor, after : torch.Tensor) -> dict[str, torch.Tensor]:
         r"""Convert before/after [b; A^T] matrices into native trainable tensors."""
 
@@ -100,6 +101,7 @@ class SwitchSINDy(LatentDynamics):
         };
 
 
+
     def train_coef_tensors(self) -> list[torch.Tensor]:
         r"""Return all trainable switching-SINDy coefficient tensors."""
 
@@ -107,6 +109,7 @@ class SwitchSINDy(LatentDynamics):
         for coef_dict in self.train_coefs.values():
             tensors.extend([coef_dict["A_before"], coef_dict["b_before"], coef_dict["A_after"], coef_dict["b_after"]]);
         return tensors;
+
 
 
     def flatten_coefficients(self, coefs : dict[str, torch.Tensor] | list[dict[str, torch.Tensor]]) -> numpy.ndarray:
@@ -124,6 +127,7 @@ class SwitchSINDy(LatentDynamics):
             after  = torch.cat([b_after.reshape(1, self.n_z),  A_after.T],  dim = 0);
             rows.append(torch.cat([before.reshape(-1), after.reshape(-1)]).detach().cpu().numpy().reshape(1, -1));
         return numpy.concatenate(rows, axis = 0);
+
 
 
     def fit_coefficients(self,
@@ -201,6 +205,7 @@ class SwitchSINDy(LatentDynamics):
         return None;
 
 
+
     def calibrate(  self,  
                     Latent_States   : list[list[torch.Tensor]], 
                     loss_type       : str,
@@ -251,18 +256,32 @@ class SwitchSINDy(LatentDynamics):
         assert len(Latent_States) == len(t_Grid) == params.shape[0];
         assert loss_type in ["MSE", "MAE"];
 
-        loss_LD_list : list[torch.Tensor] = [];
+        # Prepare containers for the three loss components returned to the Trainer. The Trainer
+        # applies the user-specified weights and sums these values into the total objective.
+        loss_LD_list   : list[torch.Tensor] = [];
         loss_coef_list : list[torch.Tensor] = [];
         loss_stab_list : list[torch.Tensor] = [];
+
+        # -----------------------------------------------------------------------------------------
+        # Loop over parameter combinations.
+        # -----------------------------------------------------------------------------------------
+
         for i in range(len(t_Grid)):
+            # Fetch the latent trajectory and time grid for this parameter.
             t_Grid0 : torch.Tensor  = t_Grid[i];
             Z       : torch.Tensor  = Latent_States[i][0];
             n_t     : int           = len(t_Grid0);
+
+            # Approximate dZ/dt using the finite-difference stencil appropriate for the time grid.
             if(self.Uniform_t_Grid == True):
                 h       : float         = (t_Grid0[1] - t_Grid0[0]).item();
                 dZdt    : torch.Tensor  = Derivative1_Order4(Z, h);
             else:
                 dZdt                    = Derivative1_Order2_NonUniform(Z, t_Grid = t_Grid0);
+
+            # -------------------------------------------------------------------------------------
+            # Fetch native coefficients for this parameter.
+            # -------------------------------------------------------------------------------------
 
             # Fetch native trainable coefficients for this parameter.
             coef_dict = self.get_train_coefs(params[i, :]);
@@ -270,23 +289,60 @@ class SwitchSINDy(LatentDynamics):
             b_before = coef_dict["b_before"].to(device = Z.device, dtype = Z.dtype);
             A_after  = coef_dict["A_after"].to(device = Z.device, dtype = Z.dtype);
             b_after  = coef_dict["b_after"].to(device = Z.device, dtype = Z.dtype);
+
+            # -------------------------------------------------------------------------------------
+            # Split the trajectory into before/after-switch samples.
+            # -------------------------------------------------------------------------------------
+
             switch_time_theta : float = self.switch_time(params[i, :].reshape(1, -1));
             mask_before = t_Grid0 < switch_time_theta;
             mask_after  = ~mask_before;
+
+            # -------------------------------------------------------------------------------------
+            # Compute the residual loss.
+            # -------------------------------------------------------------------------------------
+
+            # Each regime uses its own affine model. It is possible (especially for short or
+            # truncated trajectories) for one regime to have no samples, so each term is guarded.
             loss_terms : list[torch.Tensor] = [];
             if mask_before.sum() > 0:
                 RHS_b = Z[mask_before] @ A_before.T + b_before.reshape(1, -1);
-                loss_terms.append(torch.sum((dZdt[mask_before] - RHS_b)**2) if loss_type == "MSE" else torch.sum(torch.abs(dZdt[mask_before] - RHS_b)));
+                residual_b = dZdt[mask_before] - RHS_b;
+                if(loss_type == "MSE"):
+                    loss_terms.append(torch.sum(residual_b**2));
+                else:
+                    loss_terms.append(torch.sum(torch.abs(residual_b)));
+
             if mask_after.sum() > 0:
                 RHS_a = Z[mask_after] @ A_after.T + b_after.reshape(1, -1);
-                loss_terms.append(torch.sum((dZdt[mask_after] - RHS_a)**2) if loss_type == "MSE" else torch.sum(torch.abs(dZdt[mask_after] - RHS_a)));
+                residual_a = dZdt[mask_after] - RHS_a;
+                if(loss_type == "MSE"):
+                    loss_terms.append(torch.sum(residual_a**2));
+                else:
+                    loss_terms.append(torch.sum(torch.abs(residual_a)));
+
+            # Normalize by the total number of time samples so trajectories with more frames do not
+            # automatically dominate the objective.
             loss_LD = sum(loss_terms) / float(n_t);
+
+            # -------------------------------------------------------------------------------------
+            # Compute regularization terms.
+            # -------------------------------------------------------------------------------------
+
+            # Coefficient regularization: penalize the sizes of both affine systems.
             loss_coef = torch.norm(A_before, 'fro') + torch.norm(b_before) + torch.norm(A_after, 'fro') + torch.norm(b_after);
+
+            # Stability regularization: apply the base-class differentiable stability penalty to
+            # each linear part. The constant terms b_before/b_after do not affect linear stability.
             loss_stab = self.stability_penalty(A_before) + self.stability_penalty(A_after);
+
+            # Package this parameter's losses.
             loss_LD_list.append(loss_LD);
             loss_coef_list.append(loss_coef);
             loss_stab_list.append(loss_stab);
+
         return loss_LD_list, loss_coef_list, loss_stab_list;
+
 
 
     def simulate(   self,
@@ -329,7 +385,8 @@ class SwitchSINDy(LatentDynamics):
             (n_t(i), n_initial_conditions, n_z).
         """
 
-        # Normalize coefficient input to a list.
+        # Normalize coefficient input to a list so the multi-parameter and single-parameter paths
+        # share the same validation/bookkeeping.
         if isinstance(coefs, dict):
             coefs_list = [coefs];
         else:
@@ -337,8 +394,19 @@ class SwitchSINDy(LatentDynamics):
         n_param = len(coefs_list);
         assert params is not None and params.shape[0] == n_param;
         assert len(IC) == n_param and len(t_Grid) == n_param;
+
+        # -----------------------------------------------------------------------------------------
+        # Multi-parameter case.
+        # -----------------------------------------------------------------------------------------
+
+        # Recurse on each parameter/coefficient pair. This keeps the one-parameter implementation
+        # below as the single place where backend conversion and RK4 setup happen.
         if n_param > 1:
             return [self.simulate(coefs = coefs_list[i], IC = [IC[i]], t_Grid = [t_Grid[i]], params = params[i, :].reshape(1, -1))[0] for i in range(n_param)];
+
+        # -----------------------------------------------------------------------------------------
+        # One-parameter case.
+        # -----------------------------------------------------------------------------------------
 
         assert len(IC[0]) == 1;
         t_Grid0 = t_Grid[0];
@@ -352,6 +420,10 @@ class SwitchSINDy(LatentDynamics):
 
         # Fetch native coefficients and match them to the IC backend below.
         A_before, b_before, A_after, b_after = c["A_before"], c["b_before"], c["A_after"], c["b_after"];
+
+        # Define the right-hand side in either NumPy or PyTorch. The solver backend follows the
+        # initial-condition backend; this preserves differentiability for tensor rollouts in
+        # training and keeps plotting/sampling paths lightweight with NumPy arrays.
         if isinstance(Z0, numpy.ndarray):
             vals = [];
             for x in [A_before, b_before, A_after, b_after]:
@@ -368,6 +440,8 @@ class SwitchSINDy(LatentDynamics):
             def f(t : float, z : torch.Tensor) -> torch.Tensor:
                 return b_before + torch.matmul(z, A_before.T) if t < switch_time_theta else b_after + torch.matmul(z, A_after.T);
 
+        # Integrate all initial conditions together when they share a time grid; otherwise integrate
+        # each row of the IC array with its corresponding row of the time-grid array.
         if(Same_t_Grid == True):
             Z = [[RK4(f = f, y0 = Z0, t_Grid = t_Grid0)]]; 
         else:

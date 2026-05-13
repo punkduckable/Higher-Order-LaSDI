@@ -138,6 +138,7 @@ class DampedSpring_weak(LatentDynamics):
         return {"K": K, "C": C, "b": b};
 
 
+
     def _matrix_from_native(self, coefs : dict[str, torch.Tensor]) -> torch.Tensor:
         r"""Reconstruct the weak-form library matrix [K^T; C^T; b]."""
 
@@ -147,6 +148,7 @@ class DampedSpring_weak(LatentDynamics):
         return torch.cat([K.T, C.T, b.reshape(1, self.n_z)], dim = 0);
 
 
+
     def train_coef_tensors(self) -> list[torch.Tensor]:
         r"""Return the actual weak-form coefficient tensors to optimize."""
 
@@ -154,6 +156,7 @@ class DampedSpring_weak(LatentDynamics):
         for coef_dict in self.train_coefs.values():
             tensors.extend([coef_dict["K"], coef_dict["C"], coef_dict["b"]]);
         return tensors;
+
 
 
     def flatten_coefficients(self, coefs : dict[str, torch.Tensor] | list[dict[str, torch.Tensor]]) -> numpy.ndarray:

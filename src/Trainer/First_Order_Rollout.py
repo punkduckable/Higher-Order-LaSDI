@@ -554,11 +554,9 @@ class First_Order_Rollout(Trainer):
 
             self.timer.start("Calibration");
 
-            # Compute the latent dynamics and stability losses. Also fetch the current latent
-            # dynamics coefficients for each training point. The latter is stored in a 2d array 
-            # called "train_coefs" of shape (n_train, n_coefs), where n_train = number of 
-            # training combinations of parameters and n_coefs denotes the number of 
-            # coefficients in the latent dynamics model. 
+            # Compute the latent dynamics, coefficient, and stability losses using the native
+            # coefficient dictionaries stored in latent_dynamics.train_coefs. The LatentDynamics
+            # object looks up the coefficient dictionary for each row of param_space.train_space.
             loss_LD_list, loss_coef_list, loss_stab_list = self.latent_dynamics.calibrate(
                                                                             Latent_States    = Latent_States, 
                                                                             t_Grid           = t_Train_device,

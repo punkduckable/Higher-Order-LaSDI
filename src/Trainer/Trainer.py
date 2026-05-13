@@ -436,8 +436,16 @@ class Trainer:
     def _check_train_coefficients(self) -> None:
         """
         Verify every training parameter has LD-owned native coefficients.
+
         This is intentionally a check, not synchronization; missing coefficients indicate a sampler
         or initialization bug and should stop execution.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        Nothing!
         """
         for i in range(self.param_space.n_train()):
             params_i = self.param_space.train_space[i, :];
@@ -452,6 +460,23 @@ class Trainer:
 
 
     def _optimizer_parameters(self) -> list[torch.Tensor]:
+        """
+        Collect EncoderDecoder parameters and LD-owned coefficient tensors for optimization.
+
+        The latent-dynamics coefficients live in `self.latent_dynamics.train_coefs`. This method
+        verifies that every training parameter has a native coefficient dictionary, then appends the
+        actual tensors returned by `latent_dynamics.train_coef_tensors()` to the neural-network
+        parameters.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        parameters : list[torch.Tensor]
+            Trainable tensors that should be passed to a torch optimizer.
+        """
+
         self._check_train_coefficients();
         return list(self.encoder_decoder.parameters()) + self.latent_dynamics.train_coef_tensors();
 

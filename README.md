@@ -1,6 +1,6 @@
 # Higher-Order LaSDI
 
-Higher-Order LaSDI provides tools for building reduced-order models (ROMs) from full-order (FOM) simulations using latent-space dynamics identification with Gaussian Process-based greedy sampling. Higher-Order LaSDI is designed to be incredibly flexible. At its core, a reduced-order model (ROM) consists of:
+Higher-Order LaSDI provides tools for building reduced-order models (ROMs) from full-order (FOM) simulations using latent-space dynamics identification with adaptive greedy sampling. Higher-Order LaSDI is designed to be incredibly flexible. At its core, a reduced-order model (ROM) consists of:
 1. A parameterized collection of time series that live in some high-dimensional, FOM space (Physics).
 2. An Encoder/Decoder pair which can map elements from the FOM space to a lower dimensional latent space (EncoderDecoder).
 3. A parameterized set of latent dynamics to describe how the encodings of a particular time series evolves (LatentDynamics).
@@ -10,7 +10,7 @@ Higher-Order LaSDI implements a modular framework that allows the user to custom
 
 ## Key Features
 
-- **Gaussian Process-based Greedy Sampling**: Adaptive parameter space exploration using GP uncertainty quantification
+- **Interpolator-backed Greedy Sampling**: Adaptive parameter space exploration using uncertainty estimates from the `Interpolate` interface
 - **Higher-Order Dynamics**: Native support for systems requiring multiple time derivatives
 - **Flexible Time Grids**: Handles both uniform and non-uniform temporal discretizations with automatic finite difference scheme selection
 - **Multiple Loss Functions**: Reconstruction, latent dynamics, rollout, IC rollout, chain rule, and consistency losses with configurable weights
@@ -41,7 +41,7 @@ This command will:
 `Workflow.py` orchestrates the following pipeline:
 - **Data Generation**: Calls physics solvers to generate training trajectories
 - **Training**: Uses the `Trainer` class to train autoencoders and latent dynamics
-- **Greedy Sampling**: Uses a configurable `Sampler` to select new training points (often via Gaussian Processes fit to latent dynamics coefficients)
+- **Greedy Sampling**: Uses a configurable `Sampler` to select new training points. Samplers query an `Interpolate` object for coefficient posterior means, standard deviations, or samples.
 - **Evaluation**: Computes rollout errors, relative errors, and standard deviations
 - **Visualization**: Generates latent trajectory plots, error heatmaps, and solution animations
 
@@ -111,8 +111,8 @@ In general, every Physics, EncoderDecoder, and Trainer object expects a specific
   - `CNN_3D_Autoencoder.py`: 3D convolutional autoencoder variant
 - **`src/ParameterSpace.py`** – Parameter space management, grid generation, and train/test split utilities
 - **`src/SolveROMs.py`** – ROM simulation functions:
-  - `average_rom()`: Simulate using GP mean predictions
-  - `sample_roms()`: Simulate using samples from GP posteriors
+  - `average_rom()`: Simulate using coefficient dictionaries returned by `Interpolate.mean(...)`
+  - `sample_roms()`: Simulate using coefficient dictionaries returned by `Interpolate.sample(...)`
   - Error computation and uncertainty quantification
 - **`src/Sample/`** – Greedy sampling logic:
   - `Sampler.py`: Base `Sampler` class (selects the next training parameter during greedy sampling)
@@ -141,11 +141,63 @@ In general, every Physics, EncoderDecoder, and Trainer object expects a specific
 - **`src/LatentDynamics/LatentDynamics.py`** – Base `LatentDynamics` class
 - **`src/LatentDynamics/SINDy.py`** – Sparse Identification of Nonlinear Dynamics
   - Uses polynomial library (currently order ≤ 1)
-  - Supports learnable coefficients or least-squares fitting
+  - Stores native coefficient dictionaries of the form `{"A": A, "b": b}`
 - **`src/LatentDynamics/DampedSpring.py`** – Physics-informed damped spring dynamics
+  - Stores native coefficient dictionaries of the form `{"K": K, "C": C, "b": b}`
+- **`src/LatentDynamics/DampedSpring_weak.py`** – Weak-form damped-spring dynamics with the same native `K`, `C`, and `b` coefficient names
+- **`src/LatentDynamics/SwitchSINDy.py`** – Switching affine SINDy dynamics with native `A_before`, `b_before`, `A_after`, and `b_after` coefficients
+
+#### Latent-dynamics coefficient ownership
+
+Latent-dynamics coefficients are owned by the `LatentDynamics` object, not by the `Trainer`.
+Training coefficients are stored in
+
+```python
+latent_dynamics.train_coefs
+```
+
+as a dictionary
+
+```python
+dict[tuple[float, ...], dict[str, torch.Tensor]]
+```
+
+The outer key is the exact parameter tuple, and the inner dictionary stores the named native
+coefficient tensors for the selected latent-dynamics model. For example:
+
+```python
+# SINDy: z' = A z + b
+{(0.1, 1.0): {"A": A, "b": b}}
+
+# DampedSpring / DampedSpring_weak: z'' = K z + C z' + b
+{(0.1, 1.0): {"K": K, "C": C, "b": b}}
+```
+
+The base class provides:
+- `param_key(params_row)`: convert one parameter row to the tuple key used by `train_coefs`
+- `get_train_coefs(params_row)`: strict lookup of one native coefficient dictionary
+- `set_train_coefs(params_row, coefs)`: store native coefficient tensors as trainable leaves
+- `train_coef_tensors()`: subclass implementation returning the actual tensors passed to optimizers
+- `flatten_coefficients(coefs)`: subclass implementation used only at compatibility boundaries
+  such as coefficient heatmap output
+
+Missing coefficient entries intentionally raise errors. The sampler/data-generation path should
+initialize coefficients for every training parameter by calling `latent_dynamics.fit_coefficients(...)`.
+The Trainer checks this with `_check_train_coefficients()` before optimization and builds optimizers
+from encoder/decoder parameters plus `latent_dynamics.train_coef_tensors()`. Checkpoints serialize
+the full `LatentDynamics` export, including `train_coefs`, then restore those coefficient tensors as
+trainable leaves when loading.
 
 ### Utilities
 
+- **`src/Utilities/Interpolate.py`** – Native coefficient interpolation:
+  - Takes `dict[tuple[float, ...], dict[str, torch.Tensor]]` training coefficients
+  - Validates that every parameter has the same string coefficient names and tensor shapes
+  - Fits one internal GP per scalar component of each named coefficient tensor
+  - `mean(param)`: returns a native coefficient dictionary of posterior means
+  - `std(param)`: returns a native coefficient dictionary of posterior standard deviations
+  - `sample(param)`: returns one native posterior coefficient sample
+  - `flatten(coefs, coef_names)`: helper for legacy matrix-shaped plotting outputs
 - **`src/Utilities/GaussianProcess.py`** – GP training and prediction:
   - `fit_gps()`: Fit GPs to latent dynamics coefficients
   - `eval_gp()`: Evaluate GP mean and standard deviation
@@ -167,7 +219,7 @@ In general, every Physics, EncoderDecoder, and Trainer object expects a specific
 ### Visualization
 
 - **`src/Plot.py`** – Plotting functions:
-  - `Plot_Latent_Trajectories()`: Visualize latent space dynamics with GP uncertainty
+  - `Plot_Latent_Trajectories()`: Visualize latent space dynamics with interpolated coefficient uncertainty
   - `Plot_Heatmap2d()`: 2D parameter space heatmaps
   - `trainSpace_RelativeErrors_Heatmap()`: Error visualization for training parameters
 - **`src/Animate.py`** – Animation generation:
@@ -188,6 +240,12 @@ Configuration files are YAML-based and specify:
   - `trainer.normalize` (if enabled, the library computes global mean/std and normalizes train/test data)
 - Device placement:
   - `trainer.device` (optional; `"cpu"` by default)
+- Coefficients:
+  - Before each training round, it checks that every training parameter has native coefficients in
+    `latent_dynamics.train_coefs`.
+  - Optimizers are built from `encoder_decoder.parameters()` plus
+    `latent_dynamics.train_coef_tensors()`, so newly added coefficient tensors are included after greedy sampling.
+  - Checkpoints save and restore the `LatentDynamics` export dictionary, including `latent_dynamics.train_coefs`.
 - Subclass-specific settings live under `trainer.<TypeName>`. Example (`Second_Order_Rollout`):
   - learning rate + stability: `lr`, `gradient_clip`, `warmup_epochs`
   - rollout curriculum: `p_rollout_init`, `rollout_update_freq`, `dp_per_update`, `max_p_rollout`
@@ -644,9 +702,20 @@ New applications can be implemented by deriving from the appropriate base classe
 
 1. **Create a subclass** of `LatentDynamics` in `src/LatentDynamics/YourModel.py`
 2. **Implement required methods**:
-   - `__init__(self, n_z, Uniform_t_Grid)`: Initialize model
-   - `calibrate(self, Latent_States, loss_type, t_Grid, input_coefs)`: Compute/update coefficients
-   - `simulate(self, Coefs, IC, t_Grid, n_steps)`: Simulate forward in time
+   - `__init__(self, n_z, Uniform_t_Grid, config)`: Initialize model metadata, loss functions, and
+     `n_IC` / `n_coefs`.
+   - `fit_coefficients(self, Latent_States, t_Grid, params)`: Fit native coefficients for one or
+     more training parameters, then store them with `set_train_coefs(...)`. This method should
+     return `None`.
+   - `calibrate(self, Latent_States, loss_type, t_Grid, params)`: Look up native coefficients from
+     `self.train_coefs` using `params`, then return latent-dynamics, coefficient, and stability
+     loss lists. It should not accept flattened `input_coefs`.
+   - `simulate(self, coefs, IC, t_Grid, params=None)`: Simulate forward using native coefficient
+     dictionaries (or a list of dictionaries) returned by `get_train_coefs(...)` or `Interpolate`.
+   - `train_coef_tensors(self)`: Return the actual coefficient tensors stored in
+     `self.train_coefs` so they can be passed to a torch optimizer.
+   - `flatten_coefficients(self, coefs)`: Flatten one or more native coefficient dictionaries into
+     an `n_param x n_coef` array for compatibility with plotting/heatmap output.
 3. **Register in `Initialize.py`**:
    ```python
    ld_dict = {
@@ -654,6 +723,10 @@ New applications can be implemented by deriving from the appropriate base classe
        'yourmodel': YourModel,
    }
    ```
+
+When designing the native coefficient dictionary, use stable string keys and the tensor shapes that
+make the latent-dynamics equations easiest to read/debug. For example, SINDy uses `{"A", "b"}` and
+damped-spring models use `{"K", "C", "b"}`.
 
 
 ### Adding a New Sampler (Greedy Sampling Strategy)

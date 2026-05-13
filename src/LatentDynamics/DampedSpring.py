@@ -86,6 +86,7 @@ class DampedSpring(LatentDynamics):
         return;
 
 
+
     def _native_from_matrix(self, coefs : torch.Tensor) -> dict[str, torch.Tensor]:
         r"""
         Convert a least-squares matrix into native second-order coefficients.
@@ -102,6 +103,7 @@ class DampedSpring(LatentDynamics):
         return {"K": K, "C": C, "b": b};
 
 
+
     def _matrix_from_native(self, coefs : dict[str, torch.Tensor]) -> torch.Tensor:
         r"""Reconstruct the [K^T; C^T; b] matrix used by the least-squares fit."""
 
@@ -114,6 +116,7 @@ class DampedSpring(LatentDynamics):
         return torch.cat([K.T, C.T, b.reshape(1, self.n_z)], dim = 0);
 
 
+
     def train_coef_tensors(self) -> list[torch.Tensor]:
         r"""Return the trainable coefficient tensors stored in `self.train_coefs`."""
 
@@ -121,6 +124,7 @@ class DampedSpring(LatentDynamics):
         for coef_dict in self.train_coefs.values():
             tensors.extend([coef_dict["K"], coef_dict["C"], coef_dict["b"]]);
         return tensors;
+
 
 
     def flatten_coefficients(self, coefs : dict[str, torch.Tensor] | list[dict[str, torch.Tensor]]) -> numpy.ndarray:
@@ -133,6 +137,7 @@ class DampedSpring(LatentDynamics):
             mat = self._matrix_from_native(coef_dict);
             rows.append(mat.detach().cpu().numpy().reshape(1, -1));
         return numpy.concatenate(rows, axis = 0);
+
 
 
     def fit_coefficients(self,
@@ -211,6 +216,7 @@ class DampedSpring(LatentDynamics):
         return None;
 
 
+
     def calibrate(self, 
                   Latent_States : list[list[torch.Tensor]],
                   loss_type     : str,
@@ -276,22 +282,36 @@ class DampedSpring(LatentDynamics):
         loss_coef_list : list[torch.Tensor] = [];
         loss_stab_list : list[torch.Tensor] = [];
 
+
+        # -----------------------------------------------------------------------------------------
+        # Loop over parameter combinations.
+        # -----------------------------------------------------------------------------------------
+
         for i in range(len(t_Grid)):
+            # Fetch latent displacement/velocity trajectories and the corresponding time grid.
             Z_D : torch.Tensor = Latent_States[i][0];
             Z_V : torch.Tensor = Latent_States[i][1];
             t_Grid0 : torch.Tensor = t_Grid[i];
 
+            # Approximate acceleration. As in the previous implementation, we use d/dt of the
+            # latent velocity stream.
             if(self.Uniform_t_Grid  == True):
                 h : float = (t_Grid0[1] - t_Grid0[0]).item();
                 d2Z_dt2 : torch.Tensor = Derivative1_Order4(U = Z_V, h = h);
             else:
                 d2Z_dt2 = Derivative1_Order2_NonUniform(U = Z_V, t_Grid = t_Grid0);
 
+
+            # -------------------------------------------------------------------------------------
+            # Evaluate the native second-order model.
+            # -------------------------------------------------------------------------------------
+
             # Fetch native trainable coefficients for this parameter.
             coef_dict = self.get_train_coefs(params[i, :]);
             K = coef_dict["K"].to(device = Z_D.device, dtype = Z_D.dtype);
             C = coef_dict["C"].to(device = Z_D.device, dtype = Z_D.dtype);
             b   = coef_dict["b"].to(device = Z_D.device, dtype = Z_D.dtype).reshape(1, -1);
+
             # Evaluate z'' = K z + C z' + b. The signs are important here: in the native
             # coefficient convention K and C are the actual linear operators appearing in the
             # right-hand side (not the old "spring/damping" matrices that were negated after
@@ -303,19 +323,31 @@ class DampedSpring(LatentDynamics):
             else:
                 Loss_LD = self.MAE(d2Z_dt2, LD_RHS);
 
+
+            # -------------------------------------------------------------------------------------
+            # Stability and coefficient regularization.
+            # -------------------------------------------------------------------------------------
+
+            # Convert the second-order system to the first-order linear part
+            #     [z, z']' = [[0, I], [K, C]] [z, z'] + [0, b].
+            # The base stability penalty is defined for first-order systems.
             Z0  : torch.Tensor  = torch.zeros((self.n_z, self.n_z), device = Z_D.device, dtype = Z_D.dtype);
             I   : torch.Tensor  = torch.eye(self.n_z, device = Z_D.device, dtype = Z_D.dtype);
             A_top    = torch.cat([Z0, I], dim = 1);
             A_bottom = torch.cat([K, C], dim = 1);
             A = torch.cat([A_top, A_bottom], dim = 0);
             Loss_Stab = self.stability_penalty(A);
+
+            # Penalize all native coefficient tensors.
             Loss_coef = torch.norm(K, 'fro') + torch.norm(C, 'fro') + torch.norm(b);
 
+            # Store per-parameter losses for the Trainer to weight/sum.
             loss_LD_list.append(Loss_LD);
             loss_coef_list.append(Loss_coef);
             loss_stab_list.append(Loss_Stab);
 
         return loss_LD_list, loss_coef_list, loss_stab_list;
+
 
 
     def simulate(   self,
@@ -384,8 +416,15 @@ class DampedSpring(LatentDynamics):
         assert isinstance(t_Grid, list) and isinstance(IC, list);
         assert len(IC) == n_param and len(t_Grid) == n_param;
 
+        # Multi-parameter simulation: recurse one parameter at a time so all backend conversion and
+        # RK4 setup lives in the single-parameter branch.
         if(n_param > 1):
             return [self.simulate(coefs = coefs_list[i], IC = [IC[i]], t_Grid = [t_Grid[i]], params = None if params is None else params[i, :].reshape(1, -1))[0] for i in range(n_param)];
+
+
+        # -----------------------------------------------------------------------------------------
+        # One-parameter setup.
+        # -----------------------------------------------------------------------------------------
 
         assert isinstance(IC[0], list) and len(IC[0]) == 2;
         t_Grid0  : numpy.ndarray | torch.Tensor  = t_Grid[0];
@@ -398,13 +437,16 @@ class DampedSpring(LatentDynamics):
 
         # Fetch native coefficients and match their backend to the IC backend.
         coef_dict = coefs_list[0];
-        K = coef_dict["K"];
-        C = coef_dict["C"];
+        K   = coef_dict["K"];
+        C   = coef_dict["C"];
         b   = coef_dict["b"];
+
+        # Define the RHS with the same backend as the initial conditions. Tensor inputs preserve
+        # differentiability for training rollouts; NumPy inputs keep sampling/plotting lightweight.
         if isinstance(D0, numpy.ndarray):
             if isinstance(K, torch.Tensor):
-                K = K.detach().cpu().numpy();
-                C = C.detach().cpu().numpy();
+                K   = K.detach().cpu().numpy();
+                C   = C.detach().cpu().numpy();
                 b   = b.detach().cpu().numpy();
             b = b.reshape(1, -1);
             f = lambda t, z, dz_dt: numpy.matmul(z, K.T) + numpy.matmul(dz_dt, C.T) + b;
@@ -420,6 +462,8 @@ class DampedSpring(LatentDynamics):
             b = b.reshape(1, -1);
             f = lambda t, z, dz_dt: torch.matmul(z, K.T) + torch.matmul(dz_dt, C.T) + b;
 
+        # Integrate all ICs together when they share one time grid. If each IC has its own time
+        # grid, integrate them separately and concatenate along the IC axis.
         if(Same_t_Grid == True):
             D, V = RK4(f = f, y0 = D0, Dy0 = V0, t_Grid = t_Grid0); # shape = (n_t, n_i, n_z)
         else:

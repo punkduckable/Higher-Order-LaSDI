@@ -23,7 +23,6 @@ class LatentDynamics:
     n_coefs         : int           = -1;       # Number of coefficients in the latent space dynamics
     n_IC            : int           = -1;       # Number of initial conditions to define the initial latent state.
     Uniform_t_Grid  : bool          = False;    # Is there an h such that the i'th frame is at t0 + i*h? Or is the spacing between frames arbitrary?
-    coefs           : torch.Tensor  = torch.Tensor([]);
 
 
 
@@ -127,9 +126,8 @@ class LatentDynamics:
     
 
 
-
     @staticmethod
-    def _param_key(params_row : numpy.ndarray | torch.Tensor | list | tuple) -> tuple[float, ...]:
+    def param_key(params_row : numpy.ndarray | torch.Tensor | list | tuple) -> tuple[float, ...]:
         r"""
         Convert one row of parameter values into the exact key used by `train_coefs`.
 
@@ -163,12 +161,24 @@ class LatentDynamics:
         return tuple(float(x) for x in params_row);
 
 
+    @staticmethod
+    def _param_key(params_row : numpy.ndarray | torch.Tensor | list | tuple) -> tuple[float, ...]:
+        r"""
+        Backward-compatible alias for `param_key(...)`.
+
+        Internal code may use the leading-underscore name, but `param_key(...)` is the public base
+        class interface for converting parameter rows into `train_coefs` keys.
+        """
+
+        return LatentDynamics.param_key(params_row);
+
+
 
     def get_train_coefs(self, params_row : numpy.ndarray | torch.Tensor | list | tuple) -> dict[str, torch.Tensor]:
         r"""
         Fetch the native coefficient dictionary for one parameter combination.
 
-        This method deliberately performs a direct dictionary lookup using `_param_key(...)`. If the
+        This method deliberately performs a direct dictionary lookup using `param_key(...)`. If the
         requested parameter is missing, Python raises a KeyError. This is intentional: all training
         coefficients should be initialized before training starts.
 
@@ -191,7 +201,7 @@ class LatentDynamics:
             damped-spring models use `K`, `C`, and `b`.
         """
 
-        key = self._param_key(params_row);
+        key = self.param_key(params_row);
         return self.train_coefs[key];
 
 
@@ -212,7 +222,7 @@ class LatentDynamics:
 
         params_row : numpy.ndarray or torch.Tensor or list or tuple
             The parameter values associated with the coefficient dictionary. These values are
-            converted to a tuple key using `_param_key(...)`.
+            converted to a tuple key using `param_key(...)`.
 
         coefs : dict[str, torch.Tensor]
             Native coefficient dictionary. Keys must be strings and values must be tensors. The
@@ -234,7 +244,7 @@ class LatentDynamics:
                 coefs[name] = value;
             else:
                 coefs[name] = value.detach().clone().requires_grad_(True);
-        self.train_coefs[self._param_key(params_row)] = coefs;
+        self.train_coefs[self.param_key(params_row)] = coefs;
         return;
 
 

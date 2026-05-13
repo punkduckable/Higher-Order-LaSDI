@@ -44,7 +44,7 @@ class SINDy(LatentDynamics):
         [b; A^T]. The new coefficient ownership model stores coefficients in their native form
         under each training parameter in `self.train_coefs`:
 
-            self.train_coefs[_param_key] = {"A": A, "b": b}.
+            self.train_coefs[param_key] = {"A": A, "b": b}.
 
 
         -------------------------------------------------------------------------------------------
@@ -92,6 +92,7 @@ class SINDy(LatentDynamics):
         return;
 
 
+
     def _native_from_matrix(self, coefs : torch.Tensor) -> dict[str, torch.Tensor]:
         r"""
         Convert the least-squares coefficient matrix into native trainable tensors.
@@ -107,6 +108,7 @@ class SINDy(LatentDynamics):
         b : torch.Tensor = coefs[0, :].detach().clone().requires_grad_(True);
         A : torch.Tensor = coefs[1:, :].T.detach().clone().requires_grad_(True);
         return {"A": A, "b": b};
+
 
 
     def _matrix_from_native(self, coefs : dict[str, torch.Tensor]) -> torch.Tensor:
@@ -125,6 +127,7 @@ class SINDy(LatentDynamics):
         return torch.cat([b.reshape(1, self.n_z), A.T], dim = 0);
 
 
+
     def train_coef_tensors(self) -> list[torch.Tensor]:
         r"""
         Return the actual coefficient tensors that should be passed to torch optimizers.
@@ -139,6 +142,7 @@ class SINDy(LatentDynamics):
         return tensors;
 
 
+
     def flatten_coefficients(self, coefs : dict[str, torch.Tensor] | list[dict[str, torch.Tensor]]) -> numpy.ndarray:
         r"""Flatten SINDy coefficients in the legacy [b; A^T] ordering."""
 
@@ -149,6 +153,7 @@ class SINDy(LatentDynamics):
             mat = self._matrix_from_native(coef_dict);
             rows.append(mat.detach().cpu().numpy().reshape(1, -1));
         return numpy.concatenate(rows, axis = 0);
+
 
 
     def fit_coefficients(self,
@@ -224,6 +229,7 @@ class SINDy(LatentDynamics):
         return None;
 
 
+
     def calibrate(  self,  
                     Latent_States   : list[list[torch.Tensor]], 
                     loss_type       : str,
@@ -278,10 +284,13 @@ class SINDy(LatentDynamics):
         loss_stab_list : list[torch.Tensor] = [];
 
         for i in range(len(t_Grid)):
+            # Fetch this parameter's latent trajectory and time grid.
             t_Grid0 : torch.Tensor  = t_Grid[i];
             Z       : torch.Tensor  = Latent_States[i][0];
             n_t     : int           = len(t_Grid0);
 
+            # Compute dZ/dt. Uniform grids use the higher-order stencil; nonuniform grids use the
+            # nonuniform finite-difference helper.
             if(self.Uniform_t_Grid == True):
                 h       : float         = (t_Grid0[1] - t_Grid0[0]).item();
                 dZdt    : torch.Tensor  = Derivative1_Order4(Z, h);
@@ -289,24 +298,33 @@ class SINDy(LatentDynamics):
                 dZdt                    = Derivative1_Order2_NonUniform(Z, t_Grid = t_Grid0);
 
             # Fetch native trainable coefficients. This direct lookup is deliberately strict.
+            # If the sampler/initialization path forgot to fit coefficients for this parameter,
+            # get_train_coefs raises KeyError and stops the run.
             coef_dict = self.get_train_coefs(params[i, :]);
             A = coef_dict["A"].to(device = Z.device, dtype = Z.dtype);
             b = coef_dict["b"].to(device = Z.device, dtype = Z.dtype);
+
             # Evaluate the affine latent dynamics z' = A z + b on the encoded trajectory.
             RHS = Z @ A.T + b.reshape(1, -1);
 
+            # Compute the data-fit part of the latent-dynamics loss.
             if(loss_type == "MSE"):
                 loss_LD = self.MSE(dZdt, RHS);
             else:
                 loss_LD = self.MAE(dZdt, RHS);
+
+            # Compute regularization terms. The stability penalty depends only on A, while the
+            # coefficient penalty includes both A and the affine shift b.
             loss_stab = self.stability_penalty(A);
             loss_coef = torch.norm(A, 'fro') + torch.norm(b);
 
+            # Store per-parameter losses for the Trainer to weight/sum.
             loss_LD_list.append(loss_LD);
             loss_coef_list.append(loss_coef);
             loss_stab_list.append(loss_stab);
 
         return loss_LD_list, loss_coef_list, loss_stab_list;
+
 
 
     def simulate(   self,
@@ -359,11 +377,14 @@ class SINDy(LatentDynamics):
         assert isinstance(t_Grid, list) and isinstance(IC, list);
         assert len(IC) == n_param and len(t_Grid) == n_param;
 
+        # Multi-parameter simulation: recurse one parameter at a time. This keeps the backend
+        # conversion and RK4 setup concentrated in the single-parameter branch below.
         # If multiple coefficient sets are provided, recurse on each one so all validation and
         # backend-specific setup only needs to be written once.
         if n_param > 1:
             return [self.simulate(coefs = coefs_list[i], IC = [IC[i]], t_Grid = [t_Grid[i]], params = None if params is None else params[i, :].reshape(1, -1))[0] for i in range(n_param)];
 
+        # One-parameter simulation.
         assert isinstance(IC[0], list) and len(IC[0]) == 1;
         t_Grid0  : numpy.ndarray | torch.Tensor  = t_Grid[0];
         if(isinstance(t_Grid0, torch.Tensor)):
@@ -394,6 +415,8 @@ class SINDy(LatentDynamics):
             b = b.reshape(1, -1);
             f = lambda t, z: b + torch.matmul(z, A.T);
 
+        # Solve the ODE. If all ICs share the same time grid we integrate them as a batch;
+        # otherwise, integrate each initial condition separately and concatenate the results.
         if(Same_t_Grid == True):
             Z = [[RK4(f = f, y0 = Z0, t_Grid = t_Grid0)]]; 
         else:
