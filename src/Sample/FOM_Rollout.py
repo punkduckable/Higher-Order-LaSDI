@@ -6,12 +6,14 @@
 import  os, sys;
 src_path            : str   = os.path.abspath(os.path.dirname(os.path.dirname(__file__)));
 EncoderDecoder_Path : str   = os.path.join(src_path, "EncoderDecoder");
-Utilities_path      : str   = os.path.join(src_path, "Utilities");
+Interpolate_Path    : str   = os.path.join(src_path, "Interpolate");
 Trainer_Path        : str   = os.path.join(src_path, "Trainer");
-sys.path.append(Utilities_path);
+Utilities_path      : str   = os.path.join(src_path, "Utilities");
 sys.path.append(EncoderDecoder_Path);
 sys.path.append(src_path);
 sys.path.append(Trainer_Path);
+sys.path.append(Interpolate_Path);
+sys.path.append(Utilities_path);
 
 
 import  logging;

@@ -119,6 +119,21 @@ In general, every Physics, EncoderDecoder, and Trainer object expects a specific
   - `FOM_Variance.py`: Selects next point by maximizing predictive variance in decoded (FOM) space
   - `FOM_Rollout.py`: Selects next point by maximizing rollout error against the true FOM (intrusive)
 - **`src/Enums.py`** – Enumerations for workflow states (`NextStep`, `Result`)
+- **`src/Interpolate/`** - The Interpolate class which determines how to sample LatentDynamics coefficients for testing parameter combinations.
+    - `Interpolate.py` - Sample coefficients in their native form for testing combinations
+        - Takes `dict[tuple[float, ...], dict[str, torch.Tensor]]` training coefficients
+        - Validates that every parameter has the same string coefficient names and tensor shapes
+        - GP interpolator fits one internal GP per scalar component of each named coefficient tensor
+        - `mean(param)`: returns a native coefficient dictionary of posterior means
+        - `std(param)`: returns a native coefficient dictionary of posterior standard deviations
+        - `sample(param)`: returns one native posterior coefficient sample
+        - `flatten(coefs, coef_names)`: helper for legacy matrix-shaped plotting outputs
+    - `GaussianProcess.py`** – GP training and prediction:
+        - `fit_gps()`: Fit GPs to latent dynamics coefficients
+        - `eval_gp()`: Evaluate GP mean and standard deviation
+        - `sample_coefs()`: Sample from GP posteriors
+        - Automatic input/output scaling for numerical stability
+        - Configurable kernels (Matern, RBF)
 
 ### Physics Solvers
 
@@ -192,20 +207,6 @@ trainable leaves when loading.
 
 ### Utilities
 
-- **`src/Utilities/Interpolate.py`** – Native coefficient interpolation:
-  - Takes `dict[tuple[float, ...], dict[str, torch.Tensor]]` training coefficients
-  - Validates that every parameter has the same string coefficient names and tensor shapes
-  - Fits one internal GP per scalar component of each named coefficient tensor
-  - `mean(param)`: returns a native coefficient dictionary of posterior means
-  - `std(param)`: returns a native coefficient dictionary of posterior standard deviations
-  - `sample(param)`: returns one native posterior coefficient sample
-  - `flatten(coefs, coef_names)`: helper for legacy matrix-shaped plotting outputs
-- **`src/Utilities/GaussianProcess.py`** – GP training and prediction:
-  - `fit_gps()`: Fit GPs to latent dynamics coefficients
-  - `eval_gp()`: Evaluate GP mean and standard deviation
-  - `sample_coefs()`: Sample from GP posteriors
-  - Automatic input/output scaling for numerical stability
-  - Configurable kernels (Matern, RBF)
 - **`src/Utilities/FiniteDifference.py`** – Derivative approximations:
   - Order 2 and Order 4 schemes for uniform grids
   - Order 2 non-uniform grid schemes

@@ -11,10 +11,12 @@ Figures_Path        : str   = os.path.join(os.path.abspath(os.path.dirname(os.pa
 Physics_Path        : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
 LD_Path             : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
 EncoderDecoder_Path : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "EncoderDecoder"));
+Interpolate_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Interpolate"));
 Utilities_Path      : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
 sys.path.append(Utilities_Path);
 sys.path.append(Physics_Path);
 sys.path.append(LD_Path);
+sys.path.append(Interpolate_Path);
 sys.path.append(EncoderDecoder_Path);
 
 import  logging;

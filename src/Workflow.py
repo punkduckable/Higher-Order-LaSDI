@@ -5,14 +5,16 @@
 # Add LatentDynamics, Physics directories to the search path.
 import  sys;
 import  os;
-LD_Path         : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
-Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
-Utils_Path      : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
-Sample_Path     : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Sample"));
+LD_Path             : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
+Physics_Path        : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
+Utils_Path          : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
+Interpolate_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Interpolate"));
+Sample_Path         : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Sample"));
 sys.path.append(LD_Path); 
 sys.path.append(Physics_Path); 
-sys.path.append(Utils_Path); 
+sys.path.append(Interpolate_Path);
 sys.path.append(Sample_Path);
+sys.path.append(Utils_Path); 
 
 import  yaml;
 import  argparse;

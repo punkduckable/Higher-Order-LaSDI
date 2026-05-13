@@ -10,6 +10,7 @@ sys.path.extend([
     SRC,
     os.path.join(SRC, "LatentDynamics"),
     os.path.join(SRC, "Utilities"),
+    os.path.join(SRC, "Interpolate"),
 ])
 
 from SINDy import SINDy
