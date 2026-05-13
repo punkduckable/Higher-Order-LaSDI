@@ -174,7 +174,7 @@ coefficient tensors for the selected latent-dynamics model. For example:
 ```
 
 The base class provides:
-- `param_key(params_row)`: convert one parameter row to the tuple key used by `train_coefs`
+- `_param_key(params_row)`: convert one parameter row to the tuple key used by `train_coefs`
 - `get_train_coefs(params_row)`: strict lookup of one native coefficient dictionary
 - `set_train_coefs(params_row, coefs)`: store native coefficient tensors as trainable leaves
 - `trainable_coef_tensors()`: subclass implementation returning the actual tensors passed to optimizers

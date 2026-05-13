@@ -25,6 +25,60 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class Sampler:
+    r"""
+    Base interface for greedy selection of new training parameters.
+
+    In the HLaSDI framework, a ROM consists of an EncoderDecoder model and a LatentDynamics 
+    object (acting as the Encoder/Decoder and Latent Dynamics portions of the ROM, respectively). 
+    These are jointly trained via a Trainer object using data from a Physics object. The 
+    LatentDynamics object holds the learnedLatentDynamics coefficients for the training set,
+    while an Interpolate object samples LatentDynamics coefficients for testing parameter 
+    combinations. A Sampler object determines how the model picks which testing example to add
+    to the training set after each round of training.
+
+    A `Sampler` decides which parameter point should be added to the HLaSDI training set after a
+    round of training.  Concrete samplers can be intrusive, using held-out full-order solutions to
+    estimate rollout error, or non-intrusive, using ROM uncertainty such as interpolated latent
+    coefficient variance.  Once `Sample(...)` appends the chosen point to the trainer's
+    `param_space.train_space`.
+    
+    `Generate_Training_Data(...)` generates training FOM solutions. It does this by solving 
+    the physics (stored in the passed trainer) for all training parameter combinations (stored in 
+    the train_coef attribute of the latent_dynamics attribute of the passed trainer object)) that 
+    do not already have training data and appends the solution to the trainer's U_True attribute.
+
+    
+
+    -----------------------------------------------------------------------------------------------
+    Class/instance variables
+    -----------------------------------------------------------------------------------------------
+    
+    config : dict
+        The `sampler` configuration dictionary.  It must contain a string `type` entry and may
+        contain sampler-specific hyperparameters used by subclasses.
+    
+    type : str
+        Name of the concrete sampler selected by the configuration and factory code.
+
+        
+
+    -----------------------------------------------------------------------------------------------
+    Subclassing
+    -----------------------------------------------------------------------------------------------
+    
+    To define a new greedy strategy, subclass `Sampler`, call `super().__init__(config)` in the
+    initializer, and implement:
+
+    - `Sample(trainer)`: inspect the trained model, parameter space, training/test data, and any
+      interpolated latent-dynamics coefficients needed by the strategy; append the selected
+      parameter to `trainer.param_space.train_space`; and return `NextStep.RunSample` so the
+      workflow knows to call `Generate_Training_Data(...)`.
+
+    Most subclasses should not override `Generate_Training_Data(...)`; it centralizes the shared
+    data-generation, normalization, and coefficient-initialization bookkeeping expected by the rest
+    of the workflow.
+    """
+    
     def __init__(self, config : dict):
         """
         The Sampler class defines how Greedy Sampling picks new parameter combinations. 

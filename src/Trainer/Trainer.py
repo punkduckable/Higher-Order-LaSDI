@@ -38,6 +38,70 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class Trainer:
+    r"""
+    Base interface and shared state for HLaSDI training algorithms.
+
+    A `Trainer` coordinates the learned parts of the reduced-order model: it owns the training and
+    testing trajectories, the `Physics`, `EncoderDecoder`, `LatentDynamics`, and `ParameterSpace`
+    objects, global normalization statistics, checkpointing, loss logging, and timing.  The base
+    `train()` method runs one round of optimization by calling a subclass `Iterate(...)` method,
+    then restores the encoder/decoder and latent-dynamics coefficients from the best checkpoint of
+    that round so subsequent greedy sampling uses the best available ROM state.
+
+    Class/instance variables
+    ------------------------
+    U_Train : list[list[torch.Tensor]]
+        Training trajectories.  The outer index selects a parameter point; the inner index selects
+        one of the `n_IC` state/derivative components; each tensor has a leading time dimension.
+    t_Train : list[torch.Tensor]
+        Time grids corresponding to `U_Train`.
+    U_Test : list[list[torch.Tensor]]
+        Testing trajectories with the same nested structure as `U_Train`.
+    t_Test : list[torch.Tensor]
+        Time grids corresponding to `U_Test`.
+    n_IC : int
+        Number of state/derivative components expected by the physics, encoder/decoder, trainer,
+        and latent dynamics.  The base initializer checks that these all agree.
+    n_iter : int
+        Maximum number of optimizer iterations performed in one training round.
+    max_iter : int
+        Global iteration limit for training.
+    max_greedy_iter : int
+        Global iteration limit for greedy sampling rounds.
+    normalize : bool
+        Whether generated FOM trajectories are normalized before training.
+    config : dict
+        The `trainer` configuration dictionary.
+    timer : Timer
+        Timing utility used by subclasses to record loss and backpropagation costs.
+    device : str
+        Device used for training (`"cpu"`, `"cuda:..."`, or `"mps"`).
+    physics : Physics
+        Full-order problem used to generate trajectories and initial conditions.
+    encoder_decoder : EncoderDecoder
+        Neural map between FOM space and latent space.
+    latent_dynamics : LatentDynamics
+        Parameterized latent ODE model whose coefficients are optimized during training.
+    param_space : ParameterSpace
+        Container for current train/test parameter sets used by training and greedy sampling.
+    data_mean, data_std : list[torch.Tensor] | None
+        Per-IC scalar normalization statistics when normalization is enabled.
+
+    Subclassing
+    -----------
+    To implement a training strategy, subclass `Trainer`, call `super().__init__(...)`, parse any
+    subclass-specific configuration, and implement:
+
+    - `Iterate(start_iter, end_iter)`: perform optimizer steps for the requested global iteration
+      range, compute reconstruction/latent/rollout/etc. losses appropriate to the strategy, update
+      encoder/decoder parameters and `latent_dynamics.train_coefs`, record timing and per-parameter
+      losses, and call `_Save_Checkpoint(...)` whenever a new best model for the round is found.
+
+    Subclasses commonly use `_optimizer_parameters()` to build optimizers over both neural-network
+    parameters and LD-owned coefficient tensors.  They may extend `export()` and `load()` for
+    additional state, but should preserve the base training data, normalization, checkpoint, and
+    iteration bookkeeping.
+    """
     # An n_Train element list. The i'th element is is an n_IC element list whose j'th element is a
     # numpy ndarray of shape (n_t(i), Frame_Shape) holding a sequence of samples of the j'th 
     # derivative of the FOM solution when we use the i'th combination of training values. 
@@ -91,28 +155,52 @@ class Trainer:
                     param_space        : ParameterSpace, 
                     trainer_config     : dict):
         """
-        Abstract base class for training strategies.
+        Abstract base class that defines how each round of training proceeds (the loss functions, 
+        and optimizer).
 
-        A `Trainer` instance owns the state of a Higher-Order-LaSDI run:
+        In the HLaSDI framework, a ROM consists of an EncoderDecoder model and a LatentDynamics 
+        object (acting as the Encoder/Decoder and Latent Dynamics portions of the ROM, respectively). 
+        These are jointly trained via a Trainer object using data from a Physics object. The 
+        LatentDynamics object holds the learnedLatentDynamics coefficients for the training set,
+        while an Interpolate object samples LatentDynamics coefficients for testing parameter 
+        combinations. A Sampler object determines how the model picks which testing example to add
+        to the training set after each round of training.
+
+        The trainer essentially defines how everything gets trained. It should do this by 
+        initializing an optimizer on the EncoderDecoder parameters and trainable coefficients 
+        in the LatentDynamics object (fetched via LatentDynamics.trainable_coef_tensors). It 
+        should train these parameters via a sequence of epochs. During each epoch, the Trainer 
+        should evaluate a number of loss functions, add them together, then back-prop through the 
+        loss to get the derivative of the loss with respect to each EncoderDecoder parameter and 
+        latent dynamics coefficient, then use these derivatives to update the parameters and 
+        coefficients. All of this is implemented in the sub-class defined "Iterate" method (which 
+        is driven via the base class' Train method).
+
+        The trainer also defines model checkpointing (via the _Save_Checkpoint method which 
+        Iterate should call each time it finds a new best model).
+        
+        Trainer also control data normalization normalization; the base class defines several 
+        methods for normalizing and de-normalizign data (set_normalization_stats_from_training, 
+        set_normalization_stats_from_test, normalize_tensor, denormalize_tensor, 
+        denormalize_np, denormalize_np, scale_std_np, and normalize_U_inplace); see 
+        each one and their doc strings for details). Normalization generally works by re-centering
+        and re-scaling training data before it is fed into the EncoderDecoder; this dramatically 
+        improves EncoderDecoder performance (mostly because ML models tend to work best when their 
+        data has 0 mean and unit variance), but creates extra book-keeping challenges. In 
+        particular, with normalization, EncoderDecoder object natively predict normalized values 
+        which need to be de-normalized before their predictions can be evaluated.
+
+        Finally, Trainer objects generally track timing data (time spent computing each loss; this
+        is managed by the timer attribute) and track losses (by training parameter! this is managed 
+        by the loss_by_param attribute).
+
+        In addition to defining how training works, a `Trainer` instance owns the state of a 
+        Higher-Order-LaSDI run:
 
         - The training and testing datasets (`U_Train`, `t_Train`, `U_Test`, `t_Test`)
         - Optional global normalization statistics (`data_mean`, `data_std`)
         - The model objects (`physics`, `encoder_decoder`, `latent_dynamics`)
-        - Trainable latent-dynamics coefficients stored by `latent_dynamics.train_coefs`
         - Bookkeeping for iterative training + greedy sampling (`restart_iter`, `n_iter`, etc.)
-        - Performance timing (`timer`) and per-parameter loss logging (`loss_by_param`)
-
-        Subclasses implement `Iterate(start_iter, end_iter)` which performs optimization steps
-        and calls `_Save_Checkpoint(...)` whenever a new best model is found within the round.
-        The base class `train()` method drives the round-by-round schedule and ensures that, at
-        the end of each round, `encoder_decoder` and the latent-dynamics coefficients are restored
-        to their *best* values from that round (not necessarily the final epoch).
-
-        The YAML config convention is:
-
-        - `trainer.type` selects the subclass (e.g., `"Rollout_1_IC"`)
-        - Base settings live directly under `trainer` (e.g., `n_iter`, `max_iter`, `normalize`)
-        - Subclass-specific settings live under `trainer[trainer.type]` (e.g., `trainer.Rollout_1_IC.lr`)
 
 
         -------------------------------------------------------------------------------------------
@@ -330,6 +418,7 @@ class Trainer:
         return X * s + m;
 
 
+
     def denormalize_np(self, x: numpy.ndarray, ic_idx: int) -> numpy.ndarray:
         """
         De-normalize a numpy array using the trainer's stored stats (per IC).
@@ -342,6 +431,7 @@ class Trainer:
         return x * s + m;
 
 
+
     def scale_std_np(self, std_x: numpy.ndarray, ic_idx: int) -> numpy.ndarray:
         """
         Convert a standard deviation computed in normalized units to physical units.
@@ -351,6 +441,7 @@ class Trainer:
         assert self.data_std is not None;
         s = float(self.data_std[ic_idx].detach().cpu().item());
         return std_x * s;
+
 
 
     def normalize_U_inplace(self, U: list[list[torch.Tensor]]) -> None:

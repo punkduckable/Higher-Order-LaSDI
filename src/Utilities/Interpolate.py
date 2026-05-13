@@ -117,6 +117,7 @@ class Interpolate:
         return;
 
 
+
     @staticmethod
     def _param_array(param : numpy.ndarray | torch.Tensor | list | tuple) -> numpy.ndarray:
         r"""
@@ -181,6 +182,7 @@ class Interpolate:
         return out;
 
 
+
     def mean(self, param : numpy.ndarray | torch.Tensor | list | tuple) -> dict[str, torch.Tensor]:
         r"""
         Return the posterior mean coefficient dictionary at a requested parameter value.
@@ -212,6 +214,7 @@ class Interpolate:
             mean_np, _ = eval_gp(self.gps[name], x.reshape(1, -1));
             out[name] = torch.tensor(mean_np[0, :].reshape(tuple(self.coef_shapes[name])), dtype = torch.float32);
         return out;
+
 
 
     def std(self, param : numpy.ndarray | torch.Tensor | list | tuple) -> dict[str, torch.Tensor]:

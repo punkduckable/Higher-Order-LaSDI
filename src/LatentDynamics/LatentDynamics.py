@@ -19,16 +19,19 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 
 class LatentDynamics:
     r"""
-    Base interface for parameterized dynamics in the learned latent space.
+    This is the base interface for parameterized latent dynamics.
+
+    In the HLaSDI framework, a ROM consists of an EncoderDecoder model and a LatentDynamics 
+    object (acting as the Encoder/Decoder and Latent Dynamics portions of the ROM, respectively). 
+    These are jointly trained via a Trainer object using data from a Physics object. The 
+    LatentDynamics object holds the learnedLatentDynamics coefficients for the training set,
+    while an Interpolate object samples LatentDynamics coefficients for testing parameter 
+    combinations. A Sampler object determines how the model picks which testing example to add
+    to the training set after each round of training.
 
     A `LatentDynamics` subclass defines an ODE model for the time evolution of the latent 
     encodings in an EncoderDecoder model. i.e., this defines the actual LatentDynamics in the 
     LaSDI model. 
-    
-    In the HLaSDI workflow, an `EncoderDecoder` model encodes snapshots (fixed time) of the 
-    FOM solution into low dimensional latent encodings. The LatentDynamics model attempts to 
-    explain how a time series of these encodings evolves. Specifically, a Trainer object trains 
-    an EncoderDecoder object and a LatentDynamics object to learn a ROM. 
 
     LatentDynamics models can rollout latent trajectories (via the simulate method) by solving 
     the latent ODE associated with a particular parameter value, compute the Latent Dynamics, 
