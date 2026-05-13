@@ -7,7 +7,7 @@ import  os, sys;
 src_path            : str   = os.path.abspath(os.path.dirname(os.path.dirname(__file__)));
 Utilities_path      : str   = os.path.join(src_path, "Utilities");
 EncoderDecoder_path : str   = os.path.join(src_path, "EncoderDecoder");
-Interpolate_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Interpolate"));
+Interpolate_Path    : str   = os.path.join(src_path, "Interpolate");
 Trainer_Path        : str   = os.path.join(src_path, "Trainer");
 sys.path.append(Utilities_path);
 sys.path.append(EncoderDecoder_path);

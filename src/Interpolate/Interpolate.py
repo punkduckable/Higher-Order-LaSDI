@@ -8,7 +8,7 @@ import  numpy;
 import  torch;
 from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 
-from    GaussianProcess             import  fit_gps, eval_gp, sample_coefs;
+from    GaussianProcess         import  fit_gps, eval_gp, sample_coefs;
 
 LOGGER : logging.Logger = logging.getLogger(__name__);
 

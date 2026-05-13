@@ -17,7 +17,7 @@ sys.path.append(Utilities_Path);
 
 import  torch;
 import  numpy;
-from   .Interpolate                 import  Interpolate;
+from    Interpolate                 import  Interpolate;
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
 from    ParameterSpace              import  ParameterSpace;

@@ -77,7 +77,7 @@ class SINDy(LatentDynamics):
 
         # Run the base class initializer. Note that this initializes self.train_coefs.
         super().__init__(n_z            = n_z, 
-                         n_coefs        = self.n_z*(self.n_z + 1), 
+                         n_coefs        = n_z*(n_z + 1), 
                          n_IC           = 1, 
                          Uniform_t_Grid = Uniform_t_Grid,
                          config         = config);
