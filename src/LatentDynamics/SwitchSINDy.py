@@ -77,15 +77,23 @@ class SwitchSINDy(LatentDynamics):
         Nothing!
         """
 
-        # Run the base class initializer.
-        super().__init__(n_z = n_z, Uniform_t_Grid = Uniform_t_Grid, config = config);
-        self.lstsq_reg : float = config.get("lstsq_reg", 1.0);
-        LOGGER.info("Initializing a SwitchSINDY object with n_z = %d, Uniform_t_Grid = %s, lstsq_reg = %s" % (self.n_z, str(self.Uniform_t_Grid), str(self.lstsq_reg)));
+        # Run the base class initializer. Note that this sets self.train_coefs.
+        super().__init__(   n_z             = n_z, 
+                            n_coefs         = self.n_z*(self.n_z + 1)*2,
+                            n_IC            = 1,
+                            Uniform_t_Grid  = Uniform_t_Grid, 
+                            config          = config);
+
+
+        # Class-specific initialization.
+        self.lstsq_reg : float      = config.get("lstsq_reg", 1.0);
         self.switch_time : callable = switch_time;
-        self.n_coefs    : int   = self.n_z*(self.n_z + 1)*2;
-        self.n_IC       : int   = 1;
-        self.MSE = torch.nn.MSELoss(reduction = 'mean');
-        self.MAE = torch.nn.L1Loss(reduction = 'mean');
+        
+        # Setup the loss functions used by calibrate.
+        self.MSE                    = torch.nn.MSELoss(reduction = 'mean');
+        self.MAE                    = torch.nn.L1Loss(reduction = 'mean');
+
+        LOGGER.info("Initializing a SwitchSINDY object with n_z = %d, Uniform_t_Grid = %s, lstsq_reg = %s" % (self.n_z, str(self.Uniform_t_Grid), str(self.lstsq_reg)));
         return;
 
 

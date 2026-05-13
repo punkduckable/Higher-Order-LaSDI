@@ -75,16 +75,16 @@ class SINDy(LatentDynamics):
         Nothing!
         """
 
-        # Run the base class initializer. This sets `n_z`, the time-grid convention, the config,
-        # and the LD-owned `train_coefs` dictionary.
-        super().__init__(n_z = n_z, Uniform_t_Grid = Uniform_t_Grid, config = config);
+        # Run the base class initializer. Note that this initializes self.train_coefs.
+        super().__init__(n_z            = n_z, 
+                         n_coefs        = self.n_z*(self.n_z + 1), 
+                         n_IC           = 1, 
+                         Uniform_t_Grid = Uniform_t_Grid,
+                         config         = config);
+        
+        # Set up class-specific variables.
         self.lstsq_reg : float = config.get("lstsq_reg", 1.0);
         LOGGER.info("Initializing a SINDY object with n_z = %d, Uniform_t_Grid = %s, lstsq_reg = %s" % (self.n_z, str(self.Uniform_t_Grid), str(self.lstsq_reg)));
-
-        # We keep `n_coefs` as the flattened count because several diagnostics/plotting utilities
-        # still report the total scalar coefficient count. The storage itself is native: A and b.
-        self.n_coefs    : int   = self.n_z*(self.n_z + 1);
-        self.n_IC       : int   = 1;
 
         # Setup the loss functions used by calibrate.
         self.MSE = torch.nn.MSELoss(reduction = 'mean');

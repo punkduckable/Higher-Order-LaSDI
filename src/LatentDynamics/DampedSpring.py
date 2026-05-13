@@ -74,13 +74,17 @@ class DampedSpring(LatentDynamics):
         """
 
         # Run the base class initializer. This also creates the LD-owned train_coefs dictionary.
-        super().__init__(n_z = n_z, Uniform_t_Grid = Uniform_t_Grid, config = config);
+        super().__init__(   n_z             = n_z, 
+                            n_coefs         = n_z*(2*n_z + 1),
+                            n_IC            = 2,
+                            Uniform_t_Grid  = Uniform_t_Grid, 
+                            config          = config);
+
+        # Class-specific variables.
         self.lstsq_reg : float = config.get("lstsq_reg", 1.0);
         LOGGER.info("Initializing a DampedSpring object with n_z = %d, Uniform_t_Grid = %s, lstsq_reg = %s" % (self.n_z, str(self.Uniform_t_Grid), str(self.lstsq_reg)));        
-        # The model needs displacement and velocity initial conditions. We keep the flattened scalar
-        # count for diagnostics, even though storage is now native.
-        self.n_IC       : int   = 2;
-        self.n_coefs    : int   = n_z*(2*n_z + 1);
+        
+        # Setup the loss functions used by calibrate.
         self.MSE = torch.nn.MSELoss(reduction = 'mean');
         self.MAE = torch.nn.L1Loss(reduction = 'mean');
         return;

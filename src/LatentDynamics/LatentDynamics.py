@@ -18,16 +18,104 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class LatentDynamics:
-    # Class variables
-    n_z             : int           = -1;       # Dimensionality of the latent space
-    n_coefs         : int           = -1;       # Number of coefficients in the latent space dynamics
-    n_IC            : int           = -1;       # Number of initial conditions to define the initial latent state.
-    Uniform_t_Grid  : bool          = False;    # Is there an h such that the i'th frame is at t0 + i*h? Or is the spacing between frames arbitrary?
+    r"""
+    Base interface for parameterized dynamics in the learned latent space.
 
+    A `LatentDynamics` subclass defines an ODE model for the time evolution of the latent 
+    encodings in an EncoderDecoder model. i.e., this defines the actual LatentDynamics in the 
+    LaSDI model. 
+    
+    In the HLaSDI workflow, an `EncoderDecoder` model encodes snapshots (fixed time) of the 
+    FOM solution into low dimensional latent encodings. The LatentDynamics model attempts to 
+    explain how a time series of these encodings evolves. Specifically, a Trainer object trains 
+    an EncoderDecoder object and a LatentDynamics object to learn a ROM. 
+
+    LatentDynamics models can rollout latent trajectories (via the simulate method) by solving 
+    the latent ODE associated with a particular parameter value, compute the Latent Dynamics, 
+    coefficient, and stability losses associated with a collection of parameter values (via the 
+    calibrate method), or fit a set of coefficients to a time series of latent states for a 
+    particular parameter value (via the "fit_coefficients" method).
+
+    LatentDynamics objects also store the latent dynamics coefficients (learnable parameters 
+    that define the latent dynamics model) for the training set. These are stored in the 
+    train_coefs attribute, which is a dictionary that uses a parameter value as the key and a 
+    "coefficient dictionary" as its associated value. Each coefficient dictionary should itself 
+    be a dictionary with string keys and tensor values; each item is associated with one of the 
+    matrices or vectors in the latent dynamic model (e.g., {"A" : A, "b" : b"} would be a typical
+    coefficient dictionary for a SINDy model, where A is the system matrix and b is the bias vector
+    in the SINDy latent dynamics model z' = Az + b).
+
+    
+
+    -----------------------------------------------------------------------------------------------
+    Class/instance variables
+    -----------------------------------------------------------------------------------------------
+    n_z : int
+        Latent-space dimension.  Each latent state component has length `n_z`.
+    
+    n_coefs : int
+        Number of scalar coefficients in the concrete latent-dynamics model, mainly used for
+        compatibility with flattened coefficient outputs.
+    
+    n_IC : int
+        Number of latent initial-condition components required to start the dynamics.  For example,
+        first-order dynamics typically use `n_IC = 1`, while second-order dynamics use position and
+        velocity components with `n_IC = 2`.
+    
+    Uniform_t_Grid : bool
+        Whether each trajectory's time grid is uniformly spaced; subclasses use this to choose
+        appropriate finite-difference or weak-form derivative approximations.
+    
+    config : dict
+        The `latent_dynamics` configuration dictionary used to construct the concrete model.
+
+    train_coefs : dict[tuple[float, ...], dict[str, torch.Tensor]]
+        Trainable, native coefficient dictionaries indexed by parameter tuple. The training 
+        parameter value (as returned by the _param_key method) is the key, while the value is a 
+        dictionary housing the associated coefficients. The dictionary for a particular parameter 
+        value should use string keys (corresponding to the symbols used for various matrices and
+        vectors in the latent dynamics model) and tensor value. For instance, for each combination
+        of parameter values in the SINDy class, the associated coefficient dictionary has two 
+        keys, "A" and "b", whose values correspond to the system matrix and bias vector in the
+        SINDy latent dynamics model (z' = Az + b). This should only be used to store the TRAINING
+        coefficients; test values should be determined by an Interpolate object.
+
+        
+    
+    -----------------------------------------------------------------------------------------------
+    Subclassing
+    -----------------------------------------------------------------------------------------------
+    To define a new latent-dynamics model, subclass `LatentDynamics`, call `super().__init__(...)`,
+    set `self.n_IC` and `self.n_coefs`, and implement:
+
+    - `fit_coefficients(Latent_States, t_Grid, params=None)`: estimate/initialize native
+      coefficient dictionaries from encoded trajectories and store them with `set_train_coefs(...)`.
+
+    - `trainable_coef_tensors()`: return the actual trainable tensors stored in `train_coefs` so
+      the `Trainer` can optimize them jointly with the encoder/decoder.
+    
+    - `calibrate(Latent_States, loss_type, t_Grid, params=None)`: compute latent-dynamics residual
+      losses and coefficient/stability regularization for the current coefficients.
+    
+    - `simulate(coefs, IC, t_Grid, params=None)`: integrate the latent ODE from one or more latent
+      initial conditions and return latent trajectories in the expected `n_IC`-component format.
+
+    Subclasses may also override `flatten_coefficients(...)` if their native coefficient
+    dictionaries need a specific legacy ordering for plotting or diagnostics.
+    """
+    # Instance variables
+    n_z             : int;          # Dimensionality of the latent space
+    n_coefs         : int;          # Number of coefficients in the latent space dynamics
+    n_IC            : int;          # Number of initial conditions to define the initial latent state.
+    Uniform_t_Grid  : bool;         # Is there an h such that the i'th frame is at t0 + i*h? Or is the spacing between frames arbitrary?
+    config          : dict          # The "latent_dynamics" sub-dictionary of the configuration file, used to define the LatentDynamics object
+    train_coefs     : dict[tuple[float, ...], dict[str, torch.Tensor]];
 
 
     def __init__(   self, 
                     n_z             : int,
+                    n_coefs         : int,
+                    n_IC            : int, 
                     Uniform_t_Grid  : bool, 
                     config          : dict) -> None:
         r"""
@@ -46,6 +134,15 @@ class LatentDynamics:
         n_z : int
             The number of dimensions in the latent space, where the latent dynamics takes place.
 
+        n_coefs : int
+            An integer housing the number of coefficients in the latent dynamics model; typically 
+            (# of matrices in the LD model)*n_z^2 + (# of vectors in the LD model)*n_z
+
+        n_IC : int
+            Number of latent initial-condition components required to start the dynamics. For 
+            example, first-order dynamics typically use `n_IC = 1`, while second-order dynamics use 
+            position and velocity components with `n_IC = 2`.
+    
         Uniform_t_Grid : bool 
             If True, then for each parameter value, the times corresponding to the frames of the 
             solution for that parameter value will be uniformly spaced. In other words, the first 
@@ -67,6 +164,8 @@ class LatentDynamics:
 
         # Set class variables.
         self.n_z             = n_z;
+        self.n_coefs         = n_coefs;
+        self.n_IC            = n_IC;
         self.Uniform_t_Grid  = Uniform_t_Grid;
         self.config          = config;
         self.train_coefs     : dict[tuple[float, ...], dict[str, torch.Tensor]] = {};
@@ -127,7 +226,7 @@ class LatentDynamics:
 
 
     @staticmethod
-    def param_key(params_row : numpy.ndarray | torch.Tensor | list | tuple) -> tuple[float, ...]:
+    def _param_key(params_row : numpy.ndarray | torch.Tensor | list | tuple) -> tuple[float, ...]:
         r"""
         Convert one row of parameter values into the exact key used by `train_coefs`.
 
@@ -162,24 +261,11 @@ class LatentDynamics:
 
 
 
-    @staticmethod
-    def _param_key(params_row : numpy.ndarray | torch.Tensor | list | tuple) -> tuple[float, ...]:
-        r"""
-        Backward-compatible alias for `param_key(...)`.
-
-        Internal code may use the leading-underscore name, but `param_key(...)` is the public base
-        class interface for converting parameter rows into `train_coefs` keys.
-        """
-
-        return LatentDynamics.param_key(params_row);
-
-
-
     def get_train_coefs(self, params_row : numpy.ndarray | torch.Tensor | list | tuple) -> dict[str, torch.Tensor]:
         r"""
         Fetch the native coefficient dictionary for one parameter combination.
 
-        This method deliberately performs a direct dictionary lookup using `param_key(...)`. If the
+        This method deliberately performs a direct dictionary lookup using `_param_key(...)`. If the
         requested parameter is missing, Python raises a KeyError. This is intentional: all training
         coefficients should be initialized before training starts.
 
@@ -202,7 +288,7 @@ class LatentDynamics:
             damped-spring models use `K`, `C`, and `b`.
         """
 
-        key = self.param_key(params_row);
+        key = self._param_key(params_row);
         return self.train_coefs[key];
 
 
@@ -245,7 +331,7 @@ class LatentDynamics:
                 coefs[name] = value;
             else:
                 coefs[name] = value.detach().clone().requires_grad_(True);
-        self.train_coefs[self.param_key(params_row)] = coefs;
+        self.train_coefs[self._param_key(params_row)] = coefs;
         return;
 
 
@@ -404,15 +490,11 @@ class LatentDynamics:
         Returns
         -------------------------------------------------------------------------------------------
 
-        coefs, loss_sindy, loss_stab. 
-        
-        coefs : torch.Tensor, shape = (n_param, n_coef)
-            A matrix of shape (n_param, n_coef). The i,j entry of this array holds the value of 
-            the j'th coefficient when we use the i'th combination of parameter values.
+        loss_LD, loss_coef, loss_stab. 
 
-        loss_sindy : list[torch.Tensor], len = n_param
+        loss_LD : list[torch.Tensor], len = n_param
             The i'th element of this list is a 0-dimensional tensor whose lone element holds the 
-            sum of the SINDy losses from the i'th combination of parameter values. 
+            sum of the latent dynamics losses from the i'th combination of parameter values. 
 
         loss_coef : list[torch.Tensor], len = n_para
             The i'th element of this list is a 0-dimensional tensor whose lone element holds the

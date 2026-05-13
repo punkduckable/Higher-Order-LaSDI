@@ -85,21 +85,20 @@ class DampedSpring_weak(LatentDynamics):
         assert config['type'] == "spring_w";
         assert "spring_w" in config;
 
-        # Run the base class initializer. The only thing this does is set the n_z and n_t 
-        # attributes.;
-        super().__init__(n_z = n_z, Uniform_t_Grid = Uniform_t_Grid, config = config);
+        # Run the base class initializer. This does not set the n_t attribute. 
+        # Because K and C are n_z x n_z matrices, and b is in \mathbb{R}^n_z, there are 
+        # n_z*(2*n_z + 1) coefficients in the latent dynamics.
+        super().__init__(   n_z             = n_z,
+                            n_coefs         = n_z*(2*n_z + 1),
+                            n_IC            = 2, 
+                            Uniform_t_Grid  = Uniform_t_Grid, 
+                            config          = config);
         self.lstsq_reg : float = config.get("lstsq_reg", 1.0);
         LOGGER.info("Initializing a DampedSpring_weak object with n_z = %d, Uniform_t_Grid = %s, lstsq_reg = %s" % (
             self.n_z,
             str(self.Uniform_t_Grid),
             str(self.lstsq_reg),
         ));
-        
-        # Set n_coefs and n_IC.
-        # Because K and C are n_z x n_z matrices, and b is in \mathbb{R}^n_z, there are 
-        # n_z*(2*n_z + 1) coefficients in the latent dynamics.
-        self.n_IC       : int   = 2;
-        self.n_coefs    : int   = n_z*(2*n_z + 1);
 
         # Setup the loss function.
         self.MSE = torch.nn.MSELoss(reduction = 'mean');
