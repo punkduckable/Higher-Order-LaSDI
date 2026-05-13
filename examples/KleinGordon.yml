@@ -76,6 +76,7 @@ parameter_space:
 EncoderDecoder:
   type:                     pair
   pair:
+    n_Decoders:             1
     hidden_widths:          [250, 100, 100, 100]
     latent_dimension:       10 
     activations:            ["sin", "sin", "sin", "sin"]

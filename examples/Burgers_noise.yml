@@ -1,5 +1,5 @@
 trainer:
-  type:                   "Second_Order_Noise_Weak"
+  type:                   "Second_Order_Noise"
 
   max_iter:               5000
   # n_iter:                 2500
@@ -13,7 +13,7 @@ trainer:
 
   device:                 'cpu'
 
-  Second_Order_Noise_Weak:
+  Second_Order_Noise:
     lr:                     0.001
     gradient_clip:          50.0      # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
 
@@ -23,6 +23,8 @@ trainer:
     dp_per_update:          0.01
     max_p_rollout:          0.75      # Maximum proportion of the time window used for rollout loss.
     n_rollouts:             4         # Number of rollable start frames to rollout per training parameter per epoch.
+
+    noise_ratio:            0.05
 
     p_IC_rollout_init:      0.01
     IC_rollout_update_freq: 20
@@ -36,7 +38,6 @@ trainer:
       chain_rule:           1.0
       LD:                   1.0
       rollout:              0.0
-      # IC_rollout:           0.2
       IC_rollout:           0.0
       coef:                 0.0001
       consistency:          1.0
@@ -75,11 +76,8 @@ parameter_space:
 
 EncoderDecoder:
   type:                     pair
-  autoencoder:
-    hidden_widths:          [250, 100, 100, 100]
-    latent_dimension:       5  
-    activations:            ["sin", "sin", "sin", "sin"]
   pair:
+    n_Decoders:             1
     hidden_widths:          [250, 100, 100, 100]
     latent_dimension:       5
     activations:            ["sin", "sin", "sin", "sin"]

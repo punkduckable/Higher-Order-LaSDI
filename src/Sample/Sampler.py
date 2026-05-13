@@ -288,7 +288,7 @@ class Sampler:
                             break;
                     
                     if test_idx is not None:
-                        # New coefficients will be untrained, so we should intialize them using least-squares fit.
+                        # New coefficients will be untrained, so we should initialize them using least-squares fit.
                         U_new_i = new_U_Train[i];  # List of tensors (one per IC)
                         t_new_i = new_t_Train[i];  # Time grid tensor
                         

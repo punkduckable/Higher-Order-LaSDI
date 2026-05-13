@@ -42,6 +42,7 @@ trainer:
 
     # Ratio of noise std to signal RMS.  Set to 0.0 to recover noise-free behaviour.
     noise_ratio:            0.05
+    
 
     p_rollout_init:         0.01
     rollout_update_freq:    20
@@ -99,11 +100,8 @@ parameter_space:
 
 EncoderDecoder:
   type:                     pair
-  autoencoder:
-    hidden_widths:          [250, 100, 100, 100]
-    latent_dimension:       5
-    activations:            ["sin", "sin", "sin", "sin"]
   pair:
+    n_Decoders:             1
     hidden_widths:          [250, 100, 100, 100]
     latent_dimension:       5
     activations:            ["sin", "sin", "sin", "sin"]
