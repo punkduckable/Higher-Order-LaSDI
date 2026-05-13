@@ -112,24 +112,6 @@ class SwitchSINDy(LatentDynamics):
 
 
 
-    def flatten_coefficients(self, coefs : dict[str, torch.Tensor] | list[dict[str, torch.Tensor]]) -> numpy.ndarray:
-        r"""Flatten switching-SINDy coefficients in the legacy [before, after] ordering."""
-
-        coefs_list = [coefs] if isinstance(coefs, dict) else coefs;
-        assert isinstance(coefs_list, list);
-        rows : list[numpy.ndarray] = [];
-        for coef_dict in coefs_list:
-            A_before = coef_dict["A_before"];
-            b_before = coef_dict["b_before"];
-            A_after  = coef_dict["A_after"];
-            b_after  = coef_dict["b_after"];
-            before = torch.cat([b_before.reshape(1, self.n_z), A_before.T], dim = 0);
-            after  = torch.cat([b_after.reshape(1, self.n_z),  A_after.T],  dim = 0);
-            rows.append(torch.cat([before.reshape(-1), after.reshape(-1)]).detach().cpu().numpy().reshape(1, -1));
-        return numpy.concatenate(rows, axis = 0);
-
-
-
     def fit_coefficients(self,
                          Latent_States   : list[list[torch.Tensor]],
                          t_Grid          : list[torch.Tensor],

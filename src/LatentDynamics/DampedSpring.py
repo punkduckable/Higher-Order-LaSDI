@@ -104,19 +104,6 @@ class DampedSpring(LatentDynamics):
 
 
 
-    def _matrix_from_native(self, coefs : dict[str, torch.Tensor]) -> torch.Tensor:
-        r"""Reconstruct the [K^T; C^T; b] matrix used by the least-squares fit."""
-
-        K = coefs["K"];
-        C = coefs["C"];
-        b   = coefs["b"];
-        assert K.shape == (self.n_z, self.n_z);
-        assert C.shape == (self.n_z, self.n_z);
-        assert b.shape == (self.n_z,);
-        return torch.cat([K.T, C.T, b.reshape(1, self.n_z)], dim = 0);
-
-
-
     def train_coef_tensors(self) -> list[torch.Tensor]:
         r"""Return the trainable coefficient tensors stored in `self.train_coefs`."""
 
@@ -124,19 +111,6 @@ class DampedSpring(LatentDynamics):
         for coef_dict in self.train_coefs.values():
             tensors.extend([coef_dict["K"], coef_dict["C"], coef_dict["b"]]);
         return tensors;
-
-
-
-    def flatten_coefficients(self, coefs : dict[str, torch.Tensor] | list[dict[str, torch.Tensor]]) -> numpy.ndarray:
-        r"""Flatten damped-spring coefficients in the legacy [K^T; C^T; b] ordering."""
-
-        coefs_list = [coefs] if isinstance(coefs, dict) else coefs;
-        assert isinstance(coefs_list, list);
-        rows : list[numpy.ndarray] = [];
-        for coef_dict in coefs_list:
-            mat = self._matrix_from_native(coef_dict);
-            rows.append(mat.detach().cpu().numpy().reshape(1, -1));
-        return numpy.concatenate(rows, axis = 0);
 
 
 

@@ -111,23 +111,6 @@ class SINDy(LatentDynamics):
 
 
 
-    def _matrix_from_native(self, coefs : dict[str, torch.Tensor]) -> torch.Tensor:
-        r"""
-        Reconstruct the legacy [b; A^T] matrix from native coefficients.
-
-        This helper is mainly useful for diagnostics and for maintaining the old scalar coefficient
-        ordering in plots. The simulation/calibration code below operates directly on A and b.
-        """
-
-        assert isinstance(coefs, dict);
-        A : torch.Tensor = coefs["A"];
-        b : torch.Tensor = coefs["b"];
-        assert A.shape == (self.n_z, self.n_z);
-        assert b.shape == (self.n_z,);
-        return torch.cat([b.reshape(1, self.n_z), A.T], dim = 0);
-
-
-
     def train_coef_tensors(self) -> list[torch.Tensor]:
         r"""
         Return the actual coefficient tensors that should be passed to torch optimizers.
@@ -140,19 +123,6 @@ class SINDy(LatentDynamics):
         for coef_dict in self.train_coefs.values():
             tensors.extend([coef_dict["A"], coef_dict["b"]]);
         return tensors;
-
-
-
-    def flatten_coefficients(self, coefs : dict[str, torch.Tensor] | list[dict[str, torch.Tensor]]) -> numpy.ndarray:
-        r"""Flatten SINDy coefficients in the legacy [b; A^T] ordering."""
-
-        coefs_list = [coefs] if isinstance(coefs, dict) else coefs;
-        assert isinstance(coefs_list, list);
-        rows : list[numpy.ndarray] = [];
-        for coef_dict in coefs_list:
-            mat = self._matrix_from_native(coef_dict);
-            rows.append(mat.detach().cpu().numpy().reshape(1, -1));
-        return numpy.concatenate(rows, axis = 0);
 
 
 

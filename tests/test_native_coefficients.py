@@ -79,7 +79,7 @@ def test_interpolate_sample_mean_and_std_preserve_keys_and_shapes():
     assert sample["b"].shape == (1,)
 
 
-def test_sindy_flatten_coefficients_returns_legacy_coefficient_matrix():
+def test_base_flatten_coefficients_concatenates_native_dict_items():
     ld = SINDy(n_z=2, Uniform_t_Grid=True, config={})
     native_coefs = [
         {"A": torch.tensor([[1.0, 2.0], [3.0, 4.0]]), "b": torch.tensor([5.0, 6.0])},
@@ -90,8 +90,8 @@ def test_sindy_flatten_coefficients_returns_legacy_coefficient_matrix():
 
     assert flat.shape == (2, 6)
     assert numpy.allclose(flat, numpy.array([
-        [5.0, 6.0, 1.0, 3.0, 2.0, 4.0],
-        [11.0, 12.0, 7.0, 9.0, 8.0, 10.0],
+        [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        [7.0, 8.0, 9.0, 10.0, 11.0, 12.0],
     ]))
 
 

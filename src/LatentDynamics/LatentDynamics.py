@@ -280,10 +280,15 @@ class LatentDynamics:
 
     def flatten_coefficients(self, coefs : dict[str, torch.Tensor] | list[dict[str, torch.Tensor]]) -> numpy.ndarray:
         r"""
-        Flatten native coefficient dictionaries into this model's legacy coefficient ordering.
+        Flatten native coefficient dictionaries into one coefficient matrix.
 
         This is used only at compatibility boundaries, such as coefficient heatmap output. Internal
         training and simulation should use native dictionaries.
+
+        The base implementation does not assume any subclass-specific coefficient names or legacy
+        ordering. Instead, for each coefficient dictionary, it loops through the dictionary items in
+        insertion order, flattens each tensor, and concatenates those flattened arrays into one row.
+        Subclasses may override this method only if they need a specific scalar ordering.
 
 
         -------------------------------------------------------------------------------------------
@@ -299,10 +304,30 @@ class LatentDynamics:
         -------------------------------------------------------------------------------------------
 
         coef_matrix : numpy.ndarray, shape = (n_param, n_coefs)
-            Flattened coefficient matrix using the concrete subclass's legacy scalar ordering.
+            Flattened coefficient matrix. The i'th row contains all flattened coefficient tensors
+            from the i'th native coefficient dictionary, concatenated in dictionary item order.
         """
 
-        raise RuntimeError("Abstract function LatentDynamics.flatten_coefficients!");
+        # Normalize the input so the single-coefficient and multi-coefficient cases share the same
+        # validation/flattening logic.
+        coefs_list = [coefs] if isinstance(coefs, dict) else coefs;
+        assert isinstance(coefs_list, list), "coefs must be a dict or a list of dicts";
+        assert len(coefs_list) > 0, "coefs must be non-empty";
+
+        rows : list[numpy.ndarray] = [];
+        for coef_dict in coefs_list:
+            assert isinstance(coef_dict, dict), "Each coefficient set must be a dictionary";
+            assert len(coef_dict) > 0, "Coefficient dictionaries must be non-empty";
+
+            parts : list[numpy.ndarray] = [];
+            for name, tensor in coef_dict.items():
+                assert isinstance(name, str), "Coefficient names must be strings";
+                assert isinstance(tensor, torch.Tensor), "Coefficient %s must be a torch.Tensor" % name;
+                parts.append(tensor.detach().cpu().numpy().reshape(-1));
+
+            rows.append(numpy.concatenate(parts, axis = 0).reshape(1, -1));
+
+        return numpy.concatenate(rows, axis = 0);
 
 
 
