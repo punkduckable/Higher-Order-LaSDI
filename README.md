@@ -177,7 +177,7 @@ The base class provides:
 - `param_key(params_row)`: convert one parameter row to the tuple key used by `train_coefs`
 - `get_train_coefs(params_row)`: strict lookup of one native coefficient dictionary
 - `set_train_coefs(params_row, coefs)`: store native coefficient tensors as trainable leaves
-- `train_coef_tensors()`: subclass implementation returning the actual tensors passed to optimizers
+- `trainable_coef_tensors()`: subclass implementation returning the actual tensors passed to optimizers
 - `flatten_coefficients(coefs)`: default implementation used only at compatibility boundaries
   such as coefficient heatmap output. It accepts one native coefficient dictionary or a list of
   dictionaries, loops through each dictionary's items in insertion order, flattens each tensor, and
@@ -186,7 +186,7 @@ The base class provides:
 Missing coefficient entries intentionally raise errors. The sampler/data-generation path should
 initialize coefficients for every training parameter by calling `latent_dynamics.fit_coefficients(...)`.
 The Trainer checks this with `_check_train_coefficients()` before optimization and builds optimizers
-from encoder/decoder parameters plus `latent_dynamics.train_coef_tensors()`. Checkpoints serialize
+from encoder/decoder parameters plus `latent_dynamics.trainable_coef_tensors()`. Checkpoints serialize
 the full `LatentDynamics` export, including `train_coefs`, then restore those coefficient tensors as
 trainable leaves when loading.
 
@@ -246,7 +246,7 @@ Configuration files are YAML-based and specify:
   - Before each training round, it checks that every training parameter has native coefficients in
     `latent_dynamics.train_coefs`.
   - Optimizers are built from `encoder_decoder.parameters()` plus
-    `latent_dynamics.train_coef_tensors()`, so newly added coefficient tensors are included after greedy sampling.
+    `latent_dynamics.trainable_coef_tensors()`, so newly added coefficient tensors are included after greedy sampling.
   - Checkpoints save and restore the `LatentDynamics` export dictionary, including `latent_dynamics.train_coefs`.
 - Subclass-specific settings live under `trainer.<TypeName>`. Example (`Second_Order_Rollout`):
   - learning rate + stability: `lr`, `gradient_clip`, `warmup_epochs`
@@ -714,7 +714,7 @@ New applications can be implemented by deriving from the appropriate base classe
      loss lists. It should not accept flattened `input_coefs`.
    - `simulate(self, coefs, IC, t_Grid, params=None)`: Simulate forward using native coefficient
      dictionaries (or a list of dictionaries) returned by `get_train_coefs(...)` or `Interpolate`.
-   - `train_coef_tensors(self)`: Return the actual coefficient tensors stored in
+   - `trainable_coef_tensors(self)`: Return the actual coefficient tensors stored in
      `self.train_coefs` so they can be passed to a torch optimizer.
    - Optional: override `flatten_coefficients(self, coefs)` only if your model needs a specific
      scalar ordering for plotting/heatmap output. The base class version accepts one native

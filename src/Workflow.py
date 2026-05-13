@@ -803,7 +803,7 @@ def count_parameters(   encoder_decoder : EncoderDecoder,
 
     # Count learnable coefficients from trainer (only applies if we are learning the latent 
     # dynamics coefficients)
-    coef_params = sum(t.numel() for t in latent_dynamics.train_coef_tensors());
+    coef_params = sum(t.numel() for t in latent_dynamics.trainable_coef_tensors());
     
     # Print summary
     LOGGER.info("=" * 80);

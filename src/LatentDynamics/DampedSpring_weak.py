@@ -139,7 +139,7 @@ class DampedSpring_weak(LatentDynamics):
 
 
 
-    def train_coef_tensors(self) -> list[torch.Tensor]:
+    def trainable_coef_tensors(self) -> list[torch.Tensor]:
         r"""Return the actual weak-form coefficient tensors to optimize."""
 
         tensors : list[torch.Tensor] = [];

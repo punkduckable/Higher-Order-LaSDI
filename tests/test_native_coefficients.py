@@ -39,7 +39,7 @@ def test_sindy_fit_coefficients_stores_native_trainable_dict():
     assert coefs["b"].requires_grad
     assert coefs["A"].is_leaf
     assert coefs["b"].is_leaf
-    assert ld.train_coef_tensors() == [coefs["A"], coefs["b"]]
+    assert ld.trainable_coef_tensors() == [coefs["A"], coefs["b"]]
 
 
 def test_latent_dynamics_export_load_restores_trainable_coefs():

@@ -111,7 +111,7 @@ class SINDy(LatentDynamics):
 
 
 
-    def train_coef_tensors(self) -> list[torch.Tensor]:
+    def trainable_coef_tensors(self) -> list[torch.Tensor]:
         r"""
         Return the actual coefficient tensors that should be passed to torch optimizers.
 

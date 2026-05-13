@@ -465,7 +465,7 @@ class Trainer:
 
         The latent-dynamics coefficients live in `self.latent_dynamics.train_coefs`. This method
         verifies that every training parameter has a native coefficient dictionary, then appends the
-        actual tensors returned by `latent_dynamics.train_coef_tensors()` to the neural-network
+        actual tensors returned by `latent_dynamics.trainable_coef_tensors()` to the neural-network
         parameters.
 
 
@@ -478,7 +478,7 @@ class Trainer:
         """
 
         self._check_train_coefficients();
-        return list(self.encoder_decoder.parameters()) + self.latent_dynamics.train_coef_tensors();
+        return list(self.encoder_decoder.parameters()) + self.latent_dynamics.trainable_coef_tensors();
 
 
 

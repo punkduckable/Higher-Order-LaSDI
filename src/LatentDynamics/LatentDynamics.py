@@ -161,6 +161,7 @@ class LatentDynamics:
         return tuple(float(x) for x in params_row);
 
 
+
     @staticmethod
     def _param_key(params_row : numpy.ndarray | torch.Tensor | list | tuple) -> tuple[float, ...]:
         r"""
@@ -211,7 +212,7 @@ class LatentDynamics:
         Store a native coefficient dictionary for one parameter combination.
 
         The values in `coefs` are converted to detached trainable leaf tensors unless they already
-        are trainable leaves. This ensures that `train_coef_tensors()` can pass these exact tensor
+        are trainable leaves. This ensures that `trainable_coef_tensors()` can pass these exact tensor
         objects to a torch optimizer and that optimizer updates modify the coefficients stored in
         `self.train_coefs`.
 
@@ -249,7 +250,7 @@ class LatentDynamics:
 
 
 
-    def train_coef_tensors(self) -> list[torch.Tensor]:
+    def trainable_coef_tensors(self) -> list[torch.Tensor]:
         r"""
         Return the trainable coefficient tensors owned by this LatentDynamics object.
 
@@ -274,7 +275,7 @@ class LatentDynamics:
             A list containing all trainable coefficient tensors stored in `self.train_coefs`.
         """
 
-        raise RuntimeError("Abstract function LatentDynamics.train_coef_tensors!");
+        raise RuntimeError("Abstract function LatentDynamics.trainable_coef_tensors!");
 
 
 

@@ -698,7 +698,7 @@ class Second_Order_Rollout(Trainer):
 
             # Log coefficient statistics to diagnose constant dynamics issue
             if iter % 100 == 0 or iter == start_iter:  # Log every 100 iters and first iter
-                coef_tensors = self.latent_dynamics.train_coef_tensors();
+                coef_tensors = self.latent_dynamics.trainable_coef_tensors();
                 train_coefs_flat = torch.cat([c.reshape(-1) for c in coef_tensors]);
                 LOGGER.info("Epoch %d: Coefs numel=%d, min=%.6e, max=%.6e, mean=%.6e, std=%.6e, abs_mean=%.6e" % (
                     iter + 1, int(train_coefs_flat.numel()),
@@ -986,7 +986,7 @@ class Second_Order_Rollout(Trainer):
 
             # Record coefficient scale and the most recent epoch index for fallback checkpointing.
             with torch.no_grad():
-                coef_tensors_report = self.latent_dynamics.train_coef_tensors();
+                coef_tensors_report = self.latent_dynamics.trainable_coef_tensors();
                 train_coefs_flat_report = torch.cat([c.reshape(-1) for c in coef_tensors_report]);
                 max_train_coef = float(torch.abs(train_coefs_flat_report).max().item());
             last_iter_idx = int(iter);

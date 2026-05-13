@@ -102,7 +102,7 @@ class SwitchSINDy(LatentDynamics):
 
 
 
-    def train_coef_tensors(self) -> list[torch.Tensor]:
+    def trainable_coef_tensors(self) -> list[torch.Tensor]:
         r"""Return all trainable switching-SINDy coefficient tensors."""
 
         tensors : list[torch.Tensor] = [];

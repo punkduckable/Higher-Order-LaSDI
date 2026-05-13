@@ -104,7 +104,7 @@ class DampedSpring(LatentDynamics):
 
 
 
-    def train_coef_tensors(self) -> list[torch.Tensor]:
+    def trainable_coef_tensors(self) -> list[torch.Tensor]:
         r"""Return the trainable coefficient tensors stored in `self.train_coefs`."""
 
         tensors : list[torch.Tensor] = [];
