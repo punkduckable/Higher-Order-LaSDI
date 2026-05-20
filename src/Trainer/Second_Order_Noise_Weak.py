@@ -443,9 +443,9 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
                     self.timer.start("Consistency Loss");
                     LOGGER.debug("Consistency Loss (Autoencoder_Pair) - start for parameter combination %d" % i);
 
-                    key = tuple(self.param_space.train_space[i, :]);
-                    Phi_i   : torch.Tensor = self.Phis[key].to(device = Z_D_i.device, dtype = Z_D_i.dtype);
-                    dPhi_i  : torch.Tensor = self.dPhis[key].to(device = Z_D_i.device, dtype = Z_D_i.dtype);
+                    weight_function_derivatives = self.latent_dynamics.get_test_functions(self.param_space.train_space[i, :]);
+                    Phi_i   : torch.Tensor = weight_function_derivatives[0].to(device = Z_D_i.device, dtype = Z_D_i.dtype);
+                    dPhi_i  : torch.Tensor = weight_function_derivatives[1].to(device = Z_D_i.device, dtype = Z_D_i.dtype);
 
                     # Row-wise normalization (one scale per test function) so that
                     # test functions of different widths contribute equally.
@@ -493,9 +493,9 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
                     self.timer.start("Chain Rule Loss");
                     LOGGER.debug("Chain Rule Loss (Autoencoder_Pair) - start for parameter combination %d" % i);
                    
-                    key = tuple(self.param_space.train_space[i, :]);
-                    Phi_i   : torch.Tensor = self.Phis[key].to(device = Z_D_i.device, dtype = Z_D_i.dtype);
-                    dPhi_i  : torch.Tensor = self.dPhis[key].to(device = Z_D_i.device, dtype = Z_D_i.dtype);
+                    weight_function_derivatives = self.latent_dynamics.get_test_functions(self.param_space.train_space[i, :]);
+                    Phi_i   : torch.Tensor = weight_function_derivatives[0].to(device = Z_D_i.device, dtype = Z_D_i.dtype);
+                    dPhi_i  : torch.Tensor = weight_function_derivatives[1].to(device = Z_D_i.device, dtype = Z_D_i.dtype);
                     scale   : torch.Tensor = torch.linalg.norm(dPhi_i, dim = 1, keepdim = True).clamp(min = 1e-10);
 
                     # U-space:  Phi @ V_FOM + dPhi @ D_pred ≈ 0

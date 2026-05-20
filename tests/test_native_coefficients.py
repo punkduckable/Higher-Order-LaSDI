@@ -205,7 +205,7 @@ def test_get_test_functions_missing_param_raises_keyerror():
         ld.get_test_functions(numpy.array([0.25]))
 
 
-def test_damped_spring_weak_fit_and_calibrate_do_not_autogenerate_weights():
+def test_damped_spring_weak_fit_zero_initializes_and_calibrate_requires_weights():
     config = {
         "type": "spring_w",
         "spring_w": {
@@ -220,10 +220,15 @@ def test_damped_spring_weak_fit_and_calibrate_do_not_autogenerate_weights():
     dz = torch.cos(t).reshape(-1, 1)
     params = numpy.array([[0.25]])
 
-    with pytest.raises(KeyError):
-        ld.fit_coefficients([[z, dz]], [t], params)
+    out = ld.fit_coefficients([[z, dz]], [t], params)
+    coefs = ld.get_train_coefs(params[0])
 
-    ld.set_train_coefs(params[0], {"K": torch.zeros(1, 1), "C": torch.zeros(1, 1), "b": torch.zeros(1)})
+    assert out is None
+    assert torch.allclose(coefs["K"], torch.zeros(1, 1))
+    assert torch.allclose(coefs["C"], torch.zeros(1, 1))
+    assert torch.allclose(coefs["b"], torch.zeros(1))
+    assert all(tensor.requires_grad and tensor.is_leaf for tensor in coefs.values())
+
     with pytest.raises(KeyError):
         ld.calibrate([[z, dz]], "MSE", [t], params)
 

@@ -64,13 +64,6 @@ class DampedSpring_weak(LatentDynamics):
                 - test_func_width: The width of each bump.
                 - overlap: The amount of overlap between successive bumps.
             
-            It may also include an optional "lstsq_reg" key, which specifies the ridge-regression 
-            regularization strength used when fitting coefficients from scratch (i.e., when no 
-            input_coefs are supplied to calibrate). Replaces plain lstsq with the 
-            Tikhonov-regularized normal equations  (A^T A + λI) c = A^T b  where A = [Z_D, Z_V, 1]
-            and b = d²Z/dt². Setting lstsq_reg = 0 falls back to plain least squares.
-
-            
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
@@ -92,11 +85,9 @@ class DampedSpring_weak(LatentDynamics):
                             Uniform_t_Grid  = Uniform_t_Grid, 
                             config          = config,
                             type            = "weak");
-        self.lstsq_reg : float = config.get("lstsq_reg", 1.0);
-        LOGGER.info("Initializing a DampedSpring_weak object with n_z = %d, Uniform_t_Grid = %s, lstsq_reg = %s" % (
+        LOGGER.info("Initializing a DampedSpring_weak object with n_z = %d, Uniform_t_Grid = %s" % (
             self.n_z,
             str(self.Uniform_t_Grid),
-            str(self.lstsq_reg),
         ));
 
         # Setup the loss function.
@@ -104,24 +95,6 @@ class DampedSpring_weak(LatentDynamics):
         self.MAE = torch.nn.L1Loss(reduction = 'mean');
 
         return;
-
-
-
-
-    def _native_from_matrix(self, coefs : torch.Tensor) -> dict[str, torch.Tensor]:
-        r"""
-        Convert a weak-form least-squares coefficient matrix to native trainable tensors.
-
-        The weak normal equations still solve for the same library coefficients as the strong-form
-        damped spring model. We store them directly as K, C, and b.
-        """
-
-        assert coefs.shape == (2*self.n_z + 1, self.n_z);
-        K = coefs[0:self.n_z, :].T.detach().clone().requires_grad_(True);
-        C = coefs[self.n_z:(2*self.n_z), :].T.detach().clone().requires_grad_(True);
-        b   = coefs[2*self.n_z, :].detach().clone().requires_grad_(True);
-        return {"K": K, "C": C, "b": b};
-
 
 
     def trainable_coef_tensors(self) -> list[torch.Tensor]:
@@ -143,39 +116,28 @@ class DampedSpring_weak(LatentDynamics):
                          t_Grid        : list[torch.Tensor],
                          params        : numpy.ndarray | None = None) -> None:
         r"""
-        Fit coefficients for the weak-form damped-spring model using the weak-form normal
-        equations.
+        Initialize weak-form damped-spring coefficients to zero.
 
-        This is intended for coefficient initialization. Weight functions must already be stored
-        with `add_weight_functions(...)`; missing entries intentionally raise an error.
+        This method intentionally does not solve a weak-form least-squares system. For noisy weak
+        training, least-squares coefficients computed from a randomly initialized encoder can be a
+        poor starting point. Instead, each requested parameter receives trainable zero tensors for
+        `K`, `C`, and `b`; the optimizer learns them jointly with the encoder/decoder.
         """
         assert params is not None, "DampedSpring_weak.fit_coefficients requires `params`";
         assert isinstance(t_Grid, list) and isinstance(Latent_States, list);
         assert len(Latent_States) == len(t_Grid) == params.shape[0];
 
         for i in range(params.shape[0]):
-            Phi, dPhi, d2Phi = self.get_test_functions(params[i, :]);
+            assert isinstance(Latent_States[i], list);
+            assert len(Latent_States[i]) == self.n_IC;
+            assert isinstance(Latent_States[i][0], torch.Tensor);
+            device = Latent_States[i][0].device;
+            dtype  = Latent_States[i][0].dtype;
 
-            Z      = Latent_States[i];
-            Z_D    : torch.Tensor = Z[0];
-            Z_V    : torch.Tensor = Z[1];
-
-            ones    : torch.Tensor = torch.ones((Z_D.shape[0], 1), device = Z_D.device, dtype = Z_D.dtype);
-            Theta   : torch.Tensor = torch.cat([Z_D, Z_V, ones], dim = 1);          # (n_t, 2*n_z+1)
-
-            # Solve weak-form least squares system for vec(E^T), then reshape to E.
-            Gk, bk = self.compute_Gk_bk(self.n_z, Phi.to(Theta), dPhi.to(Theta), d2Phi.to(Theta), Theta, [Z_D, Z_V]);
-            n_lib      : int           = Gk.shape[1];
-            rhs        : torch.Tensor  = Gk.T @ bk;
-            if self.lstsq_reg > 0.0:
-                gram   : torch.Tensor  = Gk.T @ Gk + self.lstsq_reg * torch.eye(n_lib, device = Gk.device, dtype = Gk.dtype);
-                coef_v : torch.Tensor  = torch.linalg.solve(gram, rhs);
-            else:
-                coef_v : torch.Tensor  = torch.linalg.lstsq(Gk, bk).solution;
-            coefs = coef_v.reshape((self.n_z, Theta.shape[-1])).T;                  # (2*n_z+1, n_z)
-
-            # Store the initialized weak-form coefficients in native LD-owned form.
-            self.set_train_coefs(params[i, :], self._native_from_matrix(coefs));
+            K : torch.Tensor = torch.zeros((self.n_z, self.n_z), device = device, dtype = dtype, requires_grad = True);
+            C : torch.Tensor = torch.zeros((self.n_z, self.n_z), device = device, dtype = dtype, requires_grad = True);
+            b : torch.Tensor = torch.zeros((self.n_z,),          device = device, dtype = dtype, requires_grad = True);
+            self.set_train_coefs(params[i, :], {"K": K, "C": C, "b": b});
 
         return None;
 
@@ -608,43 +570,3 @@ class DampedSpring_weak(LatentDynamics):
         
         # All done!
         return [[D, V]];
-
-
-    def compute_Gk_bk(self, n_s,Phi,dPhi,d2Phi,Theta,Zs):
-
-
-        r'''
-        n_s: reduced dim
-        Phi: dimension (H,n_T)
-        dPhi: dimension (H,n_T)
-        Theta: dimension (n_T, J)
-        Gk = I_{n_s} \otimes \Phi \Theta :  dimension (H*n_s,J*n_s)
-        bk = -vec(dPhi*U): dimension (H*n_s)
-        '''
-
-        H = Phi.shape[0];
-        J = Theta.shape[1];
-
-        Ins         = torch.eye(n_s, device = Theta.device, dtype = Theta.dtype);
-        PhiTheta    = Phi @ Theta;
-        # Gk          = torch.kron(Ins, PhiTheta);
-
-        # bk = 0.5 * (d2Phi @ Zs[0] - dPhi @ Zs[1]);
-        # bk = bk.permute(1, 0).reshape((H * n_s, 1));
-
-        lhs_D = d2Phi @ Zs[0]
-        lhs_V = -(dPhi @ Zs[1])
-
-        scale_D = torch.linalg.norm(d2Phi, dim=1, keepdim=True).clamp(min = 1.0e-10)
-        scale_V = torch.linalg.norm(dPhi,  dim=1, keepdim=True).clamp(min = 1.0e-10)
-
-        Gk_D = torch.kron(Ins, PhiTheta / scale_D)
-        Gk_V = torch.kron(Ins, PhiTheta / scale_V)
-
-        bk_D = (lhs_D / scale_D).permute(1, 0).reshape(H * n_s, 1)
-        bk_V = (lhs_V / scale_V).permute(1, 0).reshape(H * n_s, 1)
-
-        Gk = torch.cat([Gk_D, Gk_V], dim=0)
-        bk = torch.cat([bk_D, bk_V], dim=0)
-
-        return Gk, bk

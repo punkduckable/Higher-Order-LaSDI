@@ -380,14 +380,28 @@ class Sampler:
         # Missing coefficients are considered a hard error later in Trainer._check_train_coefficients.
         if len(new_U_Train) > 0:
             LOGGER.info("Initializing coefficients for %d newly added training points using latent-dynamics fit_coefficients" % len(new_U_Train));
+            
+            # Move EncoderDecoder to CPU
             original_device = next(trainer.encoder_decoder.parameters()).device;
             encoder_decoder_cpu = trainer.encoder_decoder.cpu();
+
+            # Fetch latent sates for new training examples.
             Latent_States_list : list[list[torch.Tensor]] = [];
             with torch.no_grad():
                 for i in range(len(new_U_Train)):
                     Z_tuple = encoder_decoder_cpu.Encode(*[u.cpu() for u in new_U_Train[i]]);
                     Latent_States_list.append(list(Z_tuple));
+        
+            # Move EncoderDecoder back to original device
             trainer.encoder_decoder.to(original_device);
+
+            # If using weak forms, set up bump functions for these parameter combinations.
+            if getattr(trainer.latent_dynamics, "type", "strong") == "weak":
+                for i in range(len(new_t_Train)):
+                    trainer.latent_dynamics.add_weight_functions(
+                            params_row = new_train_params[i, :], 
+                            timesteps  = new_t_Train[i].cpu());
+
             trainer.latent_dynamics.fit_coefficients(
                 Latent_States   = Latent_States_list,
                 t_Grid          = [t.cpu() for t in new_t_Train],

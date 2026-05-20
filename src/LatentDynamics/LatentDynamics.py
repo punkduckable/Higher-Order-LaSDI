@@ -220,7 +220,7 @@ class LatentDynamics:
             self.test_func_type  = weak_config["test_func_type"];
             self.test_func_width = float(weak_config["test_func_width"]);
             self.overlap         = float(weak_config["overlap"]);
-            self.pq              = self.n_IC + 1;
+            self.pq              = self.n_IC + 2;
 
         # All done!
         return;
@@ -456,7 +456,10 @@ class LatentDynamics:
         derivative_rows : list[list[torch.Tensor]] = [[] for _ in range(self.n_IC + 1)];
         base_t          : torch.Tensor             = timesteps.detach().clone().requires_grad_(True);
         for h in range(n_weight_function):
-            current : torch.Tensor = self._weak_weight_function(base_t, float(a_s[h]), float(b_s[h]));
+            a_h : float = float(a_s[h]);
+            b_h : float = float(b_s[h]);
+
+            current : torch.Tensor = self._weak_weight_function(base_t, a_h, b_h);
             derivative_rows[0].append(current.detach());
             for k in range(1, self.n_IC + 1):
                 grad_outputs = torch.ones_like(current);
