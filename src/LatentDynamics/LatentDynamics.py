@@ -72,6 +72,14 @@ class LatentDynamics:
     config : dict
         The `latent_dynamics` configuration dictionary used to construct the concrete model.
 
+    type : str
+        Latent-dynamics formulation type. Strong formulations use pointwise ODE residuals, while
+        weak formulations use compactly supported weight functions.
+
+    weight_function_derivatives : list[dict[tuple[float, ...], torch.Tensor]]
+        Weak-form weight-function derivative tensors indexed first by derivative order and then by
+        parameter tuple. Entry `k` stores the `k`'th time derivatives of the weight functions.
+
     train_coefs : dict[tuple[float, ...], dict[str, torch.Tensor]]
         Trainable, native coefficient dictionaries indexed by parameter tuple. The training 
         parameter value (as returned by the _param_key method) is the key, while the value is a 
@@ -112,7 +120,9 @@ class LatentDynamics:
     n_IC            : int;          # Number of initial conditions to define the initial latent state.
     Uniform_t_Grid  : bool;         # Is there an h such that the i'th frame is at t0 + i*h? Or is the spacing between frames arbitrary?
     config          : dict          # The "latent_dynamics" sub-dictionary of the configuration file, used to define the LatentDynamics object
+    type            : str;          # Latent-dynamics formulation type: "strong" or "weak".
     train_coefs     : dict[tuple[float, ...], dict[str, torch.Tensor]];
+    weight_function_derivatives : list[dict[tuple[float, ...], torch.Tensor]];
 
 
     def __init__(   self, 
@@ -120,7 +130,8 @@ class LatentDynamics:
                     n_coefs         : int,
                     n_IC            : int, 
                     Uniform_t_Grid  : bool, 
-                    config          : dict) -> None:
+                    config          : dict,
+                    type            : str = "strong") -> None:
         r"""
         Initializes a LatentDynamics object. Each LatentDynamics object needs to have a 
         dimensionality (n_z), a number of time steps, a model for the latent space dynamics, and 
@@ -155,7 +166,14 @@ class LatentDynamics:
             method we use to compute time derivatives. 
 
         config : dict
-            The "latent_dynamics" sub-dictionary of the config file. 
+            The "latent_dynamics" sub-dictionary of the config file. If `type == "weak"`, the
+            model-specific sub-dictionary `config[config["type"]]` must contain `overlap`,
+            `test_func_width`, and `test_func_type`.
+
+        type : str, optional
+            The latent-dynamics formulation type. Must be either "strong" or "weak". Strong
+            formulations compare pointwise ODE residuals, while weak formulations use compactly
+            supported weight functions and their time derivatives. Default is "strong".
 
             
         -------------------------------------------------------------------------------------------
@@ -171,10 +189,38 @@ class LatentDynamics:
         self.n_IC            = n_IC;
         self.Uniform_t_Grid  = Uniform_t_Grid;
         self.config          = config;
+        self.type            = type;
         self.train_coefs     : dict[tuple[float, ...], dict[str, torch.Tensor]] = {};
+        self.weight_function_derivatives : list[dict[tuple[float, ...], torch.Tensor]] = [
+            {} for _ in range(self.n_IC + 1)
+        ];
 
         # There must be at least one latent dimension and there must be at least 1 time step.
         assert(self.n_z > 0);
+        assert(self.n_IC > 0);
+        assert self.type in ["strong", "weak"], "LatentDynamics.type must be either 'strong' or 'weak'";
+
+        # Weak-form settings are owned by the base class so all weak LatentDynamics subclasses use
+        # the same test-function construction and lookup path.
+        self.test_func_type  : str   | None = None;
+        self.test_func_width : float | None = None;
+        self.overlap         : float | None = None;
+        self.pq              : int   | None = None;
+        if self.type == "weak":
+            # Weak form specific checks
+            assert isinstance(config, dict),    "Weak LatentDynamics requires a config dictionary";
+            assert "type" in config,            "Weak LatentDynamics config must contain the model selector key 'type'";
+            model_type  : str   = config["type"];
+            assert model_type in config,        "Weak LatentDynamics config must contain config[config['type']]";
+            weak_config : dict  = config[model_type];
+            for key in ["overlap", "test_func_width", "test_func_type"]:
+                assert key in weak_config,          "Weak LatentDynamics config[%s] must contain '%s'" % (model_type, key);
+            
+            # Weak form setup. 
+            self.test_func_type  = weak_config["test_func_type"];
+            self.test_func_width = float(weak_config["test_func_width"]);
+            self.overlap         = float(weak_config["overlap"]);
+            self.pq              = self.n_IC + 1;
 
         # All done!
         return;
@@ -261,6 +307,210 @@ class LatentDynamics:
         else:
             params_row = list(params_row);
         return tuple(float(x) for x in params_row);
+
+
+
+    def _get_support_intervals( self,
+                                T : float,
+                                L : float,
+                                s : float) -> tuple[numpy.ndarray, numpy.ndarray]:
+        r"""
+        Generate support intervals for compactly supported weak-form weight functions.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        T : float
+            Final time value. The generated intervals lie in `[0, T]`.
+
+        L : float
+            Support width for each weight function.
+
+        s : float
+            Overlap amount between adjacent supports. The distance between adjacent left endpoints
+            is `L - s`.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        a_s, b_s : tuple[numpy.ndarray, numpy.ndarray]
+            One-dimensional arrays holding the left and right endpoints of each support interval.
+        """
+
+        assert float(T) > 0.0, "T must be positive";
+        assert float(L) > 0.0, "L must be positive";
+        assert float(s) >= 0.0, "s must be nonnegative";
+        assert float(s) < float(L), "overlap amount s must be smaller than support width L";
+        assert float(L) <= float(T), "test-function support width L must be no larger than T";
+
+        grid : list[list[float]] = [];
+        a : float = 0.0;
+        b : float = float(L);
+        grid.append([a, b]);
+        while (b - float(s) + float(L)) <= float(T):
+            a = b - float(s);
+            b = a + float(L);
+            grid.append([a, b]);
+
+        grid_array = numpy.asarray(grid, dtype = numpy.float64);
+        return grid_array[:, 0], grid_array[:, 1];
+
+
+
+    def _weak_weight_function(self,
+                              t : torch.Tensor,
+                              a : float,
+                              b : float) -> torch.Tensor:
+        r"""Evaluate one weak-form weight function on `t`."""
+
+        assert self.test_func_type is not None;
+        if self.test_func_type == "bump":
+            eta     : float = 5.0;
+            half_L  : float = 0.5 * (float(b) - float(a));
+            center  : float = 0.5 * (float(a) + float(b));
+            const   : float = eta;
+            nugget  : float = 1.0e-7;
+            a_space = numpy.linspace(-half_L + nugget, half_L - nugget, 1000);
+            bump    = numpy.exp(-eta / (1.0 - (a_space / half_L) ** 2));
+            C       : float = float(1.0 / numpy.trapz(bump, a_space) / numpy.exp(const));
+
+            x           : torch.Tensor = (t - center) / half_L;
+            denom       : torch.Tensor = 1.0 - x ** 2;
+            inside      : torch.Tensor = denom > 0.0;
+            safe_denom  : torch.Tensor = torch.where(inside, denom, torch.ones_like(denom));
+            values      : torch.Tensor = C * torch.exp(-eta / safe_denom + const);
+            return torch.where(inside, values, torch.zeros_like(values));
+
+        elif self.test_func_type == "PC-poly":
+            assert self.pq is not None;
+            p : int = self.pq;
+            q : int = self.pq;
+            C : float = 1.0 / (p ** p * q ** q) * ((p + q) / (float(b) - float(a))) ** (p + q);
+            inside = (t >= float(a)) & (t <= float(b));
+            t_a    = torch.clamp(t - float(a), min = 0.0);
+            b_t    = torch.clamp(float(b) - t, min = 0.0);
+            values = C * (t_a ** p) * (b_t ** q);
+            return torch.where(inside, values, torch.zeros_like(values));
+
+        else:
+            raise ValueError("Unsupported weak-form test function type: %s" % str(self.test_func_type));
+
+
+
+    def add_weight_functions(self,
+                             params_row : numpy.ndarray | torch.Tensor | list | tuple,
+                             timesteps  : torch.Tensor) -> None:
+        r"""
+        Build and store weak-form weight functions for one parameter value.
+
+        This method appends/replaces the entries for `params_row` in
+        `weight_function_derivatives` without clearing any other parameter values. The `k`'th
+        derivative tensor is stored in `weight_function_derivatives[k][param_key]` and has shape
+        `(n_weight_functions, n_t)`.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        params_row : numpy.ndarray or torch.Tensor or list or tuple
+            The parameter values associated with this time grid. These values are converted into a
+            dictionary key using `_param_key(...)`.
+
+        timesteps : torch.Tensor, shape = (n_t,)
+            One-dimensional time grid on which the weight functions and their derivatives should be
+            evaluated.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        Nothing!
+        """
+
+        # Checks
+        assert self.type == "weak", "add_weight_functions is only valid for weak LatentDynamics objects";
+        assert isinstance(timesteps, torch.Tensor), "timesteps must be a torch.Tensor";
+        assert timesteps.ndim == 1, "timesteps must be a 1D tensor";
+        assert timesteps.shape[0] > 1, "timesteps must contain at least two time values";
+        assert self.test_func_width is not None and self.overlap is not None;
+
+        # Get weight function supports
+        key : tuple[float, ...] = self._param_key(params_row);
+        L   : float = float(self.test_func_width);
+        s   : float = L * float(self.overlap);
+        T   : float = float(timesteps[-1].detach().cpu().item());
+        a_s, b_s = self._get_support_intervals(T = T, L = L, s = s);
+        
+        # Determine number of weight functions, time values.
+        n_weight_function   : int = len(a_s);
+        n_t                 : int = int(timesteps.shape[0]);
+        LOGGER.info("Number of %s weak-form weight functions: %d" % (str(self.test_func_type), n_weight_function));
+
+        # Evaluate the weight functions and its derivatives on the time grid.
+        derivative_rows : list[list[torch.Tensor]] = [[] for _ in range(self.n_IC + 1)];
+        base_t          : torch.Tensor             = timesteps.detach().clone().requires_grad_(True);
+        for h in range(n_weight_function):
+            current : torch.Tensor = self._weak_weight_function(base_t, float(a_s[h]), float(b_s[h]));
+            derivative_rows[0].append(current.detach());
+            for k in range(1, self.n_IC + 1):
+                grad_outputs = torch.ones_like(current);
+                current = torch.autograd.grad(outputs        = current,
+                                              inputs         = base_t,
+                                              grad_outputs   = grad_outputs,
+                                              create_graph   = (k < self.n_IC),
+                                              retain_graph   = True)[0];
+                derivative_rows[k].append(current.detach());
+
+        for k in range(self.n_IC + 1):
+            tensor_k = torch.stack(derivative_rows[k], dim = 0).reshape(n_weight_function, n_t);
+            self.weight_function_derivatives[k][key] = tensor_k;
+
+        return;
+
+
+
+    def get_test_functions(self,
+                           params_row : numpy.ndarray | torch.Tensor | list | tuple) -> list[torch.Tensor]:
+        r"""
+        Return stored weak-form weight functions for one parameter value.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        params_row : numpy.ndarray or torch.Tensor or list or tuple
+            The parameter values whose weak-form weight functions should be returned.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        weight_function_derivatives : list[torch.Tensor]
+            A list of length `self.n_IC + 1`. Entry `k` is a tensor of shape
+            `(n_weight_functions, n_t)` holding the `k`'th time derivatives of the weight
+            functions for `params_row`.
+        """
+
+        assert self.type == "weak", "get_test_functions is only valid for weak LatentDynamics objects";
+        key : tuple[float, ...] = self._param_key(params_row);
+        outputs : list[torch.Tensor] = [];
+        for k in range(self.n_IC + 1):
+            if key not in self.weight_function_derivatives[k]:
+                raise KeyError("No weak-form weight functions found for params=%s (key=%s), derivative order %d" % (
+                    str(params_row), str(key), k));
+            outputs.append(self.weight_function_derivatives[k][key]);
+
+        shapes = [tuple(tensor.shape) for tensor in outputs];
+        assert len(set(shapes)) == 1, "Stored weak-form derivative tensors must have matching shapes";
+        return outputs;
 
 
 
@@ -595,6 +845,7 @@ class LatentDynamics:
         param_dict = {'n_z'             : self.n_z, 
                       'n_coefs'         : self.n_coefs, 
                       'n_IC'            : self.n_IC,
+                      'type'            : self.type,
                       'config'          : self.config,
                       'Uniform_t_Grid'  : self.Uniform_t_Grid,
                       'train_coefs'     : train_coefs_cpu};
@@ -613,6 +864,7 @@ class LatentDynamics:
         assert(self.n_z             == dict_['n_z']);
         assert(self.n_coefs         == dict_['n_coefs']);
         assert(self.n_IC            == dict_['n_IC']);
+        assert(self.type            == dict_.get('type', self.type));
         assert(self.Uniform_t_Grid  == dict_['Uniform_t_Grid']);
 
         loaded_train_coefs = dict_.get('train_coefs', {});

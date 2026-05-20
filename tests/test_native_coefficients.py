@@ -148,10 +148,9 @@ def test_damped_spring_weak_simulate_uses_native_K_C_b_names():
     config = {
         "type": "spring_w",
         "spring_w": {
-            "test_func": "bump",
+            "test_func_type": "bump",
             "test_func_width": 0.5,
             "overlap": 0.5,
-            "LS_loss_type": "MSE",
         },
     }
     ld = DampedSpring_weak(n_z=1, Uniform_t_Grid=True, config=config)
@@ -164,3 +163,74 @@ def test_damped_spring_weak_simulate_uses_native_K_C_b_names():
 
     assert D.shape == (3, 1, 1)
     assert V.shape == (3, 1, 1)
+
+from LatentDynamics import LatentDynamics
+
+
+def _weak_base_config(test_func_type="PC-poly"):
+    return {
+        "type": "dummy",
+        "dummy": {
+            "test_func_type": test_func_type,
+            "test_func_width": 0.5,
+            "overlap": 0.5,
+        },
+    }
+
+
+def test_weak_latent_dynamics_requires_weak_config_keys():
+    bad_config = {"type": "dummy", "dummy": {"test_func_width": 0.5, "overlap": 0.5}}
+    with pytest.raises(AssertionError):
+        LatentDynamics(n_z=1, n_coefs=1, n_IC=2, Uniform_t_Grid=True, config=bad_config, type="weak")
+
+
+def test_add_and_get_weight_functions_store_arbitrary_derivatives():
+    ld = LatentDynamics(n_z=1, n_coefs=1, n_IC=2, Uniform_t_Grid=True, config=_weak_base_config(), type="weak")
+    params = numpy.array([0.25])
+    t = torch.linspace(0.0, 1.0, 11)
+
+    ld.add_weight_functions(params, t)
+    weights = ld.get_test_functions(params)
+
+    assert len(weights) == 3
+    assert len(ld.weight_function_derivatives) == 3
+    assert all(ld._param_key(params) in d for d in ld.weight_function_derivatives)
+    assert weights[0].shape == weights[1].shape == weights[2].shape
+    assert weights[0].shape[1] == t.shape[0]
+
+
+def test_get_test_functions_missing_param_raises_keyerror():
+    ld = LatentDynamics(n_z=1, n_coefs=1, n_IC=2, Uniform_t_Grid=True, config=_weak_base_config(), type="weak")
+    with pytest.raises(KeyError):
+        ld.get_test_functions(numpy.array([0.25]))
+
+
+def test_damped_spring_weak_fit_and_calibrate_do_not_autogenerate_weights():
+    config = {
+        "type": "spring_w",
+        "spring_w": {
+            "test_func_type": "PC-poly",
+            "test_func_width": 0.5,
+            "overlap": 0.5,
+        },
+    }
+    ld = DampedSpring_weak(n_z=1, Uniform_t_Grid=True, config=config)
+    t = torch.linspace(0.0, 1.0, 9)
+    z = torch.sin(t).reshape(-1, 1)
+    dz = torch.cos(t).reshape(-1, 1)
+    params = numpy.array([[0.25]])
+
+    with pytest.raises(KeyError):
+        ld.fit_coefficients([[z, dz]], [t], params)
+
+    ld.set_train_coefs(params[0], {"K": torch.zeros(1, 1), "C": torch.zeros(1, 1), "b": torch.zeros(1)})
+    with pytest.raises(KeyError):
+        ld.calibrate([[z, dz]], "MSE", [t], params)
+
+
+def test_get_uniform_grid_no_p_argument():
+    ld = LatentDynamics(n_z=1, n_coefs=1, n_IC=1, Uniform_t_Grid=True, config={})
+    a_s, b_s = ld._get_support_intervals(T=1.0, L=0.5, s=0.25)
+
+    assert numpy.allclose(a_s, numpy.array([0.0, 0.25, 0.5]))
+    assert numpy.allclose(b_s, numpy.array([0.5, 0.75, 1.0]))

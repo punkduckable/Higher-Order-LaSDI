@@ -38,19 +38,6 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class Second_Order_Noise_Weak(Second_Order_Noise):
-    # A dictionary that sends each parameter to a torch.Tensor of shape (N, n_t), whose i,j element 
-    # holds the value of the i'th test function at the j'th time value.
-    Phis : dict[tuple, torch.Tensor];   # dict[param_tuple -> torch.Tensor(H, n_t)]
-
-    # A dictionary that sends each parameter to a torch.Tensor of shape (N, n_t), whose i,j element 
-    # holds the value of the time derivative of the i'th test function at the j'th time value.    
-    dPhis : dict[tuple, torch.Tensor];   # dict[param_tuple -> torch.Tensor(H, n_t)]
-
-    # A dictionary that sends each parameter to a torch.Tensor of shape (N, n_t), whose i,j element 
-    # holds the value of the second time derivative of the i'th test function at the j'th time 
-    # value.      
-    d2Phis : dict[tuple, torch.Tensor];   # dict[param_tuple -> torch.Tensor(H, n_t)]
-
     def __init__(self, 
                  physics            : Physics, 
                  encoder_decoder    : EncoderDecoder, 
@@ -104,9 +91,9 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
 
         LOGGER.info("Initializing a Second_Order_Noise_Weak object"); 
 
-        # Make sure we are set up to work with the "spring_w" latent dynamics type.
-        assert config['latent_dynamics'].get('type', None) == 'spring_w', "Currently, Second_Order_Noise_Weak can only work with the spring_w latent dynamics type.";
-        assert 'spring_w' in config['latent_dynamics'], "config['latent_dynamics'] must contain a 'spring_w' sub-dictionary when type == 'spring_w'";
+        # Make sure we are set up to work with a weak-form latent dynamics object.
+        assert getattr(latent_dynamics, "type", None) == "weak", "Second_Order_Noise_Weak requires latent_dynamics.type == 'weak'";
+        assert hasattr(latent_dynamics, "add_weight_functions"), "latent dynamics must have an `add_weight_functions` method";
         assert hasattr(latent_dynamics, "get_test_functions"), "latent dynamics must have a `get_test_functions` method";
 
         # Next, we need to reconfigure the config to read like it is for a "Second_Order_Noise" 
@@ -117,10 +104,6 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
         del noise_config['trainer']['Second_Order_Noise_Weak'];
         noise_config['trainer']['Second_Order_Noise']   = config['trainer']['Second_Order_Noise_Weak'];        
 
-        # Initialize the weight functions.
-        self.Phis   = {};
-        self.dPhis  = {};
-        self.d2Phis = {};
 
         # Call the Second_Order_Noise initializer.
         super().__init__(   physics         = physics,
@@ -139,38 +122,24 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
     # ---------------------------------------------------------------------------------------------
 
     def _prepare_weak_form_data(self) -> None:
-        """
-        Build and cache weak-form test functions keyed by parameter tuple.
+        r"""
+        Build weak-form test functions for every testing parameter value.
 
-        Design choice: we key by parameter values (not by list index) so that downstream
-        components (including greedy sampling) can look up weight functions without relying on
-        list ordering.
+        The latent-dynamics object owns the generated tensors. This trainer only supplies the
+        parameter value and its time grid.
         """
 
         assert len(self.t_Test) == self.param_space.n_test(), "t_Test is not initialized or has wrong length";
 
-        self.Phis   = {};
-        self.dPhis  = {};
-        self.d2Phis = {};
-
         # Build weights for the *entire* test space once. Training parameters are a subset of the
         # test space, so this covers all calibrations and avoids needing sampler-specific logic.
         for i in range(self.param_space.n_test()):
-            # Use plain Python floats for stable hashing / consistent lookup in LD.
-            key = tuple(float(x) for x in self.param_space.test_space[i, :]);
+            params_i = self.param_space.test_space[i, :];
             t_i : torch.Tensor = self.t_Test[i].to(self.device);
-            T_i : float        = float(t_i[-1].detach().cpu().item());
-            Phi_i, dPhi_i, d2Phi_i = self.latent_dynamics.get_test_functions(
-                T               = T_i,
-                n_t             = int(t_i.shape[0]),
-                timesteps       = t_i);
-            self.Phis[key]   = Phi_i;
-            self.dPhis[key]  = dPhi_i;
-            self.d2Phis[key] = d2Phi_i;
+            self.latent_dynamics.add_weight_functions(params_i, t_i);
 
-        LOGGER.info("Prepared weak-form test functions for %d test trajectories" % len(self.Phis));
+        LOGGER.info("Prepared weak-form test functions for %d test trajectories" % self.param_space.n_test());
         return;
-
 
 
 
@@ -237,10 +206,6 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
         
         # Generate the weight functions and their derivatives.
         self._prepare_weak_form_data();
-        assert hasattr(self.latent_dynamics, "set_weight_functions"), "To use weak forms, the latent dynamics class must have a 'set_weight_functions' method."
-        self.latent_dynamics.set_weight_functions(  Phis_by_param   = self.Phis,
-                                                    dPhis_by_param  = self.dPhis,
-                                                    d2Phis_by_param = self.d2Phis);
 
         # Reset optimizer.
         self._check_train_coefficients();
