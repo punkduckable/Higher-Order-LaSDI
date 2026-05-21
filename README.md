@@ -113,10 +113,6 @@ In general, every `Physics`, `EncoderDecoder`, `Trainer`, and `LatentDynamics` o
   - `Autoencoder_Pair.py`: Paired autoencoder for higher-order systems (encodes multiple derivatives)
   - `CNN_3D_Autoencoder.py`: 3D convolutional autoencoder variant
 - **`src/ParameterSpace.py`** – Parameter space management, grid generation, and train/test split utilities
-- **`src/SolveROMs.py`** – ROM simulation functions:
-  - `average_rom()`: Simulate using coefficient dictionaries returned by `Interpolate.mean(...)`
-  - `sample_roms()`: Simulate using coefficient dictionaries returned by `Interpolate.sample(...)`
-  - Error computation and uncertainty quantification
 - **`src/Sample/`** – Greedy sampling logic:
   - `Sampler.py`: Base `Sampler` class (selects the next training parameter during greedy sampling)
   - `FOM_Variance.py`: Selects next point by maximizing predictive variance in decoded (FOM) space
@@ -137,7 +133,9 @@ In general, every `Physics`, `EncoderDecoder`, `Trainer`, and `LatentDynamics` o
         - `sample_coefs()`: Sample from GP posteriors
         - Automatic input/output scaling for numerical stability
         - Configurable kernels (Matern, RBF)
-
+    - `Rollouts` Functions to compute latent trajectories at testing parameters
+        - `Mean_Rollout()`: Simulate using the mean testing coefficients (returned by `Interpolate.mean(...)`)
+        - `Sample_Rollouts()`: Simulate using samples of the testing coefficients (sampled by `Interpolate.sample(...)`)
 ### Physics Solvers
 
 - **`src/Physics/Physics.py`** – Base `Physics` class defining the interface

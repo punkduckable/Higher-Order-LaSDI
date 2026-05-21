@@ -23,7 +23,7 @@ import  numpy;
 
 from    Enums                       import  NextStep;  
 from    Trainer                     import  Trainer;
-from    SolveROMs                   import  sample_roms;
+from    Rollouts                    import  Sample_Rollouts;
 from    Interpolate                 import  Interpolate;
 from    EncoderDecoder              import  EncoderDecoder;
 from    Sampler                     import  Sampler;
@@ -204,7 +204,7 @@ class FOM_Rollout(Sampler):
         # Generate the latent trajectories.
 
         LOGGER.debug("Sampling roms with %d rollouts per candidate" % self.n_samples);
-        Zis_Samples : list[list[torch.Tensor]] = sample_roms(
+        Zis_Samples : list[list[torch.Tensor]] = Sample_Rollouts(
                                                     encoder_decoder     = encoder_decoder, 
                                                     physics             = trainer.physics,
                                                     latent_dynamics     = trainer.latent_dynamics, 

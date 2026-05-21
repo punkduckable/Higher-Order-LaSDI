@@ -36,9 +36,9 @@ from    Interpolate                 import  Interpolate;
 from    Initialize                  import  Initialize_Trainer;
 from    Sampler                     import  Sampler;
 from    Logging                     import  Initialize_Logger, Log_Dictionary;
-from    Plot                        import  Plot_Heatmap2d, Plot_Latent_Trajectories, trainSpace_RelativeErrors_Heatmap;
+from    Plot                        import  Plot_Heatmap2d, Generate_Heatmap_Data, Plot_Latent_Trajectories, trainSpace_RelativeErrors_Heatmap;
 from    Animate                     import  make_solution_movies;
-from    SolveROMs                   import  average_rom, Generate_Heatmap_Data;
+from    Rollouts                    import  Mean_Rollout; 
 
 
 # Set up the logger.
@@ -332,7 +332,7 @@ def main():
         param_worst    : numpy.ndarray         = param_space.test_space[i_worst, :].reshape(1, -1);
         t_worst        : torch.Tensor          = trainer.t_Test[i_worst];                          # shape = (n_t)
         U_True_worst   : list[torch.Tensor]    = trainer.U_Test[i_worst];                          # length = n_IC        
-        Zi_mean_np     : list[numpy.ndarray]   = average_rom(   encoder_decoder = encoder_decoder, # n_IC element list whose j'th element has shape (n_t(i), n_z)
+        Zi_mean_np     : list[numpy.ndarray]   = Mean_Rollout(  encoder_decoder = encoder_decoder, # n_IC element list whose j'th element has shape (n_t(i), n_z)
                                                                 physics         = physics, 
                                                                 latent_dynamics = latent_dynamics, 
                                                                 interpolator    = interpolator, 
