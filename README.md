@@ -136,6 +136,8 @@ In general, every `Physics`, `EncoderDecoder`, `Trainer`, and `LatentDynamics` o
     - `Rollouts` Functions to compute latent trajectories at testing parameters
         - `Mean_Rollout()`: Simulate using the mean testing coefficients (returned by `Interpolate.mean(...)`)
         - `Sample_Rollouts()`: Simulate using samples of the testing coefficients (sampled by `Interpolate.sample(...)`)
+
+
 ### Physics Solvers
 
 - **`src/Physics/Physics.py`** – Base `Physics` class defining the interface
@@ -152,6 +154,7 @@ In general, every `Physics`, `EncoderDecoder`, `Trainer`, and `LatentDynamics` o
   - `telegraphers.py` – Telegraphers equation (2nd order)
   - `nonlinear_elasticity.py` – Nonlinear elasticity (2nd order)
 
+
 ### Latent Dynamics
 
 - **`src/LatentDynamics/LatentDynamics.py`** – Base `LatentDynamics` class
@@ -162,6 +165,7 @@ In general, every `Physics`, `EncoderDecoder`, `Trainer`, and `LatentDynamics` o
   - Stores native coefficient dictionaries of the form `{"K": K, "C": C, "b": b}`
 - **`src/LatentDynamics/DampedSpring_weak.py`** – Weak-form damped-spring dynamics with the same native `K`, `C`, and `b` coefficient names
 - **`src/LatentDynamics/SwitchSINDy.py`** – Switching affine SINDy dynamics with native `A_before`, `b_before`, `A_after`, and `b_after` coefficients
+
 
 #### Latent-dynamics coefficient ownership
 
@@ -205,6 +209,27 @@ The Trainer checks this with `_check_train_coefficients()` before optimization a
 from encoder/decoder parameters plus `latent_dynamics.trainable_coef_tensors()`. Checkpoints serialize
 the full `LatentDynamics` export, including `train_coefs`, then restore those coefficient tensors as
 trainable leaves when loading.
+
+#### Weak and Strong form Latent-dynamics 
+
+LatentDynamics objects can either be `strong` or `weak`. This distinction reflects how they enforce 
+the LD model. 
+
+Strong form methods enforce it by computing derivatives and enforcing the latent dynamics in their 
+strong form. `SINDy`, `SwitchSINDy`, and `DampedSpring` are examples of strong form LatentDynamics 
+models. These classes often use linear regression to define initial coefficients (via the 
+`fit_coeffcients` method).
+
+Weak LatentDynamics objects enforce their latent dynamics in its weak form. This requires a bit of 
+extra machinery, namely weight functions and their derivatives. The base LatentDynamics class 
+includes several methods to compute and store these functions and their derivatives. 
+`DampedSpring_weak` is an example of a Weak LatentDynamics class. These classes often 
+zero-initialize their latent dynamics coefficients.
+
+A LatentDynamics type is stored in its `type` attribute. Trainer classes generally expect a their 
+LatentDynamics object to have a certain type, so be careful when pairing a LD model with a Trainer 
+class; n_IC and type need to match for this to work.
+
 
 ### Utilities
 
