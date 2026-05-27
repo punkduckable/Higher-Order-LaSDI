@@ -38,6 +38,70 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class Trainer:
+    r"""
+    Base interface and shared state for HLaSDI training algorithms.
+
+    A `Trainer` coordinates the learned parts of the reduced-order model: it owns the training and
+    testing trajectories, the `Physics`, `EncoderDecoder`, `LatentDynamics`, and `ParameterSpace`
+    objects, global normalization statistics, checkpointing, loss logging, and timing.  The base
+    `train()` method runs one round of optimization by calling a subclass `Iterate(...)` method,
+    then restores the encoder/decoder and latent-dynamics coefficients from the best checkpoint of
+    that round so subsequent greedy sampling uses the best available ROM state.
+
+    Class/instance variables
+    ------------------------
+    U_Train : list[list[torch.Tensor]]
+        Training trajectories.  The outer index selects a parameter point; the inner index selects
+        one of the `n_IC` state/derivative components; each tensor has a leading time dimension.
+    t_Train : list[torch.Tensor]
+        Time grids corresponding to `U_Train`.
+    U_Test : list[list[torch.Tensor]]
+        Testing trajectories with the same nested structure as `U_Train`.
+    t_Test : list[torch.Tensor]
+        Time grids corresponding to `U_Test`.
+    n_IC : int
+        Number of state/derivative components expected by the physics, encoder/decoder, trainer,
+        and latent dynamics.  The base initializer checks that these all agree.
+    n_iter : int
+        Maximum number of optimizer iterations performed in one training round.
+    max_iter : int
+        Global iteration limit for training.
+    max_greedy_iter : int
+        Global iteration limit for greedy sampling rounds.
+    normalize : bool
+        Whether generated FOM trajectories are normalized before training.
+    config : dict
+        The `trainer` configuration dictionary.
+    timer : Timer
+        Timing utility used by subclasses to record loss and backpropagation costs.
+    device : str
+        Device used for training (`"cpu"`, `"cuda:..."`, or `"mps"`).
+    physics : Physics
+        Full-order problem used to generate trajectories and initial conditions.
+    encoder_decoder : EncoderDecoder
+        Neural map between FOM space and latent space.
+    latent_dynamics : LatentDynamics
+        Parameterized latent ODE model whose coefficients are optimized during training.
+    param_space : ParameterSpace
+        Container for current train/test parameter sets used by training and greedy sampling.
+    data_mean, data_std : list[torch.Tensor] | None
+        Per-IC scalar normalization statistics when normalization is enabled.
+
+    Subclassing
+    -----------
+    To implement a training strategy, subclass `Trainer`, call `super().__init__(...)`, parse any
+    subclass-specific configuration, and implement:
+
+    - `Iterate(start_iter, end_iter)`: perform optimizer steps for the requested global iteration
+      range, compute reconstruction/latent/rollout/etc. losses appropriate to the strategy, update
+      encoder/decoder parameters and `latent_dynamics.train_coefs`, record timing and per-parameter
+      losses, and call `_Save_Checkpoint(...)` whenever a new best model for the round is found.
+
+    Subclasses commonly use `_optimizer_parameters()` to build optimizers over both neural-network
+    parameters and LD-owned coefficient tensors.  They may extend `export()` and `load()` for
+    additional state, but should preserve the base training data, normalization, checkpoint, and
+    iteration bookkeeping.
+    """
     # An n_Train element list. The i'th element is is an n_IC element list whose j'th element is a
     # numpy ndarray of shape (n_t(i), Frame_Shape) holding a sequence of samples of the j'th 
     # derivative of the FOM solution when we use the i'th combination of training values. 
@@ -78,14 +142,6 @@ class Trainer:
     # A timer object that Iterate should use to track how long each loss takes to compute.
     timer : Timer;
 
-    # A tensor holding the coefficients for each testing parameter that we obtained during 
-    # the best training iteration
-    best_train_coefs : numpy.ndarray | None;               # shape (n_train, n_coef)
-
-    # A tensor holding the coefficients for each testing parameter that we obtained during 
-    # the best training iteration.
-    test_coefs : torch.nn.parameter.Parameter;                 # shape (n_test, n_coef)
-
     # The trainer's device
     device : str;
 
@@ -99,28 +155,52 @@ class Trainer:
                     param_space        : ParameterSpace, 
                     trainer_config     : dict):
         """
-        Abstract base class for training strategies.
+        Abstract base class that defines how each round of training proceeds (the loss functions, 
+        and optimizer).
 
-        A `Trainer` instance owns the state of a Higher-Order-LaSDI run:
+        In the HLaSDI framework, a ROM consists of an EncoderDecoder model and a LatentDynamics 
+        object (acting as the Encoder/Decoder and Latent Dynamics portions of the ROM, respectively). 
+        These are jointly trained via a Trainer object using data from a Physics object. The 
+        LatentDynamics object holds the learnedLatentDynamics coefficients for the training set,
+        while an Interpolate object samples LatentDynamics coefficients for testing parameter 
+        combinations. A Sampler object determines how the model picks which testing example to add
+        to the training set after each round of training.
+
+        The trainer essentially defines how everything gets trained. It should do this by 
+        initializing an optimizer on the EncoderDecoder parameters and trainable coefficients 
+        in the LatentDynamics object (fetched via LatentDynamics.trainable_coef_tensors). It 
+        should train these parameters via a sequence of epochs. During each epoch, the Trainer 
+        should evaluate a number of loss functions, add them together, then back-prop through the 
+        loss to get the derivative of the loss with respect to each EncoderDecoder parameter and 
+        latent dynamics coefficient, then use these derivatives to update the parameters and 
+        coefficients. All of this is implemented in the sub-class defined "Iterate" method (which 
+        is driven via the base class' Train method).
+
+        The trainer also defines model checkpointing (via the _Save_Checkpoint method which 
+        Iterate should call each time it finds a new best model).
+        
+        Trainer also control data normalization normalization; the base class defines several 
+        methods for normalizing and de-normalizign data (set_normalization_stats_from_training, 
+        set_normalization_stats_from_test, normalize_tensor, denormalize_tensor, 
+        denormalize_np, denormalize_np, scale_std_np, and normalize_U_inplace); see 
+        each one and their doc strings for details). Normalization generally works by re-centering
+        and re-scaling training data before it is fed into the EncoderDecoder; this dramatically 
+        improves EncoderDecoder performance (mostly because ML models tend to work best when their 
+        data has 0 mean and unit variance), but creates extra book-keeping challenges. In 
+        particular, with normalization, EncoderDecoder object natively predict normalized values 
+        which need to be de-normalized before their predictions can be evaluated.
+
+        Finally, Trainer objects generally track timing data (time spent computing each loss; this
+        is managed by the timer attribute) and track losses (by training parameter! this is managed 
+        by the loss_by_param attribute).
+
+        In addition to defining how training works, a `Trainer` instance owns the state of a 
+        Higher-Order-LaSDI run:
 
         - The training and testing datasets (`U_Train`, `t_Train`, `U_Test`, `t_Test`)
         - Optional global normalization statistics (`data_mean`, `data_std`)
         - The model objects (`physics`, `encoder_decoder`, `latent_dynamics`)
-        - Trainable latent-dynamics coefficients for every point in the test space (`test_coefs`)
         - Bookkeeping for iterative training + greedy sampling (`restart_iter`, `n_iter`, etc.)
-        - Performance timing (`timer`) and per-parameter loss logging (`loss_by_param`)
-
-        Subclasses implement `Iterate(start_iter, end_iter)` which performs optimization steps
-        and calls `_Save_Checkpoint(...)` whenever a new best model is found within the round.
-        The base class `train()` method drives the round-by-round schedule and ensures that, at
-        the end of each round, `encoder_decoder` and `test_coefs` are restored to their *best*
-        values from that round (not necessarily the final epoch).
-
-        The YAML config convention is:
-
-        - `trainer.type` selects the subclass (e.g., `"Rollout_1_IC"`)
-        - Base settings live directly under `trainer` (e.g., `n_iter`, `max_iter`, `normalize`)
-        - Subclass-specific settings live under `trainer[trainer.type]` (e.g., `trainer.Rollout_1_IC.lr`)
 
 
         -------------------------------------------------------------------------------------------
@@ -208,19 +288,6 @@ class Trainer:
         else:
             self.device = 'cpu';
 
-        # If we are learning the latent dynamics coefficients, then we need to set up 
-        # a torch Parameter housing the the coefficients for each combination of testing 
-        # parameters. If we aren't learning the coefficients, then this will never be used.
-        self.test_coefs : torch.nn.parameter.Parameter = torch.nn.parameter.Parameter(
-            torch.zeros(
-                self.param_space.n_test(),
-                self.latent_dynamics.n_coefs,
-                dtype = torch.float32,
-                device = self.device,
-                requires_grad = True,
-            )
-        );
-
         # Set paths for checkpointing/results.
         src_dir     = os.path.dirname(os.path.abspath(__file__));                       # .../Higher-Order-LaSDI/src/Trainer
         project_dir = os.path.abspath(os.path.join(src_dir, os.pardir, os.pardir));     # .../Higher-Order-LaSDI
@@ -235,7 +302,6 @@ class Trainer:
         LOGGER.info("Results directory: %s" % self.path_results);
 
         # Final setup.
-        self.best_train_coefs   = None;
         self.restart_iter       = 0;                # Global iteration index at the start of the next training round
         self.best_epoch         = None;             # Optional: subclasses may set this when checkpointing
 
@@ -352,6 +418,7 @@ class Trainer:
         return X * s + m;
 
 
+
     def denormalize_np(self, x: numpy.ndarray, ic_idx: int) -> numpy.ndarray:
         """
         De-normalize a numpy array using the trainer's stored stats (per IC).
@@ -364,6 +431,7 @@ class Trainer:
         return x * s + m;
 
 
+
     def scale_std_np(self, std_x: numpy.ndarray, ic_idx: int) -> numpy.ndarray:
         """
         Convert a standard deviation computed in normalized units to physical units.
@@ -373,6 +441,7 @@ class Trainer:
         assert self.data_std is not None;
         s = float(self.data_std[ic_idx].detach().cpu().item());
         return std_x * s;
+
 
 
     def normalize_U_inplace(self, U: list[list[torch.Tensor]]) -> None:
@@ -452,107 +521,140 @@ class Trainer:
 
 
     # ---------------------------------------------------------------------------------------------
+    # Latent dynamics coefficient helpers
+    # ---------------------------------------------------------------------------------------------
+
+    def _check_train_coefficients(self) -> None:
+        """
+        Verify every training parameter has LD-owned native coefficients.
+
+        This is intentionally a check, not synchronization; missing coefficients indicate a sampler
+        or initialization bug and should stop execution.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        Nothing!
+        """
+        for i in range(self.param_space.n_train()):
+            params_i = self.param_space.train_space[i, :];
+            coef_dict = self.latent_dynamics.get_train_coefs(params_i);
+            assert isinstance(coef_dict, dict), "train_coefs[%s] must be a dict" % str(tuple(params_i));
+            assert len(coef_dict) > 0, "train_coefs[%s] is empty" % str(tuple(params_i));
+            for name, tensor in coef_dict.items():
+                assert isinstance(name, str), "coefficient names must be strings";
+                assert isinstance(tensor, torch.Tensor), "coefficient %s must be a torch.Tensor" % name;
+        return;
+
+
+
+    def _optimizer_parameters(self) -> list[torch.Tensor]:
+        """
+        Collect EncoderDecoder parameters and LD-owned coefficient tensors for optimization.
+
+        The latent-dynamics coefficients live in `self.latent_dynamics.train_coefs`. This method
+        verifies that every training parameter has a native coefficient dictionary, then appends the
+        actual tensors returned by `latent_dynamics.trainable_coef_tensors()` to the neural-network
+        parameters.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        parameters : list[torch.Tensor]
+            Trainable tensors that should be passed to a torch optimizer.
+        """
+
+        self._check_train_coefficients();
+        return list(self.encoder_decoder.parameters()) + self.latent_dynamics.trainable_coef_tensors();
+
+
+
+    # ---------------------------------------------------------------------------------------------
     # Checkpointing
     # ---------------------------------------------------------------------------------------------
 
-    def _Save_Checkpoint(self, encoder_decoder : EncoderDecoder, train_coefs : numpy.ndarray, test_coefs : torch.Tensor | numpy.ndarray, iter : int) -> str:
+    def _Save_Checkpoint(self, encoder_decoder : EncoderDecoder, iter : int) -> str:
         """
-        Used to serialize a copy of the EncoderDecoder parameters and latent dynamics
-        coefficients.
+        Used to serialize a copy of the EncoderDecoder parameters and LatentDynamics state.
 
-        
+        The latent-dynamics coefficients are owned by `self.latent_dynamics`, so checkpointing now
+        stores the LatentDynamics export dictionary rather than separate flattened train/test
+        coefficient arrays. This includes `latent_dynamics.train_coefs`, whose values are native
+        coefficient dictionaries.
+
+
 
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
 
         encoder_decoder : EncoderDecoder
-            The EncoderDecoder object we want to serialize.
-        
-        train_coefs : numpy.ndarray, shape = (n_train, n_coefs).
-            The array whose i'th row holds the training coefficients for the i'th training 
-            parameter.
-        
-        test_coefs : torch.Tensor or numpy.ndarray, shape = (n_test, n_coefs)
-            The coefficient matrix for the *test* parameter space. In most workflows this is
-            simply `self.test_coefs`, which is a learnable torch Parameter.
+            The EncoderDecoder object whose state dictionary we want to serialize.
 
         iter : int
             The iteration number corresponding to when we obtained the best model/coefficients.
 
-            
+
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
         checkpoint_path : str
-            A string housing the path to the file housing the saved checkpoint. 
+            A string housing the path to the file housing the saved checkpoint.
         """
 
-        # Run checks.
-        assert isinstance(train_coefs, numpy.ndarray),                      "train_coefs must be a numpy.ndarray, not %s" % str(type(train_coefs));
-        assert len(train_coefs.shape)   == 2,                               "train_coefs must have shape (%d, %d), got %s" % (self.param_space.n_train(), self.latent_dynamics.n_coefs, str(train_coefs.shape));
-        assert train_coefs.shape[0]     == self.param_space.n_train(),      "train_coefs must have shape (%d, %d), got %s" % (self.param_space.n_train(), self.latent_dynamics.n_coefs, str(train_coefs.shape));
-        assert train_coefs.shape[1]     == self.latent_dynamics.n_coefs,    "train_coefs must have shape (%d, %d), got %s" % (self.param_space.n_train(), self.latent_dynamics.n_coefs, str(train_coefs.shape));
-
-        # Normalize test_coefs to numpy for checkpoint portability.
-        if isinstance(test_coefs, torch.Tensor):
-            test_coefs_np : numpy.ndarray = test_coefs.detach().cpu().numpy();
-        else:
-            test_coefs_np : numpy.ndarray = test_coefs;
-
-        assert isinstance(test_coefs_np, numpy.ndarray),                    "test_coefs must be a torch.Tensor or numpy.ndarray, not %s" % str(type(test_coefs));
-        assert len(test_coefs_np.shape)  == 2,                              "test_coefs must have shape (%d, %d), got %s" % (self.param_space.n_test(), self.latent_dynamics.n_coefs, str(test_coefs_np.shape));
-        assert test_coefs_np.shape[0]    == self.param_space.n_test(),      "test_coefs must have shape (%d, %d), got %s" % (self.param_space.n_test(), self.latent_dynamics.n_coefs, str(test_coefs_np.shape));
-        assert test_coefs_np.shape[1]    == self.latent_dynamics.n_coefs,   "test_coefs must have shape (%d, %d), got %s" % (self.param_space.n_test(), self.latent_dynamics.n_coefs, str(test_coefs_np.shape));
+        # Run checks. This is intentionally strict: every training parameter should already have a
+        # corresponding native coefficient dictionary in the LatentDynamics object.
+        self._check_train_coefficients();
 
         # Set up the checkpoint path.
         checkpoint_path : str = self.path_checkpoint + '/' + 'checkpoint.pt';
 
-        # First, fetch the device for the encoder_decoder.
+        # First, fetch the device for the encoder_decoder. We temporarily move it to CPU before
+        # serialization for portability, then move it back to its original device.
         device = next(encoder_decoder.parameters()).device;
 
-        # Serialize the encoder_decoder parameters and + coefficients.
+        # Serialize the encoder_decoder parameters and the LatentDynamics export dictionary.
+        # The LatentDynamics export handles moving coefficient tensors to CPU and detaching them.
         torch.save({"EncoderDecoder_state_dict"     : encoder_decoder.cpu().state_dict(),
-                    "train coefficients"            : train_coefs,
-                    "test coefficients"             : test_coefs_np,
+                    "latent_dynamics"               : self.latent_dynamics.export(),
                     "iteration number"              : iter},
                     checkpoint_path);
 
-        # Move encoder_decoder back to original device after saving
-        encoder_decoder.to(device);  
+        # Move encoder_decoder back to original device after saving.
+        encoder_decoder.to(device);
 
         return checkpoint_path;
 
 
 
-    def Load_Checkpoint(self) -> tuple[EncoderDecoder, numpy.ndarray, torch.nn.parameter.Parameter, int]:
+    def Load_Checkpoint(self) -> tuple[EncoderDecoder, int]:
         """
-        Deserializes the encoder_decoder and coefs attributes from the latest checkpoint. Note that 
-        the loaded encoder_decoder will always be on cpu, so you will need to manually move it to 
-        another device if cpu is insufficient.
+        Deserializes the EncoderDecoder parameters and LatentDynamics state from the latest
+        checkpoint. Note that the loaded encoder_decoder will always be on cpu, so you may need to
+        manually move it to another device if cpu is insufficient.
+
+        The LatentDynamics load method replaces `latent_dynamics.train_coefs` with the coefficient
+        dictionary stored in the checkpoint and restores each coefficient tensor as a trainable leaf
+        tensor.
 
 
-        
+
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
-        encoder_decoder, train_coefs, test_coefs, iter
+        encoder_decoder, iter
 
         encoder_decoder : EncoderDecoder
             The de-serialized EncoderDecoder object, mapped to the cpu.
-        
-        train_coefs : numpy.ndarray, shape = (n_train, n_coefs).
-            The array whose i'th row holds the training coefficients for the i'th training 
-            parameter.
-        
-        test_coefs : torch.Tensor, shape = (n_test, n_coefs)
-            The tensor whose i'th row holds the training coefficients for the i'th testing 
-            parameter.
 
-        iter : int 
+        iter : int
             The iteration number corresponding to when the checkpoint was made.
         """
 
@@ -561,27 +663,21 @@ class Trainer:
 
         # Load the checkpoint.
         # NOTE: PyTorch >= 2.6 defaults `weights_only=True`, which disallows loading arbitrary
-        # pickled objects (like numpy arrays). Our checkpoint intentionally stores numpy arrays
-        # for portability, so we must set `weights_only=False`.
+        # pickled objects. Our checkpoint intentionally stores dictionaries of tensors, so we must
+        # set `weights_only=False`.
         checkpoint_dict : dict = torch.load(checkpoint_path, map_location = 'cpu', weights_only = False);
-        
+
         # Load the EncoderDecoder state dictionary.
         self.encoder_decoder.cpu().load_state_dict(checkpoint_dict["EncoderDecoder_state_dict"]);
 
-        # Next, fetch the coefficients, iteration number.
-        train_coefs      : numpy.ndarray = checkpoint_dict["train coefficients"];
-        test_coefs_np    : numpy.ndarray = checkpoint_dict["test coefficients"];
-        iter             : int           = checkpoint_dict["iteration number"];
+        # Restore the LatentDynamics metadata and native training coefficient dictionaries.
+        self.latent_dynamics.load(checkpoint_dict["latent_dynamics"]);
 
-        # Restore test coefficients into the existing learnable Parameter.
-        test_coefs_t : torch.Tensor = torch.tensor(test_coefs_np, dtype = torch.float32, device = self.device);
-        with torch.no_grad():
-            self.test_coefs.data.copy_(test_coefs_t);
+        # Fetch the checkpoint iteration number.
+        iter : int = checkpoint_dict["iteration number"];
 
-        # All done! 
-        return self.encoder_decoder, train_coefs, self.test_coefs, iter;
-
-
+        # All done!
+        return self.encoder_decoder, iter;
 
 
 
@@ -643,9 +739,10 @@ class Trainer:
         `restart_iter` by at most `n_iter` (and never beyond `max_iter`). The concrete training
         behavior is implemented by the subclass `Iterate(...)` method.
 
-        Important semantic: at the end of the round, `self.test_coefs` is restored to the value
-        from the *best epoch of the round* (not the final epoch). This is critical because greedy
-        sampling should use the best available coefficients when fitting GPs / evaluating errors.
+        Important semantic: at the end of the round, the EncoderDecoder and latent-dynamics
+        coefficients are restored from the *best epoch of the round* (not the final epoch). This is
+        critical because greedy sampling should use the best available coefficients when fitting
+        interpolators / evaluating errors.
         """
         
         # -------------------------------------------------------------------------------------
@@ -720,8 +817,8 @@ class Trainer:
         # -------------------------------------------------------------------------------------
         # Load model/params from checkpoint.
 
-        self.encoder_decoder, self.best_train_coefs, self.test_coefs, iter = self.Load_Checkpoint();
-        LOGGER.info("We attained our best performance on epoch %d. Replacing encoder_decoder, coefficients with the checkpoint from that epoch" % iter);
+        self.encoder_decoder, iter = self.Load_Checkpoint();
+        LOGGER.info("We attained our best performance on epoch %d. Replacing encoder_decoder, latent dynamics coefficients with the checkpoint from that epoch" % iter);
 
 
         # -------------------------------------------------------------------------------------
@@ -762,9 +859,6 @@ class Trainer:
                  'U_Test'                   : self.U_Test,
                  't_Train'                  : self.t_Train,
                  't_Test'                   : self.t_Test,
-                 'best_train_coefs'         : self.best_train_coefs,                   # Shape = (n_train, n_coefs).
-                 # Store as numpy for portability across devices / torch versions.
-                 'test_coefs'               : self.test_coefs.detach().cpu().numpy(),  # Shape = (n_test, n_coefs).
                  'restart_iter'             : self.restart_iter, 
                  'timer'                    : self.timer.export(), 
                  'config'                   : self.config,
@@ -805,17 +899,6 @@ class Trainer:
         self.t_Train            : list[torch.Tensor]        = dict_['t_Train'];             # len = n_train.
         self.t_Test             : list[torch.Tensor]        = dict_['t_Test'];              # len = n_test.
 
-        self.best_train_coefs   : numpy.ndarray | None      = dict_['best_train_coefs'];    # Shape = (n_train, n_coefs).
-
-        # Restore test_coefs into the existing learnable Parameter (do not replace the Parameter
-        # object, since optimizers and downstream code expect it to remain a Parameter).
-        loaded_test_coefs = dict_['test_coefs'];     # numpy.ndarray or torch.Tensor
-        if isinstance(loaded_test_coefs, torch.Tensor):
-            test_coefs_t = loaded_test_coefs.detach().to(dtype = torch.float32, device = self.device);
-        else:
-            test_coefs_t = torch.tensor(loaded_test_coefs, dtype = torch.float32, device = self.device);
-        with torch.no_grad():
-            self.test_coefs.data.copy_(test_coefs_t);
         self.restart_iter       : int                       = dict_['restart_iter'];
 
         # Restore normalization stats (if present).

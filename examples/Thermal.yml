@@ -19,7 +19,7 @@ trainer:
     p_rollout_init:         0.01
     rollout_update_freq:    10
     dp_per_update:          0.005
-    max_p_rollout:          0.25        # Maximum proportion of the time window used for rollout loss.
+    max_p_rollout:          0.5         # Maximum proportion of the time window used for rollout loss.
     n_rollouts:             12          # Frame-rollout mode: number of rollable start frames to rollout per training parameter per epoch.
 
     p_IC_rollout_init:      0.01
@@ -33,7 +33,7 @@ trainer:
       recon:                1.0
       LD:                   10.0
       rollout:              1.0
-      IC_rollout:           0.1
+      IC_rollout:           0.25
       stab:                 0.01
       coef:                 2.0
 

@@ -7,21 +7,22 @@ import  os, sys;
 src_path            : str   = os.path.abspath(os.path.dirname(os.path.dirname(__file__)));
 Utilities_path      : str   = os.path.join(src_path, "Utilities");
 EncoderDecoder_path : str   = os.path.join(src_path, "EncoderDecoder");
+Interpolate_Path    : str   = os.path.join(src_path, "Interpolate");
 Trainer_Path        : str   = os.path.join(src_path, "Trainer");
 sys.path.append(Utilities_path);
 sys.path.append(EncoderDecoder_path);
 sys.path.append(src_path);
+sys.path.append(Interpolate_Path);
 sys.path.append(Trainer_Path);
 
 import  logging;
 
-from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 import  torch;
 import  numpy;
 
 from    Enums                       import  NextStep;  
 from    Trainer                     import  Trainer;
-from    GaussianProcess             import  fit_gps, sample_coefs, eval_gp;
+from    Interpolate                 import  Interpolate;
 from    Autoencoder                 import  Autoencoder;
 from    Autoencoder_Pair            import  Autoencoder_Pair;
 from    CNN_3D_Autoencoder          import  CNN_3D_Autoencoder;
@@ -122,10 +123,7 @@ class FOM_Variance(Sampler):
         trainer.timer.start("new_sample");
         assert len(trainer.U_Test)             >  0,                                    "len(trainer.U_Test) = %d" % len(trainer.U_Test);
         assert len(trainer.U_Test)             == trainer.param_space.n_test(),         "len(trainer.U_Test) = %d, trainer.param_space.n_test() = %d" % (len(trainer.U_Test), trainer.param_space.n_test());
-        assert trainer.best_train_coefs is not None,                                    "best_train_coefs is None (did training run and checkpoint succeed?)";
-        assert trainer.best_train_coefs.shape[0]     == trainer.param_space.n_train(),  "trainer.best_train_coefs.shape[0] = %d, trainer.param_space.n_train() = %d" % (trainer.best_train_coefs.shape[0], trainer.param_space.n_train());
-
-        train_coefs : numpy.ndarray = trainer.best_train_coefs;                     # Shape = (n_train, n_coefs).
+        trainer._check_train_coefficients();
         LOGGER.info('\n~~~~~~~ Finding New Point ~~~~~~~');
 
         # Move the encoder_decoder to the cpu (this is where all the GP stuff happens). Remember 
@@ -172,38 +170,15 @@ class FOM_Variance(Sampler):
                                                                     physics     = trainer.physics,
                                                                     trainer     = trainer);
 
-        # Log coefficient statistics before fitting GPs (this is critical for debugging!)
-        LOGGER.info("Coefficient statistics for GP fitting:");
-        LOGGER.info("  Training parameters shape: %s" % str(trainer.param_space.train_space.shape));
-        LOGGER.info("  Coefficients shape: %s" % str(train_coefs.shape));
-        for coef_idx in range(min(5, train_coefs.shape[1])):  # Log first 5 coefficients
-            coef_vals = train_coefs[:, coef_idx];
-            LOGGER.info("  Coef %d: mean=%.6e, std=%.6e, min=%.6e, max=%.6e, range=%.6e" % (
-                coef_idx, numpy.mean(coef_vals), numpy.std(coef_vals), 
-                numpy.min(coef_vals), numpy.max(coef_vals), numpy.max(coef_vals) - numpy.min(coef_vals)));
-        
-        # Train the GPs on the training data, get one GP per latent space coefficient.
-        gp_list : list[GaussianProcessRegressor] = fit_gps(trainer.param_space.train_space, train_coefs);
+        # Build coefficient interpolator from LD-owned native training coefficients.
+        LOGGER.info("Building coefficient interpolator from %d training coefficient entries" % len(trainer.latent_dynamics.train_coefs));
+        interpolator : Interpolate = Interpolate(trainer.latent_dynamics.train_coefs);
 
-        # For each combination of parameter values in the candidate set, for each coefficient, 
-        # draw a set of samples from the posterior distribution for that coefficient evaluated at
-        # the candidate parameters. We store the samples for a particular combination of parameter 
-        # values in a 2d numpy.ndarray of shape (n_sample, n_coef), whose i, j element holds the 
-        # i'th sample of the j'th coefficient. We store the arrays for different parameter values 
-        # in a list of length n_test. 
-        coef_samples : list[numpy.ndarray] = [sample_coefs(gp_list, candidate_parameters[i, :], self.n_samples) for i in range(n_candidates)];
-        
-        # Log GP prediction statistics for first candidate to diagnose zero-variance issue
-        if n_candidates > 0:
-            pred_mean, pred_std = eval_gp(gp_list, candidate_parameters[0:1, :]);
-            LOGGER.info("GP predictions for first candidate %s:" % str(candidate_parameters[0]));
-            for coef_idx in range(min(5, pred_mean.shape[1])):
-                LOGGER.info("  Coef %d: mean=%.6e, std=%.6e" % (coef_idx, pred_mean[0, coef_idx], pred_std[0, coef_idx]));
-            avg_std = numpy.mean(pred_std[0, :]);
-            LOGGER.info("  Average std across all coefficients: %.6e" % avg_std);
-            if avg_std < 1e-6:
-                LOGGER.warning("  WARNING: GP variance is near-zero! This suggests coefficients are nearly constant across parameter space!");
-                LOGGER.warning("  This will cause poor greedy sampling - all points will look equally good/bad.");
+        # Draw native coefficient samples for each candidate parameter.
+        coef_samples : list[list[dict[str, torch.Tensor]]] = [
+            [interpolator.sample(candidate_parameters[i, :]) for _ in range(self.n_samples)]
+            for i in range(n_candidates)
+        ];
 
         # Now, solve the latent dynamics forward in time for each set of coefficients in 
         # coef_samples. There are n_candidates combinations of parameter values, and we have 
@@ -235,7 +210,7 @@ class FOM_Variance(Sampler):
             # Simulate one sample at a time; store the resulting frames.           
             for j in range(self.n_samples):
                 LatentState_ij : list[list[numpy.ndarray]] = trainer.latent_dynamics.simulate( 
-                                                                    coefs   = coef_samples[i][j:(j + 1), :], 
+                                                                    coefs   = coef_samples[i][j], 
                                                                     IC      = [Z0[i]], 
                                                                     t_Grid  = [t_Grid], 
                                                                     params  = candidate_parameters[i, :].reshape(1, -1));

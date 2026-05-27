@@ -5,14 +5,16 @@
 # Add LatentDynamics, Physics directories to the search path.
 import  sys;
 import  os;
-LD_Path         : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
-Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
-Utils_Path      : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
-Sample_Path     : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Sample"));
+LD_Path             : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
+Physics_Path        : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
+Utils_Path          : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
+Interpolate_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Interpolate"));
+Sample_Path         : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Sample"));
 sys.path.append(LD_Path); 
 sys.path.append(Physics_Path); 
-sys.path.append(Utils_Path); 
+sys.path.append(Interpolate_Path);
 sys.path.append(Sample_Path);
+sys.path.append(Utils_Path); 
 
 import  yaml;
 import  argparse;
@@ -22,7 +24,6 @@ import  time;
 import  numpy;
 import  torch;
 import  matplotlib.pyplot           as      plt;
-from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 from    pathlib                     import  Path;
 
 from    EncoderDecoder              import  EncoderDecoder;
@@ -31,13 +32,13 @@ from    Physics                     import  Physics;
 from    Enums                       import  NextStep;
 from    LatentDynamics              import  LatentDynamics;
 from    Trainer                     import  Trainer;
-from    GaussianProcess             import  fit_gps;
+from    Interpolate                 import  Interpolate;
 from    Initialize                  import  Initialize_Trainer;
 from    Sampler                     import  Sampler;
 from    Logging                     import  Initialize_Logger, Log_Dictionary;
-from    Plot                        import  Plot_Heatmap2d, Plot_Latent_Trajectories, trainSpace_RelativeErrors_Heatmap;
+from    Plot                        import  Plot_Heatmap2d, Generate_Heatmap_Data, Plot_Latent_Trajectories, trainSpace_RelativeErrors_Heatmap;
 from    Animate                     import  make_solution_movies;
-from    SolveROMs                   import  average_rom, Generate_Heatmap_Data;
+from    Rollouts                    import  Mean_Rollout; 
 
 
 # Set up the logger.
@@ -132,7 +133,6 @@ def main():
     # ---------------------------------------------------------------------------------------------
 
     # Save!
-    LOGGER.info("Saving results to %s" % restart_filename);
     Save(   param_space         = param_space,
             config              = config,
             physics             = physics,
@@ -148,11 +148,10 @@ def main():
     # Plot Setup
     # ---------------------------------------------------------------------------------------------
 
-    # Set up gaussian processes. 
+    # Set up coefficient interpolator. 
     encoder_decoder.cpu();
-
-    # Get a GP for each coefficient in the latent dynamics.
-    gp_list         : list[GaussianProcessRegressor]    = fit_gps(param_space.train_space, trainer.best_train_coefs);
+    trainer._check_train_coefficients();
+    interpolator : Interpolate = Interpolate(latent_dynamics.train_coefs);
 
     # Number of coefficient/ROM samples used for plotting + uncertainty metrics.
     # Most samplers expose this as an attribute; fall back to 20 for custom samplers.
@@ -165,7 +164,7 @@ def main():
                                                                                         physics         = physics,
                                                                                         param_space     = param_space,
                                                                                         latent_dynamics = latent_dynamics,
-                                                                                        gp_list         = gp_list,
+                                                                                        interpolator    = interpolator,
                                                                                         t_Test          = trainer.t_Test,
                                                                                         U_Test          = trainer.U_Test,
                                                                                         n_samples       = n_samples_plot,
@@ -180,7 +179,7 @@ def main():
     Plot_Latent_Trajectories(  physics         = physics,
                                encoder_decoder = encoder_decoder,
                                latent_dynamics = latent_dynamics,
-                               gp_list         = gp_list,
+                               interpolator    = interpolator,
                                param_grid      = param_space.test_space[i_worst, :].reshape(1, -1),
                                n_samples       = n_samples_plot,
                                U_True          = [trainer.U_Test[i_worst]],
@@ -332,10 +331,10 @@ def main():
         param_worst    : numpy.ndarray         = param_space.test_space[i_worst, :].reshape(1, -1);
         t_worst        : torch.Tensor          = trainer.t_Test[i_worst];                          # shape = (n_t)
         U_True_worst   : list[torch.Tensor]    = trainer.U_Test[i_worst];                          # length = n_IC        
-        Zi_mean_np     : list[numpy.ndarray]   = average_rom(   encoder_decoder = encoder_decoder, # n_IC element list whose j'th element has shape (n_t(i), n_z)
+        Zi_mean_np     : list[numpy.ndarray]   = Mean_Rollout(  encoder_decoder = encoder_decoder, # n_IC element list whose j'th element has shape (n_t(i), n_z)
                                                                 physics         = physics, 
                                                                 latent_dynamics = latent_dynamics, 
-                                                                gp_list         = gp_list, 
+                                                                interpolator    = interpolator, 
                                                                 param_grid      = param_worst, 
                                                                 t_Grid          = [t_worst],
                                                                 trainer         = trainer)[0];   # shape = (n_t, n_IC, n_z)
@@ -737,6 +736,8 @@ def Save(   param_space         : ParameterSpace,
         restart_filename = restart_filename_no_ext + '__' + date_str + '.npy';
     else:
         restart_filename : str = config["physics"]["type"] + '_' + date_str + '.npy';
+    LOGGER.info("Saving results to %s" % restart_filename);
+
     
     # Set up the restart path.
     # Use an absolute results directory under the project root (Higher-Order-LaSDI/results),
@@ -805,9 +806,7 @@ def count_parameters(   encoder_decoder : EncoderDecoder,
 
     # Count learnable coefficients from trainer (only applies if we are learning the latent 
     # dynamics coefficients)
-    coef_params = 0;
-    if hasattr(trainer, 'test_coefs') and trainer.test_coefs is not None:
-        coef_params = trainer.test_coefs.numel();
+    coef_params = sum(t.numel() for t in latent_dynamics.trainable_coef_tensors());
     
     # Print summary
     LOGGER.info("=" * 80);

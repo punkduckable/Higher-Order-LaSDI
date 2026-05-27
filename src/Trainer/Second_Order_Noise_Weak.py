@@ -38,19 +38,6 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class Second_Order_Noise_Weak(Second_Order_Noise):
-    # A dictionary that sends each parameter to a torch.Tensor of shape (N, n_t), whose i,j element 
-    # holds the value of the i'th test function at the j'th time value.
-    Phis : dict[tuple, torch.Tensor];   # dict[param_tuple -> torch.Tensor(H, n_t)]
-
-    # A dictionary that sends each parameter to a torch.Tensor of shape (N, n_t), whose i,j element 
-    # holds the value of the time derivative of the i'th test function at the j'th time value.    
-    dPhis : dict[tuple, torch.Tensor];   # dict[param_tuple -> torch.Tensor(H, n_t)]
-
-    # A dictionary that sends each parameter to a torch.Tensor of shape (N, n_t), whose i,j element 
-    # holds the value of the second time derivative of the i'th test function at the j'th time 
-    # value.      
-    d2Phis : dict[tuple, torch.Tensor];   # dict[param_tuple -> torch.Tensor(H, n_t)]
-
     def __init__(self, 
                  physics            : Physics, 
                  encoder_decoder    : EncoderDecoder, 
@@ -104,9 +91,9 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
 
         LOGGER.info("Initializing a Second_Order_Noise_Weak object"); 
 
-        # Make sure we are set up to work with the "spring_w" latent dynamics type.
-        assert config['latent_dynamics'].get('type', None) == 'spring_w', "Currently, Second_Order_Noise_Weak can only work with the spring_w latent dynamics type.";
-        assert 'spring_w' in config['latent_dynamics'], "config['latent_dynamics'] must contain a 'spring_w' sub-dictionary when type == 'spring_w'";
+        # Make sure we are set up to work with a weak-form latent dynamics object.
+        assert getattr(latent_dynamics, "type", None) == "weak", "Second_Order_Noise_Weak requires latent_dynamics.type == 'weak'";
+        assert hasattr(latent_dynamics, "add_weight_functions"), "latent dynamics must have an `add_weight_functions` method";
         assert hasattr(latent_dynamics, "get_test_functions"), "latent dynamics must have a `get_test_functions` method";
 
         # Next, we need to reconfigure the config to read like it is for a "Second_Order_Noise" 
@@ -117,10 +104,6 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
         del noise_config['trainer']['Second_Order_Noise_Weak'];
         noise_config['trainer']['Second_Order_Noise']   = config['trainer']['Second_Order_Noise_Weak'];        
 
-        # Initialize the weight functions.
-        self.Phis   = {};
-        self.dPhis  = {};
-        self.d2Phis = {};
 
         # Call the Second_Order_Noise initializer.
         super().__init__(   physics         = physics,
@@ -139,38 +122,24 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
     # ---------------------------------------------------------------------------------------------
 
     def _prepare_weak_form_data(self) -> None:
-        """
-        Build and cache weak-form test functions keyed by parameter tuple.
+        r"""
+        Build weak-form test functions for every testing parameter value.
 
-        Design choice: we key by parameter values (not by list index) so that downstream
-        components (including greedy sampling) can look up weight functions without relying on
-        list ordering.
+        The latent-dynamics object owns the generated tensors. This trainer only supplies the
+        parameter value and its time grid.
         """
 
         assert len(self.t_Test) == self.param_space.n_test(), "t_Test is not initialized or has wrong length";
 
-        self.Phis   = {};
-        self.dPhis  = {};
-        self.d2Phis = {};
-
         # Build weights for the *entire* test space once. Training parameters are a subset of the
         # test space, so this covers all calibrations and avoids needing sampler-specific logic.
         for i in range(self.param_space.n_test()):
-            # Use plain Python floats for stable hashing / consistent lookup in LD.
-            key = tuple(float(x) for x in self.param_space.test_space[i, :]);
+            params_i = self.param_space.test_space[i, :];
             t_i : torch.Tensor = self.t_Test[i].to(self.device);
-            T_i : float        = float(t_i[-1].detach().cpu().item());
-            Phi_i, dPhi_i, d2Phi_i = self.latent_dynamics.get_test_functions(
-                T               = T_i,
-                n_t             = int(t_i.shape[0]),
-                timesteps       = t_i);
-            self.Phis[key]   = Phi_i;
-            self.dPhis[key]  = dPhi_i;
-            self.d2Phis[key] = d2Phi_i;
+            self.latent_dynamics.add_weight_functions(params_i, t_i);
 
-        LOGGER.info("Prepared weak-form test functions for %d test trajectories" % len(self.Phis));
+        LOGGER.info("Prepared weak-form test functions for %d test trajectories" % self.param_space.n_test());
         return;
-
 
 
 
@@ -203,8 +172,7 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
         `Trainer._Save_Checkpoint(...)` to snapshot:
 
         - EncoderDecoder weights
-        - the per-training-point coefficient matrix (`train_coefs`)
-        - the full test-space coefficient matrix (`self.test_coefs`)
+        - the LatentDynamics state, including native training coefficient dictionaries
 
         This ensures `Trainer.train()` can restore the model and coefficients from the best epoch
         of the round, which is what greedy sampling should use.
@@ -238,12 +206,10 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
         
         # Generate the weight functions and their derivatives.
         self._prepare_weak_form_data();
-        assert hasattr(self.latent_dynamics, "set_weight_functions"), "To use weak forms, the latent dynamics class must have a 'set_weight_functions' method."
-        self.latent_dynamics.set_weight_functions(  Phis_by_param   = self.Phis,
-                                                    dPhis_by_param  = self.dPhis,
-                                                    d2Phis_by_param = self.d2Phis);
 
         # Reset optimizer.
+        self._check_train_coefficients();
+        self.optimizer = torch.optim.Adam(self._optimizer_parameters(), lr = self.lr, weight_decay = 1.0e-5);
         Reset_Optimizer(self.optimizer);
 
         # Add noise
@@ -259,7 +225,7 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
         p_IC_rollout            : float             = min(self.max_p_IC_rollout, self.p_IC_rollout_init + self.IC_dp_per_update*(epochs_in_round//self.IC_rollout_update_freq));
         best_loss               : float             = numpy.inf;                    # Stores the lowest loss we get in this round of training.
         checkpoint_saved        : bool              = False;                        # Ensure we save at least one checkpoint per round.
-        last_train_coefs_detached : numpy.ndarray | None = None;
+        
         last_iter_idx             : int | None         = None;
 
         # Map everything to self's device.
@@ -283,31 +249,6 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
             t_Grid_IC_rollout, n_IC_rollout_frames, U_IC_Rollout_Targets = self._IC_rollout_setup(  t            = t_Train_device, 
                                                                                                     p_IC_rollout = p_IC_rollout);
             self.timer.end("IC Rollout Setup"); 
-
-        # If we are learning the latent dynamics coefficients, then we need to determine 
-        # which combinations of parameters are in the training set. Specifically, each 
-        # element of the train space should also be in the test space. We need to figure out 
-        # the index of each train space element within the test space.
-        train_coefs_list : list[torch.Tensor] = [];
-        for i in range(n_train):
-            ith_train_in_test : bool = False;
-            for j in range(self.param_space.n_test()):
-                if(numpy.allclose(self.param_space.test_space[j, :], self.param_space.train_space[i, :], rtol = 1e-12, atol = 1e-14)):
-                    train_coefs_list.append(self.test_coefs[j, :]);
-                    ith_train_in_test = True;
-                    break;
-
-            # Make sure we found the training combination of parameters in the test space.
-            assert(ith_train_in_test == True);
-
-
-        # -----------------------------------------------------------------------------------------
-        # Noise-related warnings.
-
-        if self.noise_ratio > 0.0:
-            LOGGER.info("noise_ratio = %f with weak form active. Consistency and chain-rule losses "
-                        "will use noise-tolerant weak-form variants (IBP, no finite differences)." % self.noise_ratio);
-
 
         # -----------------------------------------------------------------------------------------
         # Run the iterations!
@@ -502,9 +443,9 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
                     self.timer.start("Consistency Loss");
                     LOGGER.debug("Consistency Loss (Autoencoder_Pair) - start for parameter combination %d" % i);
 
-                    key = tuple(self.param_space.train_space[i, :]);
-                    Phi_i   : torch.Tensor = self.Phis[key].to(device = Z_D_i.device, dtype = Z_D_i.dtype);
-                    dPhi_i  : torch.Tensor = self.dPhis[key].to(device = Z_D_i.device, dtype = Z_D_i.dtype);
+                    weight_function_derivatives = self.latent_dynamics.get_test_functions(self.param_space.train_space[i, :]);
+                    Phi_i   : torch.Tensor = weight_function_derivatives[0].to(device = Z_D_i.device, dtype = Z_D_i.dtype);
+                    dPhi_i  : torch.Tensor = weight_function_derivatives[1].to(device = Z_D_i.device, dtype = Z_D_i.dtype);
 
                     # Row-wise normalization (one scale per test function) so that
                     # test functions of different widths contribute equally.
@@ -552,9 +493,9 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
                     self.timer.start("Chain Rule Loss");
                     LOGGER.debug("Chain Rule Loss (Autoencoder_Pair) - start for parameter combination %d" % i);
                    
-                    key = tuple(self.param_space.train_space[i, :]);
-                    Phi_i   : torch.Tensor = self.Phis[key].to(device = Z_D_i.device, dtype = Z_D_i.dtype);
-                    dPhi_i  : torch.Tensor = self.dPhis[key].to(device = Z_D_i.device, dtype = Z_D_i.dtype);
+                    weight_function_derivatives = self.latent_dynamics.get_test_functions(self.param_space.train_space[i, :]);
+                    Phi_i   : torch.Tensor = weight_function_derivatives[0].to(device = Z_D_i.device, dtype = Z_D_i.dtype);
+                    dPhi_i  : torch.Tensor = weight_function_derivatives[1].to(device = Z_D_i.device, dtype = Z_D_i.dtype);
                     scale   : torch.Tensor = torch.linalg.norm(dPhi_i, dim = 1, keepdim = True).clamp(min = 1e-10);
 
                     # U-space:  Phi @ V_FOM + dPhi @ D_pred ≈ 0
@@ -591,25 +532,24 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
             self.timer.start("Calibration");
             LOGGER.debug("Calibration (Autoencoder_Pair) - start");
 
-            # Compute the latent dynamics and stability losses. Also fetch the current latent
-            # dynamics coefficients for each training point. The latter is stored in a 2d array 
-            # called "train_coefs" of shape (n_train, n_coefs), where n_train = number of training 
-            # parameter parameters and n_coefs denotes the number of coefficients in the latent
-            # dynamics model. 
-            train_coefs, loss_LD_list, loss_coef_list, loss_stab_list = self.latent_dynamics.calibrate(
+            # Compute the latent dynamics, coefficient, and stability losses using the native
+            # coefficient dictionaries stored in latent_dynamics.train_coefs. The LatentDynamics
+            # object looks up the coefficient dictionary for each row of param_space.train_space.
+            loss_LD_list, loss_coef_list, loss_stab_list = self.latent_dynamics.calibrate(
                                                                         Latent_States    = Latent_States,
                                                                         t_Grid           = t_Train_device,
-                                                                        input_coefs      = train_coefs_list,
                                                                         loss_type        = self.loss_types['LD'],
                                                                         params           = self.param_space.train_space);
 
             # Log coefficient statistics to diagnose constant dynamics issue
             if iter % 100 == 0 or iter == start_iter:  # Log every 100 iters and first iter
-                LOGGER.info("Epoch %d: Coefs shape=%s, min=%.6e, max=%.6e, mean=%.6e, std=%.6e, abs_mean=%.6e" % (
-                    iter + 1, str(train_coefs.shape),
-                    float(train_coefs.min().item()), float(train_coefs.max().item()),
-                    float(train_coefs.mean().item()), float(train_coefs.std().item()),
-                    float(torch.abs(train_coefs).mean().item())));
+                coef_tensors = self.latent_dynamics.trainable_coef_tensors();
+                train_coefs_flat = torch.cat([c.reshape(-1) for c in coef_tensors]);
+                LOGGER.info("Epoch %d: Coefs numel=%d, min=%.6e, max=%.6e, mean=%.6e, std=%.6e, abs_mean=%.6e" % (
+                    iter + 1, int(train_coefs_flat.numel()),
+                    float(train_coefs_flat.min().item()), float(train_coefs_flat.max().item()),
+                    float(train_coefs_flat.mean().item()), float(train_coefs_flat.std().item()),
+                    float(torch.abs(train_coefs_flat).mean().item())));
 
             # Append the LD and stability losses to loss_by_param.
             for i in range(n_train):
@@ -673,7 +613,7 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
                     loss_FOM_i_V : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
 
                     param_i = self.param_space.train_space[i, :].reshape(1, -1);
-                    coef_i  = train_coefs[i, :].reshape(1, -1);
+                    coef_i  = self.latent_dynamics.get_train_coefs(self.param_space.train_space[i, :]);
 
                     Z_D_i : torch.Tensor = Latent_States[i][0];
                     Z_V_i : torch.Tensor = Latent_States[i][1];
@@ -793,7 +733,7 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
                     Z_D_IC_i, Z_V_IC_i = encoder_decoder_device.Encode(D_IC_i, V_IC_i);
                     
                     # Get the coefficients for this combination of parameters
-                    train_coef_i            : torch.Tensor              = train_coefs[i, :].reshape(1, -1);
+                    train_coef_i            : dict[str, torch.Tensor]     = self.latent_dynamics.get_train_coefs(param_i);
                     
                     # Simulate the latent dynamics forward in time
                     Z_IC_Rollout_i    : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(  coefs   = train_coef_i, 
@@ -889,13 +829,12 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
 
 
 
-            # Convert coefs to numpy and find the maximum element.
-            # Store a detached copy for reporting (needed after backprop), but keep original for gradient flow
+            # Record coefficient scale and the most recent epoch index for fallback checkpointing.
             with torch.no_grad():
-                train_coefs_detached    : numpy.ndarray = train_coefs.detach().cpu().numpy();                # Shape = (n_train, n_coefs).
-                max_train_coef          : numpy.float32 = numpy.abs(train_coefs_detached).max();
-                last_train_coefs_detached = train_coefs_detached;
-                last_iter_idx             = int(iter);
+                coef_tensors_report = self.latent_dynamics.trainable_coef_tensors();
+                train_coefs_flat_report = torch.cat([c.reshape(-1) for c in coef_tensors_report]);
+                max_train_coef = float(torch.abs(train_coefs_flat_report).max().item());
+            last_iter_idx = int(iter);
 
 
 
@@ -929,12 +868,9 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
                 if epochs_in_round >= self.warmup_epochs:
                     LOGGER.info("Got a new lowest loss (%f) on epoch %d" % (loss.item(), iter + 1));
                     self._Save_Checkpoint(encoder_decoder = encoder_decoder_device,
-                                          train_coefs     = train_coefs_detached,
-                                          test_coefs      = self.test_coefs,
                                           iter            = int(iter));
                     checkpoint_saved      = True;
 
-                    self.best_train_coefs = train_coefs_detached.copy();
                     self.best_epoch       = int(iter);
                     best_loss             = loss.item();
                 else:
@@ -971,13 +907,10 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
         # Ensure we wrote a checkpoint for this round. If warmup prevented checkpointing, fall
         # back to saving the final epoch of this round.
         if checkpoint_saved == False:
-            assert last_train_coefs_detached is not None and last_iter_idx is not None;
+            assert last_iter_idx is not None;
             LOGGER.warning("No checkpoint saved during this round (likely warmup-only). Saving final epoch checkpoint instead.");
             self._Save_Checkpoint(encoder_decoder = encoder_decoder_device,
-                                  train_coefs     = last_train_coefs_detached,
-                                  test_coefs      = self.test_coefs,
                                   iter            = int(last_iter_idx));
-            self.best_train_coefs = last_train_coefs_detached.copy();
             self.best_epoch       = int(last_iter_idx);
 
         # All done!

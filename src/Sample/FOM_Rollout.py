@@ -6,23 +6,25 @@
 import  os, sys;
 src_path            : str   = os.path.abspath(os.path.dirname(os.path.dirname(__file__)));
 EncoderDecoder_Path : str   = os.path.join(src_path, "EncoderDecoder");
-Utilities_path      : str   = os.path.join(src_path, "Utilities");
+Interpolate_Path    : str   = os.path.join(src_path, "Interpolate");
 Trainer_Path        : str   = os.path.join(src_path, "Trainer");
-sys.path.append(Utilities_path);
+Utilities_path      : str   = os.path.join(src_path, "Utilities");
+sys.path.append(EncoderDecoder_Path);
 sys.path.append(src_path);
 sys.path.append(Trainer_Path);
+sys.path.append(Interpolate_Path);
+sys.path.append(Utilities_path);
 
 
 import  logging;
 
-from    sklearn.gaussian_process    import  GaussianProcessRegressor;
 import  torch;
 import  numpy;
 
 from    Enums                       import  NextStep;  
 from    Trainer                     import  Trainer;
-from    SolveROMs                   import  sample_roms;
-from    GaussianProcess             import  fit_gps;
+from    Rollouts                    import  Sample_Rollouts;
+from    Interpolate                 import  Interpolate;
 from    EncoderDecoder              import  EncoderDecoder;
 from    Sampler                     import  Sampler;
 
@@ -145,10 +147,7 @@ class FOM_Rollout(Sampler):
         trainer.timer.start("new_sample");
         assert len(trainer.U_Test)             >  0,                                    "len(trainer.U_Test) = %d" % len(trainer.U_Test);
         assert len(trainer.U_Test)             == trainer.param_space.n_test(),         "len(trainer.U_Test) = %d, trainer.param_space.n_test() = %d" % (len(trainer.U_Test), trainer.param_space.n_test());
-        assert trainer.best_train_coefs is not None,                                    "best_train_coefs is None (did training run and checkpoint succeed?)";
-        assert trainer.best_train_coefs.shape[0]     == trainer.param_space.n_train(),  "trainer.best_train_coefs.shape[0] = %d, trainer.param_space.n_train() = %d" % (trainer.best_train_coefs.shape[0], trainer.param_space.n_train());
-
-        train_coefs : numpy.ndarray = trainer.best_train_coefs;                     # Shape = (n_train, n_coefs).
+        trainer._check_train_coefficients();
         LOGGER.info('\n~~~~~~~ Finding New Point ~~~~~~~');
 
         # Move the encoder_decoder to the cpu (this is where all the GP stuff happens). Remember 
@@ -193,20 +192,11 @@ class FOM_Rollout(Sampler):
 
 
         # ---------------------------------------------------------------------------------------------
-        # Fit the GPs
+        # Fit an Interpolator
 
-        # Log coefficient statistics before fitting GPs
-        LOGGER.info("Coefficient statistics for GP fitting:");
-        LOGGER.info("  Training parameters shape: %s" % str(trainer.param_space.train_space.shape));
-        LOGGER.info("  Coefficients shape: %s" % str(train_coefs.shape));
-        for coef_idx in range(min(5, train_coefs.shape[1])):  # Log first 5 coefficients
-            coef_vals = train_coefs[:, coef_idx];
-            LOGGER.info("  Coef %d: mean=%.6e, std=%.6e, min=%.6e, max=%.6e, range=%.6e" % (
-                coef_idx, numpy.mean(coef_vals), numpy.std(coef_vals), 
-                numpy.min(coef_vals), numpy.max(coef_vals), numpy.max(coef_vals) - numpy.min(coef_vals)));
-        
-        # Train the GPs on the training data, get one GP per latent space coefficient.
-        gp_list : list[GaussianProcessRegressor] = fit_gps(trainer.param_space.train_space, train_coefs);
+        # Build coefficient interpolator from LD-owned native training coefficients.
+        LOGGER.info("Building coefficient interpolator from %d training coefficient entries" % len(trainer.latent_dynamics.train_coefs));
+        interpolator : Interpolate = Interpolate(trainer.latent_dynamics.train_coefs);
 
 
 
@@ -214,11 +204,11 @@ class FOM_Rollout(Sampler):
         # Generate the latent trajectories.
 
         LOGGER.debug("Sampling roms with %d rollouts per candidate" % self.n_samples);
-        Zis_Samples : list[list[torch.Tensor]] = sample_roms(
+        Zis_Samples : list[list[torch.Tensor]] = Sample_Rollouts(
                                                     encoder_decoder     = encoder_decoder, 
                                                     physics             = trainer.physics,
                                                     latent_dynamics     = trainer.latent_dynamics, 
-                                                    gp_list             = gp_list, 
+                                                    interpolator        = interpolator, 
                                                     param_grid          = candidate_parameters, 
                                                     t_Grid              = t_Candidates, 
                                                     n_samples           = self.n_samples, 

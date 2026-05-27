@@ -15,3 +15,14 @@ checkpoint/*
 results/*
 output.txt
 Figures/*
+venv/*
+venv_mfem/*
+.vscode/settings.json
+dconf/user
+slirp.out
+env_lc.sh
+.codex
+*_stderr.txt
+*_stdout.txt
+*.err
+*.log

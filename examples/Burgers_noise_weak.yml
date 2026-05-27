@@ -29,7 +29,7 @@
 trainer:
   type:                   "Second_Order_Noise_Weak"
 
-  max_iter:               5000
+  max_iter:               2000
   n_iter:                 30000
   max_greedy_iter:        0
 
@@ -40,7 +40,7 @@ trainer:
     lr:                     0.001
     gradient_clip:          50.0
 
-    # Ratio of noise std to signal RMS.  Set to 0.0 to recover noise-free behaviour.
+    # Ratio of noise std to signal RMS.  Set to 0.0 to recover noise-free behavior.
     noise_ratio:            0.05
     
 
@@ -64,6 +64,7 @@ trainer:
       rollout:              0.0
       IC_rollout:           0.0
       coef:                 0.0001
+      stab:                 0.0
       consistency:          1.0       # Weak-form variant: dPhi @ Z_D + Phi @ Z_V ≈ 0 (no FD).
 
     loss_types:
@@ -110,11 +111,9 @@ latent_dynamics:
   type:                     spring_w
   lstsq_reg:                0.0
   spring_w:
-    test_func:              'PC-poly'
+    test_func_type:         'PC-poly'
     test_func_width:        .1
     overlap:                0.8
-    pq:                     8
-    LS_loss_type:           'weak'
 
 physics:
   type:                     BurgersSecondOrder

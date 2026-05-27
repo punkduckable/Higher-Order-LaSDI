@@ -18,8 +18,81 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class Physics:
+    r"""
+    Base interface for full-order physics problems and trajectory generation.
+
+    In the HLaSDI framework, a ROM consists of an EncoderDecoder model and a LatentDynamics 
+    object (acting as the Encoder/Decoder and Latent Dynamics portions of the ROM, respectively). 
+    These are jointly trained via a Trainer object using data from a Physics object. The 
+    LatentDynamics object holds the learnedLatentDynamics coefficients for the training set,
+    while an Interpolate object samples LatentDynamics coefficients for testing parameter 
+    combinations. A Sampler object determines how the model picks which testing example to add
+    to the training set after each round of training.
+
+    A `Physics` subclass wraps the full-order model (FOM) used to generate HLaSDI training and
+    testing data.  It defines the parameterized initial condition, the spatial layout and frame
+    shape expected by the `EncoderDecoder`, and the solver that produces time trajectories for a
+    given parameter vector. 
+
+    The "initial_conditions" method generates the initial conditions for a given parameter value.
+
+    The "solve" method generates a new FOM solution for a specific parameter value.
+
+    
+    -----------------------------------------------------------------------------------------------
+    Class/instance variables
+    -----------------------------------------------------------------------------------------------
+    
+    spatial_dim : int
+        Number of spatial dimensions in the physical problem domain.
+    
+    Frame_Shape : list[int]
+        Shape of one FOM frame passed to the encoder/decoder.  Structured grids may use one entry
+        per spatial axis, and vector-valued fields should put the vector dimension first.
+    
+    X_Positions : numpy.ndarray
+        Spatial coordinates associated with the FOM degrees of freedom.  This is primarily used for
+        plotting/visualization, so concrete subclasses may choose the most convenient layout.
+    
+    config : dict
+        The `physics` configuration dictionary used by the concrete solver.
+    
+    param_names : list[str]
+        Names of the physical/initial-condition parameters represented in each parameter vector.
+    
+    n_p : int
+        Number of scalar parameters, equal to `len(param_names)`.
+    
+    Uniform_t_Grid : bool
+        Whether each solved trajectory uses uniformly spaced time points; downstream latent
+        dynamics use this to choose derivative approximations.
+    
+    n_IC : int
+        Number of state/derivative components required to specify an initial condition and returned
+        in each trajectory.
+
+        
+    -----------------------------------------------------------------------------------------------
+    Subclassing
+    -----------------------------------------------------------------------------------------------
+
+    To add a new FOM, subclass `Physics`, call `super().__init__(...)` with the spatial metadata and
+    configuration, and implement:
+
+    - `initial_condition(param)`: evaluate the parameterized initial condition on the spatial grid
+      and return a list of `n_IC` NumPy arrays, each shaped like `Frame_Shape`.
+    
+    - `solve(param)`: run the full-order solver for one parameter vector and return
+      `(X, t_Grid)`, where `X` is a list of `n_IC` tensors with leading time dimension and
+      `t_Grid` is the corresponding one-dimensional time tensor.
+
+    The inherited `generate_solutions(...)` method batches over parameter rows by repeatedly
+    calling `solve(...)`.  Subclasses may override `export()`/`load()` if they need to serialize
+    additional solver-specific metadata.
+    """
+
     # spatial dimension of the problem domain.
-    spatial_dim :    int;
+    spatial_dim     : int;
     
     # The shape of each frame of a FOM solution to this equation. This is the shape of the objects
     # we will put into our autoencoder. If there is no structure to the spatial positions of the 

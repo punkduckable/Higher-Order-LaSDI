@@ -32,6 +32,81 @@ LOGGER  : logging.Logger    = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class EncoderDecoder(torch.nn.Module):
+    r"""
+    This defines the base class interface for the learned encoder/decoder.
+    
+    In the HLaSDI framework, a ROM consists of an EncoderDecoder model and a LatentDynamics 
+    object (acting as the Encoder/Decoder and Latent Dynamics portions of the ROM, respectively). 
+    These are jointly trained via a Trainer object using data from a Physics object. The 
+    LatentDynamics object holds the learnedLatentDynamics coefficients for the training set,
+    while an Interpolate object samples LatentDynamics coefficients for testing parameter 
+    combinations. A Sampler object determines how the model picks which testing example to add
+    to the training set after each round of training.
+     
+    An EncoderDecoder object defines the encoder and decoder portion of a ROM. The Encoder maps 
+    a snapshot (fixed time) of the FOM state to a low dimensional latent encoding. Likewise, the 
+    decoder learns a mapping from latent encodings to FOM states (ideally acting like the inverse
+    of the Encoder when restricted to the FOM solution manifold). 
+
+    If the governing FOM dynamics involves n_IC time derivatives (n_IC'th order in time), then 
+    a FOM snapshot must consist of the solution and its first n_IC - 1 time derivatives at a 
+    fixed time. EncoderDecoder objects are designed to operate in such situations by learning 
+    a separate encoder-decoder pair for each time derivative of the solution. In general, however, 
+    each encoder-decoder pair will have the same latent space, and their latent encodings are 
+    generally joined by a latent dynamics models that involves all of their encodings.
+
+    EncoderDecoder models natively support multi-stage decoding. Specifically, the decoder is a 
+    weighted combination of n_Decoders sub-models (each which map latent encodings FOM 
+    snapshots). The user can dynamically adjust the weights and change which models are enabled 
+    via the `Set_Decoder_Weight` and `Set_Decoder_Active` methods, respectively. This approach 
+    allows for multi-stage Training methods (mLaSDI style).
+
+    
+
+    -----------------------------------------------------------------------------------------------
+    Class/instance variables
+    -----------------------------------------------------------------------------------------------
+
+    n_IC : int
+        Number of FOM/latent components handled together, often corresponding to the state and the
+        first `n_IC - 1` time derivatives needed by the latent dynamics.
+    
+    n_z : int
+        Latent-space dimension for each component returned by `Encode(...)`.
+    
+    n_Decoders : int
+        Number of decoder stages available to `Decode(...)`.
+    
+    config : dict
+        The `encoder_decoder` configuration dictionary used by the concrete architecture.
+    
+    Decoder_Active : numpy.ndarray, shape = (n_Decoders,)
+        Boolean mask indicating which decoder stages contribute to `Decode(...)`.
+    
+    Decoder_Weight : numpy.ndarray, shape = (n_IC, n_Decoders)
+        Weight applied to each decoder stage for each output component when forming the weighted
+        decoder sum.
+
+        
+        
+    -----------------------------------------------------------------------------------------------
+    Subclassing
+    -----------------------------------------------------------------------------------------------
+    
+    To define a new architecture, subclass `EncoderDecoder`, call `super().__init__(...)`, register
+    any PyTorch modules as normal `torch.nn.Module` attributes, and implement:
+
+    - `Encode(*Xs)`: accept exactly `n_IC` FOM tensors and return a tuple of `n_IC` latent tensors,
+      each typically shaped `(batch, n_z)`.
+    
+    - `Eval_Decoder(i_Decoder, *Zs)`: evaluate one decoder stage on exactly `n_IC` latent tensors
+      and return a tuple of `n_IC` reconstructed FOM tensors.
+
+    The base `Decode(...)` method handles active decoder selection and weighted summation, and
+    `forward(...)` implements encode-then-decode.  Subclasses that store additional non-PyTorch
+    state should extend `export()` and `load()` while preserving the base metadata and decoder
+    active/weight state.
+    """
     # i'th element is True if the i'th decoder is currently active, otherwise False.
     # Defaults to an array whose 0 element is True and whose other elements are False (only the 
     # first decoder is active).
@@ -511,5 +586,4 @@ class EncoderDecoder(torch.nn.Module):
         assert self.n_z         == dict_['n_z'];
         assert self.n_IC        == dict_['n_IC'];
         assert self.n_Decoders  == dict_['n_Decoders'];
-
 
