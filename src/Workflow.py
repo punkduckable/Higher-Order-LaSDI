@@ -133,7 +133,6 @@ def main():
     # ---------------------------------------------------------------------------------------------
 
     # Save!
-    LOGGER.info("Saving results to %s" % restart_filename);
     Save(   param_space         = param_space,
             config              = config,
             physics             = physics,
@@ -737,6 +736,8 @@ def Save(   param_space         : ParameterSpace,
         restart_filename = restart_filename_no_ext + '__' + date_str + '.npy';
     else:
         restart_filename : str = config["physics"]["type"] + '_' + date_str + '.npy';
+    LOGGER.info("Saving results to %s" % restart_filename);
+
     
     # Set up the restart path.
     # Use an absolute results directory under the project root (Higher-Order-LaSDI/results),
