@@ -100,11 +100,11 @@ In general, every `Physics`, `EncoderDecoder`, `Trainer`, and `LatentDynamics` o
 
 - **`src/Workflow.py`** – Main command-line driver that loads configuration files, initializes components, and runs the training pipeline
 - **`src/Trainer/`** - Training algorithms and shared training state for optimizing the encoder/decoder and latent dynamics from FOM data
-    - `Trainer.py` – Base `Trainer` class: normalization helpers, checkpointing, loss logging, timing, and round-based training orchestration
+    - `Trainer.py` – Base `Trainer` class: normalization helpers, optional native noise injection, checkpointing, loss logging, timing, and round-based training orchestration
     - `First_Order_Rollout.py` – `Trainer` subclass for first-order systems (`n_IC = 1`)
+    - `First_Order_Weak.py` – first-order rollout trainer for weak-form latent dynamics
     - `Second_Order_Rollout.py` – `Trainer` subclass for second-order systems (`n_IC = 2`)
-    - `Second_Order_Noise.py` – Similar to `Second_Order_Rollout` but can add noise to the data
-    - `Second_Order_Noise_Weak.py` – Similar to `Second_Order_Noise`, but intended for weak-form latent dynamics
+    - `Second_Order_Weak.py` – second-order rollout trainer for weak-form latent dynamics
 - **`src/Initialize.py`** – Factory functions for initializing trainers, EncoderDecoders, physics solvers, and latent dynamics from config files. You must register all new sub-classes in this file.
 - **`src/EncoderDecoder`** – Neural network architectures:
   - `EncoderDecoder.py`: Base `EncoderDecoder` class.
@@ -274,13 +274,18 @@ class; n_IC and type need to match for this to work.
 Configuration files are YAML-based and specify:
 
 ### Trainer Settings (`trainer`)
-- `trainer.type` selects the concrete `Trainer` subclass to use (e.g., `First_Order_Rollout`, `Second_Order_Rollout`, `Second_Order_Noise`, `Second_Order_Noise_Weak`).
+- `trainer.type` selects the concrete `Trainer` subclass to use (e.g., `First_Order_Rollout`, `First_Order_Weak`, `Second_Order_Rollout`, `Second_Order_Weak`).
 - Round scheduling / greedy sampling limits:
   - `trainer.n_iter`, `trainer.max_iter`, `trainer.max_greedy_iter`
 - Normalization:
   - `trainer.normalize` (if enabled, the library computes global mean/std and normalizes train/test data)
 - Device placement:
   - `trainer.device` (optional; `"cpu"` by default)
+- Optional native noise:
+  - `trainer.noise_ratio` (optional; `0.0` by default) adds Gaussian noise to training trajectories before each training round with `sigma = noise_ratio * signal_RMS`.
+  - Noise is applied to the stored training data (`U_Train`); if `normalize: true`, this means noise is applied in normalized units.
+  - `Trainer.U_Train_Clean` stores the clean backup and is used to re-sample noise each round and when new greedy samples are added.
+  - The first frame of each training trajectory component is restored from `U_Train_Clean`, preserving exact initial conditions.
 - Coefficients:
   - Before each training round, it checks that every training parameter has native coefficients in
     `latent_dynamics.train_coefs`.
@@ -340,7 +345,7 @@ Create a new file under `src/Trainer/`, for example `src/Trainer/MyTrainer.py`, 
 - `__init__(...)`, which calls `super().__init__(...)` and parses any subclass-specific config
 - `Iterate(start_iter, end_iter)` (the actual per-epoch training logic)
 
-Follow the existing trainers (`First_Order_Rollout`, `Second_Order_Rollout`, `Second_Order_Noise`, `Second_Order_Noise_Weak`) as templates. In particular, your
+Follow the existing trainers (`First_Order_Rollout`, `First_Order_Weak`, `Second_Order_Rollout`, `Second_Order_Weak`) as templates. In particular, your
 `Iterate(...)` method should:
 
 - Log losses via `_store_loss_by_param(...)` / `_store_total_loss(...)`
@@ -363,9 +368,9 @@ from MyTrainer import MyTrainer
 ```python
 trainer_dict = {
     'First_Order_Rollout'      : First_Order_Rollout,
+    'First_Order_Weak'         : First_Order_Weak,
     'Second_Order_Rollout'     : Second_Order_Rollout,
-    'Second_Order_Noise'       : Second_Order_Noise,
-    'Second_Order_Noise_Weak'  : Second_Order_Noise_Weak,
+    'Second_Order_Weak'        : Second_Order_Weak,
     'MyTrainer'  : MyTrainer,
 }
 ```

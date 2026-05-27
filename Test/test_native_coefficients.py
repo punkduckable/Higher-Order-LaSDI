@@ -344,3 +344,32 @@ def test_get_uniform_grid_no_p_argument():
 
     assert numpy.allclose(a_s, numpy.array([0.0, 0.25, 0.5]))
     assert numpy.allclose(b_s, numpy.array([0.5, 0.75, 1.0]))
+
+from Trainer import Trainer
+
+
+def test_base_trainer_noise_uses_clean_backup_and_preserves_initial_frame():
+    trainer = Trainer.__new__(Trainer)
+    trainer.noise_ratio = 0.2
+    clean = torch.arange(12, dtype=torch.float32).reshape(4, 3)
+    trainer.U_Train = [[clean.clone()]]
+    trainer.U_Train_Clean = []
+
+    torch.manual_seed(0)
+    trainer.apply_noise_to_U_Train()
+
+    assert len(trainer.U_Train_Clean) == 1
+    assert torch.allclose(trainer.U_Train_Clean[0][0], clean)
+    assert trainer.U_Train[0][0].shape == clean.shape
+    assert trainer.U_Train[0][0].dtype == clean.dtype
+    assert trainer.U_Train[0][0].device == clean.device
+    assert torch.allclose(trainer.U_Train[0][0][0], clean[0])
+    assert not torch.allclose(trainer.U_Train[0][0][1:], clean[1:])
+
+    # Re-noising should use U_Train_Clean, not add noise on top of the current U_Train contents.
+    trainer.U_Train[0][0].fill_(999.0)
+    torch.manual_seed(1)
+    trainer.apply_noise_to_U_Train()
+    assert torch.allclose(trainer.U_Train_Clean[0][0], clean)
+    assert torch.allclose(trainer.U_Train[0][0][0], clean[0])
+    assert not torch.allclose(trainer.U_Train[0][0], torch.full_like(clean, 999.0))

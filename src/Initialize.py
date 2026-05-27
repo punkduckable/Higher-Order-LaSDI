@@ -36,9 +36,9 @@ from    ParameterSpace          import  ParameterSpace;
 
 from    Trainer                 import  Trainer;
 from    First_Order_Rollout     import  First_Order_Rollout;
+from    First_Order_Weak        import  First_Order_Weak;
 from    Second_Order_Rollout    import  Second_Order_Rollout;
-from    Second_Order_Noise      import  Second_Order_Noise;
-from    Second_Order_Noise_Weak import  Second_Order_Noise_Weak;
+from    Second_Order_Weak       import  Second_Order_Weak;
 
 
 from    EncoderDecoder          import  EncoderDecoder;
@@ -91,10 +91,10 @@ ld_dict = {                     'sindy'                     : SINDy,
                                 'switch'                    : SwitchSINDy,
                                 'switch_w'                  : SwitchSINDy_weak};
 
-trainer_dict = {                'First_Order_Rollout'       : First_Order_Rollout, 
+trainer_dict = {                'First_Order_Rollout'       : First_Order_Rollout,
+                                'First_Order_Weak'          : First_Order_Weak,
                                 'Second_Order_Rollout'      : Second_Order_Rollout,
-                                'Second_Order_Noise'        : Second_Order_Noise,
-                                'Second_Order_Noise_Weak'   : Second_Order_Noise_Weak};
+                                'Second_Order_Weak'         : Second_Order_Weak};
 
 sampler_dict = {                'FOM_Rollout'               : FOM_Rollout,
                                 'FOM_Variance'              : FOM_Variance};
