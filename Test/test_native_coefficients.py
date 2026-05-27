@@ -102,6 +102,8 @@ def test_interpolate_rejects_non_tensor_values():
 
 from DampedSpring import DampedSpring
 from DampedSpring_weak import DampedSpring_weak
+from SINDy_weak import SINDy_weak
+from SwitchSINDy_weak import SwitchSINDy_weak
 from FiniteDifference import Derivative1_Order4
 
 
@@ -231,6 +233,109 @@ def test_damped_spring_weak_fit_zero_initializes_and_calibrate_requires_weights(
 
     with pytest.raises(KeyError):
         ld.calibrate([[z, dz]], "MSE", [t], params)
+
+
+def test_sindy_weak_fit_zero_initializes_and_calibrate_requires_weights():
+    config = {
+        "type": "sindy_w",
+        "sindy_w": {
+            "test_func_type": "PC-poly",
+            "test_func_width": 0.5,
+            "overlap": 0.5,
+        },
+    }
+    ld = SINDy_weak(n_z=1, Uniform_t_Grid=True, config=config)
+    t = torch.linspace(0.0, 1.0, 9)
+    z = torch.sin(t).reshape(-1, 1)
+    params = numpy.array([[0.25]])
+
+    out = ld.fit_coefficients([[z]], [t], params)
+    coefs = ld.get_train_coefs(params[0])
+
+    assert out is None
+    assert set(coefs.keys()) == {"A", "b"}
+    assert torch.allclose(coefs["A"], torch.zeros(1, 1))
+    assert torch.allclose(coefs["b"], torch.zeros(1))
+    assert all(tensor.requires_grad and tensor.is_leaf for tensor in coefs.values())
+    assert ld.trainable_coef_tensors() == [coefs["A"], coefs["b"]]
+
+    with pytest.raises(KeyError):
+        ld.calibrate([[z]], "MSE", [t], params)
+
+
+def test_sindy_weak_calibrate_with_weight_functions_returns_losses():
+    config = {
+        "type": "sindy_w",
+        "sindy_w": {
+            "test_func_type": "PC-poly",
+            "test_func_width": 0.5,
+            "overlap": 0.5,
+        },
+    }
+    ld = SINDy_weak(n_z=1, Uniform_t_Grid=True, config=config)
+    t = torch.linspace(0.0, 1.0, 9)
+    z = torch.sin(t).reshape(-1, 1)
+    params = numpy.array([[0.25]])
+
+    ld.add_weight_functions(params[0], t)
+    ld.fit_coefficients([[z]], [t], params)
+    loss_LD_list, loss_coef_list, loss_stab_list = ld.calibrate([[z]], "MSE", [t], params)
+
+    assert len(loss_LD_list) == 1
+    assert len(loss_coef_list) == 1
+    assert len(loss_stab_list) == 1
+    assert all(loss.ndim == 0 for loss in loss_LD_list + loss_coef_list + loss_stab_list)
+
+
+def test_switch_sindy_weak_fit_zero_initializes_native_names():
+    config = {
+        "type": "switch_w",
+        "switch_w": {
+            "test_func_type": "PC-poly",
+            "test_func_width": 0.5,
+            "overlap": 0.5,
+        },
+    }
+    ld = SwitchSINDy_weak(n_z=1, Uniform_t_Grid=True, switch_time=lambda p: 0.5, config=config)
+    t = torch.linspace(0.0, 1.0, 9)
+    z = torch.sin(t).reshape(-1, 1)
+    params = numpy.array([[0.25]])
+
+    out = ld.fit_coefficients([[z]], [t], params)
+    coefs = ld.get_train_coefs(params[0])
+
+    assert out is None
+    assert set(coefs.keys()) == {"A_before", "b_before", "A_after", "b_after"}
+    assert torch.allclose(coefs["A_before"], torch.zeros(1, 1))
+    assert torch.allclose(coefs["b_before"], torch.zeros(1))
+    assert torch.allclose(coefs["A_after"], torch.zeros(1, 1))
+    assert torch.allclose(coefs["b_after"], torch.zeros(1))
+    assert all(tensor.requires_grad and tensor.is_leaf for tensor in coefs.values())
+
+
+def test_switch_sindy_weak_simulate_returns_first_order_trajectory_shape():
+    config = {
+        "type": "switch_w",
+        "switch_w": {
+            "test_func_type": "PC-poly",
+            "test_func_width": 0.5,
+            "overlap": 0.5,
+        },
+    }
+    ld = SwitchSINDy_weak(n_z=1, Uniform_t_Grid=True, switch_time=lambda p: 0.5, config=config)
+    coefs = {
+        "A_before": torch.zeros(1, 1),
+        "b_before": torch.ones(1),
+        "A_after": torch.zeros(1, 1),
+        "b_after": torch.zeros(1),
+    }
+    Z0 = torch.zeros(1, 1)
+    t = torch.linspace(0.0, 1.0, 5)
+    params = numpy.array([[0.25]])
+
+    Z = ld.simulate(coefs=coefs, IC=[[Z0]], t_Grid=[t], params=params)[0][0]
+
+    assert Z.shape == (5, 1, 1)
 
 
 def test_get_uniform_grid_no_p_argument():

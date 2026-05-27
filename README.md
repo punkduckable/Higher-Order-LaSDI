@@ -161,10 +161,16 @@ In general, every `Physics`, `EncoderDecoder`, `Trainer`, and `LatentDynamics` o
 - **`src/LatentDynamics/SINDy.py`** – Sparse Identification of Nonlinear Dynamics
   - Uses polynomial library (currently order ≤ 1)
   - Stores native coefficient dictionaries of the form `{"A": A, "b": b}`
+- **`src/LatentDynamics/SINDy_weak.py`** – Weak-form affine SINDy dynamics
+  - Select with `latent_dynamics.type: sindy_w`
+  - Stores native coefficient dictionaries of the form `{"A": A, "b": b}`
 - **`src/LatentDynamics/DampedSpring.py`** – Physics-informed damped spring dynamics
   - Stores native coefficient dictionaries of the form `{"K": K, "C": C, "b": b}`
 - **`src/LatentDynamics/DampedSpring_weak.py`** – Weak-form damped-spring dynamics with the same native `K`, `C`, and `b` coefficient names
 - **`src/LatentDynamics/SwitchSINDy.py`** – Switching affine SINDy dynamics with native `A_before`, `b_before`, `A_after`, and `b_after` coefficients
+- **`src/LatentDynamics/SwitchSINDy_weak.py`** – Weak-form switching affine SINDy dynamics
+  - Select with `latent_dynamics.type: switch_w`
+  - Stores native coefficient dictionaries of the form `{"A_before": A_before, "b_before": b_before, "A_after": A_after, "b_after": b_after}`
 
 
 #### Latent-dynamics coefficient ownership
@@ -189,8 +195,14 @@ coefficient tensors for the selected latent-dynamics model. For example:
 # SINDy: z' = A z + b
 {(0.1, 1.0): {"A": A, "b": b}}
 
+# SINDy_weak: same native coefficients as SINDy, weak-form calibration
+{(0.1, 1.0): {"A": A, "b": b}}
+
 # DampedSpring / DampedSpring_weak: z'' = K z + C z' + b
 {(0.1, 1.0): {"K": K, "C": C, "b": b}}
+
+# SwitchSINDy / SwitchSINDy_weak: before/after affine systems
+{(0.1, 1.0): {"A_before": A_before, "b_before": b_before, "A_after": A_after, "b_after": b_after}}
 ```
 
 The base class provides:
