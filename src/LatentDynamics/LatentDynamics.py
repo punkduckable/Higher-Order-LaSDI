@@ -106,7 +106,14 @@ class LatentDynamics:
       the `Trainer` can optimize them jointly with the encoder/decoder.
     
     - `calibrate(Latent_States, loss_type, t_Grid, params=None)`: compute latent-dynamics residual
-      losses and coefficient/stability regularization for the current coefficients.
+      losses and coefficient/stability regularization for the current coefficients. This should 
+      return three losses: The LD loss, coefficient loss, and stability loss. The user has some 
+      leeway in terms of what these losses actually do, though the LD loss should roughly indicate
+      how well the latent states satisfy the corresponding latent dynamics, the coefficient loss 
+      should be some norm of some portion of the coefficients, and the stability loss should 
+      somehow indicate how stable the latent dynamics are for a particular training parameter. The 
+      user has some leeway here, so feel free to use these losses as appropriate for your sub-class.
+
     
     - `simulate(coefs, IC, t_Grid, params=None)`: integrate the latent ODE from one or more latent
       initial conditions and return latent trajectories in the expected `n_IC`-component format.
@@ -227,6 +234,10 @@ class LatentDynamics:
 
 
 
+    # ---------------------------------------------------------------------------------------------
+    # Fit Coefficients (compute initial coefficients for a particular training parameter).
+    # ---------------------------------------------------------------------------------------------
+
     def fit_coefficients(self,
                          Latent_States   : list[list[torch.Tensor]],
                          t_Grid          : list[torch.Tensor],
@@ -273,6 +284,10 @@ class LatentDynamics:
         raise RuntimeError("Abstract function LatentDynamics.fit_coefficients!");
     
 
+    
+    # ---------------------------------------------------------------------------------------------
+    # Weak form methods
+    # ---------------------------------------------------------------------------------------------
 
     @staticmethod
     def _param_key(params_row : numpy.ndarray | torch.Tensor | list | tuple) -> tuple[float, ...]:
@@ -517,6 +532,10 @@ class LatentDynamics:
 
 
 
+    # ---------------------------------------------------------------------------------------------
+    # Methods to get/set training coefficients
+    # ---------------------------------------------------------------------------------------------
+
     def get_train_coefs(self, params_row : numpy.ndarray | torch.Tensor | list | tuple) -> dict[str, torch.Tensor]:
         r"""
         Fetch the native coefficient dictionary for one parameter combination.
@@ -674,6 +693,10 @@ class LatentDynamics:
 
 
 
+    # ---------------------------------------------------------------------------------------------
+    # Stability penalty method for computing stability losses
+    # ---------------------------------------------------------------------------------------------
+
     @staticmethod
     def stability_penalty(A: torch.Tensor, margin : float = 0.1) -> torch.Tensor:
         """
@@ -699,6 +722,11 @@ class LatentDynamics:
 
 
 
+
+    # ---------------------------------------------------------------------------------------------
+    # Calibrate: Compute losses for a particular set of training parameter values.
+    # ---------------------------------------------------------------------------------------------
+    
     def calibrate(  self, 
                     Latent_States   : list[list[torch.Tensor]], 
                     loss_type       : str,
@@ -754,19 +782,48 @@ class LatentDynamics:
 
         loss_coef : list[torch.Tensor], len = n_para
             The i'th element of this list is a 0-dimensional tensor whose lone element holds the
-            coefficient loss (Frobenius norm) of the coefficients for the i'th combination 
-            of parameter values.      
+            coefficient loss (some norm) of some subset of the coefficients for the i'th 
+            combination of parameter values.      
             
         loss_stab : list[torch.Tensor], len = n_param
             The i'th element of this list is a 0-dimensional tensor whose lone element holds the
-            coefficient regularization term for the i'th combination of parameter values. In the
-            current codebase this is a *stability penalty* on the learned linear dynamics matrix
-            (see LatentDynamics.stability_penalty).
+            coefficient regularization term for the i'th combination of parameter values. This is
+            generally the largest eigenvalue of the symmetric part of some matrix (see 
+            LatentDynamics.stability_penalty).
+        
+            
+        -------------------------------------------------------------------------------------------
+        What should the losses actually represent? 
+        -------------------------------------------------------------------------------------------
+        
+        The user actually has some leeway here. 
+        
+        Roughly speaking, the LD loss should quantify how well the time series of latent states 
+        satisfy the  corresponding latent dynamics (often the mean difference between the left and 
+        right hand side of the dynamical system evaluated at each time step in the time series).
+        
+        The coefficient loss should be some norm of some subset of the coefficients for a particular 
+        training parameter.
+        
+        The stability loss should somehow quantify if the dynamics for a particular training 
+        parameter are stable or not. For instance, in the SINDy LD class, the stability loss is 
+        the largest eigenvalue of the symmetric part of the system matrix, since this eigenvalue 
+        determines the rate of change of the magnitude of the latent state. 
+        
+        However, the authors of HLaSDI are aware that everyone's needs are different, and some sub 
+        classes may have different uses for each loss. Just be aware that trainers generally expect 
+        the three losses to fit into the descriptions above (though this is not prescriptive; no 
+        trainer will actually check that the LD loss is the difference between the LHS and RHS of 
+        some LD model, for instance).
         """
 
         raise RuntimeError('Abstract function LatentDynamics.calibrate!');
     
 
+
+    # ---------------------------------------------------------------------------------------------
+    # Simulate: Solve the latent dynamics for a specific set of training parameters.
+    # ---------------------------------------------------------------------------------------------
 
     def simulate(   self,
                     coefs   : numpy.ndarray             | torch.Tensor, 
@@ -827,6 +884,10 @@ class LatentDynamics:
         raise RuntimeError('Abstract function LatentDynamics.simulate!');
     
 
+
+    # ---------------------------------------------------------------------------------------------
+    # Serialization methods
+    # ---------------------------------------------------------------------------------------------
 
     def export(self) -> dict:
         r"""

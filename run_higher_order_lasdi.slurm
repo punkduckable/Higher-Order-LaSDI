@@ -16,6 +16,7 @@
 #SBATCH --ntasks=1
 #SBATCH --account=iffmodel
 #SBATCH --exclusive
+#SBATCH --mail-type=all
 #SBATCH --cpus-per-task=1
 #SBATCH --time=00:30:00
 #
