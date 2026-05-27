@@ -31,8 +31,7 @@ class SwitchSINDy(LatentDynamics):
                     n_z             : int,
                     Uniform_t_Grid  : bool, 
                     switch_time     : callable,
-                    config          : dict,
-                    lstsq_reg       : float = 1.0) -> None:
+                    config          : dict) -> None:
         r"""
         Initializes a SwitchSINDy object.
 
@@ -64,10 +63,6 @@ class SwitchSINDy(LatentDynamics):
         config : dict
             The latent-dynamics configuration dictionary. The optional `lstsq_reg` value controls
             ridge regularization when fitting before/after coefficient matrices.
-
-        lstsq_reg : float
-            Kept for compatibility with the previous constructor signature; the config value takes
-            precedence when present.
 
 
         -------------------------------------------------------------------------------------------
