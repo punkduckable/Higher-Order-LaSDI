@@ -64,9 +64,10 @@ class First_Order_Rollout(Trainer):
         This trainer follows the standard Higher-Order-LaSDI convention:
 
         - `config['trainer']` contains base trainer settings such as `n_iter`, `max_iter`,
-          `max_greedy_iter`, `normalize`, and `device`.
-        - Subclass-specific hyperparameters live under `config['trainer']['First_Order_Rollout']`
-          (learning rate, rollout curriculum settings, and loss weights/types).
+          `max_greedy_iter`, `normalize`, `device`, and optional `noise_ratio`.
+        - Trainer-specific hyperparameters live under `config['trainer'][config['trainer']['type']]`
+          (learning rate, rollout curriculum settings, and loss weights/types). This lets weak
+          subclasses reuse this initializer without duplicating rollout setup.
 
         **Coefficient semantics**
 
@@ -119,14 +120,14 @@ class First_Order_Rollout(Trainer):
 
         assert 'trainer' in config,                                 "config must contain a 'trainer' sub-dictionary";
         assert 'type' in config['trainer'],                         "trainer dictionary must contain a 'type' attribute";
-        assert config['trainer']['type'] == "First_Order_Rollout",  "config['trainer']['type'] = %s, should be First_Order_Rollout" % config['trainer']['type'];
-        assert "First_Order_Rollout" in config['trainer'],          "First_Order_Rollout must be in config['trainer']";
+        trainer_type : str = config['trainer']['type'];
+        assert trainer_type in config['trainer'], "%s must be in config['trainer']" % trainer_type;
 
-        LOGGER.info("Initializing a First_Order_Rollout object"); 
+        LOGGER.info("Initializing a %s object with First_Order_Rollout setup" % trainer_type); 
 
         # Fetch the trainer sub-dictionary.
         trainer_config          : dict      = config['trainer'];
-        sub_config              : dict      = trainer_config['First_Order_Rollout'];
+        sub_config              : dict      = trainer_config[trainer_type];
 
         # Call the super class initializer.
         super().__init__(   n_IC            = n_IC,
@@ -155,7 +156,7 @@ class First_Order_Rollout(Trainer):
         # Randomly select `n_rollouts` rollable start frames per training trajectory per epoch,
         # rollout each one using the *true* absolute-time grid slice t[k:j], and compare full
         # predicted trajectories against the true trajectory slice (no interpolation).
-        assert 'n_rollouts' in sub_config, "First_Order_Rollout config must include `n_rollouts` (int > 0) for rollout supervision";
+        assert 'n_rollouts' in sub_config, "%s config must include `n_rollouts` (int > 0) for rollout supervision" % trainer_type;
         self.n_rollouts             : int       = int(sub_config['n_rollouts']);
         assert self.n_rollouts > 0, "trainer.n_rollouts must be > 0";
         

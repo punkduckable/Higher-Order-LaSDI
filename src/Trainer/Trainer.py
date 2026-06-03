@@ -53,6 +53,15 @@ class Trainer:
     U_Train : list[list[torch.Tensor]]
         Training trajectories.  The outer index selects a parameter point; the inner index selects
         one of the `n_IC` state/derivative components; each tensor has a leading time dimension.
+        If `noise_ratio > 0`, these trajectories are corrupted in-place before each training
+        round. If normalization is enabled, noise is added to the normalized training data.
+    U_Train_Clean : list[list[torch.Tensor]]
+        Deep copy of `U_Train` before noise is applied. This is the authoritative clean backup
+        used to re-sample noisy training data each round and when new greedy samples are added.
+    noise_ratio : float
+        Ratio of Gaussian noise standard deviation to signal RMS. Defaults to `0.0` (disabled).
+        The first frame of each trajectory component is restored from `U_Train_Clean` after noise
+        injection, so initial conditions remain exact.
     t_Train : list[torch.Tensor]
         Time grids corresponding to `U_Train`.
     U_Test : list[list[torch.Tensor]]
@@ -107,6 +116,13 @@ class Trainer:
     # derivative of the FOM solution when we use the i'th combination of training values. 
     # NOTE: these are initialized as instance variables in __init__ (do not share across instances).
     U_Train : list[list[torch.Tensor]];
+
+    # A deep-copy of U_Train without any noise. If noise_ratio > 0, U_Train is re-noised from this
+    # clean backup before each training round. It has the same nested shape as U_Train.
+    U_Train_Clean : list[list[torch.Tensor]];
+
+    # How much noise we add to the data.
+    noise_ratio : float;
 
     # An n_Train element list whose i'th element is a torch.Tensor of shape (n_t(i)) whose j'th
     # element holds the time value for the j'th frame when we use the i'th combination of training 
@@ -233,6 +249,7 @@ class Trainer:
 
             Optional keys:
                 - device   (defaults to "cpu")
+                - noise_ratio (defaults to 0.0; Gaussian noise std / signal RMS)
 
         
         -------------------------------------------------------------------------------------------
@@ -258,6 +275,7 @@ class Trainer:
 
         # Initialize datasets (instance variables; do NOT share across instances).
         self.U_Train                        = [];
+        self.U_Train_Clean                  = [];
         self.t_Train                        = [];
         self.U_Test                         = [];
         self.t_Test                         = [];
@@ -270,6 +288,12 @@ class Trainer:
         self.max_iter               : int   = trainer_config['max_iter'];           # We stop training if restart_iter goes above this number. 
         self.max_greedy_iter        : int   = trainer_config['max_greedy_iter'];    # We stop performing greedy sampling if restart_iter goes above this number.
         device                      : str   = trainer_config.get('device', 'cpu');  # The device we want to map the trainer and its attributes to (and where we will perform training).
+        self.noise_ratio            : float = float(trainer_config.get('noise_ratio', 0.0));
+        assert self.noise_ratio >= 0.0, "trainer.noise_ratio must be non-negative";
+        if self.noise_ratio > 0.0:
+            LOGGER.info("Noise injection enabled: noise_ratio = %f" % self.noise_ratio);
+        else:
+            LOGGER.info("Noise injection disabled (noise_ratio = 0.0)");
 
         # Optional normalization (training-only stats).
         # If enabled, we compute a single mean/std across ALL training trajectories (per IC),
@@ -308,6 +332,87 @@ class Trainer:
         # All done!
         return;
 
+
+
+
+    # ---------------------------------------------------------------------------------------------
+    # Methods to add noise
+    # ---------------------------------------------------------------------------------------------
+
+    @staticmethod
+    def addNoise(x : torch.Tensor, noise_ratio : float) -> torch.Tensor:
+        """
+        Add Gaussian noise to a tensor, scaled by the signal's RMS power.
+
+        sigma = noise_ratio * sqrt(mean(x^2))
+        noise ~ N(0, sigma)
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        x : torch.Tensor
+            The clean signal to corrupt.
+
+        noise_ratio : float
+            The ratio of the noise standard deviation to the signal RMS.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        x_noisy : torch.Tensor
+            The corrupted signal (same shape and dtype as x).
+        """
+
+        if noise_ratio <= 0.0:
+            return x;
+        
+        signal_power    : float         = float(torch.sqrt(torch.mean(x**2)).item());
+        sigma           : float         = noise_ratio * signal_power;
+        noise           : torch.Tensor  = torch.normal(mean = 0.0, std = sigma, size = x.shape).to(dtype = x.dtype, device = x.device);
+        return x + noise;
+
+
+
+    def apply_noise_to_U_Train(self) -> None:
+        """
+        Apply Gaussian noise to the current training data (self.U_Train).
+
+        Before corrupting the data, a deep copy of the clean training data is saved in
+        self.U_Train_Clean so that noise-free references remain available. Repeated calls
+        re-sample noise from this clean backup rather than adding noise on top of existing noisy
+        data. Note that the first frame (IC) of every trajectory component is restored from the
+        clean data because we assume perfect initial conditions.
+        """
+
+        if self.noise_ratio <= 0.0:
+            return;
+
+        LOGGER.info("Applying noise (ratio = %f) to %d training trajectories" % (self.noise_ratio, len(self.U_Train)));
+
+        # Deep-copy clean data before corruption. Notably, if U_Train is longer than
+        # U_Train_Clean, then the extra elements of U_Train were added by the sampler and do not
+        # yet have any noise; we need to back them up in U_Train_Clean.
+        for i in range( len(self.U_Train_Clean), len(self.U_Train) ):
+            self.U_Train_Clean.append([u.clone() for u in self.U_Train[i]]);
+
+        # Corrupt each trajectory, each IC derivative, but preserve the first frame (IC).
+        for i in range(len(self.U_Train)):
+            for j in range(len(self.U_Train[i])):
+                clean_IC    : torch.Tensor  = self.U_Train_Clean[i][j][0:1, ...].clone();     # shape (1, ...)
+                noisy_data  : torch.Tensor  = self.addNoise(self.U_Train_Clean[i][j].clone(), self.noise_ratio);
+                noisy_data[0:1, ...]        = clean_IC;                                  # restore perfect IC
+                self.U_Train[i][j]          = noisy_data;
+                
+                LOGGER.debug("  Trajectory %d, IC %d: signal_rms = %.6e, noise_std = %.6e" % (
+                    i, j,
+                    float(torch.sqrt(torch.mean(self.U_Train_Clean[i][j]**2)).item()),
+                    float(self.noise_ratio * torch.sqrt(torch.mean(self.U_Train_Clean[i][j]**2)).item())));
+
+        LOGGER.info("Noise injection complete. Clean data saved in U_Train_Clean.");
+        return;
 
 
 
@@ -752,6 +857,13 @@ class Trainer:
         assert len(self.U_Train) > 0, "len(self.U_Train) = %d" % len(self.U_Train);
         assert len(self.U_Train) == self.param_space.n_train(), "len(self.U_Train) = %d, self.param_space.n_train() = %d" % (len(self.U_Train), self.param_space.n_train());
 
+        # Apply optional base-Trainer noise before subclasses build device copies or rollout
+        # targets. This keeps all training losses for this round consistent with the same noisy
+        # data. New greedy samples are clean when appended, so this call also backs them up in
+        # U_Train_Clean before corruption.
+        if self.noise_ratio > 0.0:
+            self.apply_noise_to_U_Train();
+
         # Make sure the checkpoints and results directories exist.
         from pathlib import Path
         Path(self.path_checkpoint).mkdir(   parents = True, exist_ok = True);
@@ -855,7 +967,9 @@ class Trainer:
             self.
         """
 
-        dict_ = {'U_Train'                  : self.U_Train, 
+        dict_ = {'U_Train'                  : self.U_Train,
+                 'U_Train_Clean'            : self.U_Train_Clean,
+                 'noise_ratio'              : self.noise_ratio,
                  'U_Test'                   : self.U_Test,
                  't_Train'                  : self.t_Train,
                  't_Test'                   : self.t_Test,
@@ -894,6 +1008,8 @@ class Trainer:
 
         # Extract instance variables from dict_.
         self.U_Train            : list[list[torch.Tensor]]  = dict_['U_Train'];             # len = n_train, i'th element is an n_IC element list.  
+        self.U_Train_Clean      : list[list[torch.Tensor]]  = dict_['U_Train_Clean'];       # len = n_train, i'th element is an n_IC element list.  
+        self.noise_ratio        : float                     = float(dict_['noise_ratio']);
         self.U_Test             : list[list[torch.Tensor]]  = dict_['U_Test'];              # len = n_test, i'th element is an n_IC element list.
 
         self.t_Train            : list[torch.Tensor]        = dict_['t_Train'];             # len = n_train.

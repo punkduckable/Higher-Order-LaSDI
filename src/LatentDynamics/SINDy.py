@@ -30,8 +30,7 @@ class SINDy(LatentDynamics):
     def __init__(   self, 
                     n_z             : int,
                     Uniform_t_Grid  : bool,
-                    config          : dict,
-                    lstsq_reg       : float = 1.0) -> None:
+                    config          : dict) -> None:
         r"""
         Initializes a SINDy latent-dynamics object.
 
@@ -63,10 +62,6 @@ class SINDy(LatentDynamics):
             ridge regularization used by `fit_coefficients(...)` when initializing coefficients
             from encoded trajectories.
 
-        lstsq_reg : float
-            Kept for compatibility with the previous constructor signature; the config value takes
-            precedence when present.
-
 
         -------------------------------------------------------------------------------------------
         Returns
@@ -80,7 +75,8 @@ class SINDy(LatentDynamics):
                          n_coefs        = n_z*(n_z + 1), 
                          n_IC           = 1, 
                          Uniform_t_Grid = Uniform_t_Grid,
-                         config         = config);
+                         config         = config,
+                         type           = "strong");
         
         # Set up class-specific variables.
         self.lstsq_reg : float = config.get("lstsq_reg", 1.0);

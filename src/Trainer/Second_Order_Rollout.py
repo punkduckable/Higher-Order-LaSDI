@@ -65,9 +65,10 @@ class Second_Order_Rollout(Trainer):
         **Configuration format**
 
         - `config['trainer']` contains base trainer settings such as `n_iter`, `max_iter`,
-          `max_greedy_iter`, `normalize`, and `device`.
-        - Subclass-specific hyperparameters live under `config['trainer']['Second_Order_Rollout']`
-          (learning rate, rollout curriculum settings, and loss weights/types).
+          `max_greedy_iter`, `normalize`, `device`, and optional `noise_ratio`.
+        - Trainer-specific hyperparameters live under `config['trainer'][config['trainer']['type']]`
+          (learning rate, rollout curriculum settings, and loss weights/types). This lets weak
+          subclasses reuse this initializer without duplicating rollout setup.
 
         **Coefficient semantics**
 
@@ -120,14 +121,14 @@ class Second_Order_Rollout(Trainer):
 
         assert 'trainer' in config,                                 "config must contain a 'trainer' sub-dictionary";
         assert 'type' in config['trainer'],                         "trainer dictionary must contain a 'type' attribute";
-        assert config['trainer']['type'] == "Second_Order_Rollout", "config['trainer']['type'] = %s, should be Second_Order_Rollout" % config['trainer']['type'];
-        assert "Second_Order_Rollout" in config['trainer'],         "Second_Order_Rollout must be in config['trainer']";
+        trainer_type : str = config['trainer']['type'];
+        assert trainer_type in config['trainer'], "%s must be in config['trainer']" % trainer_type;
 
-        LOGGER.info("Initializing a Second_Order_Rollout object"); 
+        LOGGER.info("Initializing a %s object with Second_Order_Rollout setup" % trainer_type); 
 
         # Fetch the trainer sub-dictionary.
         trainer_config          : dict      = config['trainer'];
-        sub_config              : dict      = trainer_config['Second_Order_Rollout'];
+        sub_config              : dict      = trainer_config[trainer_type];
 
         # Call the super class initializer.
         super().__init__(   n_IC            = n_IC,
@@ -150,13 +151,12 @@ class Second_Order_Rollout(Trainer):
         self.dp_per_update          : float     = float(sub_config.get('dp_per_update', 0.005));    # We increase p_rollout by this much each time we increase it.
         self.max_p_rollout          : float     = float(sub_config.get('max_p_rollout', 0.75));     # Maximum value p_rollout is allowed to reach (curriculum ceiling for the frame rollout loss).
 
-
         # Rollout supervision (frame-rollout mode; safe for non-autonomous latent dynamics):
         #
         # Randomly select `n_rollouts` rollable start frames per training trajectory per epoch,
         # rollout each one using the *true* absolute-time grid slice t[k:j], and compare full
         # predicted trajectories against the true trajectory slice (no interpolation).
-        assert 'n_rollouts' in sub_config, "Second_Order_Rollout config must include `n_rollouts` (int > 0) for rollout supervision";
+        assert 'n_rollouts' in sub_config, "%s config must include `n_rollouts` (int > 0) for rollout supervision" % trainer_type;
         self.n_rollouts             : int       = int(sub_config['n_rollouts']);
         assert self.n_rollouts > 0, "trainer.n_rollouts must be > 0";
         
@@ -246,7 +246,6 @@ class Second_Order_Rollout(Trainer):
         t_Grid_IC_rollout          : list[torch.Tensor]         = [];   # n_train element list whose i'th element is 1d array of times for IC rollout solve.
         n_IC_rollout_frames        : list[int]                  = [];   # n_train element list whose i'th element specifies how many time steps we should simulate forward.
         U_IC_Rollout_Targets       : list[list[torch.Tensor]]   = [];   # n_train element list whose i'th element is n_IC element list whose j'th element is a tensor of shape (n_IC_rollout_frames[i], ...) specifying FOM IC rollout targets
-
 
         # -----------------------------------------------------------------------------------------
         # Find t_Grid_IC_rollout and n_IC_rollout_frames.
@@ -379,6 +378,19 @@ class Second_Order_Rollout(Trainer):
         checkpoint_saved        : bool              = False;                        # Ensure we save at least one checkpoint per round.
         
         last_iter_idx             : int | None         = None;
+
+        # Strong-form derivative losses are usually not reliable when training data is noisy.
+        if(self.noise_ratio > 0):
+            if self.loss_weights.get('consistency', 0.0) > 0.0:
+                LOGGER.warning(
+                    "noise_ratio = %f but consistency weight = %f and weak form is DISABLED. "
+                    "Finite-difference consistency losses are unreliable with noisy data; "
+                    "consider using Second_Order_Weak or setting consistency weight to 0." % (self.noise_ratio, self.loss_weights['consistency']));
+            if self.loss_weights.get('chain_rule', 0.0) > 0.0:
+                LOGGER.warning(
+                    "noise_ratio = %f but chain_rule weight = %f and weak form is DISABLED. "
+                    "Strong-form chain-rule losses compare against noisy FOM velocity and use FD of noisy "
+                    "latent states; consider using Second_Order_Weak or setting chain_rule weight to 0." % (self.noise_ratio, self.loss_weights['chain_rule']));
 
         # Map everything to self's device.
         device                  : str                       = self.device;

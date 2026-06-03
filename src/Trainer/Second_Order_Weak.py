@@ -16,7 +16,6 @@ sys.path.append(EncoderDecoder_Path);
 sys.path.append(Utils_Path);
 
 import  logging;
-from    copy                        import  deepcopy;
 
 import  torch;
 import  numpy;
@@ -26,7 +25,7 @@ from    ParameterSpace              import  ParameterSpace;
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
 from    Optimizer                   import  Reset_Optimizer;
-from    Second_Order_Noise          import  Second_Order_Noise;
+from    Second_Order_Rollout        import  Second_Order_Rollout;
 
 # Setup Logger
 LOGGER : logging.Logger = logging.getLogger(__name__);
@@ -37,7 +36,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # Trainer class
 # -------------------------------------------------------------------------------------------------
 
-class Second_Order_Noise_Weak(Second_Order_Noise):
+class Second_Order_Weak(Second_Order_Rollout):
     def __init__(self, 
                  physics            : Physics, 
                  encoder_decoder    : EncoderDecoder, 
@@ -45,12 +44,12 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
                  param_space        : ParameterSpace, 
                  config             : dict):
         """
-        This defines a Trainer class designed to train second order dynamics from noisy data using
-        latent dynamics based on the weak formulation. 
+        This defines a Trainer class designed to train second-order dynamics using latent dynamics
+        based on the weak formulation.
          
-        It is a sub-class of Second_Order_Noise that is specially designed to work with weak forms.
-        Thus, it has most of the same dependencies/attributes as the base "Second_Order_Rollout" 
-        and "Second_Order_Noise" classes. See those classes for details. 
+        It is a sub-class of Second_Order_Rollout that is specially designed to work with weak
+        forms. Optional data noise is controlled by the base Trainer through top-level
+        `trainer.noise_ratio`.
         
 
         -------------------------------------------------------------------------------------------
@@ -83,34 +82,27 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
         Nothing!
         """
         
-        # Make sure this config is for a "Second_Order_Noise_Weak" tainer.
+        # Make sure this config is for a "Second_Order_Weak" tainer.
         assert 'trainer' in config,                                     "config must contain a 'trainer' sub-dictionary";
         assert 'type' in config['trainer'],                             "trainer dictionary must contain a 'type' attribute";
-        assert config['trainer']['type'] == "Second_Order_Noise_Weak",  "config['trainer']['type'] = %s, should be Second_Order_Noise_Weak" % config['trainer']['type'];
-        assert "Second_Order_Noise_Weak" in config['trainer'],          "Second_Order_Noise_Weak must be in config['trainer']";
+        assert config['trainer']['type'] == "Second_Order_Weak",  "config['trainer']['type'] = %s, should be Second_Order_Weak" % config['trainer']['type'];
+        assert "Second_Order_Weak" in config['trainer'],          "Second_Order_Weak must be in config['trainer']";
 
-        LOGGER.info("Initializing a Second_Order_Noise_Weak object"); 
+        LOGGER.info("Initializing a Second_Order_Weak object"); 
 
         # Make sure we are set up to work with a weak-form latent dynamics object.
-        assert getattr(latent_dynamics, "type", None) == "weak", "Second_Order_Noise_Weak requires latent_dynamics.type == 'weak'";
+        assert getattr(latent_dynamics, "type", None) == "weak", "Second_Order_Weak requires latent_dynamics.type == 'weak'";
         assert hasattr(latent_dynamics, "add_weight_functions"), "latent dynamics must have an `add_weight_functions` method";
         assert hasattr(latent_dynamics, "get_test_functions"), "latent dynamics must have a `get_test_functions` method";
 
-        # Next, we need to reconfigure the config to read like it is for a "Second_Order_Noise" 
-        # object. This will allow us to hijack the "Second_Order_Noise" initializer to do most 
-        # of the actual setup.
-        noise_config : dict                             = deepcopy(config);
-        noise_config['trainer']['type']                 = "Second_Order_Noise";
-        del noise_config['trainer']['Second_Order_Noise_Weak'];
-        noise_config['trainer']['Second_Order_Noise']   = config['trainer']['Second_Order_Noise_Weak'];        
-
-
-        # Call the Second_Order_Noise initializer.
+        # Call the Second_Order_Rollout initializer. It reads the trainer-specific settings from
+        # config['trainer'][config['trainer']['type']], so the Second_Order_Weak config block can
+        # be used directly.
         super().__init__(   physics         = physics,
                             encoder_decoder = encoder_decoder,
                             latent_dynamics = latent_dynamics,
                             param_space     = param_space,
-                            config          = noise_config);
+                            config          = config);
 
         # All done!
         return;
@@ -211,10 +203,6 @@ class Second_Order_Noise_Weak(Second_Order_Noise):
         self._check_train_coefficients();
         self.optimizer = torch.optim.Adam(self._optimizer_parameters(), lr = self.lr, weight_decay = 1.0e-5);
         Reset_Optimizer(self.optimizer);
-
-        # Add noise
-        if(self.noise_ratio > 0):
-            self.apply_noise_to_U_Train();
 
         # Fetch parameters. Note that p_rollout and p_IC_rollout can be negative.
         # IMPORTANT: Calculate rollout proportions using epochs within CURRENT round (not accumulated restart_iter).

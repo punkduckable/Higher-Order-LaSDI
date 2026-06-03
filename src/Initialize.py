@@ -25,7 +25,9 @@ import  torch;
 
 from    LatentDynamics          import  LatentDynamics;
 from    SINDy                   import  SINDy;
+from    SINDy_weak              import  SINDy_weak;
 from    SwitchSINDy             import  SwitchSINDy;
+from    SwitchSINDy_weak        import  SwitchSINDy_weak;
 from    DampedSpring            import  DampedSpring;
 from    DampedSpring_weak       import  DampedSpring_weak;
 
@@ -34,9 +36,9 @@ from    ParameterSpace          import  ParameterSpace;
 
 from    Trainer                 import  Trainer;
 from    First_Order_Rollout     import  First_Order_Rollout;
+from    First_Order_Weak        import  First_Order_Weak;
 from    Second_Order_Rollout    import  Second_Order_Rollout;
-from    Second_Order_Noise      import  Second_Order_Noise;
-from    Second_Order_Noise_Weak import  Second_Order_Noise_Weak;
+from    Second_Order_Weak       import  Second_Order_Weak;
 
 
 from    EncoderDecoder          import  EncoderDecoder;
@@ -82,15 +84,17 @@ encoder_decoder_load_dict = {   'ae'                        : load_Autoencoder,
                                 'cnn_3d_ae'                 : load_CNN_3D_Autoencoder,
                                 'cnn_3d_autoencoder'        : load_CNN_3D_Autoencoder};
 
-ld_dict = {                     'sindy'                     : SINDy, 
+ld_dict = {                     'sindy'                     : SINDy,
+                                'sindy_w'                   : SINDy_weak,
                                 'spring'                    : DampedSpring,
                                 'spring_w'                  : DampedSpring_weak,
-                                'switch'                    : SwitchSINDy};
+                                'switch'                    : SwitchSINDy,
+                                'switch_w'                  : SwitchSINDy_weak};
 
-trainer_dict = {                'First_Order_Rollout'       : First_Order_Rollout, 
+trainer_dict = {                'First_Order_Rollout'       : First_Order_Rollout,
+                                'First_Order_Weak'          : First_Order_Weak,
                                 'Second_Order_Rollout'      : Second_Order_Rollout,
-                                'Second_Order_Noise'        : Second_Order_Noise,
-                                'Second_Order_Noise_Weak'   : Second_Order_Noise_Weak};
+                                'Second_Order_Weak'         : Second_Order_Weak};
 
 sampler_dict = {                'FOM_Rollout'               : FOM_Rollout,
                                 'FOM_Variance'              : FOM_Variance};
@@ -200,7 +204,7 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer
     ld_type                 = config['latent_dynamics']['type'];
     assert(ld_type in config['latent_dynamics']);
     assert(ld_type in ld_dict);
-    if(ld_type == "switch"):
+    if(ld_type == "switch" or ld_type == "switch_w"):
         latent_dynamics         = ld_dict[ld_type]( n_z             = encoder_decoder.n_z, 
                                                     Uniform_t_Grid  = physics.Uniform_t_Grid,
                                                     switch_time     = physics.switch_time,

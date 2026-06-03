@@ -11,19 +11,19 @@
 # ----------------------------- SLURM settings -----------------------------
 # Adjust these defaults for your machine/partition/account as needed.
 #SBATCH --job-name=HigherOrderLaSDI
-#SBATCH --partition=pdebug
+#SBATCH --partition=pbatch
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --account=iffmodel
 #SBATCH --exclusive
 #SBATCH --mail-type=all
 #SBATCH --cpus-per-task=1
-#SBATCH --time=00:30:00
+#SBATCH --time=06:00:00
 #
 # Keep SLURM's own wrapper output separate from the Python stdout/stderr logs.
 # The Python logs are written below and then moved by scripts/cleanup_run.py.
-#SBATCH --output=slurm-%x-%j.log
-#SBATCH --error=slurm-%x-%j.err
+#SBATCH --output=slurm-%x.log
+#SBATCH --error=slurm-%x.err
 
 set -u
 

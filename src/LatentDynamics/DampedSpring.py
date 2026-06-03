@@ -78,7 +78,8 @@ class DampedSpring(LatentDynamics):
                             n_coefs         = n_z*(2*n_z + 1),
                             n_IC            = 2,
                             Uniform_t_Grid  = Uniform_t_Grid, 
-                            config          = config);
+                            config          = config,
+                            type           = "strong");
 
         # Class-specific variables.
         self.lstsq_reg : float = config.get("lstsq_reg", 1.0);
