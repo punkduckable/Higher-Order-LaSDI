@@ -77,7 +77,8 @@ class SwitchSINDy(LatentDynamics):
                             n_coefs         = n_z*(n_z + 1)*2,
                             n_IC            = 1,
                             Uniform_t_Grid  = Uniform_t_Grid, 
-                            config          = config);
+                            config          = config,
+                            type            = "strong");
 
 
         # Class-specific initialization.
