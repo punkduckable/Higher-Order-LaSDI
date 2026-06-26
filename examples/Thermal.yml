@@ -68,6 +68,7 @@ parameter_space:
 
 EncoderDecoder:
   type:                     cnn_3d
+  trainable:                true
   cnn_3d:
     n_Decoders:             1
 
@@ -85,12 +86,13 @@ EncoderDecoder:
 
 latent_dynamics:
   type:                     switch
-  lstsq_reg:                0.5           # Ridge-regression regularization for SINDy coefficient initialization (prevents blow-up for new greedy-sampled points).
+  trainable:                true
   switch:
+    lstsq_reg:                0.5           # Ridge-regression regularization for SINDy coefficient initialization (prevents blow-up for new greedy-sampled points).
+
 
 physics:
   type:                     Thermal
-  
   Thermal:
     hdf5_dir:               /p/lustre1/robertrs/AI4NS/Generate_Data/9x9 dataset/
     use_cnn:                True

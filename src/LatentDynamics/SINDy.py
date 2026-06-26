@@ -58,7 +58,9 @@ class SINDy(LatentDynamics):
             finite-difference stencil. Otherwise, nonuniform-grid finite differences are used.
 
         config : dict
-            The latent-dynamics configuration dictionary. The optional `lstsq_reg` entry controls
+            The latent-dynamics configuration dictionary. It must three keys: `type`, `trainable`,
+            and `sindy`. It must have `config["type"] == "sindy"` and `config["sindy"]` should be a 
+            dictionary housing sub-class specific settings. The required `lstsq_reg` entry controls
             ridge regularization used by `fit_coefficients(...)` when initializing coefficients
             from encoded trajectories.
 
@@ -70,16 +72,25 @@ class SINDy(LatentDynamics):
         Nothing!
         """
 
+        # Checks
+        assert  'type'      in config;
+        assert  'trainable' in config;
+        assert  isinstance(config["type"], str);
+        assert  isinstance(config["trainable"], bool);
+        assert  config['type'] == "sindy";
+        assert  "sindy"     in config;
+
         # Run the base class initializer. Note that this initializes self.train_coefs.
         super().__init__(n_z            = n_z, 
                          n_coefs        = n_z*(n_z + 1), 
                          n_IC           = 1, 
                          Uniform_t_Grid = Uniform_t_Grid,
+                         trainable      = config["trainable"],
                          config         = config,
                          type           = "strong");
         
         # Set up class-specific variables.
-        self.lstsq_reg : float = config.get("lstsq_reg", 1.0);
+        self.lstsq_reg : float = config["sindy"]["lstsq_reg"];
         LOGGER.info("Initializing a SINDY object with n_z = %d, Uniform_t_Grid = %s, lstsq_reg = %s" % (self.n_z, str(self.Uniform_t_Grid), str(self.lstsq_reg)));
 
         # Setup the loss functions used by calibrate.
@@ -114,6 +125,9 @@ class SINDy(LatentDynamics):
         These are not copies. They are the same tensors stored in `self.train_coefs`, so optimizer
         updates modify the LD-owned coefficient dictionaries used by calibrate/simulate.
         """
+
+        if self.trainable == False:
+            return [];
 
         tensors : list[torch.Tensor] = [];
         for coef_dict in self.train_coefs.values():

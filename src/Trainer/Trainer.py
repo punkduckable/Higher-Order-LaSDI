@@ -673,8 +673,14 @@ class Trainer:
             Trainable tensors that should be passed to a torch optimizer.
         """
 
-        self._check_train_coefficients();
-        return list(self.encoder_decoder.parameters()) + self.latent_dynamics.trainable_coef_tensors();
+        trainable_params = [];
+        if self.encoder_decoder.trainable == True:
+            trainable_params.extend(list(self.encoder_decoder.parameters()));
+        if self.latent_dynamics.trainable == True:
+            self._check_train_coefficients();
+            trainable_params.extend(self.latent_dynamics.trainable_coef_tensors());
+
+        return trainable_params;
 
 
 

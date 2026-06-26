@@ -68,6 +68,7 @@ parameter_space:
 
 EncoderDecoder:
   type:                     ae
+  trainable:                true
   ae:
     n_Decoders:             1
     hidden_widths:          [250, 100, 100, 100]
@@ -81,9 +82,10 @@ EncoderDecoder:
 
 latent_dynamics:
   type:                     sindy
-  lstsq_reg:                0.1
-  spring:
+  trainable:                true
   sindy:
+    lstsq_reg:                0.1
+
 
 physics:
   type:                     Explicit

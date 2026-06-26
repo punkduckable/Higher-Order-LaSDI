@@ -16,9 +16,6 @@
 #       consistency: 0.0 and chain_rule: 0.0 since the strong-form FD versions
 #       amplify noise catastrophically.
 #
-#   3.  lstsq_reg: 1.0e-3  — mild Tikhonov regularization for the weak-form LS solve to
-#       stabilize coefficient estimation under noise.
-#
 # The weak-form LD loss (Phi-integrated) is inherently noise-tolerant: integration against
 # compactly-supported test functions acts as a smoother, so the LD loss remains reliable.
 #
@@ -100,6 +97,7 @@ parameter_space:
 
 EncoderDecoder:
   type:                     pair
+  trainable:                true
   pair:
     n_Decoders:             1
     hidden_widths:          [250, 100, 100, 100]
@@ -108,7 +106,7 @@ EncoderDecoder:
 
 latent_dynamics:
   type:                     spring_w
-  lstsq_reg:                0.0
+  trainable:                true
   spring_w:
     test_func_type:         'PC-poly'
     test_func_width:        .1

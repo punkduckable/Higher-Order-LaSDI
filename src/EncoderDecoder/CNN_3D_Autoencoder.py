@@ -11,6 +11,7 @@ sys.path.append(Physics_Path);
 
 import  logging;
 from    typing          import  Callable, Sequence;
+from    copy            import  deepcopy;
 
 import  torch;
 import  numpy;
@@ -50,7 +51,7 @@ def _as_3tuple(x : int | Sequence[int]) -> tuple[int, int, int]:
 
 
 
-def _expand_3tuple_param(    x           : int | Sequence[int] | Sequence[Sequence[int]],
+def _expand_3tuple_param(   x           : int | Sequence[int] | Sequence[Sequence[int]],
                             n_layers    : int,
                             name        : str) -> list[tuple[int, int, int]]:
     """
@@ -74,7 +75,7 @@ def _expand_3tuple_param(    x           : int | Sequence[int] | Sequence[Sequen
 
 
 
-def _conv3d_out_shape(   in_shape    : tuple[int, int, int],
+def _conv3d_out_shape(  in_shape    : tuple[int, int, int],
                         kernel      : tuple[int, int, int],
                         stride      : tuple[int, int, int],
                         padding     : tuple[int, int, int]) -> tuple[int, int, int]:
@@ -119,12 +120,16 @@ class CNN_3D_Autoencoder(EncoderDecoder):
 
             
         config: dict
-            The "EncoderDecoder" sub dictionary of the configuration file. It must contain a "type"
-            key whose value is either "cnn_3d", "cnn_3d_ae", or "cnn_3d_autoencoder". There must 
-            also be an item whose key matches the value of the "type" key and whose value is a 
-            dictionary specifying the settings to define the CNN_3D_Autoencoder object. Namely, 
-            it must contain the following keys:
+            The "EncoderDecoder" sub dictionary of the configuration file. It must contain "type"
+            and "trainable" keys. 
 
+            the "trainable" should be true or false and is used to signal (to the trainer) if 
+            we should train the EncoderDecoder object during training.
+
+            The "type" key should be "cnn_3d", "cnn_3d_ae", or "cnn_3d_autoencoder". The config  
+            must also contain an item whose key matches the value of the "type" key and whose value 
+            is a dictionary specifying the settings to define the CNN_3D_Autoencoder object. 
+            Namely, it must contain the following keys:
 
             hidden_widths_fc : list[int]
                 A list of integers specifying the widths of the hidden fully-connected layers. The
@@ -169,7 +174,8 @@ class CNN_3D_Autoencoder(EncoderDecoder):
         """
 
         # Input checks.
-        assert 'type' in config;
+        assert 'type'       in config;
+        assert 'trainable'  in config;
         assert (config['type'] == "cnn_3d") or (config['type'] == "cnn_3d_ae") or (config['type'] == "cnn_3d_autoencoder");
         cnn_key  : str = config['type'];
         assert cnn_key in config;
@@ -266,7 +272,11 @@ class CNN_3D_Autoencoder(EncoderDecoder):
         n_Decoders = config[cnn_key]['n_Decoders'];
 
         # Run the superclass initializer.
-        super().__init__(n_IC   = 1, n_z = latent_dimension, n_Decoders = n_Decoders, config = config);
+        super().__init__(n_IC       = 1, 
+                         n_z        = latent_dimension, 
+                         n_Decoders = n_Decoders, 
+                         trainable  = config["trainable"], 
+                         config     = config);
 
         # Store information (for return purposes).
         self.reshape_shape      : list[int]     = reshape_shape;
@@ -384,6 +394,8 @@ class CNN_3D_Autoencoder(EncoderDecoder):
         self._decoder_conv_act_fns : list[Callable] = [];
         for i in range(self.n_conv_layers):
             self._decoder_conv_act_fns.append(act_dict[self.conv_activations[::-1][i].lower()]);
+
+        self.set_trainable(self.trainable);
 
         # All done!
         return;
@@ -513,16 +525,48 @@ class CNN_3D_Autoencoder(EncoderDecoder):
 
 
 
-def load_CNN_3D_Autoencoder(dict_ : dict) -> CNN_3D_Autoencoder:
+def load_CNN_3D_Autoencoder(dict_ : dict, config_ : dict) -> CNN_3D_Autoencoder:
     """
-    This function builds a CNN_3D_Autoencoder object using the information in dict_.
+    This function builds a CNN_3D_Autoencoder object using the information in dict_. dict_ should 
+    be the dictionary returned by the export method for some Autoencoder_Pair object (or a 
+    de-serialized version of one). The CNN_3D_Autoencoder that we recreate should be an identical 
+    copy of the object that generated dict_.
+
+
+    
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+
+    dict_ : dict
+        This should be a dictionary returned by a Autoencoder_Pair's export method.
+
+    config: dict
+        The EncoderDecoder portion of the loaded settings. We override certain saved settings 
+        (namely trainable) using their values in this dictionary..
+
+    
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    CNN : CNN_3D_Autoencoder
+        A Autoencoder_Pair object that is identical to the one that created dict_!
     """
 
     LOGGER.info("De-serializing a CNN_3D_Autoencoder..." );
 
+    # First, extract the information we need to initialize a CNN_3D_Autoencoder object with the same 
+    # architecture as the one that created dict_.
+    Frame_Shape     : list[int] = dict_['Frame_Shape'];
+    config          : dict      = deepcopy(dict_['config']);
+
+    # Override the trainable argument
+    config['trainable']         = config_['trainable'];
+
     # Build the model.
-    CNN = CNN_3D_Autoencoder( Frame_Shape     = dict_['Frame_Shape'],
-                                config          = dict_['config']);
+    CNN = CNN_3D_Autoencoder(   Frame_Shape     = Frame_Shape,
+                                config          = config);
 
     
     # Set the decoder weights/active.

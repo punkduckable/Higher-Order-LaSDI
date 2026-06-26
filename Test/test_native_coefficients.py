@@ -17,14 +17,66 @@ from SINDy import SINDy
 from Interpolate import Interpolate
 
 
+def _sindy_config(lstsq_reg=1.0, trainable=True):
+    return {
+        "type": "sindy",
+        "trainable": trainable,
+        "sindy": {"lstsq_reg": lstsq_reg},
+    }
+
+
+def _spring_config(lstsq_reg=1.0, trainable=True):
+    return {
+        "type": "spring",
+        "trainable": trainable,
+        "spring": {"lstsq_reg": lstsq_reg},
+    }
+
+
+def _sindy_w_config(test_func_type="PC-poly", trainable=True):
+    return {
+        "type": "sindy_w",
+        "trainable": trainable,
+        "sindy_w": {
+            "test_func_type": test_func_type,
+            "test_func_width": 0.5,
+            "overlap": 0.5,
+        },
+    }
+
+
+def _spring_w_config(test_func_type="PC-poly", trainable=True):
+    return {
+        "type": "spring_w",
+        "trainable": trainable,
+        "spring_w": {
+            "test_func_type": test_func_type,
+            "test_func_width": 0.5,
+            "overlap": 0.5,
+        },
+    }
+
+
+def _switch_w_config(test_func_type="PC-poly", trainable=True):
+    return {
+        "type": "switch_w",
+        "trainable": trainable,
+        "switch_w": {
+            "test_func_type": test_func_type,
+            "test_func_width": 0.5,
+            "overlap": 0.5,
+        },
+    }
+
+
 def test_missing_train_coefs_raises_keyerror():
-    ld = SINDy(n_z=1, Uniform_t_Grid=True, config={})
+    ld = SINDy(n_z=1, Uniform_t_Grid=True, config=_sindy_config())
     with pytest.raises(KeyError):
         ld.get_train_coefs(numpy.array([0.0]))
 
 
 def test_sindy_fit_coefficients_stores_native_trainable_dict():
-    ld = SINDy(n_z=1, Uniform_t_Grid=True, config={"lstsq_reg": 0.0})
+    ld = SINDy(n_z=1, Uniform_t_Grid=True, config=_sindy_config(lstsq_reg=0.0))
     t = torch.linspace(0.0, 1.0, 9)
     z = torch.exp(-t).reshape(-1, 1)
     params = numpy.array([[0.25]])
@@ -44,11 +96,11 @@ def test_sindy_fit_coefficients_stores_native_trainable_dict():
 
 
 def test_latent_dynamics_export_load_restores_trainable_coefs():
-    ld = SINDy(n_z=1, Uniform_t_Grid=True, config={})
+    ld = SINDy(n_z=1, Uniform_t_Grid=True, config=_sindy_config())
     ld.set_train_coefs(numpy.array([1.0]), {"A": torch.ones(1, 1), "b": torch.zeros(1)})
     exported = ld.export()
 
-    ld2 = SINDy(n_z=1, Uniform_t_Grid=True, config={})
+    ld2 = SINDy(n_z=1, Uniform_t_Grid=True, config=_sindy_config())
     ld2.load(exported)
     coefs = ld2.get_train_coefs(numpy.array([1.0]))
 
@@ -81,7 +133,7 @@ def test_interpolate_sample_mean_and_std_preserve_keys_and_shapes():
 
 
 def test_base_flatten_coefficients_concatenates_native_dict_items():
-    ld = SINDy(n_z=2, Uniform_t_Grid=True, config={})
+    ld = SINDy(n_z=2, Uniform_t_Grid=True, config=_sindy_config())
     native_coefs = [
         {"A": torch.tensor([[1.0, 2.0], [3.0, 4.0]]), "b": torch.tensor([5.0, 6.0])},
         {"A": torch.tensor([[7.0, 8.0], [9.0, 10.0]]), "b": torch.tensor([11.0, 12.0])},
@@ -108,7 +160,7 @@ from FiniteDifference import Derivative1_Order4
 
 
 def test_damped_spring_fit_coefficients_uses_K_C_b_names():
-    ld = DampedSpring(n_z=1, Uniform_t_Grid=True, config={"lstsq_reg": 1.0})
+    ld = DampedSpring(n_z=1, Uniform_t_Grid=True, config=_spring_config())
     t = torch.linspace(0.0, 1.0, 9)
     z = torch.sin(t).reshape(-1, 1)
     dz = torch.cos(t).reshape(-1, 1)
@@ -126,7 +178,7 @@ def test_damped_spring_fit_coefficients_uses_K_C_b_names():
 
 
 def test_damped_spring_calibrate_uses_native_K_C_b_rhs():
-    ld = DampedSpring(n_z=1, Uniform_t_Grid=True, config={})
+    ld = DampedSpring(n_z=1, Uniform_t_Grid=True, config=_spring_config())
     t = torch.linspace(0.0, 1.0, 9)
     z = torch.sin(t).reshape(-1, 1)
     dz = torch.cos(t).reshape(-1, 1)
@@ -147,15 +199,7 @@ def test_damped_spring_calibrate_uses_native_K_C_b_rhs():
 
 
 def test_damped_spring_weak_simulate_uses_native_K_C_b_names():
-    config = {
-        "type": "spring_w",
-        "spring_w": {
-            "test_func_type": "bump",
-            "test_func_width": 0.5,
-            "overlap": 0.5,
-        },
-    }
-    ld = DampedSpring_weak(n_z=1, Uniform_t_Grid=True, config=config)
+    ld = DampedSpring_weak(n_z=1, Uniform_t_Grid=True, config=_spring_w_config(test_func_type="bump"))
     coefs = {"K": torch.zeros(1, 1), "C": torch.zeros(1, 1), "b": torch.ones(1)}
     D0 = torch.zeros(1, 1)
     V0 = torch.zeros(1, 1)
@@ -172,6 +216,7 @@ from LatentDynamics import LatentDynamics
 def _weak_base_config(test_func_type="PC-poly"):
     return {
         "type": "dummy",
+        "trainable": True,
         "dummy": {
             "test_func_type": test_func_type,
             "test_func_width": 0.5,
@@ -181,13 +226,13 @@ def _weak_base_config(test_func_type="PC-poly"):
 
 
 def test_weak_latent_dynamics_requires_weak_config_keys():
-    bad_config = {"type": "dummy", "dummy": {"test_func_width": 0.5, "overlap": 0.5}}
+    bad_config = {"type": "dummy", "trainable": True, "dummy": {"test_func_width": 0.5, "overlap": 0.5}}
     with pytest.raises(AssertionError):
-        LatentDynamics(n_z=1, n_coefs=1, n_IC=2, Uniform_t_Grid=True, config=bad_config, type="weak")
+        LatentDynamics(n_z=1, n_coefs=1, n_IC=2, Uniform_t_Grid=True, trainable=True, config=bad_config, type="weak")
 
 
 def test_add_and_get_weight_functions_store_arbitrary_derivatives():
-    ld = LatentDynamics(n_z=1, n_coefs=1, n_IC=2, Uniform_t_Grid=True, config=_weak_base_config(), type="weak")
+    ld = LatentDynamics(n_z=1, n_coefs=1, n_IC=2, Uniform_t_Grid=True, trainable=True, config=_weak_base_config(), type="weak")
     params = numpy.array([0.25])
     t = torch.linspace(0.0, 1.0, 11)
 
@@ -202,21 +247,13 @@ def test_add_and_get_weight_functions_store_arbitrary_derivatives():
 
 
 def test_get_test_functions_missing_param_raises_keyerror():
-    ld = LatentDynamics(n_z=1, n_coefs=1, n_IC=2, Uniform_t_Grid=True, config=_weak_base_config(), type="weak")
+    ld = LatentDynamics(n_z=1, n_coefs=1, n_IC=2, Uniform_t_Grid=True, trainable=True, config=_weak_base_config(), type="weak")
     with pytest.raises(KeyError):
         ld.get_test_functions(numpy.array([0.25]))
 
 
 def test_damped_spring_weak_fit_zero_initializes_and_calibrate_requires_weights():
-    config = {
-        "type": "spring_w",
-        "spring_w": {
-            "test_func_type": "PC-poly",
-            "test_func_width": 0.5,
-            "overlap": 0.5,
-        },
-    }
-    ld = DampedSpring_weak(n_z=1, Uniform_t_Grid=True, config=config)
+    ld = DampedSpring_weak(n_z=1, Uniform_t_Grid=True, config=_spring_w_config())
     t = torch.linspace(0.0, 1.0, 9)
     z = torch.sin(t).reshape(-1, 1)
     dz = torch.cos(t).reshape(-1, 1)
@@ -236,15 +273,7 @@ def test_damped_spring_weak_fit_zero_initializes_and_calibrate_requires_weights(
 
 
 def test_sindy_weak_fit_zero_initializes_and_calibrate_requires_weights():
-    config = {
-        "type": "sindy_w",
-        "sindy_w": {
-            "test_func_type": "PC-poly",
-            "test_func_width": 0.5,
-            "overlap": 0.5,
-        },
-    }
-    ld = SINDy_weak(n_z=1, Uniform_t_Grid=True, config=config)
+    ld = SINDy_weak(n_z=1, Uniform_t_Grid=True, config=_sindy_w_config())
     t = torch.linspace(0.0, 1.0, 9)
     z = torch.sin(t).reshape(-1, 1)
     params = numpy.array([[0.25]])
@@ -264,15 +293,7 @@ def test_sindy_weak_fit_zero_initializes_and_calibrate_requires_weights():
 
 
 def test_sindy_weak_calibrate_with_weight_functions_returns_losses():
-    config = {
-        "type": "sindy_w",
-        "sindy_w": {
-            "test_func_type": "PC-poly",
-            "test_func_width": 0.5,
-            "overlap": 0.5,
-        },
-    }
-    ld = SINDy_weak(n_z=1, Uniform_t_Grid=True, config=config)
+    ld = SINDy_weak(n_z=1, Uniform_t_Grid=True, config=_sindy_w_config())
     t = torch.linspace(0.0, 1.0, 9)
     z = torch.sin(t).reshape(-1, 1)
     params = numpy.array([[0.25]])
@@ -288,15 +309,7 @@ def test_sindy_weak_calibrate_with_weight_functions_returns_losses():
 
 
 def test_switch_sindy_weak_fit_zero_initializes_native_names():
-    config = {
-        "type": "switch_w",
-        "switch_w": {
-            "test_func_type": "PC-poly",
-            "test_func_width": 0.5,
-            "overlap": 0.5,
-        },
-    }
-    ld = SwitchSINDy_weak(n_z=1, Uniform_t_Grid=True, switch_time=lambda p: 0.5, config=config)
+    ld = SwitchSINDy_weak(n_z=1, Uniform_t_Grid=True, switch_time=lambda p: 0.5, config=_switch_w_config())
     t = torch.linspace(0.0, 1.0, 9)
     z = torch.sin(t).reshape(-1, 1)
     params = numpy.array([[0.25]])
@@ -314,15 +327,7 @@ def test_switch_sindy_weak_fit_zero_initializes_native_names():
 
 
 def test_switch_sindy_weak_simulate_returns_first_order_trajectory_shape():
-    config = {
-        "type": "switch_w",
-        "switch_w": {
-            "test_func_type": "PC-poly",
-            "test_func_width": 0.5,
-            "overlap": 0.5,
-        },
-    }
-    ld = SwitchSINDy_weak(n_z=1, Uniform_t_Grid=True, switch_time=lambda p: 0.5, config=config)
+    ld = SwitchSINDy_weak(n_z=1, Uniform_t_Grid=True, switch_time=lambda p: 0.5, config=_switch_w_config())
     coefs = {
         "A_before": torch.zeros(1, 1),
         "b_before": torch.ones(1),
@@ -339,7 +344,7 @@ def test_switch_sindy_weak_simulate_returns_first_order_trajectory_shape():
 
 
 def test_get_uniform_grid_no_p_argument():
-    ld = LatentDynamics(n_z=1, n_coefs=1, n_IC=1, Uniform_t_Grid=True, config={})
+    ld = LatentDynamics(n_z=1, n_coefs=1, n_IC=1, Uniform_t_Grid=True, trainable=True, config={})
     a_s, b_s = ld._get_support_intervals(T=1.0, L=0.5, s=0.25)
 
     assert numpy.allclose(a_s, numpy.array([0.0, 0.25, 0.5]))

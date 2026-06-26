@@ -75,6 +75,7 @@ parameter_space:
 
 EncoderDecoder:
   type:                     pair
+  trainable:                true
   pair:
     n_Decoders:             1
     hidden_widths:          [250, 100, 100, 100]
@@ -83,8 +84,9 @@ EncoderDecoder:
 
 latent_dynamics:
   type:                     spring
-  lstsq_reg:                1.0           # Ridge-regression regularization for SINDy coefficient initialization (prevents blow-up for new greedy-sampled points).
+  trainable:                true
   spring:
+    lstsq_reg:              1.0           # Ridge-regression regularization for SINDy coefficient initialization (prevents blow-up for new greedy-sampled points).
 
 physics:
   type:                     WaveEquation

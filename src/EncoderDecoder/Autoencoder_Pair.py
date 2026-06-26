@@ -59,9 +59,14 @@ class Autoencoder_Pair(EncoderDecoder):
             the last layer (if reshape_index == -1). 
 
         config: dict
-            The "EncoderDecoder" sub dictionary of the configuration file. This must contain 
-            a "type" key whose value is either "pair" or "autoencoder_pair". It must also contain 
-            an item whose key matches the value of tye "type" key and whose value is a 
+            The "EncoderDecoder" sub dictionary of the configuration file. It must contain "type"
+            and "trainable" keys. 
+
+            the "trainable" should be true or false and is used to signal (to the trainer) if 
+            we should train the EncoderDecoder object during training.
+            
+            The "type" key's value must be "pair" or "autoencoder_pair". The config must also 
+            contain a an item whose key matches the value of tye "type" key and whose value is a 
             sub-dictionary specifying the configuration settings for the autoencoder_pair object.
             Namely, it must contain the following sub-keys:
                 - hidden_widths : A list of ints specifying the widths of the hidden layers in 
@@ -81,7 +86,8 @@ class Autoencoder_Pair(EncoderDecoder):
         """
 
         # Input checks.
-        assert 'type' in config;
+        assert  'type'      in config;
+        assert  'trainable' in config;
         assert (config['type'] == "pair") or (config['type'] == "autoencoder_pair");
         pair_key  : str = config['type'];
         assert pair_key in config;
@@ -131,7 +137,11 @@ class Autoencoder_Pair(EncoderDecoder):
         n_Decoders = config[pair_key]['n_Decoders'];
 
         # Run the superclass initializer.
-        super().__init__(n_IC = 2, n_z = widths[-1], n_Decoders = n_Decoders, config = config);
+        super().__init__(n_IC       = 2, 
+                         n_z        = widths[-1], 
+                         n_Decoders = n_Decoders, 
+                         trainable  = config["trainable"], 
+                         config     = config);
         LOGGER.info("Initializing an Autoencoder_Pair");
 
         # In general, the FOM solution may be vector valued and have multiple spatial dimensions. 
@@ -158,6 +168,8 @@ class Autoencoder_Pair(EncoderDecoder):
         LOGGER.info("Initializing the Velocity Autoencoder...");
         self.Velocity_Autoencoder       = Autoencoder(  Frame_Shape     = self.Frame_Shape,
                                                         config          = ae_config);
+
+        self.set_trainable(self.trainable);
 
 
 
@@ -295,7 +307,7 @@ class Autoencoder_Pair(EncoderDecoder):
     
 
 
-def load_Autoencoder_Pair(dict_ : dict) -> Autoencoder_Pair:
+def load_Autoencoder_Pair(dict_ : dict, config_ : dict) -> Autoencoder_Pair:
     """
     This function builds a Autoencoder_Pair object using the information in dict_. dict_ should be 
     the dictionary returned by the export method for some Autoencoder_Pair object (or a 
@@ -311,8 +323,11 @@ def load_Autoencoder_Pair(dict_ : dict) -> Autoencoder_Pair:
     dict_ : dict
         This should be a dictionary returned by a Autoencoder_Pair's export method.
 
-    
+    config: dict
+        The EncoderDecoder portion of the loaded settings. We override certain saved settings 
+        (namely trainable) using their values in this dictionary..
 
+    
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
@@ -325,8 +340,11 @@ def load_Autoencoder_Pair(dict_ : dict) -> Autoencoder_Pair:
 
     # First, extract the information we need to initialize a Autoencoder_Pair object with the same 
     # architecture as the one that created dict_.
-    Frame_Shape   : list[int] = dict_['Frame_Shape'];
-    config          : dict      = dict_['config'];
+    Frame_Shape     : list[int] = dict_['Frame_Shape'];
+    config          : dict      = deepcopy(dict_['config']);
+
+    # Override the trainable argument
+    config['trainable']         = config_['trainable'];
 
     # Now initialize the Autoencoder_Pair.
     AEP                     = Autoencoder_Pair( Frame_Shape     = Frame_Shape,
@@ -336,8 +354,8 @@ def load_Autoencoder_Pair(dict_ : dict) -> Autoencoder_Pair:
     AEP.load(dict_ = dict_['EncoderDecoder dict']);
 
     # Now replace its auto-encoders.
-    AEP.Displacement_Autoencoder    = load_Autoencoder(dict_['Displacement dict']);
-    AEP.Velocity_Autoencoder        = load_Autoencoder(dict_['Velocity dict']);
+    AEP.Displacement_Autoencoder    = load_Autoencoder(dict_['Displacement dict'], config);
+    AEP.Velocity_Autoencoder        = load_Autoencoder(dict_['Velocity dict'], config);
 
     # All done!
     return AEP;

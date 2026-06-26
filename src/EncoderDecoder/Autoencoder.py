@@ -10,6 +10,7 @@ Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__)
 sys.path.append(Physics_Path);
 
 import  logging;
+from    copy            import  deepcopy;
 
 import  torch;
 import  numpy;
@@ -62,8 +63,13 @@ class Autoencoder(EncoderDecoder):
             the last layer (if reshape_index == -1). 
         
         config: dict
-            The "EncoderDecoder" sub dictionary of the configuration file. This must contain 
-            a "type" key whose value is either "ae" or "autoencoder". It must also contain 
+            The "EncoderDecoder" sub dictionary of the configuration file. It must contain "type"
+            and "trainable" keys. 
+
+            the "trainable" should be true or false and is used to signal (to the trainer) if 
+            we should train the EncoderDecoder object during training. 
+            
+            The "type" key's value must be "ae" or "autoencoder". The config must also contain 
             an item whose key matches the value of tye "type" key and whose value is a 
             sub-dictionary specifying the configuration settings for the autoencoder object.
             Namely, it must contain the following sub-keys:
@@ -84,7 +90,8 @@ class Autoencoder(EncoderDecoder):
         """
         
         # Input checks.
-        assert 'type' in config;
+        assert 'type'       in config;
+        assert 'trainable'  in config;
         assert (config['type'] == "ae") or (config['type'] == "autoencoder");
         ae_key  : str = config['type'];
         assert ae_key in config;
@@ -134,7 +141,11 @@ class Autoencoder(EncoderDecoder):
         n_Decoders = config[ae_key]['n_Decoders'];
 
         # Run the superclass initializer.
-        super().__init__(n_IC = 1, n_z = widths[-1], n_Decoders = n_Decoders, config = config);
+        super().__init__(n_IC       = 1, 
+                         n_z        = widths[-1], 
+                         n_Decoders = n_Decoders,
+                         trainable  = config["trainable"], 
+                         config     = config);
         
         # Store information (for return purposes).
         self.widths         : list[int] = widths;
@@ -162,6 +173,8 @@ class Autoencoder(EncoderDecoder):
                                     activations         = activations[::-1],    # Reverses the order for the decoder.
                                     reshape_index       = -1,                   # We need to reshape the network output to a FOM frame.
                                     reshape_shape       = Frame_Shape));      # We need to reshape the network output to a FOM frame.
+
+        self.set_trainable(self.trainable);
 
         # All done!
         return;
@@ -268,7 +281,7 @@ class Autoencoder(EncoderDecoder):
 
 
 
-def load_Autoencoder(dict_ : dict) -> Autoencoder:
+def load_Autoencoder(dict_ : dict, config_ : dict) -> Autoencoder:
     """
     This function builds an Autoencoder object using the information in dict_. dict_ should be 
     the dictionary returned by the export method for some Autoencoder object (or a de-serialized 
@@ -282,6 +295,10 @@ def load_Autoencoder(dict_ : dict) -> Autoencoder:
 
     dict_: dict
         This should be a dictionary returned by an Autoencoder's export method.
+
+    config: dict
+        The EncoderDecoder portion of the loaded settings. We override certain saved settings 
+        (namely trainable) using their values in this dictionary..
 
     
     -----------------------------------------------------------------------------------------------
@@ -297,7 +314,10 @@ def load_Autoencoder(dict_ : dict) -> Autoencoder:
     # First, extract the parameters we need to initialize an Autoencoder object with the same 
     # architecture as the one that created dict_.
     Frame_Shape     : list[int] = dict_['Frame_Shape'];
-    config          : dict      = dict_['config'];
+    config          : dict      = deepcopy(dict_['config']);
+
+    # Override the trainable argument
+    config['trainable']         = config_['trainable'];
 
     # Now... initialize an Autoencoder object.
     AE = Autoencoder(Frame_Shape = Frame_Shape, config = config);

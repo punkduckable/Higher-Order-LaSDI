@@ -86,6 +86,10 @@ class EncoderDecoder(torch.nn.Module):
     Decoder_Weight : numpy.ndarray, shape = (n_IC, n_Decoders)
         Weight applied to each decoder stage for each output component when forming the weighted
         decoder sum.
+    
+    trainable : bool
+        A boolean indicating if the trainer should train the EncoderDecoder object's parameters.
+        Technically this is just a boolean, it's up to the trainer to actually respect it.
 
         
         
@@ -121,6 +125,7 @@ class EncoderDecoder(torch.nn.Module):
                     n_IC        : int, 
                     n_z         : int,
                     n_Decoders  : int,
+                    trainable   : bool, 
                     config      : dict) -> None:
         r"""
         Initializes a EncoderDecoder object. A EncoderDecoder object does two things. a) It can 
@@ -132,11 +137,12 @@ class EncoderDecoder(torch.nn.Module):
         
         EncoderDecoder objects natively support using multiple decoders, which enables things 
         like multi-stage training (mLaSDI). The actual decode method should return a weighted sum 
-        of these outputs. Thus, an EncoderDecoder object is defined by three variables:
+        of these outputs. Thus, an EncoderDecoder object is defined by four variables:
 
             n_IC (the number of initial conditions)
             n_z (the latent space dimension)
             n_decoders (the number of decoders)
+            trainable (if the trainer should train the EncoderDecoder)
         
         The encoder must map n_IC elements of the FOM space to n_IC elements of \mathbb{R}^{n_z}. 
         Each decoder decoder must map n_IC elements of \mathbb{R}^{n_z} to n_IC elements of the 
@@ -189,6 +195,9 @@ class EncoderDecoder(torch.nn.Module):
         n_Decoders : int
             The number of decoders.
 
+        trainable : bool 
+            Indicates if the trainer should train the EncoderDecoder parameters.
+
         config: dict
             The "EncoderDecoder" sub dictionary of the configuration file.
 
@@ -204,6 +213,7 @@ class EncoderDecoder(torch.nn.Module):
         assert isinstance(n_IC, int),       "n_IC must be an int, not %s"       % str(type(n_IC));
         assert isinstance(n_z, int),        "n_z must be an int, not %s"        % str(type(n_z));
         assert isinstance(n_Decoders, int), "n_Decoders must be an int, not %s" % str(type(n_Decoders));
+        assert isinstance(trainable, bool), "trainable must be a bool, not %s"  % str(type(trainable));
         assert n_IC > 0,                    "n_IC = %d; must be positive"       % n_IC;
         assert n_z > 0,                     "n_z = %d; must be positive"        % n_z;
         assert n_Decoders > 0,              "n_Decoders = %d; must be positive" % n_Decoders;
@@ -215,6 +225,7 @@ class EncoderDecoder(torch.nn.Module):
         self.n_IC           : int       = n_IC;
         self.n_z            : int       = n_z;
         self.n_Decoders     : int       = n_Decoders;
+        self.trainable      : bool      = trainable;
         self.config         : dict      = config;
 
         # Set up Decoder_Weight and Decoder_Active.
@@ -231,8 +242,33 @@ class EncoderDecoder(torch.nn.Module):
 
     
     # ---------------------------------------------------------------------------------------------
-    # Set_Decoder_Active and Set_Decoder_Weight.
+    # set_trainable, Set_Decoder_Active, and Set_Decoder_Weight.
     # ---------------------------------------------------------------------------------------------
+
+    def set_trainable(self, trainable : bool) -> None:
+        """
+        Enable or disable gradients for all registered EncoderDecoder parameters.
+
+        Concrete subclasses should call this once after constructing all submodules. This keeps
+        the public `trainable` flag and PyTorch's `requires_grad` flags consistent, so frozen
+        EncoderDecoder objects are omitted from optimizer updates and do not accumulate gradients.
+
+
+        -------------------------------------------------------------------------------------------
+        Args:
+
+        trainable : bool
+            If True, all EncoderDecoder parameters require gradients. If False, all parameters are
+            frozen.
+        """
+
+        assert isinstance(trainable, bool), "trainable must be a bool, not %s" % str(type(trainable));
+        self.trainable = trainable;
+        for param in self.parameters():
+            param.requires_grad_(trainable);
+        return;
+
+
 
     def Set_Decoder_Active(self, i_Decoder : int, active : bool) -> None:
         """
@@ -586,4 +622,3 @@ class EncoderDecoder(torch.nn.Module):
         assert self.n_z         == dict_['n_z'];
         assert self.n_IC        == dict_['n_IC'];
         assert self.n_Decoders  == dict_['n_Decoders'];
-

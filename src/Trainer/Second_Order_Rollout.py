@@ -709,7 +709,7 @@ class Second_Order_Rollout(Trainer):
                                                                             params           = self.param_space.train_space);
 
             # Log coefficient statistics to diagnose constant dynamics issue
-            if iter % 100 == 0 or iter == start_iter:  # Log every 100 iters and first iter
+            if self.latent_dynamics.trainable and (iter % 100 == 0 or iter == start_iter):  # Log every 100 iters and first iter
                 coef_tensors = self.latent_dynamics.trainable_coef_tensors();
                 train_coefs_flat = torch.cat([c.reshape(-1) for c in coef_tensors]);
                 LOGGER.info("Epoch %d: Coefs numel=%d, min=%.6e, max=%.6e, mean=%.6e, std=%.6e, abs_mean=%.6e" % (
@@ -997,10 +997,11 @@ class Second_Order_Rollout(Trainer):
 
 
             # Record coefficient scale and the most recent epoch index for fallback checkpointing.
-            with torch.no_grad():
-                coef_tensors_report = self.latent_dynamics.trainable_coef_tensors();
-                train_coefs_flat_report = torch.cat([c.reshape(-1) for c in coef_tensors_report]);
-                max_train_coef = float(torch.abs(train_coefs_flat_report).max().item());
+            if self.latent_dynamics.trainable:
+                with torch.no_grad():
+                    coef_tensors_report = self.latent_dynamics.trainable_coef_tensors();
+                    train_coefs_flat_report = torch.cat([c.reshape(-1) for c in coef_tensors_report]);
+                    max_train_coef = float(torch.abs(train_coefs_flat_report).max().item());
             last_iter_idx = int(iter);
 
 
@@ -1063,7 +1064,8 @@ class Second_Order_Rollout(Trainer):
             if(self.loss_weights['LD'] > 0):            info_str += ", LD: %3.6f"                                                                   % loss_LD.item();
             if(self.loss_weights['stab'] > 0):          info_str += ", Stab: %3.6f"                                                                 % loss_stab.item();
             if(self.loss_weights['coef'] > 0):          info_str += ", Coef: %3.6f"                                                                 % loss_coef.item();
-            info_str += ", max|c|: %.3f" % max_train_coef;
+            if self.latent_dynamics.trainable:
+                info_str += ", max|c|: %.3f" % max_train_coef;
             LOGGER.info(info_str);
 
             self.timer.end("Report");

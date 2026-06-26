@@ -63,9 +63,12 @@ class SINDy_weak(LatentDynamics):
             functions rather than finite differences.
 
         config : dict
-            The latent-dynamics configuration dictionary. It must have
-            `config["type"] == "sindy_w"` and a `config["sindy_w"]` weak-form sub-dictionary
-            containing `test_func_type`, `test_func_width`, and `overlap`.
+            The latent-dynamics configuration dictionary. It must three keys: `type`, `trainable`,
+            and `sindy_w`. It must have `config["type"] == "sindy_w"` and `config["sindy_w"]` 
+            should be a weak-form sub-dictionary containing the following keys:
+                - test_func_type: Specifies the kind of bump function. Either "bump" or "PC-poly".
+                - test_func_width: The width of each bump.
+                - overlap: The amount of overlap between successive bumps.
 
 
         -------------------------------------------------------------------------------------------
@@ -76,9 +79,12 @@ class SINDy_weak(LatentDynamics):
         """
 
         # Checks
-        assert 'type' in config;
-        assert config['type'] == "sindy_w";
-        assert "sindy_w" in config;
+        assert  'type'      in config;
+        assert  'trainable' in config;
+        assert  isinstance(config["type"], str);
+        assert  isinstance(config["trainable"], bool);
+        assert  config['type'] == "sindy_w";
+        assert  "sindy_w"   in config;
 
         # Run the base class initializer. Since A has n_z^2 entries and b has n_z entries, there
         # are n_z*(n_z + 1) scalar coefficients.
@@ -86,6 +92,7 @@ class SINDy_weak(LatentDynamics):
                          n_coefs        = n_z*(n_z + 1),
                          n_IC           = 1,
                          Uniform_t_Grid = Uniform_t_Grid,
+                         trainable      = config["trainable"],
                          config         = config,
                          type           = "weak");
 
@@ -103,6 +110,9 @@ class SINDy_weak(LatentDynamics):
 
     def trainable_coef_tensors(self) -> list[torch.Tensor]:
         r"""Return the actual weak-form SINDy coefficient tensors to optimize."""
+
+        if self.trainable == False:
+            return [];
 
         tensors : list[torch.Tensor] = [];
         for coef_dict in self.train_coefs.values():

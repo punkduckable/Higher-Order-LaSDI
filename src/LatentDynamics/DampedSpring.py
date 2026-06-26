@@ -62,8 +62,11 @@ class DampedSpring(LatentDynamics):
             accelerations from latent trajectories.
 
         config : dict
-            Latent-dynamics configuration. The optional `lstsq_reg` value controls ridge
-            regularization in `fit_coefficients`.
+            The latent-dynamics configuration dictionary. It must three keys: `type`, `trainable`,
+            and `spring`. It must have `config["type"] == "spring"` and `config["spring"]` should be a 
+            dictionary housing sub-class specific settings. The required `lstsq_reg` entry controls
+            ridge regularization used by `fit_coefficients(...)` when initializing coefficients
+            from encoded trajectories.
 
 
         -------------------------------------------------------------------------------------------
@@ -72,17 +75,26 @@ class DampedSpring(LatentDynamics):
 
         Nothing!
         """
+        
+        # Checks
+        assert  'type'      in config;
+        assert  'trainable' in config;
+        assert  isinstance(config["type"], str);
+        assert  isinstance(config["trainable"], bool);
+        assert  config['type'] == "spring";
+        assert  "spring"    in config;
 
         # Run the base class initializer. This also creates the LD-owned train_coefs dictionary.
         super().__init__(   n_z             = n_z, 
                             n_coefs         = n_z*(2*n_z + 1),
                             n_IC            = 2,
                             Uniform_t_Grid  = Uniform_t_Grid, 
+                            trainable       = config["trainable"],
                             config          = config,
-                            type           = "strong");
+                            type            = "strong");
 
         # Class-specific variables.
-        self.lstsq_reg : float = config.get("lstsq_reg", 1.0);
+        self.lstsq_reg : float = config["spring"]["lstsq_reg"];
         LOGGER.info("Initializing a DampedSpring object with n_z = %d, Uniform_t_Grid = %s, lstsq_reg = %s" % (self.n_z, str(self.Uniform_t_Grid), str(self.lstsq_reg)));        
         
         # Setup the loss functions used by calibrate.
@@ -111,6 +123,9 @@ class DampedSpring(LatentDynamics):
 
     def trainable_coef_tensors(self) -> list[torch.Tensor]:
         r"""Return the trainable coefficient tensors stored in `self.train_coefs`."""
+
+        if self.trainable == False:
+            return [];
 
         tensors : list[torch.Tensor] = [];
         for coef_dict in self.train_coefs.values():

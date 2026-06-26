@@ -61,9 +61,11 @@ class SwitchSINDy(LatentDynamics):
             for those parameter values.
 
         config : dict
-            The latent-dynamics configuration dictionary. The optional `lstsq_reg` value controls
-            ridge regularization when fitting before/after coefficient matrices.
-
+            The latent-dynamics configuration dictionary. It must three keys: `type`, `trainable`,
+            and `switch`. It must have `config["type"] == "switch"` and `config["switch"]` should be a 
+            dictionary housing sub-class specific settings. The required `lstsq_reg` entry controls
+            ridge regularization used by `fit_coefficients(...)` when initializing coefficients
+            from encoded trajectories.
 
         -------------------------------------------------------------------------------------------
         Returns
@@ -72,18 +74,27 @@ class SwitchSINDy(LatentDynamics):
         Nothing!
         """
 
+        # Checks
+        assert  'type'      in config;
+        assert  'trainable' in config;
+        assert  isinstance(config["type"], str);
+        assert  isinstance(config["trainable"], bool);
+        assert  config['type'] == "switch";
+        assert  "switch"    in config;
+
         # Run the base class initializer. Note that this sets self.train_coefs.
         super().__init__(   n_z             = n_z, 
                             n_coefs         = n_z*(n_z + 1)*2,
                             n_IC            = 1,
                             Uniform_t_Grid  = Uniform_t_Grid, 
+                            trainable       = config["trainable"],
                             config          = config,
                             type            = "strong");
 
 
         # Class-specific initialization.
-        self.lstsq_reg : float      = config.get("lstsq_reg", 1.0);
-        self.switch_time : callable = switch_time;
+        self.lstsq_reg      : float     = config["switch"]["lstsq_reg"];
+        self.switch_time    : callable  = switch_time;
         
         # Setup the loss functions used by calibrate.
         self.MSE                    = torch.nn.MSELoss(reduction = 'mean');
@@ -108,6 +119,9 @@ class SwitchSINDy(LatentDynamics):
 
     def trainable_coef_tensors(self) -> list[torch.Tensor]:
         r"""Return all trainable switching-SINDy coefficient tensors."""
+
+        if self.trainable == False:
+            return [];
 
         tensors : list[torch.Tensor] = [];
         for coef_dict in self.train_coefs.values():

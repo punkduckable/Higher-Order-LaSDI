@@ -61,9 +61,12 @@ class SwitchSINDy_weak(LatentDynamics):
             for those parameter values.
 
         config : dict
-            The latent-dynamics configuration dictionary. It must have
-            `config["type"] == "switch_w"` and a `config["switch_w"]` weak-form sub-dictionary
-            containing `test_func_type`, `test_func_width`, and `overlap`.
+            The latent-dynamics configuration dictionary. It must three keys: `type`, `trainable`,
+            and `switch_w`. It must have `config["type"] == "switch_w"` and `config["switch_w"]` 
+            should be a weak-form sub-dictionary containing the following keys:
+                - test_func_type: Specifies the kind of bump function. Either "bump" or "PC-poly".
+                - test_func_width: The width of each bump.
+                - overlap: The amount of overlap between successive bumps.
 
 
         -------------------------------------------------------------------------------------------
@@ -74,9 +77,12 @@ class SwitchSINDy_weak(LatentDynamics):
         """
 
         # Checks
-        assert 'type' in config;
-        assert config['type'] == "switch_w";
-        assert "switch_w" in config;
+        assert  'type'      in config;
+        assert  'trainable' in config;
+        assert  isinstance(config["type"], str);
+        assert  isinstance(config["trainable"], bool);
+        assert  config['type'] == "switch_w";
+        assert  "switch_w"   in config;
 
         # Run the base class initializer. There are two affine systems, each with n_z*(n_z + 1)
         # scalar coefficients.
@@ -84,6 +90,7 @@ class SwitchSINDy_weak(LatentDynamics):
                             n_coefs         = n_z*(n_z + 1)*2,
                             n_IC            = 1,
                             Uniform_t_Grid  = Uniform_t_Grid,
+                            trainable       = config["trainable"],
                             config          = config,
                             type            = "weak");
 
@@ -104,6 +111,9 @@ class SwitchSINDy_weak(LatentDynamics):
 
     def trainable_coef_tensors(self) -> list[torch.Tensor]:
         r"""Return all trainable weak-form switching-SINDy coefficient tensors."""
+
+        if self.trainable == False:
+            return [];
 
         tensors : list[torch.Tensor] = [];
         for coef_dict in self.train_coefs.values():

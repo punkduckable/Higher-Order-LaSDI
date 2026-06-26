@@ -31,7 +31,6 @@ from    SwitchSINDy_weak        import  SwitchSINDy_weak;
 from    DampedSpring            import  DampedSpring;
 from    DampedSpring_weak       import  DampedSpring_weak;
 
-
 from    ParameterSpace          import  ParameterSpace;
 
 from    Trainer                 import  Trainer;
@@ -39,7 +38,6 @@ from    First_Order_Rollout     import  First_Order_Rollout;
 from    First_Order_Weak        import  First_Order_Weak;
 from    Second_Order_Rollout    import  Second_Order_Rollout;
 from    Second_Order_Weak       import  Second_Order_Weak;
-
 
 from    EncoderDecoder          import  EncoderDecoder;
 from    Autoencoder             import  Autoencoder, load_Autoencoder;
@@ -195,7 +193,7 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer
     # encoder_decoder parameters from file.
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
         encoder_decoder_type : str    = config['EncoderDecoder']['type'];
-        encoder_decoder               = encoder_decoder_load_dict[encoder_decoder_type](restart_dict['encoder_decoder']);
+        encoder_decoder               = encoder_decoder_load_dict[encoder_decoder_type](restart_dict['encoder_decoder'], config['EncoderDecoder']);
     else: 
         encoder_decoder               = Initialize_Encoder_Decoder(physics, config);
 

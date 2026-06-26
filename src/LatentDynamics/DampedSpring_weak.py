@@ -58,8 +58,9 @@ class DampedSpring_weak(LatentDynamics):
             method we use to compute time derivatives. 
 
         config : dict 
-            The "latent_dynamics" sub-dictionary of the config file. It should include the 
-            following keys:
+            The latent-dynamics configuration dictionary. It must three keys: `type`, `trainable`,
+            and `spring_w`. It must have `config["type"] == "spring_w"` and `config["spring_w"]` 
+            should be a weak-form sub-dictionary containing the following keys:
                 - test_func_type: Specifies the kind of bump function. Either "bump" or "PC-poly".
                 - test_func_width: The width of each bump.
                 - overlap: The amount of overlap between successive bumps.
@@ -72,9 +73,12 @@ class DampedSpring_weak(LatentDynamics):
         """
 
         # Checks
-        assert 'type' in config;
-        assert config['type'] == "spring_w";
-        assert "spring_w" in config;
+        assert  'type'      in config;
+        assert  'trainable' in config;
+        assert  isinstance(config["type"], str);
+        assert  isinstance(config["trainable"], bool);
+        assert  config['type'] == "spring_w";
+        assert  "spring_w"  in config;
 
         # Run the base class initializer. This does not set the n_t attribute. 
         # Because K and C are n_z x n_z matrices, and b is in \mathbb{R}^n_z, there are 
@@ -83,6 +87,7 @@ class DampedSpring_weak(LatentDynamics):
                             n_coefs         = n_z*(2*n_z + 1),
                             n_IC            = 2, 
                             Uniform_t_Grid  = Uniform_t_Grid, 
+                            trainable       = config["trainable"],
                             config          = config,
                             type            = "weak");
         LOGGER.info("Initializing a DampedSpring_weak object with n_z = %d, Uniform_t_Grid = %s" % (
@@ -100,6 +105,9 @@ class DampedSpring_weak(LatentDynamics):
     def trainable_coef_tensors(self) -> list[torch.Tensor]:
         r"""Return the actual weak-form coefficient tensors to optimize."""
 
+        if self.trainable == False:
+            return [];
+    
         tensors : list[torch.Tensor] = [];
         for coef_dict in self.train_coefs.values():
             tensors.extend([coef_dict["K"], coef_dict["C"], coef_dict["b"]]);

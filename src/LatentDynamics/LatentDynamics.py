@@ -69,6 +69,11 @@ class LatentDynamics:
         Whether each trajectory's time grid is uniformly spaced; subclasses use this to choose
         appropriate finite-difference or weak-form derivative approximations.
     
+    trainable : bool 
+        Indicates if the trainer should train the parameters in this LatentDynamics object. 
+        Sub-classes should configure `trainable_coef_tensors` to return an empty list if 
+        `trainable = False`. 
+
     config : dict
         The `latent_dynamics` configuration dictionary used to construct the concrete model.
 
@@ -102,8 +107,8 @@ class LatentDynamics:
     - `fit_coefficients(Latent_States, t_Grid, params=None)`: estimate/initialize native
       coefficient dictionaries from encoded trajectories and store them with `set_train_coefs(...)`.
 
-    - `trainable_coef_tensors()`: return the actual trainable tensors stored in `train_coefs` so
-      the `Trainer` can optimize them jointly with the encoder/decoder.
+    - `trainable_coef_tensors()`: return the actual trainable tensors (if training is enabled) 
+      stored in `train_coefs` so the `Trainer` can optimize them jointly with the encoder/decoder.
     
     - `calibrate(Latent_States, loss_type, t_Grid, params=None)`: compute latent-dynamics residual
       losses and coefficient/stability regularization for the current coefficients. This should 
@@ -126,6 +131,7 @@ class LatentDynamics:
     n_coefs         : int;          # Number of coefficients in the latent space dynamics
     n_IC            : int;          # Number of initial conditions to define the initial latent state.
     Uniform_t_Grid  : bool;         # Is there an h such that the i'th frame is at t0 + i*h? Or is the spacing between frames arbitrary?
+    trainable       : bool          # Should the trainer train the latent dynamics parameters?
     config          : dict          # The "latent_dynamics" sub-dictionary of the configuration file, used to define the LatentDynamics object
     type            : str;          # Latent-dynamics formulation type: "strong" or "weak".
     train_coefs     : dict[tuple[float, ...], dict[str, torch.Tensor]];
@@ -137,6 +143,7 @@ class LatentDynamics:
                     n_coefs         : int,
                     n_IC            : int, 
                     Uniform_t_Grid  : bool, 
+                    trainable       : bool,
                     config          : dict,
                     type            : str = "strong") -> None:
         r"""
@@ -171,6 +178,10 @@ class LatentDynamics:
             (note that h may depend on the parameter value, but it needs to be constant for a 
             specific parameter value). The value of this setting determines which finite difference 
             method we use to compute time derivatives. 
+        
+        trainable : bool
+            Indicates if the trainer should train the latent dynamics parameters. If false, 
+            `trainable_coef_tensors` should return an empty list.
 
         config : dict
             The "latent_dynamics" sub-dictionary of the config file. If `type == "weak"`, the
@@ -195,6 +206,7 @@ class LatentDynamics:
         self.n_coefs         = n_coefs;
         self.n_IC            = n_IC;
         self.Uniform_t_Grid  = Uniform_t_Grid;
+        self.trainable       = trainable;
         self.config          = config;
         self.type            = type;
         self.train_coefs     : dict[tuple[float, ...], dict[str, torch.Tensor]] = {};
@@ -572,10 +584,11 @@ class LatentDynamics:
         r"""
         Store a native coefficient dictionary for one parameter combination.
 
-        The values in `coefs` are converted to detached trainable leaf tensors unless they already
-        are trainable leaves. This ensures that `trainable_coef_tensors()` can pass these exact tensor
-        objects to a torch optimizer and that optimizer updates modify the coefficients stored in
-        `self.train_coefs`.
+        The values in `coefs` are converted to detached leaf tensors whose `requires_grad` flag
+        matches `self.trainable`, unless they are already leaf tensors with the correct gradient
+        setting. This ensures that `trainable_coef_tensors()` can pass these exact tensor objects
+        to a torch optimizer when training is enabled, and frozen latent dynamics do not accumulate
+        coefficient gradients.
 
 
         -------------------------------------------------------------------------------------------
@@ -602,10 +615,10 @@ class LatentDynamics:
         for name, value in coefs.items():
             assert isinstance(name, str), "coefficient names must be strings";
             assert isinstance(value, torch.Tensor), "coefficient %s must be a torch.Tensor" % name;
-            if value.requires_grad and value.is_leaf:
+            if value.is_leaf and (value.requires_grad == self.trainable):
                 coefs[name] = value;
             else:
-                coefs[name] = value.detach().clone().requires_grad_(True);
+                coefs[name] = value.detach().clone().requires_grad_(self.trainable);
         self.train_coefs[self._param_key(params_row)] = coefs;
         return;
 
@@ -894,7 +907,9 @@ class LatentDynamics:
         Export latent-dynamics metadata and LD-owned training coefficients.
 
         Coefficients are detached and moved to CPU for portable checkpoint/restart files. Loading
-        re-creates trainable leaf tensors, so optimizer construction after load still works.
+        re-creates leaf tensors whose `requires_grad` flags match `self.trainable`, so optimizer
+        construction after load still works when training is enabled and frozen latent dynamics
+        remain frozen.
         """
 
         train_coefs_cpu : dict[tuple[float, ...], dict[str, torch.Tensor]] = {};
@@ -922,7 +937,7 @@ class LatentDynamics:
         Load latent-dynamics metadata and replace `self.train_coefs`.
 
         Shape/model metadata are checked against the already-constructed object. Coefficients are
-        restored as trainable leaf tensors rather than raw checkpoint tensors.
+        restored as leaf tensors whose `requires_grad` flags match `self.trainable`.
         """
 
         assert(self.n_z             == dict_['n_z']);
@@ -941,6 +956,6 @@ class LatentDynamics:
             for name, tensor in coef_dict.items():
                 assert isinstance(name, str), "coefficient names must be strings";
                 assert isinstance(tensor, torch.Tensor), "coefficient values must be tensors";
-                self.train_coefs[key][name] = tensor.detach().clone().requires_grad_(True);
+                self.train_coefs[key][name] = tensor.detach().clone().requires_grad_(self.trainable);
         return;
     
