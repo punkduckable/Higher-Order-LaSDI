@@ -270,11 +270,15 @@ def main() -> int:
     # Get path to config file.
     config_path = resolve_example(repo_root, args.example, args.examples_dir)
 
-    # Checks
-    if not figures_dir.is_dir():
-        raise FileNotFoundError(f"Figures directory not found: {figures_dir}")
-    if not results_dir.is_dir():
-        raise FileNotFoundError(f"results directory not found: {results_dir}")
+    # Ensure output directories exist. If a path exists but is not a directory,
+    # fail fast rather than silently writing somewhere unexpected.
+    for directory in (figures_dir, results_dir):
+        if directory.exists() and not directory.is_dir():
+            raise NotADirectoryError(f"expected directory path: {directory}")
+        if not directory.exists():
+            print(f"CREATE directory: {directory}")
+            if not args.dry_run:
+                directory.mkdir(parents=True, exist_ok=True)
 
     # Set up a directory (and coefficient heatmap sub-directory) to hold the files.
     run_dir = next_run_directory(figures_dir, dt.date.today())
