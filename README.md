@@ -24,12 +24,12 @@ Each piece has a base class that defines the interface used by the rest of the c
 
 ## Getting Started
 
-For a command-line workflow, use `src/Workflow.py` together with a YAML configuration file. Example configurations are provided in `examples/*.yml`. 
+For a command-line workflow, use `scripts/run_experiment.py` together with a YAML configuration file. Example configurations are provided in `examples/*.yml`. 
 
 ### Basic Usage
 
 ```bash
-python src/Workflow.py --config examples/KleinGordon.yml
+python scripts/run_experiment.py --config examples/KleinGordon.yml
 ```
 
 This command will:
@@ -41,7 +41,7 @@ This command will:
 
 ### Workflow Components
 
-`Workflow.py` orchestrates the following pipeline:
+`scripts/run_experiment.py` orchestrates the following pipeline:
 - **Data Generation**: Calls physics solvers to generate training trajectories
 - **Training**: Uses a `Trainer` subclass to optimize the `EncoderDecoder` parameters and LD-owned `LatentDynamics.train_coefs` coefficient tensors
 - **Greedy Sampling**: Uses a configurable `Sampler` to select new training parameters. Samplers may query an `Interpolate` object for coefficient posterior means, standard deviations, or samples.
@@ -98,7 +98,7 @@ In general, every `Physics`, `EncoderDecoder`, `Trainer`, and `LatentDynamics` o
 
 ### Core Components
 
-- **`src/Workflow.py`** – Main command-line driver that loads configuration files, initializes components, and runs the training pipeline
+- **`scripts/run_experiment.py`** – Main command-line driver that loads configuration files, initializes components, and runs the training pipeline
 - **`src/Trainer/`** - Training algorithms and shared training state for optimizing the encoder/decoder and latent dynamics from FOM data
     - `Trainer.py` – Base `Trainer` class: normalization helpers, optional native noise injection, checkpointing, loss logging, timing, and round-based training orchestration
     - `First_Order_Rollout.py` – `Trainer` subclass for first-order systems (`n_IC = 1`)

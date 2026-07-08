@@ -2,19 +2,24 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-# Add LatentDynamics, Physics directories to the search path.
 import  sys;
 import  os;
-LD_Path             : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
-Physics_Path        : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
-Utils_Path          : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
-Interpolate_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Interpolate"));
-Sample_Path         : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Sample"));
-sys.path.append(LD_Path); 
-sys.path.append(Physics_Path); 
+from    pathlib                     import  Path;
+
+# Add src and its subpackages to the search path.
+PROJECT_DIR         : Path  = Path(__file__).resolve().parent.parent;
+SRC_Path            : str   = str(PROJECT_DIR / "src");
+LD_Path             : str   = str(PROJECT_DIR / "src" / "LatentDynamics");
+Physics_Path        : str   = str(PROJECT_DIR / "src" / "Physics");
+Utils_Path          : str   = str(PROJECT_DIR / "src" / "Utilities");
+Interpolate_Path    : str   = str(PROJECT_DIR / "src" / "Interpolate");
+Sample_Path         : str   = str(PROJECT_DIR / "src" / "Sample");
+sys.path.append(SRC_Path);
+sys.path.append(LD_Path);
+sys.path.append(Physics_Path);
 sys.path.append(Interpolate_Path);
 sys.path.append(Sample_Path);
-sys.path.append(Utils_Path); 
+sys.path.append(Utils_Path);
 
 import  yaml;
 import  argparse;
@@ -24,7 +29,6 @@ import  time;
 import  numpy;
 import  torch;
 import  matplotlib.pyplot           as      plt;
-from    pathlib                     import  Path;
 
 from    EncoderDecoder              import  EncoderDecoder;
 from    ParameterSpace              import  ParameterSpace;
@@ -87,9 +91,7 @@ def main():
         LOGGER.info("Loading from restart (%s)" % restart_filename);
 
         # Set up the restart path under Higher-Order-LaSDI/results (independent of CWD).
-        _SRC_DIR            : Path  = Path(__file__).resolve().parent;      # Higher-Order-LaSDI/src
-        _PROJECT_DIR        : Path  = _SRC_DIR.parent;                      # Higher-Order-LaSDI
-        results_dir         : Path  = _PROJECT_DIR / "results";
+        results_dir         : Path  = PROJECT_DIR / "results";
         restart_path        : str   = str(results_dir / restart_filename);
     
     LOGGER.info("Done! Took %fs" % (time.perf_counter() - timer));

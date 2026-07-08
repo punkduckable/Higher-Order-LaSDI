@@ -66,7 +66,7 @@ candidate_roots+=("$SCRIPT_DIR")
 
 REPO_ROOT=""
 for candidate in "${candidate_roots[@]}"; do
-    if [[ -f "${candidate}/src/Workflow.py" ]]; then
+    if [[ -f "${candidate}/scripts/run_experiment.py" ]]; then
         REPO_ROOT="$(cd "$candidate" && pwd)"
         break
     fi
@@ -125,7 +125,7 @@ export MPLBACKEND=Agg
 
 RUN_START_EPOCH="$(date +%s)"
 
-python src/Workflow.py --config "$CONFIG_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE"
+python scripts/run_experiment.py --config "$CONFIG_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE"
 workflow_status=$?
 
 echo "Workflow finished at $(date) with exit code ${workflow_status}"
