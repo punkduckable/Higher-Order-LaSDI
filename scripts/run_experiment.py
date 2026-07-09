@@ -69,12 +69,12 @@ def main():
     # Setup
     # ---------------------------------------------------------------------------------------------
 
-    LOGGER.info("Setting up...");
-    timer     : float = time.perf_counter();
-
     # Load in the argument
     args : argparse.Namespace = parser.parse_args(sys.argv[1:]);
     LOGGER.debug("config file: %s" % args.config);
+
+    LOGGER.info("Setting up...");
+    timer     : float = time.perf_counter();
 
     # Load the configuration file. 
     with open(args.config, 'r') as f:

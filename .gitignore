@@ -15,8 +15,8 @@ checkpoint/*
 results/*
 output.txt
 Figures/*
-venv/*
-venv_mfem/*
+.venv/*
+.uv-cache/*
 .vscode/settings.json
 dconf/user
 slirp.out
@@ -26,3 +26,4 @@ env_lc.sh
 *_stdout.txt
 *.err
 *.log
+uv.lock

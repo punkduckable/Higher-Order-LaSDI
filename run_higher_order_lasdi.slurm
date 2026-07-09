@@ -80,6 +80,10 @@ fi
 
 cd "$REPO_ROOT" || exit 1
 
+# Keep uv's package cache out of $HOME to avoid home-directory quota failures
+# on shared systems.
+export UV_CACHE_DIR="${UV_CACHE_DIR:-${REPO_ROOT}/.uv-cache}"
+
 if [[ "$ExamplesDir" == /* ]]; then
     EXAMPLES_PATH="$ExamplesDir"
 else
@@ -106,8 +110,14 @@ if [[ "$Example" == */* || ! -f "$CONFIG_FILE" ]]; then
     exit 2
 fi
 
-if [[ ! -f ./venv/bin/activate ]]; then
-    echo "ERROR: virtual environment not found at ./venv/bin/activate" >&2
+if ! command -v uv >/dev/null 2>&1; then
+    echo "ERROR: uv is not available on PATH" >&2
+    exit 2
+fi
+
+if [[ ! -x ./.venv/bin/python ]]; then
+    echo "ERROR: uv environment not found at ./.venv/bin/python" >&2
+    echo "Run 'uv sync' in the repository root before submitting this job." >&2
     exit 2
 fi
 
@@ -117,15 +127,12 @@ echo "Config:     ${CONFIG_FILE}"
 echo "Stdout:     ${STDOUT_FILE}"
 echo "Stderr:     ${STDERR_FILE}"
 
-# shellcheck source=/dev/null
-source ./venv/bin/activate
-
 # Use a non-interactive Matplotlib backend for batch jobs.
 export MPLBACKEND=Agg
 
 RUN_START_EPOCH="$(date +%s)"
 
-python scripts/run_experiment.py --config "$CONFIG_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE"
+uv run --no-sync python scripts/run_experiment.py --config "$CONFIG_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE"
 workflow_status=$?
 
 echo "Workflow finished at $(date) with exit code ${workflow_status}"
@@ -134,7 +141,7 @@ echo "Running cleanup..."
 # Cleanup is intentionally run even if training fails, so partial logs/configs
 # are still archived for debugging. It copies result/config files and moves
 # top-level Figures outputs generated after the latest save file.
-python scripts/cleanup_run.py "$Example" \
+uv run --no-sync python scripts/cleanup_run.py "$Example" \
     --repo-root "$REPO_ROOT" \
     --examples-dir "$EXAMPLES_PATH" \
     --stdout "$STDOUT_FILE" \

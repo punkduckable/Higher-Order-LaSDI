@@ -29,7 +29,7 @@ For a command-line workflow, use `scripts/run_experiment.py` together with a YAM
 ### Basic Usage
 
 ```bash
-python scripts/run_experiment.py --config examples/KleinGordon.yml
+uv run python scripts/run_experiment.py --config examples/KleinGordon.yml
 ```
 
 This command will:
@@ -397,59 +397,47 @@ trainer:
 
 Tested with the following versions:
 
-- Python (3.10)
+- Python (3.10–3.12; Python 3.11 is recommended for PyMFEM)
 - numpy (1.26.4)
 - torch (2.5.1)
 - scikit-learn (1.5.2)
 - pyyaml (6.0.2)
 - scipy (1.14.1)
 - matplotlib (3.9.2)
+- h5py (3.14.0)
 
-These packages are listed in the `requirements.txt` file.
+These dependencies are declared in `pyproject.toml` and installed with `uv`.
 
+### Installing with uv (recommended)
 
-### Installing with venv (recommended)
+Install `uv` if it is not already available:
 
-Create the virtual environment in a `venv/` subdirectory of `Higher-Order-LaSDI/`:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Create/sync the project environment from `pyproject.toml`:
 
 ```bash
 cd Higher-Order-LaSDI
-python3 -m venv venv
-source venv/bin/activate
 
-python -m pip install --upgrade pip setuptools wheel
-python -m pip install -r requirements.txt 
+# Keep uv's package cache in the repository instead of $HOME. This avoids
+# home-directory quota failures on shared systems.
+export UV_CACHE_DIR="${PWD}/.uv-cache"
 
-# Alternatively, you can install the core dependencies with tested versions.
-python -m pip install \
-  numpy==1.26.4 \
-  scipy==1.14.1 \
-  scikit-learn==1.5.2 \
-  pyyaml==6.0.2 \
-  matplotlib==3.9.2 \
-
-# PyTorch (pick the right wheel for your platform/CUDA)
-python -m pip install torch==2.5.1
+uv sync --python 3.11
 ```
 
-Add optional dependencies to the same venv:
+Run experiments through `uv run` so the command uses the project environment:
 
 ```bash
-# HDF5 data loading (Thermal example)
-python -m pip install h5py==3.14.0
-
-# Jupyter for error diagnostics
-python -m pip install jupyter==1.0.0
-
-# PyMFEM: This one is tricky. Go to the PyMFEM build steps below.
+uv run python scripts/run_experiment.py --config examples/KleinGordon.yml
 ```
 
-
-
-Deactivate with:
+For a shell inside the uv-managed environment:
 
 ```bash
-deactivate
+source .venv/bin/activate
 ```
 
 ### Optional Dependencies
@@ -460,42 +448,35 @@ deactivate
 
 **For HDF5 data loading (Thermal example):**
 - hdf5 (the system HDF5 library, not a Python package; 1.14.5)
-- h5py (3.14.0)
+- h5py (3.14.0), installed by `uv sync`
 
 **For PyMFEM examples:**
 - mfem (4.7.0.1)
-- cmake (3.28.1)
+- cmake (3.31.10)
 - mpi4py (4.0.3)
 - See installation instructions below
 
 **For Jupyter notebooks (error diagnostics):**
-- jupyter (1.0.0)
+- jupyter (1.0.0), installed with `uv sync --extra notebooks`
 
 ## Installing PyMFEM
 
-PyMFEM can be challenging to install. Below is a step-by-step guide to avoid common issues. 
+PyMFEM can be challenging to install. Below is a step-by-step guide to avoid common issues.
 
-
-### 1. Create/Activate a venv (project-local)
+### 1. Create/sync a uv environment
 
 PyMFEM (via `numba-scipy`/SciPy constraints) does not work on the latest Python versions. For this
 guide, use Python 3.11.
 
-If you aren't already, set up a new virtual environment:
+From the Higher-Order-LaSDI repository root:
 
 ```bash
-python3.11 -m venv venv_mfem
-source venv_mfem/bin/activate
-
-python -m pip install --upgrade pip setuptools wheel
-# Install Higher-Order-LaSDI Python dependencies into this venv
-python -m pip install -r requirements.txt
-
-python -m pip install torch==2.5.1
+export UV_CACHE_DIR="${PWD}/.uv-cache"
+uv sync --python 3.11 --extra pymfem
+source .venv/bin/activate
 ```
 
-PyMFEM should be installed into the same `Higher-Order-LaSDI/venv_mfem`.
-
+PyMFEM should be installed into this same uv-managed `.venv`.
 
 ### 2. Clone and Checkout PyMFEM
 
@@ -506,22 +487,21 @@ cd ./PyMFEM
 git checkout v_4.7.0.1
 ```
 
-### 3. Install Dependencies
+### 3. Install PyMFEM Python build dependencies
 
-Install all dependencies using the requirements file:
+Install PyMFEM's own requirements into the active uv-managed environment:
 
 ```bash
-python -m pip install -r requirements.txt
+uv pip install -r requirements.txt
 ```
-
 
 ### 4. Fix CMake Version
 
 PyMFEM v_4.7.0.1 requires cmake < 4.0:
 
 ```bash
-python -m pip uninstall cmake
-python -m pip install cmake==3.31.10
+uv pip uninstall cmake
+uv pip install cmake==3.31.10
 ```
 
 ### 5. Install MPI
@@ -558,7 +538,7 @@ mpicc --showme:link 2>/dev/null || mpicc -show
 
 **On most systems:**
 ```bash
-pip install mpi4py==4.0.3
+uv pip install mpi4py==4.0.3
 ```
 
 **On LC:**
@@ -571,10 +551,10 @@ The procedure below forces `mpi4py` to link against the OpenMPI module you loade
 
 First, install Cython and remove any existing `mpi4py`:
 ```bash
-source ./venv_mfem/bin/activate
+source ./Higher-Order-LaSDI/.venv/bin/activate  # adjust path if needed
 
-python -m pip install --upgrade "cython>=3.0"
-pip uninstall -y mpi4py
+uv pip install --upgrade "cython>=3.0"
+uv pip uninstall -y mpi4py
 ```
 
 Next, download the `mpi4py` source distribution:
@@ -612,8 +592,7 @@ EOF
 
 Install from source using that config:
 ```bash
-# make sure build tooling is up to date inside the venv
-python -m pip install -U pip setuptools wheel
+uv pip install -U pip setuptools wheel
 
 # tell mpi4py to use your mpi.cfg
 export MPI4PY_BUILD_MPICFG="$PWD/mpi.cfg"
@@ -652,7 +631,7 @@ Now run a test import:
 python -c "from mpi4py import MPI; print(MPI.Get_library_version())"
 ```
 
-This should print something like the following: 
+This should print something like the following:
 
 `Open MPI v4.1.2, package: Open MPI sly1@rzwhippet7 Distribution, ident: 4.1.2, repo rev: v4.1.2, Nov 24, 2021`
 
@@ -661,7 +640,6 @@ If so, mpi4py is now installed and linked correctly. Change back to the PyMFEM d
 ```bash
 cd <path to PyMFEM directory>
 ```
-
 
 **Suppressing warnings on LC:**
 
@@ -676,7 +654,6 @@ export OMPI_MCA_btl_openib_allow_ib=0
 Avoid hard-coding `OMPI_MCA_btl="self,tcp"` unless you know your system provides the `btl:tcp`
 component; on some systems it can cause `MPI_Init` failures on compute nodes.
 
-
 ### 7. Build PyMFEM
 
 ```bash
@@ -689,8 +666,8 @@ If this works, you have now installed PyMFEM!
 
 ### LC note: “Do I need to redo this every login?”
 
-- The **venv is persistent**: once `venv_mfem` (and the patched `mpi4py` inside it) is created, it
-  will keep working across logins *as long as you don't reinstall/upgrade `mpi4py`* inside that venv.
+- The **uv-managed environment is persistent**: once `.venv` (and the patched `mpi4py` inside it) is
+  created, it will keep working across logins *as long as you don't reinstall/upgrade `mpi4py`* inside it.
 - Your **module environment is not persistent**: you generally need to `module load intel-classic`
   and `module load openmpi` again in each new shell / batch job.
 - Any **environment variables** (e.g. `OMPI_MCA_btl`) must be set each session/job if you want them.
@@ -698,14 +675,13 @@ If this works, you have now installed PyMFEM!
 
 A simple solution is to create a small helper script (e.g. `env_lc.sh` in Higher-Order-LaSDI repo) with the following contents:
 
-
 ```bash
 # env_lc.sh (example)
 module --force purge
 module load StdEnv
 module load intel-classic/2021.6.0
 module load openmpi/4.1.2
-source ./venv_mfem/bin/activate
+source ./.venv/bin/activate
 export OMPI_MCA_btl_openib_warn_no_device_params_found=0
 export OMPI_MCA_btl_openib_allow_ib=0
 ```
@@ -714,7 +690,6 @@ Before running LaSDI, `source` the script:
 ```bash
 source env_lc.sh
 ```
-
 
 ## Non-Uniform Time Grids
 

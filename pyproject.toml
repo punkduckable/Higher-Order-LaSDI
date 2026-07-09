@@ -1,0 +1,28 @@
+[project]
+name = "higher-order-lasdi"
+version = "0.1.0"
+description = "Higher-Order LaSDI research code for latent-space dynamics identification."
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "h5py==3.14.0",
+    "matplotlib==3.9.2",
+    "numpy==1.26.4",
+    "pyyaml==6.0.2",
+    "scikit-learn==1.5.2",
+    "scipy==1.14.1",
+    "torch==2.5.1",
+]
+
+[project.optional-dependencies]
+notebooks = [
+    "jupyter==1.0.0",
+]
+pymfem = [
+    "cmake==3.31.10",
+    "cython>=3.0",
+    "mpi4py==4.0.3",
+]
+
+[tool.uv]
+package = false
