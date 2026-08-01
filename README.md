@@ -24,12 +24,21 @@ Each piece has a base class that defines the interface used by the rest of the c
 
 ## Getting Started
 
-For a command-line workflow, use `scripts/run_experiment.py` together with a YAML configuration file. Example configurations are provided in `examples/*.yml`. 
+For a command-line workflow, use `scripts/run_experiment.py` together with a YAML configuration file
+to train and serialize a model/data artifact. Use `scripts/analyze_experiment.py` afterwards to load
+that artifact and generate plots/animations. Example configurations are provided in `examples/*.yml`. 
 
 ### Basic Usage
 
 ```bash
 uv run python scripts/run_experiment.py --config examples/KleinGordon.yml
+```
+
+After training finishes, the script writes a serialized experiment artifact under `results/`, e.g.
+`results/KleinGordon_07_22_2026_14_31.npy`. Run the plotting/analysis stage separately:
+
+```bash
+uv run python scripts/analyze_experiment.py --artifact results/KleinGordon_07_22_2026_14_31.npy
 ```
 
 For queued runs, use the Flux or SLURM batch scripts after running `uv sync`:
@@ -45,12 +54,15 @@ sbatch run_higher_order_lasdi.slurm
 The batch scripts run `scripts/run_experiment.py` through `uv run --no-sync` and expect the
 `.venv` environment to already exist.
 
-This command will:
+The training command will:
 1. Generate or load training data from the physics solver
 2. Train the `EncoderDecoder` and latent dynamics using `Trainer`
 3. Perform greedy sampling to adaptively select new training parameters
-4. Evaluate the learned ROM on test data
-5. Generate plots and error metrics
+4. Save the trained model, latent-dynamics coefficients, parameter space, trainer data, and config
+   to a restart/analysis artifact in `results/`
+
+The analysis command will load that artifact, evaluate the learned ROM on test data, and generate
+plots, error metrics, and animations.
 
 ### Workflow Components
 
@@ -59,7 +71,7 @@ This command will:
 - **Training**: Uses a `Trainer` subclass to optimize the `EncoderDecoder` parameters and LD-owned `LatentDynamics.train_coefs` coefficient tensors
 - **Greedy Sampling**: Uses a configurable `Sampler` to select new training parameters. Samplers may query `latent_dynamics.interpolator` for coefficient posterior means, standard deviations, or samples.
 - **Evaluation**: Computes rollout errors, relative errors, and standard deviations
-- **Visualization**: Generates latent trajectory plots, error heatmaps, and solution animations
+- **Visualization**: Generates latent trajectory plots, error heatmaps, melt-pool diagnostics, and solution animations
 
 ## Available Examples
 
@@ -70,7 +82,7 @@ The `examples/` directory contains configuration files for various physics probl
 | `Explicit.yml` | Custom explicit solver | 1st | Uniform |
 | `Burgers.yml` | Burgers equation (second-order formulation) | 2nd | Uniform |
 | `Burgers2D.yml` | 2D Burgers equation | 1st | Uniform |
-| `Thermal.yml` | Thermal diffusion (HDF5) | 1st | Uniform |
+| `Thermal.yml` | Thermal diffusion (3D HDF5) | 1st | Non-uniform |
 | `Advection.yml` | Advection equation (PyMFEM) | 1st | Uniform |
 | `WaveEquation.yml` | Wave equation (PyMFEM) | 2nd | Uniform |
 | `KleinGordon.yml` | Klein-Gordon equation (PyMFEM) | 2nd | Uniform |
@@ -159,8 +171,8 @@ In general, every `Physics`, `EncoderDecoder`, `Trainer`, and `LatentDynamics` o
   - `Burgers2D.py` – 2D Burgers equation
   - `BurgersSecondOrder.py` – Second-order Burgers formulation
   - `Explicit.py` / `ExplicitSecondOrder.py` – Custom explicit solvers
-  - `Thermal.py` – Thermal diffusion (loads from HDF5 files)
-- **PyMFEM-based Solvers** (in `src/HLaSDI/Physics/PyMFEM/`):
+  - `Thermal.py` – Thermal diffusion (loads 3D HDF5 files over laser power, scan speed, and initial temperature)
+- **PyMFEM-based Solvers** (in `src/Physics/PyMFEM/`):
   - `advection.py` – Advection equation
   - `wave_equation.py` – Wave equation (2nd order)
   - `klein_gordon.py` – Klein-Gordon equation (2nd order)

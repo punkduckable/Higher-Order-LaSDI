@@ -57,10 +57,13 @@ parameter_space:
   parameters:
     - name:                 laser powers
       test_space_type:      file
-      file:                 /p/lustre5/robertrs/AM_Agents/Generate_Data//9x9 no gas dataset/metadata.txt
+      file:                 /p/lustre5/robertrs/AM_Agents/Generate_Data/5x5x5 dataset - small/metadata.txt
     - name:                 scan speed
       test_space_type:      file
-      file:                 /p/lustre5/robertrs/AM_Agents/Generate_Data/9x9 no gas dataset/metadata.txt
+      file:                 /p/lustre5/robertrs/AM_Agents/Generate_Data/5x5x5 dataset - small/metadata.txt
+    - name:                 initial temp
+      test_space_type:      file
+      file:                 /p/lustre5/robertrs/AM_Agents/Generate_Data/5x5x5 dataset - small/metadata.txt
   test_space:
     type:                   grid
 
@@ -110,7 +113,6 @@ latent_dynamics:
 physics:
   type:                     Thermal
   Thermal:
-    hdf5_dir:               /p/lustre5/robertrs/AM_Agents/Generate_Data//9x9 no gas dataset/
+    hdf5_dir:               /p/lustre5/robertrs/AM_Agents/Generate_Data/5x5x5 dataset - small/
     use_cnn:                True
     threshold:              1700.0
-
