@@ -9,15 +9,15 @@ trainer:
   # all training/testing trajectories using these values.
   normalize:              true
 
-  device:                 'cpu'
+  device:                 'cuda:0'
 
-  noise_ratio:            0.0
+  noise_ratio:              0.0
   First_Order_Weak:       
     lr:                     0.001
     gradient_clip:          10.0        # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
 
     # p_rollout grows from p_rollout_init by dp_per_update every rollout_update_freq epochs, capped at max_p_rollout.
-    p_rollout_init:         0.01
+    p_rollout_init:         0.0
     rollout_update_freq:    10
     dp_per_update:          0.005
     max_p_rollout:          0.5         # Maximum proportion of the time window used for rollout loss.
@@ -41,8 +41,7 @@ trainer:
     
 workflow:
   use_restart:              False
-  restart_file:           
-  plot_train_rel_errors:    False
+  restart_file:             
 
 sampler: 
   type:                     'FOM_Rollout'
@@ -55,13 +54,13 @@ parameter_space:
   parameters:
     - name:                 laser powers
       test_space_type:      file
-      file:                 /p/lustre5/robertrs/AM_Agents/Generate_Data/5x5x5 dataset - small/metadata.txt
+      file:                 /p/lustre1/robertrs/AM_Agents/Generate_Data/Datasets/5x5x5 dataset/metadata.txt
     - name:                 scan speed
       test_space_type:      file
-      file:                 /p/lustre5/robertrs/AM_Agents/Generate_Data/5x5x5 dataset - small/metadata.txt
+      file:                 /p/lustre1/robertrs/AM_Agents/Generate_Data/Datasets/5x5x5 dataset/metadata.txt
     - name:                 initial temp
       test_space_type:      file
-      file:                 /p/lustre5/robertrs/AM_Agents/Generate_Data/5x5x5 dataset - small/metadata.txt
+      file:                 /p/lustre1/robertrs/AM_Agents/Generate_Data/Datasets/5x5x5 dataset/metadata.txt
   test_space:
     type:                   grid
 
@@ -86,14 +85,17 @@ EncoderDecoder:
 latent_dynamics:
   type:                     switch_w
   trainable:                true
+  switch:
+      lstsq_reg:              1.0
+
   switch_w:
     test_func_type:         'PC-poly'
     test_func_width:        150.0
-    overlap:                0.95
+    overlap:                0.9
 
 physics:
   type:                     Thermal
   Thermal:
-    hdf5_dir:               /p/lustre5/robertrs/AM_Agents/Generate_Data/5x5x5 dataset - small/
+    hdf5_dir:               /p/lustre1/robertrs/AM_Agents/Generate_Data/Datasets/5x5x5 dataset/
     use_cnn:                True
     threshold:              1700.0
