@@ -2,11 +2,6 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-# Add the main (src) directory to the search path.
-import  os, sys;
-src_path        : str   = os.path.abspath(os.path.dirname(os.path.dirname(__file__)));
-sys.path.append(src_path);
-
 import  numpy;
 import  torch;
 

@@ -2,19 +2,6 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-# Add the main (src) directory to the search path.
-import  os, sys;
-src_path            : str   = os.path.abspath(os.path.dirname(os.path.dirname(__file__)));
-Utilities_path      : str   = os.path.join(src_path, "Utilities");
-EncoderDecoder_path : str   = os.path.join(src_path, "EncoderDecoder");
-Interpolate_Path    : str   = os.path.join(src_path, "Interpolate");
-Trainer_Path        : str   = os.path.join(src_path, "Trainer");
-sys.path.append(Utilities_path);
-sys.path.append(EncoderDecoder_path);
-sys.path.append(src_path);
-sys.path.append(Interpolate_Path);
-sys.path.append(Trainer_Path);
-
 import  logging;
 
 import  torch;
@@ -23,11 +10,8 @@ import  numpy;
 from    Enums                       import  NextStep;  
 from    Trainer                     import  Trainer;
 from    Interpolate                 import  Interpolate;
-from    Autoencoder                 import  Autoencoder;
-from    Autoencoder_Pair            import  Autoencoder_Pair;
-from    CNN_3D_Autoencoder          import  CNN_3D_Autoencoder;
 from    EncoderDecoder              import  EncoderDecoder;
-from    Sampler                     import  Sampler;
+from    Sample.Sampler              import  Sampler;
 
 
 # Setup logger.

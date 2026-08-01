@@ -6,12 +6,13 @@ The script creates a dated run directory under ``Figures`` named like
 
 * moves requested stdout/stderr/log files into that directory if they exist,
 * copies the example YAML config into that directory,
-* copies the most recent result save from ``results`` that is not a
-  ``*_loss_by_param.pkl`` file,
-* copies the most recent ``*_loss_by_param.pkl`` file from ``results``, and
+* copies the requested result save, or the most recent result save from
+  ``results`` that is not a ``*_loss_by_param.pkl`` file,
+* copies the matching ``*_loss_by_param.pkl`` file from ``results``, and
 * moves top-level files in ``Figures`` whose modification time is later than
-  the latest non-loss result save. Files ending in ``_mean.png`` or
-  ``_std.png`` are moved into a ``Coefficient Heatmaps`` subdirectory.
+  the archived result save, or later than ``--min-figure-mtime`` when supplied.
+  Coefficient mean/std heatmap files are moved into a
+  ``Coefficient Heatmaps`` subdirectory.
 
 Only direct children of ``Figures`` are moved; existing dated subdirectories
 are never traversed.
@@ -33,6 +34,8 @@ DEFAULT_LOG_FILES = (
     "ho_lasdi_stdout.txt",
     "ho_lasdi_stderr.txt",
 )
+
+LOSS_BY_PARAM_SUFFIX = "_loss_by_param.pkl"
 
 
 def parse_args() -> argparse.Namespace:
@@ -101,17 +104,39 @@ def parse_args() -> argparse.Namespace:
             "stale result files if a run fails before saving."
         ),
     )
+    parser.add_argument(
+        "--result-save",
+        "--artifact",
+        dest="result_save",
+        type=Path,
+        default=None,
+        help=(
+            "Explicit serialized experiment artifact to copy into the archive. "
+            "Relative paths are interpreted relative to --repo-root, then ./results."
+        ),
+    )
+    parser.add_argument(
+        "--min-figure-mtime",
+        type=float,
+        default=None,
+        help=(
+            "Only move figures modified after this Unix timestamp. If omitted, "
+            "figures are moved only if they are newer than the archived result save."
+        ),
+    )
     return parser.parse_args()
 
 
 def resolve_example(
     repo_root: Path, example: str, examples_dir_arg: Path | None = None
 ) -> Path:
-    """Return the validated example config path.
+    """Return the resolved example config path.
 
     The repository uses ``examples`` (lowercase). A capitalized ``Examples``
     directory is also accepted if present, but the config must be a direct
-    child of that directory and must use the ``.yml`` extension.
+    child of that directory and must use the ``.yml`` extension. The file is
+    not required to exist; missing files are skipped later with a warning so
+    cleanup can still archive whatever artifacts are present.
     """
 
     if not example.endswith(".yml"):
@@ -143,8 +168,6 @@ def resolve_example(
         raise ValueError(
             f"Example must be a direct child of {examples_dir}: {config_path}"
         )
-    if not config_path.is_file():
-        raise FileNotFoundError(f"Example config not found: {config_path}")
     return config_path
 
 
@@ -171,11 +194,30 @@ def next_run_directory(figures_dir: Path, today: dt.date) -> Path:
 
 
 def latest_file(paths: list[Path]) -> Path | None:
-    """Return the file with the newest modification time, or ``None``."""
+    """Return the existing file with the newest modification time, or ``None``."""
 
-    if not paths:
+    existing_paths = [path for path in paths if path.is_file()]
+    if not existing_paths:
         return None
-    return max(paths, key=lambda path: path.stat().st_mtime)
+    return max(existing_paths, key=lambda path: path.stat().st_mtime)
+
+
+def resolve_result_save(repo_root: Path, result_save: Path) -> Path:
+    """Resolve an explicit serialized experiment artifact path."""
+
+    candidates: list[Path] = []
+    if result_save.is_absolute():
+        candidates.append(result_save)
+    else:
+        candidates.append(repo_root / result_save)
+        candidates.append(repo_root / "results" / result_save)
+
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved.is_file():
+            return resolved
+
+    raise FileNotFoundError(f"result save does not exist: {result_save}")
 
 
 def unique_destination(destination: Path) -> Path:
@@ -198,6 +240,10 @@ def unique_destination(destination: Path) -> Path:
 def copy_file(source: Path, destination_dir: Path, dry_run: bool) -> None:
     """Copy ``source`` into ``destination_dir`` without overwriting files."""
 
+    if not source.is_file():
+        print(f"SKIP missing file: {source}")
+        return
+
     destination = unique_destination(destination_dir / source.name)
     print(f"COPY {source} -> {destination}")
     if not dry_run:
@@ -206,6 +252,10 @@ def copy_file(source: Path, destination_dir: Path, dry_run: bool) -> None:
 
 def move_file(source: Path, destination_dir: Path, dry_run: bool) -> None:
     """Move ``source`` into ``destination_dir`` without overwriting files."""
+
+    if not source.is_file():
+        print(f"SKIP missing file: {source}")
+        return
 
     destination = unique_destination(destination_dir / source.name)
     print(f"MOVE {source} -> {destination}")
@@ -251,11 +301,81 @@ def top_level_figures_after(figures_dir: Path, timestamp: float) -> list[Path]:
     return sorted(figure_files, key=lambda path: path.stat().st_mtime)
 
 
+def is_loss_by_param_file(path: Path) -> bool:
+    """Return True for per-parameter loss pickle files."""
+
+    return path.name.endswith(LOSS_BY_PARAM_SUFFIX)
+
+
+def loss_by_param_prefix(path: Path) -> str:
+    """Return the physics/result prefix for a per-parameter loss file."""
+
+    return path.name[: -len(LOSS_BY_PARAM_SUFFIX)]
+
+
+def loss_by_param_matches_save(loss_file: Path, result_save: Path) -> bool:
+    """Return True when ``loss_file`` appears to belong to ``result_save``.
+
+    Result saves include a timestamp (for example ``Thermal_07_30_2026_19_18.npy``),
+    while loss files are overwritten under the physics-type prefix (for example
+    ``Thermal_loss_by_param.pkl``). Match by that prefix instead of modification
+    time only, because restart/resume workflows can leave the loss pickle older
+    than ``--min-result-mtime`` even though it is the companion diagnostics file.
+    """
+
+    if not is_loss_by_param_file(loss_file):
+        return False
+
+    loss_prefix = loss_by_param_prefix(loss_file)
+    save_stem = result_save.stem
+    return save_stem == loss_prefix or save_stem.startswith(f"{loss_prefix}_")
+
+
+def select_loss_by_param_file(
+    all_result_files: list[Path],
+    filtered_result_files: list[Path],
+    latest_save: Path | None,
+) -> Path | None:
+    """Select the best per-parameter loss file to archive."""
+
+    if latest_save is None:
+        return latest_file(
+            [path for path in filtered_result_files if is_loss_by_param_file(path)]
+        )
+
+    matching_loss_files = [
+        path
+        for path in all_result_files
+        if loss_by_param_matches_save(path, latest_save)
+    ]
+    if matching_loss_files:
+        longest_prefix_length = max(
+            len(loss_by_param_prefix(path)) for path in matching_loss_files
+        )
+        return latest_file(
+            [
+                path
+                for path in matching_loss_files
+                if len(loss_by_param_prefix(path)) == longest_prefix_length
+            ]
+        )
+
+    return latest_file(
+        [path for path in filtered_result_files if is_loss_by_param_file(path)]
+    )
+
+
 def is_coefficient_heatmap(path: Path) -> bool:
-    """Return True for coefficient heatmap images named ``*_mean/std.png``."""
+    """Return True for coefficient mean/std heatmap images."""
 
     lower_name = path.name.lower()
-    return lower_name.endswith("_mean.png") or lower_name.endswith("_std.png")
+    if not lower_name.endswith(".png"):
+        return False
+
+    return (
+        re.search(r"coefficient_\d+_(?:mean|std)(?:__.*)?\.png$", lower_name)
+        is not None
+    )
 
 
 def main() -> int:
@@ -269,6 +389,14 @@ def main() -> int:
 
     # Get path to config file.
     config_path = resolve_example(repo_root, args.example, args.examples_dir)
+
+    # Resolve an explicitly requested serialized artifact before any filesystem mutations. This
+    # avoids creating a run directory or moving logs when the artifact path is misspelled.
+    explicit_result_save = (
+        resolve_result_save(repo_root, args.result_save)
+        if args.result_save is not None
+        else None
+    )
 
     # Ensure output directories exist. If a path exists but is not a directory,
     # fail fast rather than silently writing somewhere unexpected.
@@ -296,8 +424,15 @@ def main() -> int:
     # available in their standard repository locations.
     copy_file(config_path, run_dir, args.dry_run)
 
-    # Fetch all files in results (or, if min_result_mtime is defined, then only files in results created after this))
-    result_files = [path for path in results_dir.iterdir() if path.is_file()]
+    # Fetch all files in results (or, if min_result_mtime is defined, then only
+    # files in results created after this).
+    # In dry-run mode the directory may not actually have been created above.
+    all_result_files = (
+        [path for path in results_dir.iterdir() if path.is_file()]
+        if results_dir.is_dir()
+        else []
+    )
+    result_files = all_result_files
     if args.min_result_mtime is not None:
         result_files = [
             path
@@ -305,13 +440,19 @@ def main() -> int:
             if path.stat().st_mtime >= args.min_result_mtime
         ]
 
-    # Fetch the save/loss_by_parm files by fetching the last file in results with 
-    # that do/do not end with loss_by_parm.
-    latest_save = latest_file(
-        [path for path in result_files if not path.name.endswith("loss_by_param.pkl")]
-    )
-    latest_loss_by_param = latest_file(
-        [path for path in result_files if path.name.endswith("loss_by_param.pkl")]
+    # Fetch the save/loss_by_param files. Prefer an explicit serialized artifact when supplied;
+    # otherwise keep the legacy behavior of selecting the most recent non-loss result file.
+    if args.result_save is None:
+        latest_save = latest_file(
+            [path for path in result_files if not is_loss_by_param_file(path)]
+        )
+    else:
+        latest_save = explicit_result_save
+
+    latest_loss_by_param = select_loss_by_param_file(
+        all_result_files,
+        result_files,
+        latest_save,
     )
 
     # Copy the save
@@ -320,16 +461,31 @@ def main() -> int:
     else:
         copy_file(latest_save, run_dir, args.dry_run)
 
-    # Copy loss_by_parm
+    # Copy loss_by_param
     if latest_loss_by_param is None:
         print("WARNING: no *_loss_by_param.pkl file found in results.")
     else:
+        if (
+            args.min_result_mtime is not None
+            and latest_loss_by_param.stat().st_mtime < args.min_result_mtime
+        ):
+            print(
+                "WARNING: copying matching loss_by_param file older than "
+                "--min-result-mtime: "
+                f"{latest_loss_by_param}"
+            )
         copy_file(latest_loss_by_param, run_dir, args.dry_run)
 
-    # Now copy the figures created after the save.
+    # Now move the figures created after the save, or after the explicit figure timestamp if one
+    # was provided. This supports the split train/analyze workflow, where analysis may be run as a
+    # separate job after the serialized artifact already exists.
     if latest_save is not None:
-        save_mtime = latest_save.stat().st_mtime
-        for figure_file in top_level_figures_after(figures_dir, save_mtime):
+        figure_mtime = (
+            args.min_figure_mtime
+            if args.min_figure_mtime is not None
+            else latest_save.stat().st_mtime
+        )
+        for figure_file in top_level_figures_after(figures_dir, figure_mtime):
             if figure_file.resolve().is_relative_to(run_dir.resolve()):
                 continue
             if is_coefficient_heatmap(figure_file):

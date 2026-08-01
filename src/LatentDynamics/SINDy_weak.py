@@ -2,20 +2,13 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-import  os;
-import  sys;
-src_Path        : str   = os.path.dirname(os.path.dirname(__file__));
-util_Path       : str   = os.path.join(src_Path, "Utilities");
-sys.path.append(src_Path);
-sys.path.append(util_Path);
-
 import  logging;
 
 import  numpy;
 import  torch;
 
-from    LatentDynamics      import  LatentDynamics;
-from    FirstOrderSolvers   import  RK4;
+from    LatentDynamics                  import  LatentDynamics;
+from    Utilities.FirstOrderSolvers     import  RK4;
 
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
@@ -59,7 +52,7 @@ class SINDy_weak(LatentDynamics):
 
         Uniform_t_Grid : bool
             Whether each trajectory has uniform time spacing. This argument is kept for API
-            consistency with other latent-dynamics classes; weak calibration uses stored test
+            consistency with other latent-dynamics classes; weak compute_losses uses stored test
             functions rather than finite differences.
 
         config : dict
@@ -101,7 +94,7 @@ class SINDy_weak(LatentDynamics):
             str(self.Uniform_t_Grid),
         ));
 
-        # Setup the loss functions used by calibrate.
+        # Setup the loss functions used by compute_losses.
         self.MSE = torch.nn.MSELoss(reduction = 'mean');
         self.MAE = torch.nn.L1Loss(reduction = 'mean');
         return;
@@ -159,14 +152,16 @@ class SINDy_weak(LatentDynamics):
 
 
     # ---------------------------------------------------------------------------------------------
-    # Calibrate
+    # compute_losses
     # ---------------------------------------------------------------------------------------------
 
-    def calibrate(  self,
-                    Latent_States   : list[list[torch.Tensor]],
-                    loss_type       : str,
-                    t_Grid          : list[torch.Tensor],
-                    params          : numpy.ndarray | None = None) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
+    def compute_losses(  
+        self,
+        Latent_States   : list[list[torch.Tensor]],
+        loss_type       : str,
+        t_Grid          : list[torch.Tensor],
+        params          : numpy.ndarray | None = None
+    ) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
         r"""
         Compute weak-form SINDy latent-dynamics, coefficient, and stability losses.
 
@@ -208,7 +203,7 @@ class SINDy_weak(LatentDynamics):
         """
 
         # Checks.
-        assert params is not None, "SINDy_weak.calibrate requires params";
+        assert params is not None, "SINDy_weak.compute_losses requires params";
         assert isinstance(t_Grid, list);
         assert isinstance(Latent_States, list);
         assert len(Latent_States) == len(t_Grid) == params.shape[0];
@@ -276,7 +271,7 @@ class SINDy_weak(LatentDynamics):
         r"""
         Time-integrate the native SINDy latent dynamics.
 
-        The weak formulation only changes the calibration loss; rollouts still solve
+        The weak formulation only changes the LD loss; rollouts still solve
 
             z'(t) = A z(t) + b.
 

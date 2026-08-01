@@ -2,21 +2,14 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-import  os;
-import  sys;
-src_Path        : str   = os.path.dirname(os.path.dirname(__file__));
-util_Path       : str   = os.path.join(src_Path, "Utilities");
-sys.path.append(src_Path);
-sys.path.append(util_Path);
-
 import  logging;
 
 import  numpy;
 import  torch;
 
-from    LatentDynamics      import  LatentDynamics;
-from    FiniteDifference    import  Derivative1_Order4, Derivative1_Order2_NonUniform;
-from    FirstOrderSolvers   import  RK4;
+from    LatentDynamics                  import  LatentDynamics;
+from    Utilities.FiniteDifference      import  Derivative1_Order4, Derivative1_Order2_NonUniform;
+from    Utilities.FirstOrderSolvers     import  RK4;
 
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
@@ -96,7 +89,7 @@ class SwitchSINDy(LatentDynamics):
         self.lstsq_reg      : float     = config["switch"]["lstsq_reg"];
         self.switch_time    : callable  = switch_time;
         
-        # Setup the loss functions used by calibrate.
+        # Setup the loss functions used by compute_losses.
         self.MSE                    = torch.nn.MSELoss(reduction = 'mean');
         self.MAE                    = torch.nn.L1Loss(reduction = 'mean');
 
@@ -206,11 +199,13 @@ class SwitchSINDy(LatentDynamics):
 
 
 
-    def calibrate(  self,  
-                    Latent_States   : list[list[torch.Tensor]], 
-                    loss_type       : str,
-                    t_Grid          : list[torch.Tensor], 
-                    params          : numpy.ndarray | None = None) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
+    def compute_losses(  
+        self,  
+        Latent_States   : list[list[torch.Tensor]], 
+        loss_type       : str,
+        t_Grid          : list[torch.Tensor], 
+        params          : numpy.ndarray | None = None
+    ) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
         r"""
         Compute switching-SINDy latent-dynamics, coefficient, and stability losses.
 
@@ -251,7 +246,7 @@ class SwitchSINDy(LatentDynamics):
         """
 
         # Checks.
-        assert params is not None, "SwitchSINDy.calibrate requires params";
+        assert params is not None, "SwitchSINDy.compute_losses requires params";
         assert isinstance(t_Grid, list) and isinstance(Latent_States, list);
         assert len(Latent_States) == len(t_Grid) == params.shape[0];
         assert loss_type in ["MSE", "MAE"];

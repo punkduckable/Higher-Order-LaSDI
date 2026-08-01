@@ -3,16 +3,13 @@
 # -------------------------------------------------------------------------------------------------
 
 import      os;
-import      sys;
 import      logging;
 
 import      mfem.par    as      mfem;
 from        os.path     import  expanduser, join, dirname;
 import      numpy;
 
-utils_path : str        = os.path.join(os.path.join(os.path.pardir, os.path.pardir), "Utilities");
-sys.path.append(utils_path);
-import      Logging;
+from        Utilities   import  Logging;
 
 
 # Logger Setup 

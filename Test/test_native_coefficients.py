@@ -6,14 +6,9 @@ import pytest
 import torch
 
 SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
-sys.path.extend([
-    SRC,
-    os.path.join(SRC, "LatentDynamics"),
-    os.path.join(SRC, "Utilities"),
-    os.path.join(SRC, "Interpolate"),
-])
+sys.path.append(SRC)
 
-from SINDy import SINDy
+from LatentDynamics import SINDy
 from Interpolate import Interpolate
 
 
@@ -152,11 +147,8 @@ def test_interpolate_rejects_non_tensor_values():
     with pytest.raises(AssertionError):
         Interpolate({(0.0,): {"A": numpy.zeros((1, 1))}})
 
-from DampedSpring import DampedSpring
-from DampedSpring_weak import DampedSpring_weak
-from SINDy_weak import SINDy_weak
-from SwitchSINDy_weak import SwitchSINDy_weak
-from FiniteDifference import Derivative1_Order4
+from LatentDynamics import DampedSpring, DampedSpring_weak, SINDy_weak, SwitchSINDy_weak
+from Utilities.FiniteDifference import Derivative1_Order4
 
 
 def test_damped_spring_fit_coefficients_uses_K_C_b_names():
@@ -177,7 +169,7 @@ def test_damped_spring_fit_coefficients_uses_K_C_b_names():
     assert all(tensor.requires_grad and tensor.is_leaf for tensor in coefs.values())
 
 
-def test_damped_spring_calibrate_uses_native_K_C_b_rhs():
+def test_damped_spring_compute_losses_uses_native_K_C_b_rhs():
     ld = DampedSpring(n_z=1, Uniform_t_Grid=True, config=_spring_config())
     t = torch.linspace(0.0, 1.0, 9)
     z = torch.sin(t).reshape(-1, 1)
@@ -188,7 +180,7 @@ def test_damped_spring_calibrate_uses_native_K_C_b_rhs():
     b = torch.tensor([0.1])
     ld.set_train_coefs(params[0], {"K": K, "C": C, "b": b})
 
-    loss_LD_list, loss_coef_list, loss_stab_list = ld.calibrate([[z, dz]], "MSE", [t], params)
+    loss_LD_list, loss_coef_list, loss_stab_list = ld.compute_losses([[z, dz]], "MSE", [t], params)
 
     d2z = Derivative1_Order4(dz, float((t[1] - t[0]).item()))
     rhs = z @ K.T + dz @ C.T + b.reshape(1, -1)
@@ -252,7 +244,7 @@ def test_get_test_functions_missing_param_raises_keyerror():
         ld.get_test_functions(numpy.array([0.25]))
 
 
-def test_damped_spring_weak_fit_zero_initializes_and_calibrate_requires_weights():
+def test_damped_spring_weak_fit_zero_initializes_and_compute_losses_requires_weights():
     ld = DampedSpring_weak(n_z=1, Uniform_t_Grid=True, config=_spring_w_config())
     t = torch.linspace(0.0, 1.0, 9)
     z = torch.sin(t).reshape(-1, 1)
@@ -269,10 +261,10 @@ def test_damped_spring_weak_fit_zero_initializes_and_calibrate_requires_weights(
     assert all(tensor.requires_grad and tensor.is_leaf for tensor in coefs.values())
 
     with pytest.raises(KeyError):
-        ld.calibrate([[z, dz]], "MSE", [t], params)
+        ld.compute_losses([[z, dz]], "MSE", [t], params)
 
 
-def test_sindy_weak_fit_zero_initializes_and_calibrate_requires_weights():
+def test_sindy_weak_fit_zero_initializes_and_compute_losses_requires_weights():
     ld = SINDy_weak(n_z=1, Uniform_t_Grid=True, config=_sindy_w_config())
     t = torch.linspace(0.0, 1.0, 9)
     z = torch.sin(t).reshape(-1, 1)
@@ -289,10 +281,10 @@ def test_sindy_weak_fit_zero_initializes_and_calibrate_requires_weights():
     assert ld.trainable_coef_tensors() == [coefs["A"], coefs["b"]]
 
     with pytest.raises(KeyError):
-        ld.calibrate([[z]], "MSE", [t], params)
+        ld.compute_losses([[z]], "MSE", [t], params)
 
 
-def test_sindy_weak_calibrate_with_weight_functions_returns_losses():
+def test_sindy_weak_compute_losses_with_weight_functions_returns_losses():
     ld = SINDy_weak(n_z=1, Uniform_t_Grid=True, config=_sindy_w_config())
     t = torch.linspace(0.0, 1.0, 9)
     z = torch.sin(t).reshape(-1, 1)
@@ -300,7 +292,7 @@ def test_sindy_weak_calibrate_with_weight_functions_returns_losses():
 
     ld.add_weight_functions(params[0], t)
     ld.fit_coefficients([[z]], [t], params)
-    loss_LD_list, loss_coef_list, loss_stab_list = ld.calibrate([[z]], "MSE", [t], params)
+    loss_LD_list, loss_coef_list, loss_stab_list = ld.compute_losses([[z]], "MSE", [t], params)
 
     assert len(loss_LD_list) == 1
     assert len(loss_coef_list) == 1

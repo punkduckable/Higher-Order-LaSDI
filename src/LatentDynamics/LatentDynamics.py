@@ -36,7 +36,7 @@ class LatentDynamics:
     LatentDynamics models can rollout latent trajectories (via the simulate method) by solving 
     the latent ODE associated with a particular parameter value, compute the Latent Dynamics, 
     coefficient, and stability losses associated with a collection of parameter values (via the 
-    calibrate method), or fit a set of coefficients to a time series of latent states for a 
+    compute_losses method), or fit a set of coefficients to a time series of latent states for a 
     particular parameter value (via the "fit_coefficients" method).
 
     LatentDynamics objects also store the latent dynamics coefficients (learnable parameters 
@@ -110,7 +110,7 @@ class LatentDynamics:
     - `trainable_coef_tensors()`: return the actual trainable tensors (if training is enabled) 
       stored in `train_coefs` so the `Trainer` can optimize them jointly with the encoder/decoder.
     
-    - `calibrate(Latent_States, loss_type, t_Grid, params=None)`: compute latent-dynamics residual
+    - `compute_losses(Latent_States, loss_type, t_Grid, params=None)`: compute latent-dynamics residual
       losses and coefficient/stability regularization for the current coefficients. This should 
       return three losses: The LD loss, coefficient loss, and stability loss. The user has some 
       leeway in terms of what these losses actually do, though the LD loss should roughly indicate
@@ -151,8 +151,8 @@ class LatentDynamics:
         dimensionality (n_z), a number of time steps, a model for the latent space dynamics, and 
         set of coefficients for that model. The model should describe a set of ODEs in 
         \mathbb{R}^{n_z}. These ODEs should contain a set of unknown coefficients. We learn those 
-        coefficients using the calibrate function. Once we have learned the coefficients, we can 
-        solve the corresponding set of ODEs forward in time using the simulate function.
+        coefficients using the compute_losses function. Once we have learned the coefficients, we 
+        can solve the corresponding set of ODEs forward in time using the simulate function.
 
 
         -------------------------------------------------------------------------------------------
@@ -263,7 +263,8 @@ class LatentDynamics:
         `self.n_coefs`.
 
         Design rule:
-        - `calibrate(...)` computes the LD loss (and other regularizers) **given coefficients**.
+        - `compute_losses(...)` computes the LD loss (and other regularizers) **given 
+        coefficients**.
         - `fit_coefficients(...)` estimates coefficients **from data**.
 
 
@@ -737,14 +738,16 @@ class LatentDynamics:
 
 
     # ---------------------------------------------------------------------------------------------
-    # Calibrate: Compute losses for a particular set of training parameter values.
+    # compute_losses: Compute losses for a particular set of training parameter values.
     # ---------------------------------------------------------------------------------------------
     
-    def calibrate(  self, 
-                    Latent_States   : list[list[torch.Tensor]], 
-                    loss_type       : str,
-                    t_Grid          : list[torch.Tensor], 
-                    params          : numpy.ndarray | None  = None) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
+    def compute_losses(  
+        self, 
+        Latent_States   : list[list[torch.Tensor]], 
+        loss_type       : str,
+        t_Grid          : list[torch.Tensor], 
+        params          : numpy.ndarray | None  = None
+    ) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
         """
         The user must implement this class on any latent dynamics sub-class. Each latent dynamics 
         object should implement a parameterized model for the dynamics in the latent space. A 
@@ -830,7 +833,7 @@ class LatentDynamics:
         some LD model, for instance).
         """
 
-        raise RuntimeError('Abstract function LatentDynamics.calibrate!');
+        raise RuntimeError('Abstract function LatentDynamics.compute_losses!');
     
 
 

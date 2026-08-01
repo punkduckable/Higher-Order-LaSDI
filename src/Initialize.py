@@ -2,64 +2,33 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-# Add LatentDynamics, Physics, and EncoderDecoder directories to the search path.
-import  sys;
-import  os;
-LD_Path             : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
-Physics_Path        : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
-EncoderDecoder_Path : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "EncoderDecoder"));
-Trainer_Path        : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "Trainer"));
-Sample_Path         : str = os.path.abspath(os.path.join(os.path.dirname(__file__), "Sample"));
-
-sys.path.append(LD_Path); 
-sys.path.append(Physics_Path); 
-sys.path.append(EncoderDecoder_Path); 
-sys.path.append(Trainer_Path);
-sys.path.append(Sample_Path);
-
 import  logging;
 
 import  numpy;
 import  torch; 
 
 
-from    LatentDynamics          import  LatentDynamics;
-from    SINDy                   import  SINDy;
-from    SINDy_weak              import  SINDy_weak;
-from    SwitchSINDy             import  SwitchSINDy;
-from    SwitchSINDy_weak        import  SwitchSINDy_weak;
-from    DampedSpring            import  DampedSpring;
-from    DampedSpring_weak       import  DampedSpring_weak;
+from    LatentDynamics          import  LatentDynamics, SINDy, SINDy_weak, SwitchSINDy;
+from    LatentDynamics          import  SwitchSINDy_weak, DampedSpring, DampedSpring_weak;
 
 from    ParameterSpace          import  ParameterSpace;
 
-from    Trainer                 import  Trainer;
-from    First_Order_Rollout     import  First_Order_Rollout;
-from    First_Order_Weak        import  First_Order_Weak;
-from    Second_Order_Rollout    import  Second_Order_Rollout;
-from    Second_Order_Weak       import  Second_Order_Weak;
+from    Trainer                 import  Trainer, First_Order_Rollout, First_Order_Weak;
+from    Trainer                 import  Second_Order_Rollout, Second_Order_Weak;
 
-from    EncoderDecoder          import  EncoderDecoder;
-from    Autoencoder             import  Autoencoder, load_Autoencoder;
-from    Autoencoder_Pair        import  Autoencoder_Pair, load_Autoencoder_Pair;
-from    CNN_3D_Autoencoder      import  CNN_3D_Autoencoder, load_CNN_3D_Autoencoder;
+from    EncoderDecoder          import  EncoderDecoder, Autoencoder, load_Autoencoder;
+from    EncoderDecoder          import  Autoencoder_Pair, load_Autoencoder_Pair;
+from    EncoderDecoder          import  CNN_3D_Autoencoder, load_CNN_3D_Autoencoder;
 
-from    Physics                 import  Physics;
-# import  NonlinearElasticity;   # mfem dependency (disabled by default)
-# import  Advection;             # mfem dependency (disabled by default)
-# import  WaveEquation;          # mfem dependency (disabled by default)
-# import  KleinGordon;           # mfem dependency (disabled by default)
-# import  Telegraphers;          # mfem dependency (disabled by default)
-import  Burgers2D;
-import  Thermal;
-import  Burgers;
-import  BurgersSecondOrder;
-import  Explicit;
-import  ExplicitSecondOrder;
+from    Physics                 import  Physics, Burgers2D, Thermal, Burgers, BurgersSecondOrder;
+from    Physics                 import  Explicit, ExplicitSecondOrder;
+# from  Physics.Advection               import  Advection;             # mfem dependency.
+# from  Physics.NonlinearElasticity     import  NonlinearElasticity;   # mfem dependency.
+# from  Physics.WaveEquation            import  WaveEquation;          # mfem dependency.
+# from  Physics.KleinGordon             import  KleinGordon;           # mfem dependency.
+# from  Physics.Telegraphers            import  Telegraphers;          # mfem dependency.
 
-from    Sampler                 import  Sampler;
-from    FOM_Rollout             import  FOM_Rollout;
-from    FOM_Variance            import  FOM_Variance;
+from    Sample                  import  Sampler, FOM_Rollout, FOM_Variance;
 
 # Set up logger.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
@@ -116,13 +85,16 @@ physics_dict = {                'Burgers'                   : Burgers.Burgers,
 # Initialization functions
 # -------------------------------------------------------------------------------------------------
 
-def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer, Sampler, ParameterSpace, Physics, EncoderDecoder, LatentDynamics]:
+def Initialize_Trainer( 
+        config                  : dict, 
+        restart_dict            : dict  = {},
+        make_restart_checkpoint : bool  = True,
+    ) -> tuple[Trainer, Sampler, ParameterSpace, Physics, EncoderDecoder, LatentDynamics]:
     """
     Initialize a Trainer object with a latent space model and physics object according to config 
     file. 
 
     
-
     -----------------------------------------------------------------------------------------------
     Arguments
     -----------------------------------------------------------------------------------------------
@@ -142,6 +114,11 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer
         If provided, then we will use the settings in this dictionary to initialize the trainer, 
         parameter space, physics, encoder_decoder, and latent dynamics. If not provided, then we will 
         initialize everything from scratch.
+
+    make_restart_checkpoint : bool, optional
+        If True and restart_dict is provided, then make a checkpoint using the loaded 
+        encoder_decoder parameters. This preserves the original restart behavior for training. Set
+        this to False when loading a saved artifact for analysis only.
             
     
     -----------------------------------------------------------------------------------------------
@@ -223,8 +200,8 @@ def Initialize_Trainer(config : dict, restart_dict : dict = {}) -> tuple[Trainer
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
         trainer.load(restart_dict['trainer']);
 
-    # If we are loading from a restart file, make a checkpoint using the current encoder_decoder parameters.
-    if (bool(restart_dict) == True): 
+    # Check if we should make a checkpoint using the current encoder_decoder parameters.
+    if (bool(restart_dict) == True and make_restart_checkpoint == True): 
         trainer._Save_Checkpoint(   encoder_decoder = encoder_decoder, 
                                     iter            = trainer.restart_iter);
 

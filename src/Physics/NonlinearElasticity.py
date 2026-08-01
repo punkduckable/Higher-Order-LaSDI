@@ -2,20 +2,14 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-# Add the main directory to the search path.
-import  os;
-import  sys;
-import  logging
-
-from torch._library.fake_class_registry import FakeScriptMethod;
-PyMFEM_Path     : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "PyMFEM"));
-sys.path.append(PyMFEM_Path);
+import  logging;
 
 import  numpy;
 import  torch;
 
-from    Physics                         import  Physics;
-from    nonlinear_elasticity            import  Simulate, Initial_Displacement, Initial_Velocity;
+from    Physics                                 import  Physics;
+from    Physics.PyMFEM.nonlinear_elasticity     import  Simulate, Initial_Displacement;
+from    Physics.PyMFEM.nonlinear_elasticity     import  Initial_Velocity;
 
 LOGGER : logging.Logger = logging.getLogger(__name__);
 

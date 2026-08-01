@@ -2,22 +2,11 @@
 # Import and Setup
 # -------------------------------------------------------------------------------------------------
 
-import os;
-import sys;
-from pathlib import Path;
+import  os;
+from    pathlib                         import  Path;
 
 # Resolve paths relative to the project root (Higher-Order-LaSDI/), independent of CWD.
-Figures_Path        : str   = os.path.join(os.path.abspath(os.path.dirname(os.path.dirname(__file__))), "Figures");
-Physics_Path        : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Physics"));
-LD_Path             : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "LatentDynamics"));
-EncoderDecoder_Path : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "EncoderDecoder"));
-Interpolate_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Interpolate"));
-Utilities_Path      : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
-sys.path.append(Utilities_Path);
-sys.path.append(Physics_Path);
-sys.path.append(LD_Path);
-sys.path.append(Interpolate_Path);
-sys.path.append(EncoderDecoder_Path);
+Figures_Path        : str   = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "Figures"));
 
 import  logging;
 
@@ -26,14 +15,14 @@ import  numpy;
 import  matplotlib.pyplot               as      plt;
 import  matplotlib                      as      mpl;
 from    matplotlib.figure               import  Figure;
-from    matplotlib.backends.backend_agg import FigureCanvasAgg;
+from    matplotlib.backends.backend_agg import  FigureCanvasAgg;
 
 from    EncoderDecoder                  import  EncoderDecoder;
 from    Physics                         import  Physics;
 from    LatentDynamics                  import  LatentDynamics;
 from    ParameterSpace                  import  ParameterSpace;
 from    Trainer                         import  Trainer;
-from    Rollouts                        import  Sample_Rollouts, Mean_Rollout;
+from    Interpolate.Rollouts            import  Sample_Rollouts;
 from    Interpolate                     import  Interpolate;
 
 
@@ -243,293 +232,68 @@ def Plot_Latent_Trajectories(physics         : Physics,
 # Heatmaps!
 # -------------------------------------------------------------------------------------------------
 
+def _format_param_value_for_label(value : float) -> str:
+    """Format parameter values consistently for plot titles and file-name suffixes."""
 
-def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
-                            physics         : Physics,
-                            param_space     : ParameterSpace,
-                            latent_dynamics : LatentDynamics,
-                            interpolator    : Interpolate,
-                            t_Test          : list[torch.Tensor],
-                            U_Test          : list[list[torch.Tensor]],
-                            trainer         : Trainer,
-                            n_samples       : int       = 20) -> tuple[numpy.ndarray, numpy.ndarray, list[list[numpy.ndarray]], list[list[numpy.ndarray]], numpy.ndarray, numpy.ndarray]:
-    r"""
-    This function computes the relative error and STD between the FOM solution and its 
-    prediction when we rollout the FOM solution using the the ICs and mean of the posterior 
-    distribution of the coefficients for each combination of parameter values.
-    
-    To do this, we first sample the posterior distribution of the coefficients for each combination 
-    of parameter values and solve the latent dynamics forward in time using each sample (as well as
-    the mean of the posterior distribution). We then decode the latent trajectories to get a set of 
-    FOM solutions. We then compute a *normalized absolute error* between the mean predicted solution 
-    and the true solution for each frame of each derivative of the FOM solution for each combination 
-    of parameter values. The normalization is a single standard deviation per (parameter, derivative)
-    computed over all time steps and spatial nodes of the true trajectory. We then find the maximum 
-    relative error (across the frames and components) for each derivative for each combination of 
-    parameter values. 
-    
-    We also compute the STD (across the samples) of each frame of each derivative of the FOM 
-    solution for each combination of the parameter values. We then find the maximum STD (across 
-    the frames and components) for each derivative for each combination of parameter values.
-
-    Note: If X_1, ... , X_M \in \mathbb{R}^N are vectors then the STD of this collection is the 
-    vector whose i'th component holds the (sample) STD of {X_1[i], ... , X_M[i]}.
-    
-    Note: The implementation below does **not** use an l^\infty normalization. Instead, for each
-    (parameter, derivative) it computes
-        mean_x |u_pred(t_k, x) - u_true(t_k, x)| / std(u_true)
-    where std(u_true) is computed over the full true trajectory (all times and spatial nodes).
-
-
-    -----------------------------------------------------------------------------------------------
-    Arguments
-    -----------------------------------------------------------------------------------------------
-
-    encoder_decoder : EncoderDecoder
-        For each combinations of parameters, we find the encoder_decoder's latent dynamics for that 
-        combination and solve them forward in time. 
-
-    physics : Physics
-        A Physics object that we use to fetch the initial condition for each combination of 
-        parameter values.
-
-    param_space : ParameterSpace
-        A ParameterSpace object which holds the testing parameters.
-    
-    latent_dynamics : LatentDynamics
-        The LatentDynamics object we use to generate the latent space data. For each combination 
-        of parameter values, we fetch the corresponding coefficients to define the latent dynamics.
-    
-    interpolator : Interpolate
-        Interpolator object for the native latent-dynamics coefficients. For each combination of
-        parameter values, we sample coefficient dictionaries from this object and use them to sample
-        the predicted dynamics produced by that combination of parameter values.
-
-    t_Test : list[torch.Tensor], len = n_test
-        i'th element is a 1d numpy.ndarray object of length n_t(i) whose j'th element holds the 
-        value of the j'th time value at which we solve the latent dynamics for the i'th combination
-        of parameter values.
-
-    U_Test : list[list[torch.Tensor]], len = n_test
-        i'th element is an n_IC element list whose j'th element is a torch.Tensor of shape 
-        (n_t(i), ...) whose k, ... slice holds the k'th frame of the j'th time derivative of the
-        FOM model when we use the i'th combination of parameter values to define the FOM model.
-
-    trainer : Trainer
-        A Trainer object.
-
-    n_samples : int
-        The number of coefficient samples we draw from the Interpolate posterior. Each sample gives us 
-        a set of coefficients which we can use to define the latent dynamics that we then solve 
-        forward in time. 
-
-
-    
-    -----------------------------------------------------------------------------------------------
-    Returns
-    -----------------------------------------------------------------------------------------------
-
-    max_Rel_Error, max_STD, Rel_Error, STD, coef_means, coef_stds
-
-    max_Rel_Error : numpy.ndarray, shape = (n_Test, n_IC)
-        i, j element holds the maximum of rel_error[i][j] (see below).
-    
-    max_STD : numpy.ndarray, shape = (n_Test, n_IC)
-        i, j element holds the maximum of STD[i][j] (see below).
-
-    Rel_Error : list[list[numpy.ndarray]], len = n_Test
-        i'th element is an n_IC element list whose j'th element is an numpy.ndarray of shape 
-        n_t_i, where n_t_i is the number of time steps in the time series for the i'th combination
-        of testing parameters. The k'th element of this array holds
-            mean(u_Rollout[i][j][k, ...] - u_True[i][j][k, ...]) / std(u_True[i][j])
-    
-    STD : list[list[numpy.ndarray]], len = n_Test
-        i'th element is an n_IC element list whose j'th element is an numpy.ndarray whose shape
-        matches that of U_Test[i][j]. The [k, ...] element of this array holds the std (across 
-        the samples) of the k'th frame of the reconstruction of the j'th derivative of the FOM 
-        solution when we use the i'th combination of testing parameters.
-    
-    coef_means : numpy.ndarray, shape = (n_Test, n_Coef)
-        i, j element holds the mean of the posterior distribution for the j'th coefficient 
-        evaluated at the i'th combination of testing parameters.
-
-    coef_stds : numpy.ndarray, shape = (n_Test, n_Coef)
-        i, j element holds the stds of the posterior distribution for the j'th coefficient 
-        evaluated at the i'th combination of testing parameters.
-    """ 
-
-    # Run checks
-    assert isinstance(interpolator,      Interpolate), "type(interpolator) = %s, expected Interpolate" % (type(interpolator));
-    assert isinstance(t_Test,           list),      "type(t_Test) = %s, expected list" % (type(t_Test));
-    assert isinstance(U_Test,           list),      "type(U_Test) = %s, expected list" % (type(U_Test));
-    assert isinstance(n_samples,        int),       "type(n_samples) = %s, expected int" % (type(n_samples));
-    assert len(t_Test)  == len(U_Test),             "len(t_Test) = %d, len(U_Test) %d" % (len(t_Test), len(U_Test));
-    
-    # Fetch the number of testing parameter combinations.
-    n_Test  : int   = len(U_Test);   
-    
-    # Run additional checks.
-    param_test  : numpy.ndarray         = param_space.test_space;
-    assert isinstance(param_test,       numpy.ndarray),     "type(param_test) = %s, expected numpy.ndarray" % (type(param_test));
-    assert len(param_test.shape)        == 2,               "len(param_test.shape) = %d, expected 2" % (len(param_test.shape));
-    assert param_test.shape[0]          == n_Test,          "param_test.shape = %s, n_Test %d" % (str(param_test.shape), n_Test);
-
-    n_IC    : int                       = len(U_Test[0]);
-    for i in range(n_Test):
-        assert isinstance(U_Test[i],    list),              "type(U_Test[%d]) = %s, expected list" % (i, type(U_Test[i]));
-        assert len(U_Test[i])           == n_IC,            "len(U_Test[%d]) = %d, n_IC %d" % (i, len(U_Test[i]), n_IC);
-    
-        assert isinstance(t_Test[i],    torch.Tensor),      "type(t_Test[%d]) = %s, expected torch.Tensor" % (i, type(t_Test[i]));
-        assert len(t_Test[i].shape)     == 1,               "len(t_Test[%d].shape) = %d, expected 1" % (i, len(t_Test[i].shape));
-        n_t_i   : int = t_Test[i].shape[0];
-
-        for j in range(n_IC):
-            assert isinstance(U_Test[i][j], torch.Tensor),  "type(U_Test[%d][%d]) = %s, expected torch.Tensor" % (i, j, type(U_Test[i][j]));
-            assert U_Test[i][j].shape[0]    == n_t_i,       "U_Test[%d][%d].shape = %s, n_t_i = %d" % (i, j, str(U_Test[i][j].shape), n_t_i);
-    
-    # Evaluate posterior means/stds through the Interpolate interface in native coefficient format,
-    # then flatten to the legacy matrix shape used by heatmap plotting.
-    coef_means_native : list[dict[str, torch.Tensor]] = [interpolator.mean(param_test[i, :]) for i in range(n_Test)];
-    coef_stds_native  : list[dict[str, torch.Tensor]] = [interpolator.std(param_test[i, :])  for i in range(n_Test)];
-    coef_means = latent_dynamics.flatten_coefficients(coef_means_native);
-    coef_stds  = latent_dynamics.flatten_coefficients(coef_stds_native);
-
-
-    # ---------------------------------------------------------------------------------------------
-    # Draw n_samples samples of the posterior distribution.
-
-    # For each combination of parameter values in the testing set, sample the latent coefficients 
-    # and solve the latent dynamics forward in time. 
-    LOGGER.info("Generating latent dynamics trajectories for %d samples of the coefficients for %d combinations of testing parameter" % (n_samples, n_Test));
-    Zis_samples     : list[list[numpy.ndarray]] = Sample_Rollouts(encoder_decoder, physics, latent_dynamics, interpolator, param_test, t_Test, n_samples, trainer = trainer);    # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_samples, n_z)
-
-    LOGGER.info("Generating latent dynamics trajectories using posterior distribution means for %d combinations of testing parameter" % (n_Test));
-    Zis_mean        : list[list[numpy.ndarray]] = Mean_Rollout(encoder_decoder, physics, latent_dynamics, interpolator, param_test, t_Test, trainer = trainer);               # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_z)
-        
-
-    # ---------------------------------------------------------------------------------------------
-    # Set up Rel_Error, STD, max_Rel_Error, and max_STD.
-
-    STD         : list[list[numpy.ndarray]] = [];           # (n_Test)
-    Rel_Error   : list[list[numpy.ndarray]] = [];           # (n_Test)
-
-    for i in range(n_Test):
-        # Initialize lists for the i'th combination of parameter values
-        STD_i       : list[numpy.ndarray]   = [];
-        Rel_Error_i : list[numpy.ndarray]   = [];
-
-        # Fetch n_t_i.
-        n_t_i : int = t_Test[i].shape[0];
-
-        # Build an array for each derivative of the FOM solution.
-        for j in range(n_IC):
-            STD_i.append(numpy.zeros_like(U_Test[i][j].detach().cpu().numpy()));
-            Rel_Error_i.append(numpy.zeros(n_t_i, dtype = numpy.float32));
-
-        # Append the lists for the i'th combination to the overall lists.
-        STD.append(STD_i);
-        Rel_Error.append(Rel_Error_i);
-    
-    max_Rel_Error   = numpy.empty((n_Test, n_IC), dtype = numpy.float32);
-    max_STD         = numpy.empty((n_Test, n_IC), dtype = numpy.float32);
+    if value == 0.0:
+        return "0.0";
+    elif abs(value) < 0.01 or abs(value) > 1000:
+        return f"{value:.2e}";
+    else:
+        return f"{value:.2f}";
 
 
 
-    # ---------------------------------------------------------------------------------------------
-    # Compute std, max_std. 
+def _format_param_value_for_filename(value : float) -> str:
+    """Format parameter values for compact file names."""
 
-    # If the workflow uses normalization, U_Test and decoded predictions are in normalized
-    # units. De-normalize here for meaningful physical errors/plots using the trainer.
-    use_denorm : bool = hasattr(trainer, "has_normalization") and trainer.has_normalization();
-
-    for i in range(n_Test):
-        # -------------------------------------------------------------------------------------
-        # Relative Error
-
-        # Convert latent trajectories to Tensors
-        Zis_mean_i : list[torch.Tensor] = [];
-        for j in range(n_IC):
-            Zis_mean_i.append(torch.Tensor(Zis_mean[i][j]));
-
-        # Decode the mean latent trajectories for each combination of parameter values.
-        U_Pred_Mean_i       : list[torch.Tensor]    = list(encoder_decoder.Decode(*Zis_mean_i));
-
-        # Fetch the corresponding test predictions.
-        U_Test_i            : list[torch.Tensor]    = U_Test[i];
-        
-        # Set up a list to hold the STDs of the FOM solution.
-        U_Test_i_std        : list[float]           = [];
-
-        # Convert to numpy and denormalize. Also populate U_Test_i_std.
-        U_Test_i_np         : list[numpy.ndarray]   = [];
-        U_Pred_Mean_i_np    : list[numpy.ndarray]   = [];
-        for j in range(n_IC):
-            U_Pred_Mean_i_np.append(U_Pred_Mean_i[j].detach().numpy())  # (n_t_i, physics.Frame_Shape)
-            U_Test_i_np.append(U_Test_i[j].detach().numpy())            # (n_t_i, physics.Frame_Shape)
-            
-            if use_denorm:
-                U_Pred_Mean_i_np[j] = trainer.denormalize_np(U_Pred_Mean_i_np[j], j);
-                U_Test_i_np[j]      = trainer.denormalize_np(U_Test_i_np[j], j);
-        
-            U_Test_i_std.append(numpy.std(U_Test_i_np[j]))
-
-        # For each frame, compute the relative error between the true and predicted FOM solutions.
-        # We normalize the error by the std of the true solution.
-        n_t_i : int = t_Test[i].shape[0];
-        for j in range(n_IC):
-            for k in range(n_t_i):
-                Rel_Error[i][j][k] = numpy.mean(numpy.abs(U_Pred_Mean_i_np[j][k, ...] - U_Test_i_np[j][k, ...]))/U_Test_i_std[j];
-        
-            # Now compute the corresponding element of max_Rel_Error
-            max_Rel_Error[i, j] = Rel_Error[i][j].max();
-    
-
-        # -------------------------------------------------------------------------------------
-        # Standard Deviation
-
-        # Set up an array to hold the decoding of latent trajectory.
-        FOM_Frame_Shape : list[int]             = physics.Frame_Shape;
-        U_Pred_i        : list[numpy.ndarray]   = [];
-        for j in range(n_IC):
-            U_Pred_i.append(numpy.empty([n_t_i, n_samples] + FOM_Frame_Shape, dtype = numpy.float32));
-
-        # Decode the latent trajectory for each sample.
-        for j in range(n_samples):
-            Zis_sample_ij: list[torch.Tensor] = [];
-            for k in range(n_IC):
-                Zis_sample_ij.append(torch.Tensor(Zis_samples[i][k][:, j, :]));
-            U_Pred_ij   : tuple[torch.Tensor]     = encoder_decoder.Decode(*Zis_sample_ij);
-            
-            # Detach, convert to numpy, and store in U_Pred_i.
-            for k in range(n_IC):
-                U_Pred_ijk_np = U_Pred_ij[k].detach().numpy();
-                U_Pred_i[k][:, j, ...]             = U_Pred_ijk_np;
-    
-        # Compute the STD across the sample axis.
-        for j in range(n_IC):
-            STD_ij          = numpy.std(U_Pred_i[j], axis = 1);
-            STD[i][j]       = trainer.scale_std_np(STD_ij, j) if use_denorm else STD_ij;
-        
-            # Compute max STD using robust metric: average across spatial dimensions, then max over time
-            # This prevents single outlier nodes from dominating the metric.
-            STD_ij_spatial_avg : numpy.ndarray = STD[i][j].mean(axis = tuple(range(1, STD[i][j].ndim)));  # Average over spatial dims
-            max_STD[i, j]      : numpy.float32 = STD_ij_spatial_avg.max();  # Max over time only
-    
-
-    # All done!
-    return max_Rel_Error, max_STD, Rel_Error, STD, coef_means, coef_stds;
+    return numpy.format_float_scientific(float(value), precision = 2, unique = False, trim = 'k');
 
 
 
+def _append_suffix_to_file_name(file_name : str, suffix : str) -> str:
+    """Insert suffix before the file extension, if any."""
+
+    path        : Path = Path(file_name);
+    stem        : str  = path.stem if path.suffix != "" else path.name;
+    extension   : str  = path.suffix;
+    parent      : Path = path.parent;
+    new_name    : str  = stem + suffix + extension;
+    if str(parent) == ".":
+        return new_name;
+    return str(parent / new_name);
 
 
-def Plot_Heatmap2d( values          : numpy.ndarray, 
-                    param_space     : ParameterSpace,
-                    figsize         : tuple[int]    = (10, 10), 
-                    title           : str           = '',
-                    save_file_name  : str           = "Heatmap",
-                    show_plot       : bool          = True,
-                    annotate_cells  : bool          = True) -> None:
+
+def _get_param_grid_1d(param_space : ParameterSpace, param_index : int) -> numpy.ndarray:
+    """
+    Extract the one-dimensional grid for one parameter from ParameterSpace.test_meshgrid.
+
+    ParameterSpace.createHyperMeshGrid uses numpy.meshgrid(..., indexing = 'ij'), so the values for
+    parameter k vary only along axis k. We take index 0 along every other axis.
+    """
+
+    assert isinstance(param_space, ParameterSpace), "type(param_space) = %s" % type(param_space);
+    assert isinstance(param_index, int),            "type(param_index) = %s" % type(param_index);
+    assert 0 <= param_index < param_space.n_p,      "param_index = %d, param_space.n_p = %d" % (param_index, param_space.n_p);
+
+    mesh_k      : numpy.ndarray = param_space.test_meshgrid[param_index];
+    grid_slice  : list          = [0 for _ in range(param_space.n_p)];
+    grid_slice[param_index]     = slice(None);
+    return mesh_k[tuple(grid_slice)];
+
+
+
+def _Plot_Heatmap2d( values              : numpy.ndarray, 
+                     param_space         : ParameterSpace,
+                     figsize             : tuple[int]         = (10, 10), 
+                     title               : str                = '',
+                     save_file_name      : str                = "Heatmap",
+                     show_plot           : bool | None        = None,
+                     annotate_cells      : bool               = True,
+                     param_indices       : tuple[int, int]    = (0, 1),
+                     fixed_param_indices : tuple[int, ...]    = (),
+                     fixed_param_values  : tuple[float, ...]  = ()) -> None:
     """
     This plot makes a "heatmap". Specifically, we assume that values represents the samples of 
     a function which depends on two parameters, p1 and p2 (the two variables in the 
@@ -565,8 +329,10 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     save_file_name : str
         The name of the file in which we want to save the figure in the Figures directory.
     
-    show_plot : bool
-        If true, we will display the plot after saving it. Otherwise, we will not (save only). 
+    show_plot : bool | None
+        If true, we will display the plot after saving it. Otherwise, we will not (save only).
+        If None, we default to save-only behavior. The public ``Plot_Heatmap`` wrapper owns the
+        dimension-dependent default policy.
     
     annotate_cells : bool
         If true, we add labels to each cell of the plot. If not, then we do not (though you 
@@ -584,11 +350,20 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     # Checks
     assert isinstance(values, numpy.ndarray),       "type(values) = %s" % type(values);
     assert isinstance(param_space, ParameterSpace), "type(param_space) = %s" % type(param_space);
-    assert param_space.n_p  == 2,                    "param_space.n_p = %d != 2" % param_space.n_p;
     assert values.ndim      == 2,                    "values.ndim = %d != 2" % values.ndim;
+    assert isinstance(param_indices, tuple),          "type(param_indices) = %s" % type(param_indices);
+    assert len(param_indices) == 2,                   "len(param_indices) = %d != 2" % len(param_indices);
+    assert isinstance(fixed_param_indices, tuple),    "type(fixed_param_indices) = %s" % type(fixed_param_indices);
+    assert isinstance(fixed_param_values, tuple),     "type(fixed_param_values) = %s" % type(fixed_param_values);
+    assert len(fixed_param_indices) == len(fixed_param_values), \
+        "len(fixed_param_indices) = %d != len(fixed_param_values) = %d" % (len(fixed_param_indices), len(fixed_param_values));
+    assert param_indices[0] != param_indices[1],      "param_indices must contain two distinct indices";
+    for idx in param_indices + fixed_param_indices:
+        assert isinstance(idx, int),                  "parameter index %s is not an int" % str(idx);
+        assert 0 <= idx < param_space.n_p,            "parameter index %d out of range for n_p = %d" % (idx, param_space.n_p);
 
-    p1_grid : numpy.ndarray     = param_space.test_meshgrid[0][:, 0];
-    p2_grid : numpy.ndarray     = param_space.test_meshgrid[1][0, :];
+    p1_grid : numpy.ndarray     = _get_param_grid_1d(param_space, param_indices[0]);
+    p2_grid : numpy.ndarray     = _get_param_grid_1d(param_space, param_indices[1]);
     n1      : int               = p1_grid.shape[0];
     n2      : int               = p2_grid.shape[0];
     assert values.shape[0]  == n1, "values.shape[0] = %d != n1 = %d" % (values.shape[0], n1);
@@ -598,11 +373,15 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     assert len(figsize)     == 2,      "len(figsize) = %d != 2" % len(figsize);
     
     # Setup.
+    if show_plot == None: 
+        show_plot = False;
     n_train         : int           = param_space.n_train();
     n_test          : int           = param_space.n_test();
     param_names     : list[str]     = param_space.param_names;
     n_init_train    : int           = param_space.n_init_train;
-    LOGGER.info("Making \"%s\" heatmap. Parameters = %s. %d training points (%d initial) and %d testing points." % (title, str(param_names), n_train, n_init_train, n_test));
+    plotted_param_names : list[str] = [param_names[param_indices[0]], param_names[param_indices[1]]];
+    LOGGER.info("Making \"%s\" heatmap. Plotted parameters = %s. Fixed parameters = %s. %d training points (%d initial) and %d testing points." % (
+        title, str(plotted_param_names), str(list(zip(fixed_param_indices, fixed_param_values))), n_train, n_init_train, n_test));
 
 
     # ---------------------------------------------------------------------------------------------
@@ -661,8 +440,19 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     # Add boxes around parameter combinations in the training set.
     LOGGER.debug("Adding boxes around parameters in the training set");
     for i in range(n_train):
-        p1_index : float = numpy.sum(p1_grid < param_space.train_space[i, 0]);
-        p2_index : float = numpy.sum(p2_grid < param_space.train_space[i, 1]);
+        include_training_point : bool = True;
+        for fixed_idx, fixed_value in zip(fixed_param_indices, fixed_param_values):
+            if not numpy.isclose(param_space.train_space[i, fixed_idx], fixed_value, rtol = 1e-12, atol = 1e-14):
+                include_training_point = False;
+                break;
+        if include_training_point == False:
+            continue;
+
+        p1_index : int = int(numpy.sum(p1_grid < param_space.train_space[i, param_indices[0]]));
+        p2_index : int = int(numpy.sum(p2_grid < param_space.train_space[i, param_indices[1]]));
+        if p1_index < 0 or p1_index >= n1 or p2_index < 0 or p2_index >= n2:
+            LOGGER.warning("Skipping training point %d with parameter %s because it falls outside the plotted grid." % (i, str(param_space.train_space[i, :])));
+            continue;
 
         # Add red boxes around the initial points and black ones around points we added to the 
         # training set in later rounds.
@@ -684,12 +474,12 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     # Set plot labels and plot!
     # Position x-axis label at the right of the axis
     # Axis labels/ticks: keep labels inside the figure and increase readability.
-    ax.set_xlabel(param_names[0], fontsize = 16, labelpad = 10);
+    ax.set_xlabel(param_names[param_indices[0]], fontsize = 16, labelpad = 10);
     # Place x label slightly closer to the heatmap (and avoid being clipped).
     ax.xaxis.set_label_coords(0.5, -0.06);
 
     # y label at top-left (horizontal), avoiding overlap with tick labels
-    ax.set_ylabel(param_names[1], fontsize = 16, rotation = 0, labelpad = 12);
+    ax.set_ylabel(param_names[param_indices[1]], fontsize = 16, rotation = 0, labelpad = 12);
     ax.yaxis.set_label_coords(-0.08, 1.02);
 
     ax.tick_params(axis = 'both', which = 'major', labelsize = 12);
@@ -707,6 +497,82 @@ def Plot_Heatmap2d( values          : numpy.ndarray,
     if(show_plot == True):
         plt.show();
     plt.close(fig);
+
+    return;
+
+
+
+def Plot_Heatmap(  values          : numpy.ndarray,
+                   param_space     : ParameterSpace,
+                   figsize         : tuple[int]    = (10, 10),
+                   title           : str           = '',
+                   save_file_name  : str           = "Heatmap",
+                   show_plot       : bool | None   = None,
+                   annotate_cells  : bool          = True) -> None:
+    """
+    Plot heatmaps over a two- or three-dimensional parameter grid.
+
+    For a two-parameter ParameterSpace, ``values`` must have shape ``param_space.test_grid_sizes``
+    and this function writes a single heatmap. For a three-parameter ParameterSpace, ``values`` must
+    have shape ``param_space.test_grid_sizes`` and this function writes one 2D heatmap for each
+    value of the third parameter, plotting parameter 0 against parameter 1.
+
+    Training boxes in the 3D case are slice-aware: a training point is marked on a slice only when
+    its third parameter matches that slice's third-parameter value.
+    """
+
+    if not isinstance(values, numpy.ndarray):
+        raise TypeError("values must be a numpy.ndarray, got %s" % type(values));
+    if not isinstance(param_space, ParameterSpace):
+        raise TypeError("param_space must be a ParameterSpace, got %s" % type(param_space));
+    if not isinstance(figsize, tuple) or len(figsize) != 2:
+        raise ValueError("figsize must be a two-element tuple, got %s" % str(figsize));
+
+    n_p : int = param_space.n_p;
+    if n_p not in (2, 3):
+        raise ValueError("Plot_Heatmap only supports 2D or 3D parameter spaces, got param_space.n_p = %d" % n_p);
+
+    expected_shape : tuple[int, ...] = tuple(param_space.test_grid_sizes);
+    if values.shape != expected_shape:
+        raise ValueError("values.shape = %s, expected %s from param_space.test_grid_sizes" % (str(values.shape), str(expected_shape)));
+
+    if n_p == 2:
+        if show_plot is None:
+            show_plot = True;
+        _Plot_Heatmap2d(values         = values,
+                        param_space    = param_space,
+                        figsize        = figsize,
+                        title          = title,
+                        save_file_name = save_file_name,
+                        show_plot      = show_plot,
+                        annotate_cells = annotate_cells);
+        return;
+
+    # n_p == 3: sweep through the third parameter and write one 2D slice per value.
+    if show_plot is None:
+        show_plot = False;
+
+    fixed_param_index : int           = 2;
+    fixed_param_name  : str           = param_space.param_names[fixed_param_index];
+    fixed_param_grid  : numpy.ndarray = _get_param_grid_1d(param_space, fixed_param_index);
+    for k in range(fixed_param_grid.shape[0]):
+        fixed_value : float = float(fixed_param_grid[k]);
+        value_label : str   = _format_param_value_for_label(fixed_value);
+        title_k     : str   = ("%s, %s = %s" % (title, fixed_param_name, value_label)) if title != "" else ("%s = %s" % (fixed_param_name, value_label));
+
+        suffix      : str   = "__%s_%s" % (fixed_param_name, _format_param_value_for_filename(fixed_value));
+        file_name_k : str   = _append_suffix_to_file_name(save_file_name, suffix);
+
+        _Plot_Heatmap2d(values              = values[:, :, k],
+                        param_space         = param_space,
+                        figsize             = figsize,
+                        title               = title_k,
+                        save_file_name      = file_name_k,
+                        show_plot           = show_plot,
+                        annotate_cells      = annotate_cells,
+                        param_indices       = (0, 1),
+                        fixed_param_indices = (fixed_param_index,),
+                        fixed_param_values  = (fixed_value,));
 
     return;
 

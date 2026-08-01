@@ -1,9 +1,9 @@
 trainer:
-  type:                   "First_Order_Rollout"
+  type:                   "First_Order_Weak"
 
-  max_iter:               3000
-  n_iter:                 1500
-  max_greedy_iter:        3000
+  max_iter:               4000
+  n_iter:                 2000
+  max_greedy_iter:        4000
 
   # If true, compute a single global mean/std from TRAINING data only, and normalize
   # all training/testing trajectories using these values.
@@ -11,7 +11,8 @@ trainer:
 
   device:                 'cpu'
 
-  First_Order_Rollout:       
+  noise_ratio:            0.0
+  First_Order_Weak:       
     lr:                     0.001
     gradient_clip:          10.0        # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
 
@@ -22,20 +23,15 @@ trainer:
     max_p_rollout:          0.5         # Maximum proportion of the time window used for rollout loss.
     n_rollouts:             12          # Frame-rollout mode: number of rollable start frames to rollout per training parameter per epoch.
 
-    p_IC_rollout_init:      0.01
-    IC_rollout_update_freq: 10
-    IC_dp_per_update:       0.01
-    max_p_IC_rollout:       1.0       # Maximum proportion of the time window used for IC rollout loss.
-
     warmup_epochs:          40        # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
 
     loss_weights:
       recon:                1.0
-      LD:                   10.0
+      LD:                   20.0
       rollout:              1.0
-      IC_rollout:           0.25
-      stab:                 0.01
-      coef:                 2.0
+      IC_rollout:           0.0
+      stab:                 0.005
+      coef:                 1.0
 
     loss_types:
       recon:                "MSE"
@@ -59,10 +55,10 @@ parameter_space:
   parameters:
     - name:                 laser powers
       test_space_type:      file
-      file:                 /p/lustre1/robertrs/AI4NS/Generate_Data/9x9 dataset/metadata.txt
+      file:                 /p/lustre5/robertrs/AM_Agents/Generate_Data//9x9 no gas dataset/metadata.txt
     - name:                 scan speed
       test_space_type:      file
-      file:                 /p/lustre1/robertrs/AI4NS/Generate_Data/9x9 dataset/metadata.txt
+      file:                 /p/lustre5/robertrs/AM_Agents/Generate_Data/9x9 no gas dataset/metadata.txt
   test_space:
     type:                   grid
 
@@ -85,16 +81,17 @@ EncoderDecoder:
     conv_activations:       ["relu", "relu", "relu"]
 
 latent_dynamics:
-  type:                     switch
+  type:                     switch_w
   trainable:                true
-  switch:
-    lstsq_reg:                0.5           # Ridge-regression regularization for SINDy coefficient initialization (prevents blow-up for new greedy-sampled points).
-
+  switch_w:
+    test_func_type:         'PC-poly'
+    test_func_width:        150.0
+    overlap:                0.95
 
 physics:
   type:                     Thermal
   Thermal:
-    hdf5_dir:               /p/lustre1/robertrs/AI4NS/Generate_Data/9x9 dataset/
+    hdf5_dir:               /p/lustre5/robertrs/AM_Agents/Generate_Data//9x9 no gas dataset/
     use_cnn:                True
-    threshold:              1900.0
+    threshold:              1700.0
 

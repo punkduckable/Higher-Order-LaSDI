@@ -2,21 +2,14 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-import  os;
-import  sys;
-src_Path        : str   = os.path.dirname(os.path.dirname(__file__));
-util_Path       : str   = os.path.join(src_Path, "Utilities");
-sys.path.append(src_Path);
-sys.path.append(util_Path);
-
 import  logging;
 
 import  numpy;
 import  torch;
 
-from    LatentDynamics      import  LatentDynamics;
-from    FiniteDifference    import  Derivative1_Order4, Derivative1_Order2_NonUniform;
-from    FirstOrderSolvers   import  RK4;
+from    LatentDynamics                  import  LatentDynamics;
+from    Utilities.FiniteDifference      import  Derivative1_Order4, Derivative1_Order2_NonUniform;
+from    Utilities.FirstOrderSolvers     import  RK4;
 
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
@@ -93,7 +86,7 @@ class SINDy(LatentDynamics):
         self.lstsq_reg : float = config["sindy"]["lstsq_reg"];
         LOGGER.info("Initializing a SINDY object with n_z = %d, Uniform_t_Grid = %s, lstsq_reg = %s" % (self.n_z, str(self.Uniform_t_Grid), str(self.lstsq_reg)));
 
-        # Setup the loss functions used by calibrate.
+        # Setup the loss functions used by compute_losses.
         self.MSE = torch.nn.MSELoss(reduction = 'mean');
         self.MAE = torch.nn.L1Loss(reduction = 'mean');
         return;
@@ -123,7 +116,7 @@ class SINDy(LatentDynamics):
         Return the actual coefficient tensors that should be passed to torch optimizers.
 
         These are not copies. They are the same tensors stored in `self.train_coefs`, so optimizer
-        updates modify the LD-owned coefficient dictionaries used by calibrate/simulate.
+        updates modify the LD-owned coefficient dictionaries used by compute_losses/simulate.
         """
 
         if self.trainable == False:
@@ -210,16 +203,18 @@ class SINDy(LatentDynamics):
 
 
 
-    def calibrate(  self,  
-                    Latent_States   : list[list[torch.Tensor]], 
-                    loss_type       : str,
-                    t_Grid          : list[torch.Tensor], 
-                    params          : numpy.ndarray | None = None) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
+    def compute_losses(  
+        self,  
+        Latent_States   : list[list[torch.Tensor]], 
+        loss_type       : str,
+        t_Grid          : list[torch.Tensor], 
+        params          : numpy.ndarray | None = None
+    ) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
         r"""
         Evaluate the SINDy latent-dynamics loss using LD-owned native coefficients.
 
-        `calibrate` no longer receives coefficient tensors from the Trainer. Instead, it looks up
-        the coefficient dictionary for each parameter row in `self.train_coefs`. Missing entries
+        `compute_losses` no longer receives coefficient tensors from the Trainer. Instead, it looks 
+        up the coefficient dictionary for each parameter row in `self.train_coefs`. Missing entries
         raise a KeyError through `get_train_coefs`, which is intentional: by the time training
         starts, the sampler/initialization path should already have fitted coefficients for every
         training parameter.
@@ -251,7 +246,7 @@ class SINDy(LatentDynamics):
         """
 
         # Checks.
-        assert params is not None, "SINDy.calibrate requires params to look up train_coefs";
+        assert params is not None, "SINDy.compute_losses requires params to look up train_coefs";
         assert isinstance(t_Grid, list);
         assert isinstance(Latent_States, list);
         assert len(Latent_States) == len(t_Grid) == params.shape[0];

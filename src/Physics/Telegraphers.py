@@ -2,18 +2,13 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-# Add the main directory to the search path.
 import  logging;
-import  os;
-import  sys;
-PyMFEM_Path     : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "PyMFEM"));
-sys.path.append(PyMFEM_Path);
 
 import  numpy;
 import  torch;
 
 from    Physics                         import  Physics;
-from    telegraphers                    import  Simulate, Initial_Displacement, Initial_Velocity;
+from    Physics.PyMFEM.telegraphers     import  Simulate, Initial_Displacement, Initial_Velocity;
 
 
 LOGGER : logging.Logger = logging.getLogger(__name__);

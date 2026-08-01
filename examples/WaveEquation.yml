@@ -49,7 +49,6 @@ trainer:
 workflow:
   use_restart:              True
   restart_file:             WaveEquation_09_30_2025_09_43.npy
-  plot_train_rel_errors:    False
 
 sampler:
   type:                   'FOM_Variance'

@@ -15,9 +15,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-notebooks = [
-    "jupyter==1.0.0",
-]
+notebooks = ["jupyter==1.0.0"]
+dev = ["pytest>=8.0"]
 pymfem = [
     "cmake==3.31.10",
     "cython>=3.0",

@@ -1,12 +1,23 @@
 """
-Latent dynamics models for LaSDI.
+Latent-dynamics models for LaSDI.
 
-This file exists to make `LatentDynamics/` a proper Python package and to ensure
-imports like `from LatentDynamics import LatentDynamics` resolve to the *class*
-defined in `LatentDynamics.py`, not the submodule.
+`LatentDynamics` defines the shared coefficient, weak-form, and rollout interface. `SINDy` and
+`SwitchSINDy` define first-order affine latent ODEs, including switching dynamics. `DampedSpring`
+defines second-order latent dynamics, and the `_weak` variants use weak-form residual losses.
 """
 
-from .LatentDynamics import LatentDynamics
+from    .LatentDynamics         import  LatentDynamics;
+from    .SINDy                  import  SINDy;
+from    .SINDy_weak             import  SINDy_weak;
+from    .SwitchSINDy            import  SwitchSINDy;
+from    .SwitchSINDy_weak       import  SwitchSINDy_weak;
+from    .DampedSpring           import  DampedSpring;
+from    .DampedSpring_weak      import  DampedSpring_weak;
 
-__all__ = ["LatentDynamics"]
-
+__all__ = [    "LatentDynamics",
+               "SINDy",
+               "SINDy_weak",
+               "SwitchSINDy",
+               "SwitchSINDy_weak",
+               "DampedSpring",
+               "DampedSpring_weak"];

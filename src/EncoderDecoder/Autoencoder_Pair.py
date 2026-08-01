@@ -2,29 +2,16 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-# Add the Physics directory to the search path.
-import  sys;
-import  os;
-src_Path        : str   = os.path.abspath(os.path.dirname(os.path.dirname(__file__)));
-Physics_Path    : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, "Physics"));
-
-sys.path.append(Physics_Path);
-
 import  logging;
-from    copy            import  deepcopy;
+from    copy                        import  deepcopy;
 
 import  torch;
 import  numpy;
 
-from    typing          import  TYPE_CHECKING;
-if TYPE_CHECKING:
-    from    Trainer     import  Trainer;
-    from    Physics     import  Physics;
 
-
-from    EncoderDecoder  import  EncoderDecoder;
-from    MLP             import  act_dict;
-from    Autoencoder     import  Autoencoder, load_Autoencoder;
+from    EncoderDecoder              import  EncoderDecoder;
+from    EncoderDecoder.MLP          import  act_dict;
+from    EncoderDecoder.Autoencoder  import  Autoencoder, load_Autoencoder;
 # Set up logging.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
 

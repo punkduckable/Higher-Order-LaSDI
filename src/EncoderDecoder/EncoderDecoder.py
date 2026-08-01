@@ -2,20 +2,12 @@
 # Import and Setup
 # -------------------------------------------------------------------------------------------------
 
+import      logging;
 
-# Add the Physics directory to the search path.
-import  sys;
-import  os;
-src_Path        : str   = os.path.abspath(os.path.dirname(os.path.dirname(__file__)));
-Physics_Path    : str  = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, "Physics"));
-sys.path.append(Physics_Path);
+import      torch;
+import      numpy;
 
-import  logging;
-
-import  torch;
-import  numpy;
-
-from    typing          import  TYPE_CHECKING;
+from        typing      import  TYPE_CHECKING;
 if TYPE_CHECKING:
     from    Trainer     import  Trainer;
     from    Physics     import  Physics;

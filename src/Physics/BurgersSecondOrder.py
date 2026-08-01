@@ -2,19 +2,12 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-# Add the main directory to the search path.
-import  os;
-import  sys;
-src_Path        : str   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)));
-util_Path       : str   = os.path.join(src_Path, "Utilities");
-sys.path.append(util_Path);
-
 import  numpy;
 import  torch;
 
-from    Physics             import  Physics;
-from    FiniteDifference    import  Derivative1_Order4, Derivative1_Order2_NonUniform;
-from    Burgers             import  solver;
+from    Physics                     import  Physics;
+from    Utilities.FiniteDifference  import  Derivative1_Order4, Derivative1_Order2_NonUniform;
+from    Physics.Burgers             import  solver;
 
 
 

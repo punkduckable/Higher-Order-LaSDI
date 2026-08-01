@@ -1,30 +1,28 @@
 #!/bin/bash
 #
-# SLURM input deck for running Higher-Order-LaSDI from the queue.
+# Flux batch script for running Higher-Order-LaSDI from the queue.
 #
 # Submit with:
-#   sbatch run_higher_order_lasdi.slurm
+#   ./run_higher_order_lasdi.sub
+# or:
+#   flux batch run_higher_order_lasdi.flux
 #
 # Edit the "User settings" section below before submitting. In particular,
 # set Example to the name of a .yml file that exists in ./examples.
 
-# ----------------------------- SLURM settings -----------------------------
-# Adjust these defaults for your machine/partition/account as needed.
-#SBATCH --job-name=HigherOrderLaSDI
-#SBATCH --partition=pbatch
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --account=iffmodel
-#SBATCH --exclusive
-#SBATCH --mail-type=all
-#SBATCH --cpus-per-task=1
-#SBATCH --gpus=1
-#SBATCH --time=06:00:00
+# ----------------------------- Flux settings ------------------------------
+# Adjust these defaults for your machine/queue/account as needed.
+#flux: --job-name=HigherOrderLaSDI
+#flux: --queue=pbatch
+#flux: --nodes=1
+#flux: --bank=iffmodel
+#flux: --exclusive
+#flux: --time-limit=300
 #
-# Keep SLURM's own wrapper output separate from the Python stdout/stderr logs.
+# Keep Flux's own wrapper output separate from the Python stdout/stderr logs.
 # The Python logs are written below and then moved by scripts/cleanup_run.py.
-#SBATCH --output=slurm-%x.log
-#SBATCH --error=slurm-%x.err
+#flux: --output=flux-{{id}}.log
+#flux: --error=flux-{{id}}.err
 
 set -u
 
@@ -43,16 +41,16 @@ ExamplesDir="examples"
 
 # Python stdout/stderr files. These are created in the repository root and
 # moved into the dated Figures subdirectory by scripts/cleanup_run.py.
-STDOUT_FILE="HLaSDI_${SLURM_JOB_ID:-manual}_stdout.txt"
-STDERR_FILE="HLaSDI_${SLURM_JOB_ID:-manual}_stderr.txt"
+STDOUT_FILE="HLaSDI_${FLUX_JOB_ID:-manual}_stdout.txt"
+STDERR_FILE="HLaSDI_${FLUX_JOB_ID:-manual}_stderr.txt"
 
 # ----------------------------- Run workflow -------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SUBMIT_DIR="${FLUX_SUBMIT_CWD:-${FLUX_JOB_CWD:-${PWD}}}"
 
-# SLURM may execute a copied version of this script from a spool directory, so
-# "${BASH_SOURCE[0]}" is not always the repository path. Prefer an explicit
-# RepositoryRoot if provided, then the sbatch submission directory, then the
-# script directory for interactive/manual runs.
+# Flux usually starts the job in the submission directory, but some launchers may
+# execute a copied script. Prefer an explicit RepositoryRoot if provided, then
+# environment overrides/submission cwd, then the script directory for manual runs.
 candidate_roots=()
 if [[ -n "$RepositoryRoot" ]]; then
     candidate_roots+=("$RepositoryRoot")
@@ -60,9 +58,7 @@ fi
 if [[ -n "${HLASDI_REPO_ROOT:-}" ]]; then
     candidate_roots+=("$HLASDI_REPO_ROOT")
 fi
-if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
-    candidate_roots+=("$SLURM_SUBMIT_DIR")
-fi
+candidate_roots+=("$SUBMIT_DIR")
 candidate_roots+=("$SCRIPT_DIR")
 
 REPO_ROOT=""
@@ -124,10 +120,11 @@ if [[ ! -x ./.venv/bin/python ]]; then
 fi
 
 echo "Starting Higher-Order-LaSDI job at $(date)"
-echo "Repository: ${REPO_ROOT}"
-echo "Config:     ${CONFIG_FILE}"
-echo "Stdout:     ${STDOUT_FILE}"
-echo "Stderr:     ${STDERR_FILE}"
+echo "Flux job id: ${FLUX_JOB_ID:-manual}"
+echo "Repository:  ${REPO_ROOT}"
+echo "Config:      ${CONFIG_FILE}"
+echo "Stdout:      ${STDOUT_FILE}"
+echo "Stderr:      ${STDERR_FILE}"
 
 # Use a non-interactive Matplotlib backend for batch jobs.
 export MPLBACKEND=Agg

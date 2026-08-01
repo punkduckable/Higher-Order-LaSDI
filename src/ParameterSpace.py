@@ -2,11 +2,6 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-import  sys;
-import  os;
-Util_Path       : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), "Utilities"));
-sys.path.append(Util_Path);
-
 import  logging;
 from    typing      import  Callable;
 

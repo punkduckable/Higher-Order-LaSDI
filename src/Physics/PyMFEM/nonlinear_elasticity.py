@@ -3,18 +3,15 @@
 # -------------------------------------------------------------------------------------------------
 
 import      os;
-import      sys;
 import      logging;
 from        os.path                 import  expanduser, join, dirname;
 
 import      mfem.par                as      mfem;
-from        mfem.par                import  intArray, add_vector, Add;
+from        mfem.par                import  intArray;
 from        mpi4py                  import  MPI 
 import      numpy;
 
-utils_path : str        = os.path.join(os.path.join(os.path.pardir, os.path.pardir), "Utilities");
-sys.path.append(utils_path);
-import      Logging;
+from        Utilities               import  Logging;
 
 # Setup logger
 LOGGER : logging.Logger = logging.getLogger(__name__);

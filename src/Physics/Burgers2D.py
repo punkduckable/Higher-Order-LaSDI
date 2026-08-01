@@ -2,15 +2,11 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-import  os, sys;
-src_path : str = os.path.dirname(os.path.dirname(os.path.abspath(__file__)));
-sys.path.append(src_path);
-
 import  numpy;
 import  torch;
 
-from    Physics             import  Physics;
-from    Animate                     import  Animate_2D_Grid_Scalar;
+from    Physics                     import  Physics;
+from    Plotting.Animate            import  Animate_2D_Grid_Scalar;
 
 
 

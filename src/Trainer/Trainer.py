@@ -2,28 +2,16 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
-import  sys;
 import  os;
-# Add sibling (src/*) directories to the search path. This file lives in src/Trainer/.
-src_path            : str   = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir));
-Physics_Path        : str   = os.path.join(src_path, "Physics");
-LD_Path             : str   = os.path.join(src_path, "LatentDynamics");
-EncoderDecoder_Path : str   = os.path.join(src_path, "EncoderDecoder");
-Utils_Path          : str   = os.path.join(src_path, "Utilities");
-sys.path.append(Physics_Path);
-sys.path.append(LD_Path);
-sys.path.append(EncoderDecoder_Path);
-sys.path.append(Utils_Path);
 
 import  logging;
 
 import  torch;
 import  numpy;
-from    torch.optim                 import  Optimizer;
 import  pickle;
 
 from    EncoderDecoder              import  EncoderDecoder;
-from    Timing                      import  Timer;
+from    Utilities.Timing            import  Timer;
 from    ParameterSpace              import  ParameterSpace;
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
@@ -31,6 +19,12 @@ from    LatentDynamics              import  LatentDynamics;
 # Setup Logger
 LOGGER : logging.Logger = logging.getLogger(__name__);
 
+# Should we profile a run of Iterate?
+PROFILE_ITERATE : bool  = False
+PROFILE_WAIT    : int   = 10        # Do nothing for this many epochs   
+PROFILE_WARMUP  : int   = 1         # Run machinery, but discard results
+PROFILE_ACTIVE  : int   = 10        # Run/log profiler stuff for this many epochs
+PROFILE_REPEAT  : int   = 1         # Repeat this schedule how many times?
 
 
 # -------------------------------------------------------------------------------------------------
@@ -282,6 +276,11 @@ class Trainer:
         
         # Initialize a timer object. We will use this while training.
         self.timer                          = Timer();
+
+        # Build a loss cache; this will be a list whose entries are tuples of the form:
+        #   (loss_name, param_tuple or "total", int(epoch), loss_value)
+        # The _flush_loss_cache method post-processes/serializes the contents of this list.
+        self._loss_cache                    = [];
 
         # Fetch trainer class information.
         self.n_iter                 : int   = trainer_config['n_iter'];             # Number of iterations for one train and greedy sampling
@@ -571,10 +570,24 @@ class Trainer:
     # Loss Tracking Helpers.
     # ---------------------------------------------------------------------------------------------
 
-    def _store_loss_by_param(self, loss_name: str, param_tuple: tuple, epoch: int, loss_value: float) -> None:
+    def _cache_loss_by_param(self, loss_name: str, param_tuple: tuple, epoch: int, loss_value: torch.Tensor) -> None:
         """
-        Helper function to store a loss value for a specific parameter combination.
-        
+        Cache a per-parameter loss tensor for deferred scalar logging.
+
+        `Iterate(...)` implementations should call this method at the point where a loss component
+        is computed, but they should pass a detached tensor rather than calling `.item()`.  Keeping
+        the value as a tensor on its native device lets `_flush_loss_cache(...)` batch the
+        device-to-CPU scalar transfer once per optimization step instead of synchronizing the GPU
+        repeatedly throughout the forward/loss code.
+
+        Expected use inside trainers:
+
+            self._cache_loss_by_param("LD", param_tuple, iter + 1, loss_LD_i.detach())
+
+        Do not pass Python floats and do not call `.item()` before caching.  The tensor must contain
+        exactly one scalar value and must already be detached from the autograd graph.  The matching
+        `_flush_loss_cache(...)` call should run once per training step after `optimizer.step()`.
+
 
         -------------------------------------------------------------------------------------------
         Arguments:
@@ -586,22 +599,34 @@ class Trainer:
             Parameter combination as a tuple (can be used as dictionary key)
         epoch : int
             Epoch number
-        loss_value : float
-            Loss value to store
+        loss_value : torch.Tensor
+            Detached scalar tensor containing the loss value to cache.
         """
-        if loss_name not in self.loss_by_param:
-            self.loss_by_param[loss_name] = {};
-        if param_tuple not in self.loss_by_param[loss_name]:
-            self.loss_by_param[loss_name][param_tuple] = {'epochs': [], 'losses': []};
-        self.loss_by_param[loss_name][param_tuple]['epochs'].append(epoch);
-        self.loss_by_param[loss_name][param_tuple]['losses'].append(loss_value);
+
+        assert isinstance(loss_name, str), "loss_name must be a string";
+        assert isinstance(param_tuple, tuple), "param_tuple must be a tuple";
+        assert isinstance(epoch, int), "epoch must be an int";
+        assert isinstance(loss_value, torch.Tensor), "loss_value must be a torch.Tensor; pass loss.detach(), not loss.item()";
+        assert loss_value.numel() == 1, "loss_value must contain exactly one scalar value";
+        assert loss_value.requires_grad == False, "loss_value must be detached before caching; pass loss.detach()";
+
+        self._loss_cache.append((loss_name, param_tuple, int(epoch), loss_value));
+        return;
     
 
 
-    def _store_total_loss(self, loss_name: str, epoch: int, loss_value: float) -> None:
+    def _cache_total_loss(self, loss_name: str, epoch: int, loss_value: torch.Tensor) -> None:
         """
-        Helper function to store a total loss value (summed across all parameter combinations).
-        
+        Cache a total loss tensor for deferred scalar logging.
+
+        This is the total-loss counterpart to `_cache_loss_by_param(...)`.  Trainer subclasses
+        should pass detached scalar tensors on their native device:
+
+            self._cache_total_loss("total", iter + 1, loss.detach())
+
+        Do not pass Python floats and do not call `.item()` before caching.  `_flush_loss_cache(...)`
+        should be called once per training step after `optimizer.step()` so all cached scalar losses
+        are transferred to CPU together and written into `self.loss_by_param`.
 
 
         -------------------------------------------------------------------------------------------
@@ -611,15 +636,68 @@ class Trainer:
             Name of the loss component
         epoch : int
             Epoch number
-        loss_value : float
-            Total loss value to store
+        loss_value : torch.Tensor
+            Detached scalar tensor containing the total loss value to cache.
         """
-        if loss_name not in self.loss_by_param:
-            self.loss_by_param[loss_name] = {};
-        if 'total' not in self.loss_by_param[loss_name]:
-            self.loss_by_param[loss_name]['total'] = {'epochs': [], 'losses': []};
-        self.loss_by_param[loss_name]['total']['epochs'].append(epoch);
-        self.loss_by_param[loss_name]['total']['losses'].append(loss_value);
+
+        assert isinstance(loss_name, str), "loss_name must be a string";
+        assert isinstance(epoch, int), "epoch must be an int";
+        assert isinstance(loss_value, torch.Tensor), "loss_value must be a torch.Tensor; pass loss.detach(), not loss.item()";
+        assert loss_value.numel() == 1, "loss_value must contain exactly one scalar value";
+        assert loss_value.requires_grad == False, "loss_value must be detached before caching; pass loss.detach()";
+
+        self._loss_cache.append((loss_name, 'total', int(epoch), loss_value));
+        return;
+
+
+
+    def _flush_loss_cache(self) -> dict[tuple[str, tuple | str], float]:
+        """
+        Flush cached loss tensors into `self.loss_by_param`.
+
+        This method converts all cached detached scalar tensors into Python floats with a single
+        batched CPU transfer, then appends them to the existing loss-history dictionary.  Trainer
+        subclasses should call this exactly once per training step, after `optimizer.step()` and
+        before checkpoint/report logic that needs scalar loss values.
+
+        The returned dictionary maps `(loss_name, param_tuple_or_total)` to the flushed float for
+        the current cache contents.  This lets trainers reuse the synchronized values for reporting
+        and best-loss checkpoint decisions without calling `.item()` again.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns:
+        -------------------------------------------------------------------------------------------
+
+        flushed_values : dict[tuple[str, tuple | str], float]
+            The scalar values flushed from the cache.  Total losses use the key
+            `(loss_name, 'total')`.
+        """
+
+        if len(self._loss_cache) == 0:
+            return {};
+
+        # Stack first, then transfer once.  Losses for a trainer step should all live on one device.
+        first_device = self._loss_cache[0][3].device;
+        for _, _, _, loss_value in self._loss_cache:
+            assert loss_value.device == first_device, "cached loss tensors must live on the same device for batched flushing";
+
+        # Fetch loss values, then convert to cpu/list.
+        values_tensor : torch.Tensor = torch.stack([entry[3].reshape(()) for entry in self._loss_cache], dim = 0);
+        values_list   : list[float]  = [float(x) for x in values_tensor.cpu().tolist()];
+
+        flushed_values : dict[tuple[str, tuple | str], float] = {};
+        for (loss_name, key, epoch, _), loss_float in zip(self._loss_cache, values_list):
+            if loss_name not in self.loss_by_param:
+                self.loss_by_param[loss_name] = {};
+            if key not in self.loss_by_param[loss_name]:
+                self.loss_by_param[loss_name][key] = {'epochs': [], 'losses': []};
+            self.loss_by_param[loss_name][key]['epochs'].append(epoch);
+            self.loss_by_param[loss_name][key]['losses'].append(loss_float);
+            flushed_values[(loss_name, key)] = loss_float;
+
+        self._loss_cache = [];
+        return flushed_values;
 
 
 
@@ -684,6 +762,23 @@ class Trainer:
 
 
 
+    def _move_train_coefficients_to_device(self, device : str) -> None:
+        """
+        Move LD-owned training coefficient tensors to the requested device as trainable leaves.
+
+        This is primarily important after loading a checkpoint: checkpoints are restored on CPU for
+        portability, but a later GPU training round should optimize the native coefficient tensors
+        on the same device as the encoder/decoder instead of copying them inside every loss call.
+        """
+
+        for coef_dict in self.latent_dynamics.train_coefs.values():
+            for name, tensor in list(coef_dict.items()):
+                assert isinstance(tensor, torch.Tensor), "coefficient %s must be a torch.Tensor" % name;
+                coef_dict[name] = tensor.detach().to(device = device).clone().requires_grad_(self.latent_dynamics.trainable);
+        return;
+
+
+
     # ---------------------------------------------------------------------------------------------
     # Checkpointing
     # ---------------------------------------------------------------------------------------------
@@ -726,19 +821,19 @@ class Trainer:
         # Set up the checkpoint path.
         checkpoint_path : str = self.path_checkpoint + '/' + 'checkpoint.pt';
 
-        # First, fetch the device for the encoder_decoder. We temporarily move it to CPU before
-        # serialization for portability, then move it back to its original device.
-        device = next(encoder_decoder.parameters()).device;
+        # Fetch a detached CPU copy of the encoder-decoder parameters without moving the live model.
+        with torch.no_grad():
+            model_state: dict[str, torch.Tensor] = {
+                k: v.detach().cpu().clone()
+                for k, v in encoder_decoder.state_dict().items()
+            }
 
         # Serialize the encoder_decoder parameters and the LatentDynamics export dictionary.
         # The LatentDynamics export handles moving coefficient tensors to CPU and detaching them.
-        torch.save({"EncoderDecoder_state_dict"     : encoder_decoder.cpu().state_dict(),
+        torch.save({"EncoderDecoder_state_dict"     : model_state,
                     "latent_dynamics"               : self.latent_dynamics.export(),
                     "iteration number"              : iter},
                     checkpoint_path);
-
-        # Move encoder_decoder back to original device after saving.
-        encoder_decoder.to(device);
 
         return checkpoint_path;
 
@@ -796,7 +891,10 @@ class Trainer:
     # Training.
     # ---------------------------------------------------------------------------------------------
 
-    def Iterate(self, start_iter : int, end_iter : int) -> None:
+    def Iterate(self, 
+                start_iter  : int, 
+                end_iter    : int, 
+                profiler    : torch.profiler.profile | None = None) -> None:
         """
         Runs a round of training. It should train the encoder_decoder and training coefficients 
         from iteration = start_iter to iteration = end_iter. Along the way, it should make 
@@ -804,8 +902,9 @@ class Trainer:
         and use the serialized encoder_decoder and coefficients to update the encoder_decoder 
         and latent dynamic coefficients, respectively. 
 
-        The function should also track specific losses for each training parameter combination 
-        during each epoch using the `_store_loss_by_param` and `_store_total_loss` methods.
+        The function should also track specific losses for each training parameter combination
+        during each epoch using the `_cache_loss_by_param` and `_cache_total_loss` methods, then
+        call `_flush_loss_cache` once per epoch after the optimizer step.
 
         Finally, this function should record how long each part of the training process takes. 
         Specifically, it should track how long each loss function takes to compute, as well as how 
@@ -828,6 +927,9 @@ class Trainer:
 
         end_iter : int 
             The index of the last training iteration. Must have start_iter <= end_iter.
+
+        profiler : torch.profiler.profile
+            An optional torch profiler that can be used to profile Iterate.
 
             
         -------------------------------------------------------------------------------------------
@@ -900,6 +1002,9 @@ class Trainer:
             # Initialize fresh if starting from scratch
             if not hasattr(self, 'loss_by_param'):
                 self.loss_by_param = {};
+
+        # Reset loss cache.
+        self._loss_cache = [];
         
         
 
@@ -912,7 +1017,31 @@ class Trainer:
         end_iter     : int  = min(self.restart_iter + self.n_iter, self.max_iter);
         assert end_iter >= start_iter;
         LOGGER.info("Training for %d epochs (starting at %d, going to %d) with %d training parameters" % (end_iter - start_iter, start_iter, end_iter, n_train));
-        self.Iterate(start_iter = start_iter, end_iter = end_iter);
+
+        if PROFILE_ITERATE:
+            # Iterate with profiler on
+            profiler_activities = [torch.profiler.ProfilerActivity.CPU];
+            if torch.cuda.is_available():
+                profiler_activities.append(torch.profiler.ProfilerActivity.CUDA);
+            profiler_sort_by = "cuda_time_total" if torch.cuda.is_available() else "cpu_time_total";
+
+            with torch.profiler.profile(
+                activities      = profiler_activities,
+                schedule        = torch.profiler.schedule(
+                    wait        = PROFILE_WAIT,
+                    warmup      = PROFILE_WARMUP,
+                    active      = PROFILE_ACTIVE,
+                    repeat      = PROFILE_REPEAT,
+                ),
+                record_shapes   = True,
+                profile_memory  = True,
+            ) as prof:
+                self.Iterate(start_iter = start_iter, end_iter = end_iter, profiler = prof);
+            
+            # Now print the profiling results!
+            print(prof.key_averages().table(sort_by = profiler_sort_by, row_limit = 30), flush = True);
+        else:
+            self.Iterate(start_iter = start_iter, end_iter = end_iter);
         
 
         # -------------------------------------------------------------------------------------
@@ -1040,6 +1169,7 @@ class Trainer:
 
         # Load the timer / optimizer. 
         self.timer.load(dict_['timer']);
+        self._loss_cache = [];
 
 
         # All done!

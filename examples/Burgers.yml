@@ -51,7 +51,6 @@ trainer:
 workflow:
   use_restart:              false
   restart_file:  
-  plot_train_rel_errors:    False
 
 sampler:
   type:                   'FOM_Variance'

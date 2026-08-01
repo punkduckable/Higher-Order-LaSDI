@@ -94,7 +94,7 @@ class Thermal(Physics):
             assert nodes_coords_shape[1] == 3,              "nodes_coords_shape = %s" % str(nodes_coords_shape);
 
             # Check if we should use a CNN model.
-            assert 'use_cnn' in config['Thermal'],          "Theraml sub-dictionary must have an `use-cnn` attribute."
+            assert 'use_cnn' in config['Thermal'],          "Thermal sub-dictionary must have an `use-cnn` attribute."
             self.use_cnn : bool = config['Thermal']['use_cnn'];
 
             if(self.use_cnn == True):

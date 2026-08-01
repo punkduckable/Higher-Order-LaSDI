@@ -1,19 +1,20 @@
 """
-Trainer package.
+Trainer classes for LaSDI.
 
-This repository historically used a single-module Trainer implementation (e.g. `src/Trainer.py`)
-and many modules import the base class via:
-
-    from Trainer import Trainer
-
-After refactoring the trainer code into a directory (`src/Trainer/`), `Trainer` becomes a package
-in the context where `src/` is on `sys.path` (for example when running
-`scripts/run_experiment.py`).
-
-This `__init__.py` preserves the import contract by re-exporting the base `Trainer` class at the
-package level.
+`Trainer` owns shared training state, normalization, logging, checkpointing, and diagnostics.
+`First_Order_Rollout` and `Second_Order_Rollout` train first- and second-order latent dynamics
+with reconstruction, coefficient, latent residual, and rollout losses. `First_Order_Weak` and
+`Second_Order_Weak` reuse the rollout trainer structure for weak-form latent-dynamics residuals.
 """
 
-from .Trainer import Trainer;
+from    .Trainer                import  Trainer;
+from    .First_Order_Rollout    import  First_Order_Rollout;
+from    .First_Order_Weak       import  First_Order_Weak;
+from    .Second_Order_Rollout   import  Second_Order_Rollout;
+from    .Second_Order_Weak      import  Second_Order_Weak;
 
-__all__ = ["Trainer"];
+__all__ = [    "Trainer",
+               "First_Order_Rollout",
+               "First_Order_Weak",
+               "Second_Order_Rollout",
+               "Second_Order_Weak"];

@@ -32,6 +32,19 @@ For a command-line workflow, use `scripts/run_experiment.py` together with a YAM
 uv run python scripts/run_experiment.py --config examples/KleinGordon.yml
 ```
 
+For queued runs, use the Flux or SLURM batch scripts after running `uv sync`:
+
+```bash
+# Flux
+flux batch run_higher_order_lasdi.flux
+
+# SLURM
+sbatch run_higher_order_lasdi.slurm
+```
+
+The batch scripts run `scripts/run_experiment.py` through `uv run --no-sync` and expect the
+`.venv` environment to already exist.
+
 This command will:
 1. Generate or load training data from the physics solver
 2. Train the `EncoderDecoder` and latent dynamics using `Trainer`
@@ -195,7 +208,7 @@ coefficient tensors for the selected latent-dynamics model. For example:
 # SINDy: z' = A z + b
 {(0.1, 1.0): {"A": A, "b": b}}
 
-# SINDy_weak: same native coefficients as SINDy, weak-form calibration
+# SINDy_weak: same native coefficients as SINDy, weak-form loss computation
 {(0.1, 1.0): {"A": A, "b": b}}
 
 # DampedSpring / DampedSpring_weak: z'' = K z + C z' + b
@@ -261,7 +274,7 @@ class; n_IC and type need to match for this to work.
 
 - **`src/Plot.py`** – Plotting functions:
   - `Plot_Latent_Trajectories()`: Visualize latent space dynamics with interpolated coefficient uncertainty
-  - `Plot_Heatmap2d()`: 2D parameter space heatmaps
+  - `Plot_Heatmap()`: parameter-space heatmaps for 2D grids, or 2D slices through 3D parameter grids
   - `trainSpace_RelativeErrors_Heatmap()`: Error visualization for training parameters
 - **`src/Animate.py`** – Animation generation:
   - `make_solution_movies()`: Create MP4 animations of solutions
@@ -421,11 +434,19 @@ Create/sync the project environment from `pyproject.toml`:
 ```bash
 cd Higher-Order-LaSDI
 
-# Keep uv's package cache in the repository instead of $HOME. This avoids
+# Keep uv's package cache on large storage instead of $HOME. This avoids
 # home-directory quota failures on shared systems.
-export UV_CACHE_DIR="${PWD}/.uv-cache"
+export UV_CACHE_DIR="/p/vast1/robertrs/.cache/uv"
+mkdir -p "$UV_CACHE_DIR"
 
-uv sync --python 3.11
+uv lock
+uv sync
+```
+
+If you want to install optional testing and/or notebook dependencies:
+```bash
+uv sync --extra dev
+uv sync --extra notebooks
 ```
 
 Run experiments through `uv run` so the command uses the project environment:
@@ -471,7 +492,8 @@ guide, use Python 3.11.
 From the Higher-Order-LaSDI repository root:
 
 ```bash
-export UV_CACHE_DIR="${PWD}/.uv-cache"
+export UV_CACHE_DIR="/p/vast1/robertrs/.cache/uv"
+mkdir -p "$UV_CACHE_DIR"
 uv sync --python 3.11 --extra pymfem
 source .venv/bin/activate
 ```
@@ -736,8 +758,8 @@ New applications can be implemented by deriving from the appropriate base classe
    - `fit_coefficients(self, Latent_States, t_Grid, params)`: Fit native coefficients for one or
      more training parameters, then store them with `set_train_coefs(...)`. This method should
      return `None`.
-   - `calibrate(self, Latent_States, loss_type, t_Grid, params)`: Look up native coefficients from
-     `self.train_coefs` using `params`, then return latent-dynamics, coefficient, and stability
+   - `compute_losses(self, Latent_States, loss_type, t_Grid, params)`: Look up native coefficients
+     from `self.train_coefs` using `params`, then return latent-dynamics, coefficient, and stability
      loss lists. It should not accept flattened `input_coefs`.
    - `simulate(self, coefs, IC, t_Grid, params=None)`: Simulate forward using native coefficient
      dictionaries (or a list of dictionaries) returned by `get_train_coefs(...)` or `Interpolate`.

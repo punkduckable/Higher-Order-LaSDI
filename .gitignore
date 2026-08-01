@@ -27,3 +27,4 @@ env_lc.sh
 *.err
 *.log
 uv.lock
+venv_mfem/*
