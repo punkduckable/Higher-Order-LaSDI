@@ -24,6 +24,7 @@ from    ParameterSpace                  import  ParameterSpace;
 from    Trainer                         import  Trainer;
 from    Interpolate.Rollouts            import  Sample_Rollouts;
 from    Interpolate                     import  Interpolate;
+from    Plotting.Metrics                import  Compute_Meltpool_Dimensions;
 
 
 # Set up the logger
@@ -42,6 +43,122 @@ mpl.rcParams['axes.labelsize']  = 11;
 mpl.rcParams['axes.titlesize']  = 11;
 mpl.rcParams['xtick.direction'] = 'in';
 mpl.rcParams['ytick.direction'] = 'in';
+
+
+
+# -------------------------------------------------------------------------------------------------
+# Melt pool dimension plots
+# -------------------------------------------------------------------------------------------------
+
+def Plot_Meltpool_Dimensions(t_Grid          : torch.Tensor | numpy.ndarray,
+                             U_True          : numpy.ndarray,
+                             U_Pred          : numpy.ndarray,
+                             node_coords     : numpy.ndarray,
+                             threshold       : float,
+                             param           : numpy.ndarray | None = None,
+                             file_prefix     : str                  = "Thermal",
+                             n_for_avg       : int                  = 3,
+                             figsize         : tuple[int, int]      = (9, 5),
+                             show_plot       : bool                 = False) -> tuple[tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray],
+                                                                                     tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray],
+                                                                                     tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]]:
+    """
+    Compute and plot melt pool length/width/depth time histories for true and predicted FOM data.
+
+    This function assumes ``U_True`` and ``U_Pred`` are already in physical temperature units. It
+    accepts either flattened data ``(n_t, n_nodes)`` / ``(n_t, 1, n_nodes)`` or Thermal CNN-shaped
+    data ``(n_t, 1, n_x, n_y, n_z)``; flattening is handled by ``Compute_Meltpool_Dimensions``.
+
+    Three figures are written to ``Figures/``:
+        1. true melt pool dimensions,
+        2. predicted melt pool dimensions,
+        3. absolute error between predicted and true dimensions.
+
+    Returns
+    -------
+    true_dims, pred_dims, abs_error_dims
+        Each tuple is ``(length, width, depth)``, with each array of shape ``(n_t,)``.
+    """
+
+    assert isinstance(U_True, numpy.ndarray),      "type(U_True) = %s, expected numpy.ndarray" % type(U_True);
+    assert isinstance(U_Pred, numpy.ndarray),      "type(U_Pred) = %s, expected numpy.ndarray" % type(U_Pred);
+    assert isinstance(node_coords, numpy.ndarray), "type(node_coords) = %s, expected numpy.ndarray" % type(node_coords);
+    assert U_True.shape[0] == U_Pred.shape[0],     "U_True.shape = %s, U_Pred.shape = %s" % (str(U_True.shape), str(U_Pred.shape));
+    assert isinstance(n_for_avg, int),             "type(n_for_avg) = %s, expected int" % type(n_for_avg);
+    assert n_for_avg >= 1,                         "n_for_avg must be positive, got %d" % n_for_avg;
+
+    if isinstance(t_Grid, torch.Tensor):
+        t_np : numpy.ndarray = t_Grid.detach().cpu().numpy();
+    elif isinstance(t_Grid, numpy.ndarray):
+        t_np = t_Grid;
+    else:
+        raise AssertionError("type(t_Grid) = %s, expected torch.Tensor or numpy.ndarray" % type(t_Grid));
+
+    assert t_np.ndim == 1,                         "t_Grid must be one-dimensional, got shape %s" % str(t_np.shape);
+    assert t_np.shape[0] == U_True.shape[0],        "len(t_Grid) = %d, U_True.shape[0] = %d" % (t_np.shape[0], U_True.shape[0]);
+
+    true_dims : tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray] = Compute_Meltpool_Dimensions(
+                                                                        data        = U_True,
+                                                                        node_coords = node_coords,
+                                                                        threshold   = threshold,
+                                                                        n_for_avg   = n_for_avg);
+    pred_dims : tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray] = Compute_Meltpool_Dimensions(
+                                                                        data        = U_Pred,
+                                                                        node_coords = node_coords,
+                                                                        threshold   = threshold,
+                                                                        n_for_avg   = n_for_avg);
+    abs_error_dims : tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray] = tuple(
+        numpy.abs(pred_dims[i] - true_dims[i]) for i in range(3)
+    );
+
+    param_label : str = "" if param is None else " for %s" % str(param);
+    param_suffix: str = "" if param is None else "_%s" % str(param);
+
+    figures_dir : Path = Path(Figures_Path);
+    figures_dir.mkdir(parents = True, exist_ok = True);
+
+    def _plot_dims(dims             : list[tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]],
+                   title            : str,
+                   ylabel           : str,
+                   save_file_name   : str) -> None:
+        fig, ax = plt.subplots(1, 1, figsize = figsize);
+
+        line_styles : tuple[str, str, str] = ("-", "--", ":");
+        dim_labels  : tuple[str, str, str] = ("length (x extent)", "width (y extent)", "depth (z extent)");
+        for i in range(len(dims)):
+            color : str = "C%d" % i;
+            for j in range(3):
+                ax.plot(t_np, dims[i][j], color = color, linestyle = line_styles[j], label = dim_labels[j]);
+
+        ax.set_xlabel("time (s)");
+        ax.set_ylabel(ylabel);
+        ax.set_title(title);
+        ax.grid(True, which = "both", alpha = 0.25);
+        ax.legend();
+        fig.tight_layout();
+
+        save_file_path : str = str(figures_dir / save_file_name);
+        fig.savefig(save_file_path, dpi = 150, bbox_inches = "tight");
+        LOGGER.info("Saved melt pool dimension plot to %s" % save_file_path);
+
+        if show_plot:
+            plt.show();
+        else:
+            plt.close(fig);
+
+    # Plot predicted and true melt pool dimensions
+    _plot_dims(dims           = [true_dims, pred_dims],
+               title          = "True vs Predicted FOM melt pool dimensions%s" % param_label,
+               ylabel         = "melt pool dimension",
+               save_file_name = "%s_Meltpool_Dimensions_True_vs_Pred%s.png" % (file_prefix, param_suffix));
+
+    # Plot relative error.
+    _plot_dims(dims           = [abs_error_dims],
+               title          = "Absolute error in melt pool dimensions%s" % param_label,
+               ylabel         = "Absolute dimension error",
+               save_file_name = "%s_Meltpool_Dimensions_Abs_Error%s.png" % (file_prefix, param_suffix));
+
+    return true_dims, pred_dims, abs_error_dims;
 
 
 

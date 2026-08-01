@@ -19,7 +19,7 @@ sys.path.append(SRC_Path);
 
 from    Plotting.Metrics            import  Generate_Heatmap_Data;
 from    Plotting.Plot               import  Plot_Heatmap, Plot_Latent_Trajectories;
-from    Plotting.Plot               import  trainSpace_RelativeErrors_Heatmap;
+from    Plotting.Plot               import  Plot_Meltpool_Dimensions, trainSpace_RelativeErrors_Heatmap;
 from    Plotting.Animate            import  make_solution_movies;
 from    Interpolate                 import  Interpolate;
 from    Interpolate.Rollouts        import  Mean_Rollout; 
@@ -378,6 +378,23 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
 
             U_i_true_np = _flatten_for_movie(U_i_true_np);
             U_i_pred_np = _flatten_for_movie(U_i_pred_np);
+
+            # For Thermal, compute and plot melt pool length/width/depth for the same "worst"
+            # parameter combination. Only the state U (not time derivatives) has a melt pool
+            # interpretation. Arrays are already denormalized above, so the threshold is in
+            # physical temperature units.
+            if (i == 0) and (config["physics"]["type"] == "Thermal"):
+                assert "Thermal" in config["physics"], "Thermal physics config missing `Thermal` section";
+                assert "threshold" in config["physics"]["Thermal"], "Thermal physics config missing `threshold`";
+                Plot_Meltpool_Dimensions(t_Grid      = t_worst,
+                                         U_True      = U_i_true_np,
+                                         U_Pred      = U_i_pred_np,
+                                         node_coords = physics.X_Positions,
+                                         threshold   = float(config["physics"]["Thermal"]["threshold"]),
+                                         param       = param_space.test_space[i_worst],
+                                         file_prefix = config["physics"]["type"],
+                                         n_for_avg   = 3,
+                                         show_plot   = False);
 
             if U_i_true_np.shape[1] == 1:
                 data    = U_i_true_np;

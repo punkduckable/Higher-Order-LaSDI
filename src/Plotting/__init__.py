@@ -1,9 +1,9 @@
 """
 Plotting, metric, and animation helpers for LaSDI experiments.
 
-`Animate` builds 2D scalar/vector solution movies. `Metrics` computes heatmap data. `Plot` 
-draws latent trajectories, heatmaps, and train-space relative-error diagnostics from trainer 
-and interpolation outputs.
+`Animate` builds 2D scalar/vector solution movies. `Metrics` computes heatmap data and melt-pool
+dimensions. `Plot` draws melt-pool summaries, latent trajectories, heatmaps, and train-space
+relative-error diagnostics from trainer and interpolation outputs.
 """
 
 from    importlib               import  import_module;
@@ -12,6 +12,8 @@ _EXPORTS : dict[str, tuple[str, str]] = {
     "make_solution_movies"                 : (".Animate", "make_solution_movies"),
     "Animate_2D_Grid_Scalar"               : (".Animate", "Animate_2D_Grid_Scalar"),
     "Generate_Heatmap_Data"                : (".Metrics", "Generate_Heatmap_Data"),
+    "Compute_Meltpool_Dimensions"          : (".Metrics", "Compute_Meltpool_Dimensions"),
+    "Plot_Meltpool_Dimensions"             : (".Plot", "Plot_Meltpool_Dimensions"),
     "Plot_Latent_Trajectories"             : (".Plot", "Plot_Latent_Trajectories"),
     "Plot_Heatmap"                         : (".Plot", "Plot_Heatmap"),
     "trainSpace_RelativeErrors_Heatmap"    : (".Plot", "trainSpace_RelativeErrors_Heatmap")};
@@ -19,6 +21,8 @@ _EXPORTS : dict[str, tuple[str, str]] = {
 __all__ = [    "make_solution_movies",
                "Animate_2D_Grid_Scalar",
                "Generate_Heatmap_Data",
+               "Compute_Meltpool_Dimensions",
+               "Plot_Meltpool_Dimensions",
                "Plot_Latent_Trajectories",
                "Plot_Heatmap",
                "trainSpace_RelativeErrors_Heatmap"];

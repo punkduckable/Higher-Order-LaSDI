@@ -300,3 +300,135 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
     # All done!
     return max_Rel_Error, max_STD, Rel_Error, STD, coef_means, coef_stds;
 
+
+
+# -------------------------------------------------------------------------------------------------
+# Meltpool dimensions
+# -------------------------------------------------------------------------------------------------
+
+def Compute_Meltpool_Dimensions(data        : numpy.ndarray,
+                                node_coords : numpy.ndarray,
+                                threshold   : float,
+                                n_for_avg   : int               = 3) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]:
+    """
+    Computes the dimensions of the melt pool at every time step. Specifically, for each i, we find
+    the min/max x/y/z coordinates of the nodes whose corresponding value in data[i, :] is at or
+    above the threshold. The x/y/z extents are returned as length/width/depth, respectively.
+     
+
+    
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+
+    data : numpy.ndarray, shape = (n_t, n_nodes) or (n_t, 1, ...spatial...)
+        Holds the time series of FOM solutions. If data is not already flattened, all non-time
+        dimensions are flattened with ``data.reshape(n_t, -1)``. The flattened i, j element holds
+        the FOM solution at the j'th spatial node during the i'th time step. Thermal CNN data
+        produced by ``Thermal`` has shape ``(n_t, 1, n_x, n_y, n_z)`` and is handled directly.
+
+    node_coords : numpy.ndarray, shape = (3, n_nodes) or (n_nodes, 3)
+        Holds the coordinates of the spatial nodes. The j'th column holds the x, y, and z 
+        coordinates of the j'th spatial node, respectively. ``Thermal.X_Positions`` already has
+        shape ``(3, n_nodes)``.
+    
+    threshold : float
+        At any given time step, we consider any node whose corresponding element of data is at or
+        above this threshold to be "melted". We compute the length (difference between the largest
+        and smallest x coordinates of nodes above the threshold), width (same, but for y), and depth
+        (same, but for z).
+
+    n_for_avg : int
+        When we find the "maximum" or "minimum" value of the x/y/z coordinate (to compute length/
+        width/depth), we actually use the average of the n_for_avg smallest or largest x/y/z 
+        coordinates of nodes whose corresponding value is above the threshold. 
+
+
+                
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+    
+    length, width, depth
+
+    length : numpy.ndarray, shape = (n_t)
+        i'th element holds the length of the melt pool at the i'th time step.
+    
+    width : numpy.ndarray, shape = (n_t)
+        i'th element holds the width of the melt pool at the i'th time step.
+
+    depth : numpy.ndarray, shape = (n_t)
+        i'th element holds the depth of the melt pool at the i'th time step.
+    """
+
+    # Run checks.
+    assert isinstance(data, numpy.ndarray),        "data must be a numpy.ndarray, not %s" % str(type(data));
+    assert isinstance(node_coords, numpy.ndarray), "node_coords must be a numpy.ndarray, not %s" % str(type(node_coords));
+    assert data.ndim >= 2,                         "data must have shape (n_t, n_nodes) or (n_t, 1, ...), not %s" % str(data.shape);
+    assert node_coords.ndim == 2,                  "node_coords must have shape (3, n_nodes) or (n_nodes, 3), not %s" % str(node_coords.shape);
+    assert isinstance(threshold, (float, int, numpy.floating, numpy.integer)), "threshold must be a real scalar, not %s" % str(type(threshold));
+    assert isinstance(n_for_avg, int),             "n_for_avg must be an int, not %s" % str(type(n_for_avg));
+    assert n_for_avg >= 1,                         "n_for_avg must be positive, got %d" % n_for_avg;
+
+    # Accept both common coordinate layouts, but convert to the internal (3, n_nodes) convention.
+    if node_coords.shape[0] == 3:
+        node_coords_3xn : numpy.ndarray = node_coords;
+    elif node_coords.shape[1] == 3:
+        node_coords_3xn = node_coords.T;
+    else:
+        raise AssertionError("node_coords must have shape (3, n_nodes) or (n_nodes, 3), not %s" % str(node_coords.shape));
+
+    n_t     : int = int(data.shape[0]);
+    n_nodes : int = int(node_coords_3xn.shape[1]);
+
+    # Thermal CNN/gridded data arrives as (n_t, 1, n_x, n_y, n_z). Flatten all non-time dimensions
+    # in the same order used by Workflow._flatten_for_movie.
+    data_flat : numpy.ndarray = data.reshape(n_t, -1);
+    assert data_flat.shape[1] == n_nodes, \
+        "flattened data has %d nodes, but node_coords has %d nodes; data.shape = %s, node_coords.shape = %s" % (
+            data_flat.shape[1], n_nodes, str(data.shape), str(node_coords.shape));
+
+    assert numpy.all(numpy.isfinite(data_flat)),       "data contains non-finite values";
+    assert numpy.all(numpy.isfinite(node_coords_3xn)), "node_coords contains non-finite values";
+
+    # First, eliminate any components of data that are below the threshold.
+    Data_Above_Threshold : numpy.ndarray = numpy.greater_equal(data_flat, float(threshold));  # shape = (n_t, n_nodes)
+
+    # Set up width/length/depth.
+    length  : numpy.ndarray = numpy.zeros(n_t, dtype = numpy.float32);
+    width   : numpy.ndarray = numpy.zeros(n_t, dtype = numpy.float32);
+    depth   : numpy.ndarray = numpy.zeros(n_t, dtype = numpy.float32);
+
+    # Next, cycle through the time steps.
+    for i in range(n_t):
+        # Determine which nodes are above the threshold during this time step.
+        Data_Above_Threshold_i : numpy.ndarray = Data_Above_Threshold[i, :];            # shape = (n_nodes)
+
+        # If no nodes exceed the melt threshold, the melt pool is empty and all extents remain zero.
+        if numpy.count_nonzero(Data_Above_Threshold_i) == 0:
+            continue;
+
+        # Isolate the corresponding coordinates.
+        x_Above_Threshold_i_sorted = numpy.sort(node_coords_3xn[0, Data_Above_Threshold_i]);
+        y_Above_Threshold_i_sorted = numpy.sort(node_coords_3xn[1, Data_Above_Threshold_i]);
+        z_Above_Threshold_i_sorted = numpy.sort(node_coords_3xn[2, Data_Above_Threshold_i]);
+
+        n_avg_i : int = min(n_for_avg, x_Above_Threshold_i_sorted.size);
+
+        # Find the min/max.
+        x_min_i             = numpy.mean(x_Above_Threshold_i_sorted[:n_avg_i]);
+        x_max_i             = numpy.mean(x_Above_Threshold_i_sorted[-n_avg_i:]);
+        y_min_i             = numpy.mean(y_Above_Threshold_i_sorted[:n_avg_i]);
+        y_max_i             = numpy.mean(y_Above_Threshold_i_sorted[-n_avg_i:]);
+        z_min_i             = numpy.mean(z_Above_Threshold_i_sorted[:n_avg_i]);
+        z_max_i             = numpy.mean(z_Above_Threshold_i_sorted[-n_avg_i:]);
+
+        # Compute length, width, and depth
+        length[i] = x_max_i - x_min_i;
+        width[i]  = y_max_i - y_min_i;
+        depth[i]  = z_max_i - z_min_i;
+
+    # All done!
+    return (length, width, depth);
+
+

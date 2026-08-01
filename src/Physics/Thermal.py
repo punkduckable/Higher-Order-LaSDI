@@ -29,8 +29,9 @@ class Thermal(Physics):
     of ALE3D simulations. These simulations should be of directed energy deposition (DED) additive 
     manufacturing of a powder bed. The simulation results should be stored in a single hdf5 file. 
         
-    We assume there are two parameters: the scan speed (of the laser) and the beam power. We 
-    assume the user ran simulations over a 2d grid of these parameters. 
+    We assume there are three parameters: the scan speed (of the laser), the beam power, and 
+    the initial temperature of the structure. We assume the user ran simulations over a 3d grid of 
+    these parameters. 
     
     For each simulation, we load the thermal history, and parameter values.
 
@@ -49,10 +50,11 @@ class Thermal(Physics):
         config : dict
             This should be the "Physics" sub-dictionary of the main configuration file. It should 
             have a "hdf5_dir" key which specifies the path to the directory housing a metadata
-            file and a 2D grid of simulation results (each stored in a separate hdf5 file).
+            file and a 3D grid of simulation results (each stored in a separate hdf5 file).
 
         param_names : list[str]
-            A list of the parameter names. In this case, we expect "laser power" and "scan speed".
+            A list of the parameter names. In this case, we expect "laser power", "scan speed", 
+            and "initial temp".
         """
 
         # First, let's fetch the hdf5 directory.
@@ -99,12 +101,12 @@ class Thermal(Physics):
 
             if(self.use_cnn == True):
                 self.use_cnn    : bool          = True;
-                grid_shape      : numpy.ndarray = nodes_coords_ds.attrs["grid_shape"];
+                grid_shape      : numpy.ndarray = numpy.asarray(nodes_coords_ds.attrs["grid_shape"]);
                 assert numpy.prod(grid_shape) == n_nodes,   "grid_shape = %s, product of elements is %d, but there are %d nodes." % (str(grid_shape), numpy.prod(grid_shape), n_nodes);
                 assert grid_shape.size == 3,                "grid_shape = %s, must have 3 elements." % str(grid_shape.shape);
                 for i in range(3):
-                    assert isinstance(grid_shape[i], numpy.integer),    "type(grid_shape[%d]) = %s, must be int" % (i, str(type(grid_shape[i])));
-                frame_shape : list[int] = [1, grid_shape[0], grid_shape[1], grid_shape[2]];
+                    assert isinstance(grid_shape[i], (int, numpy.integer)),    "type(grid_shape[%d]) = %s, must be int" % (i, str(type(grid_shape[i])));
+                frame_shape : list[int] = [1, int(grid_shape[0]), int(grid_shape[1]), int(grid_shape[2])];
 
             # Convert to numpy array, then transpose it so that it has shape (3, n_nodes); this is the 
             # shape that the animate functions expect.
@@ -120,8 +122,8 @@ class Thermal(Physics):
                             n_IC            = n_IC);
         
         # To make the solve method work, we need to fetch the set of parameter values. 
-        # We can do this by extracting the "laser powers" and "scan speed" lists from the 
-        # metadata header. 
+        # We can do this by extracting the "laser powers", "scan speed", and "initial temperature" 
+        # lists from the metadata header. 
         with open(os.path.join(self.hdf5_dir, "metadata.txt"), 'r') as metadata_file:
             # The first line of the metadata_file should be "PARAMETERS". The second should be
             # something like "laser powers: <p1>, <p2>, ..." where <p1>, <p2>, ... are the power
@@ -137,42 +139,54 @@ class Thermal(Physics):
             scan_speeds_line    : str           = metadata_file.readline();                             # do the same for scan speeds 
             scan_speeds         : list[str]     = scan_speeds_line.split(":")[1].strip().split(",");   
             self.scan_speeds    : list[float]   = [float(speed) for speed in scan_speeds];
+            
+            initial_temp_line   : str           = metadata_file.readline();                             # do the same for initial temps
+            initial_temps       : list[str]     = initial_temp_line.split(":")[1].strip().split(",");   
+            self.initial_temps  : list[float]   = [float(temp) for temp in initial_temps];
 
-        # Make sure all powers, scan speeds are positive.
+        # Make sure all powers, scan speeds, and initial temperatures are positive.
         for power in self.laser_powers:
             if power <= 0:
                 raise ValueError(f"Laser power must be positive, got {power}");
         for speed in self.scan_speeds:
             if speed <= 0:
                 raise ValueError(f"Scan speed must be positive, got {speed}");
+        for temp in self.initial_temps:
+            if temp <= 0:
+                raise ValueError(f"Initial temperature must be positive, got {temp}");
 
         """
         Next, we need to fetch and store the initial conditions, file names, and track lengths. 
         We will do this by determining the name of the file storing the data for each parameter 
         combination. We will store these names, then store the first frame (IC) from each file's 
-        nodet dataset in a (n_laser_powers, n_scan_speeds, n_nodes) array whose i, j, k element 
-        holds the initial temperature at the k'th node for the i'th laser power and j'th scan 
-        speed. We will also store the track length for each parameter combination in a 
-        (n_laser_powers, n_scan_speeds) array whose i, j element holds the track length for the 
-        i'th laser power and j'th scan speed.
+        nodet dataset in a (n_laser_powers, n_scan_speeds, n_initial_temps, n_nodes) array 
+        whose i, j, k, l element holds the initial temperature at the l'th node for the i'th 
+        laser power, j'th scan speed, and k'th initial temperature.
+        
+        We will also store the track length for each parameter combination in a (n_laser_powers, 
+        n_scan_speeds, n_initial_temps) array whose i, j, k element holds the track length for 
+        the i'th laser power, j'th scan speed, and k'th initial temperature.
         
         To do this, we  need to know which file corresponds to each parameter value. We can do 
-        this by reading the metadata file, whcih consist sof a header and a body. The body begins 
+        this by reading the metadata file, which consist sof a header and a body. The body begins 
         after a line of all `=` characters. It begins with a blank line, then has a line describing 
         the contents of each line in the body. After this, each line of the body consists of a 
         comma separated list of the form:
-            <p>, <s>, <file name>
-        Where <p> and <s> specify the value of the laser power and scan speed in the simulation
-        that generated the data stored in <file name>. Thus, we can run line-by-line, store the 
-        file name, then open the corresponding files, then store the first entry of that file's 
-        nodet dataset in the corresponding entry of the initial conditions array. 
+            <p>, <s>, <t>, <file name>
+        Where <p>, <s>, and <t> specify the value of the laser power, scan speed, and initial temp 
+        in the simulation that generated the data stored in <file name>. 
+        
+        Thus, we can run line-by-line, store the file name, then open the corresponding files, 
+        then store the first entry of that file's nodet dataset in the corresponding entry of the 
+        initial conditions array. 
         """
         n_powers : int = len(self.laser_powers);
         n_speeds : int = len(self.scan_speeds);
+        n_temps  : int = len(self.initial_temps);
         n_nodes  : int = self.X_Positions.shape[1];
-        self.IC_array      : numpy.ndarray = numpy.empty((n_powers, n_speeds, n_nodes), dtype = numpy.float32);
-        self.file_names    : numpy.ndarray = numpy.empty((n_powers, n_speeds), dtype = object)
-        self.track_lengths : numpy.ndarray = numpy.empty((n_powers, n_speeds), dtype = numpy.float32);
+        self.IC_array      : numpy.ndarray = numpy.empty((n_powers, n_speeds, n_temps, n_nodes), dtype = numpy.float32);
+        self.file_names    : numpy.ndarray = numpy.empty((n_powers, n_speeds, n_temps), dtype = object);
+        self.track_lengths : numpy.ndarray = numpy.empty((n_powers, n_speeds, n_temps), dtype = numpy.float32);
 
         with open(os.path.join(self.hdf5_dir, "metadata.txt"), 'r') as metadata_file:
             # Cycle through the header. 
@@ -193,18 +207,21 @@ class Thermal(Physics):
             for i in range(n_lines):
                 line : str = lines[i].strip();
                 parts : list[str] = line.split(",");   
+                assert len(parts) >= 4, "metadata line must have at least four comma-separated entries: %s" % line;
 
                 # Extract the power,  scan speed, and file name.
                 power       : float = float(parts[0]);
-                speed       : float = float(parts[1]);    
-                file_name   : str = parts[2].strip();
+                speed       : float = float(parts[1]);
+                temp        : float = float(parts[2]);    
+                file_name   : str = parts[3].strip();
                 
                 # Determine which power and scan speed this corresponds to.
                 power_idx : int = self.laser_powers.index(power);
                 speed_idx : int = self.scan_speeds.index(speed);
+                temp_idx  : int = self.initial_temps.index(temp);
                 
                 # store the file name.
-                self.file_names[power_idx, speed_idx] = file_name;
+                self.file_names[power_idx, speed_idx, temp_idx] = file_name;
 
                 # Open the file and store the first entry of the nodet dataset.
                 with h5py.File(os.path.join(self.hdf5_dir, file_name), 'r') as f:
@@ -219,7 +236,7 @@ class Thermal(Physics):
                     track_length_value = track_length[()];
                     if track_length_value <= 0:
                         raise ValueError(f"Track length must be positive in file {file_name}, got {track_length_value}")
-                    self.track_lengths[power_idx, speed_idx] = track_length_value;
+                    self.track_lengths[power_idx, speed_idx, temp_idx] = track_length_value;
 
                     # Make sure nodet_ds has shape (n_time_steps, n_nodes).
                     nodet_shape = nodet_ds.shape;
@@ -227,7 +244,7 @@ class Thermal(Physics):
                     assert nodet_shape[1] == n_nodes,   "nodet_shape = %s, self.X_Positions.shape = %s" % (str(nodet_shape), str(self.X_Positions.shape));
 
                     # Store the first entry of the nodet dataset.
-                    self.IC_array[power_idx, speed_idx, :] = nodet_ds[0, :];
+                    self.IC_array[power_idx, speed_idx, temp_idx, :] = nodet_ds[0, :];
         
         # Finally, we need to set up the "switch_time" function. This function will return the time 
         # at which the laser power and scan speed switch. This is just when the laser hits the end
@@ -237,13 +254,15 @@ class Thermal(Physics):
             # Convert to float to ensure list.index() works correctly
             param_power : float = float(param[0, 0]);
             param_speed : float = float(param[0, 1]);
+            param_temp  : float = float(param[0, 2]);
             
             # Get the index for the laser power and scan speed.
             power_idx : int = self.laser_powers.index(param_power);
             speed_idx : int = self.scan_speeds.index(param_speed);
+            temp_idx  : int = self.initial_temps.index(param_temp);
 
             # Look up the track length for this parameter combination.
-            param_track_length : float = self.track_lengths[power_idx, speed_idx];
+            param_track_length : float = self.track_lengths[power_idx, speed_idx, temp_idx];
 
             # Return the switch time.
             return param_track_length / param_speed;
@@ -270,8 +289,9 @@ class Thermal(Physics):
         -------------------------------------------------------------------------------------------
 
         param : numpy.ndarray, shape = (self.n_p)
-            A two element array holding the values of the laser power and scan speed, respectively.
-            Note that these values must be in self.laser_powers and self.scan_speeds, respectively.
+            A three element array holding the values of the laser power, scan speed, and initial 
+            temperature, respectively. Note that these values must be in self.laser_powers,  
+            self.scan_speeds, and self.initial_temps, respectively.
 
         
 
@@ -284,22 +304,25 @@ class Thermal(Physics):
         """
 
         assert isinstance(param, numpy.ndarray), "type(param) = %s" % str(type(param));
-        assert param.size == 2,                  "param shape = %s" % str(param.shape);
+        assert param.size == 3,                  "param shape = %s" % str(param.shape);
         
         # Make sure the laser powers and scan speeds are in self.laser_powers and self.scan_speeds,
         # respectively.
         requested_laser_power   : float = param[0];
         requested_scan_speed    : float = param[1];
-        assert requested_laser_power in self.laser_powers, "requested laser power = %f, self.laser_powers = %s" % (requested_laser_power, str(self.laser_powers))
-        assert requested_scan_speed in self.scan_speeds,   "requested scan speed = %f, self.scan_speeds = %s"   % (requested_scan_speed, str(self.scan_speeds)) 
+        requested_initial_temp  : float = param[2];
+        assert requested_laser_power    in self.laser_powers,   "requested laser power = %f, self.laser_powers = %s" % (requested_laser_power, str(self.laser_powers))
+        assert requested_scan_speed     in self.scan_speeds,    "requested scan speed = %f, self.scan_speeds = %s"   % (requested_scan_speed, str(self.scan_speeds)) 
+        assert requested_initial_temp   in self.initial_temps,  "requested initial temp = %f, self.initial_temps = %s"   % (requested_initial_temp, str(self.initial_temps)) 
 
         # If so, fetch the corresponding initial condition.
         power_index : int = self.laser_powers.index(requested_laser_power);
         speed_index : int = self.scan_speeds.index(requested_scan_speed);
+        temp_index : int = self.initial_temps.index(requested_initial_temp);
         if(self.use_cnn == True):
-            return [self.IC_array[power_index, speed_index, :].reshape(tuple(self.Frame_Shape))];
+            return [self.IC_array[power_index, speed_index, temp_index, :].reshape(tuple(self.Frame_Shape))];
         else:
-            return [self.IC_array[power_index, speed_index, :]];
+            return [self.IC_array[power_index, speed_index, temp_index, :]];
 
 
 
@@ -314,8 +337,9 @@ class Thermal(Physics):
         -------------------------------------------------------------------------------------------
 
         param : numpy.ndarray, shape = (self.n_p)
-            A two element array holding the values of the laser power and scan speed, respectively.
-            Note that these values must be in self.laser_powers and self.scan_speeds, respectively.
+            A three element array holding the values of the laser power, scan speed, and initial 
+            temperature, respectively. Note that these values must be in self.laser_powers, 
+            self.scan_speeds, and self.initial_temps, respectively.
 
         
 
@@ -336,21 +360,24 @@ class Thermal(Physics):
         """
 
         assert isinstance(param, numpy.ndarray), "type(param) = %s" % str(type(param));
-        assert param.size == 2,                  "param shape = %s" % str(param.shape);
+        assert param.size == 3,                  "param shape = %s" % str(param.shape);
         
         # Make sure the laser powers and scan speeds are in self.laser_powers and self.scan_speeds,
         # respectively.
         requested_laser_power   : float = param[0];
         requested_scan_speed    : float = param[1];
-        assert requested_laser_power in self.laser_powers, "requested laser power = %f, self.laser_powers = %s" % (requested_laser_power, str(self.laser_powers))
-        assert requested_scan_speed in self.scan_speeds,   "requested scan speed = %f, self.scan_speeds = %s" % (requested_scan_speed, str(self.scan_speeds)) 
+        requested_initial_temp  : float = param[2];
+        assert requested_laser_power in self.laser_powers,  "requested laser power = %f, self.laser_powers = %s" % (requested_laser_power, str(self.laser_powers))
+        assert requested_scan_speed in self.scan_speeds,    "requested scan speed = %f, self.scan_speeds = %s" % (requested_scan_speed, str(self.scan_speeds)) 
+        assert requested_initial_temp in self.initial_temps,"requested initial temp = %f, self.initial_temps = %s" % (requested_initial_temp, str(self.initial_temps)) 
 
         # If so, fetch the corresponding initial condition.
         power_index : int = self.laser_powers.index(requested_laser_power);
         speed_index : int = self.scan_speeds.index(requested_scan_speed);
+        temp_index  : int = self.initial_temps.index(requested_initial_temp);
 
         # Fetch the file name
-        requested_file : str = self.file_names[power_index, speed_index];
+        requested_file : str = self.file_names[power_index, speed_index, temp_index];
         with h5py.File(os.path.join(self.hdf5_dir, requested_file), 'r') as f:
             # Fetch the nodet dataset and its shape, make sure it has n_nodes nodes.
             nodet_ds = f.get("nodet");
