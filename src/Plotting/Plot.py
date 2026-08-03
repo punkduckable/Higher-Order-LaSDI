@@ -483,7 +483,9 @@ def _Plot_Heatmap2d( values              : numpy.ndarray,
     ax.yaxis.set_label_coords(-0.08, 1.02);
 
     ax.tick_params(axis = 'both', which = 'major', labelsize = 12);
-    ax.set_title(title, fontsize = 25);
+    # Long math titles plus 3D-slice suffixes can otherwise overlap the horizontal y-axis label
+    # placed near the top-left of the heatmap.
+    ax.set_title(title, fontsize = 18, pad = 36);
 
     # Save the figure under Higher-Order-LaSDI/Figures (independent of CWD).
     figures_dir: Path = Path(Figures_Path);
