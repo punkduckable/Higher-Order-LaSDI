@@ -325,7 +325,7 @@ class First_Order_Rollout(Trainer):
         **Loss logging**
 
         This method records both per-parameter losses and totals using the base-class helpers
-        `_cache_loss_by_param(...)` and `_cache_total_loss(...)`.
+        `_cache_loss(...)`
 
 
         -------------------------------------------------------------------------------------------
@@ -527,13 +527,13 @@ class First_Order_Rollout(Trainer):
                     
                     # Store recon loss for this parameter combination.
                     ith_param_tuple = tuple(self.param_space.train_space[i, :]);
-                    self._cache_loss_by_param('recon', ith_param_tuple, iter + 1, recon_loss_ith_param.detach());
+                    self._cache_loss('recon', iter + 1, recon_loss_ith_param.detach(), ith_param_tuple);
                     
                     LOGGER.debug("Reconstruction Loss (Autoencoder) - complete for parameter combination %d" % i);
                     self.timer.end("Reconstruction Loss");
 
             # Store total recon loss.
-            self._cache_total_loss('recon', iter + 1, loss_recon.detach());
+            self._cache_loss('recon', iter + 1, loss_recon.detach());
 
 
             # --------------------------------------------------------------------------------
@@ -553,9 +553,9 @@ class First_Order_Rollout(Trainer):
             # Append the LD and stability losses to loss_by_param.
             for i in range(n_train):
                 param_tuple = tuple(self.param_space.train_space[i, :]);
-                self._cache_loss_by_param('LD',   param_tuple, iter + 1, loss_LD_list[i].detach());
-                self._cache_loss_by_param('stab', param_tuple, iter + 1, loss_stab_list[i].detach());
-                self._cache_loss_by_param('coef', param_tuple, iter + 1, loss_coef_list[i].detach());
+                self._cache_loss('LD', iter + 1, loss_LD_list[i].detach(), param_tuple);
+                self._cache_loss('stab', iter + 1, loss_stab_list[i].detach(), param_tuple);
+                self._cache_loss('coef', iter + 1, loss_coef_list[i].detach(), param_tuple);
 
 
             # Compute the total loss.
@@ -564,9 +564,9 @@ class First_Order_Rollout(Trainer):
             loss_coef = torch.sum(torch.stack(loss_coef_list));
 
             # Append the total loss to loss_by_param.
-            self._cache_total_loss('LD', iter + 1, loss_LD.detach());
-            self._cache_total_loss('stab', iter + 1, loss_stab.detach());
-            self._cache_total_loss('coef', iter + 1, loss_coef.detach());
+            self._cache_loss('LD', iter + 1, loss_LD.detach());
+            self._cache_loss('stab', iter + 1, loss_stab.detach());
+            self._cache_loss('coef', iter + 1, loss_coef.detach());
 
             self.timer.end("LD/Coefficient/Stability Losses");
 
@@ -704,12 +704,12 @@ class First_Order_Rollout(Trainer):
 
                     # Log loss for this combination of parameters
                     param_tuple = tuple(self.param_space.train_space[i, :])
-                    self._cache_loss_by_param('rollout_ROM', param_tuple, iter + 1, loss_rollout_ROM_ith_param.detach())
-                    self._cache_loss_by_param('rollout_FOM', param_tuple, iter + 1, loss_rollout_FOM_ith_param.detach())
+                    self._cache_loss('rollout_ROM', iter + 1, loss_rollout_ROM_ith_param.detach(), param_tuple);
+                    self._cache_loss('rollout_FOM', iter + 1, loss_rollout_FOM_ith_param.detach(), param_tuple);
 
                 # Log total rollout loss.
-                self._cache_total_loss('rollout_ROM', iter + 1, loss_rollout_ROM.detach());
-                self._cache_total_loss('rollout_FOM', iter + 1, loss_rollout_FOM.detach());
+                self._cache_loss('rollout_ROM', iter + 1, loss_rollout_ROM.detach());
+                self._cache_loss('rollout_FOM', iter + 1, loss_rollout_FOM.detach());
 
                 LOGGER.debug("Rollout Loss (Autoencoder) - complete");
                 self.timer.end("Rollout Loss");
@@ -777,12 +777,12 @@ class First_Order_Rollout(Trainer):
                     
                     # Store per-parameter-combination loss
                     param_tuple = tuple(self.param_space.train_space[i, :]);
-                    self._cache_loss_by_param('IC_rollout_ROM', param_tuple, iter + 1, loss_IC_rollout_ROM_ith_param.detach());
-                    self._cache_loss_by_param('IC_rollout_FOM', param_tuple, iter + 1, loss_IC_rollout_FOM_ith_param.detach());
+                    self._cache_loss('IC_rollout_ROM', iter + 1, loss_IC_rollout_ROM_ith_param.detach(), param_tuple);
+                    self._cache_loss('IC_rollout_FOM', iter + 1, loss_IC_rollout_FOM_ith_param.detach(), param_tuple);
 
                 # Store total IC rollout loss.
-                self._cache_total_loss('IC_rollout_ROM', iter + 1, loss_IC_rollout_ROM.detach());
-                self._cache_total_loss('IC_rollout_FOM', iter + 1, loss_IC_rollout_FOM.detach());
+                self._cache_loss('IC_rollout_ROM', iter + 1, loss_IC_rollout_ROM.detach());
+                self._cache_loss('IC_rollout_FOM', iter + 1, loss_IC_rollout_FOM.detach());
 
                 LOGGER.debug("IC Rollout Loss (Autoencoder) - complete");
                 self.timer.end("IC Rollout Loss");
@@ -803,7 +803,7 @@ class First_Order_Rollout(Trainer):
                     self.loss_weights['IC_rollout'] * loss_IC_rollout + 
                     self.loss_weights['stab']       * loss_stab + 
                     self.loss_weights['coef']       * loss_coef);
-            self._cache_total_loss('total', iter + 1, loss.detach());
+            self._cache_loss('total', iter + 1, loss.detach());
             LOGGER.debug("Total loss (Autoencoder) computed");
 
 

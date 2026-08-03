@@ -570,9 +570,13 @@ class Trainer:
     # Loss Tracking Helpers.
     # ---------------------------------------------------------------------------------------------
 
-    def _cache_loss_by_param(self, loss_name: str, param_tuple: tuple, epoch: int, loss_value: torch.Tensor) -> None:
+    def _cache_loss(self, 
+                    loss_name   : str, 
+                    epoch       : int, 
+                    loss_value  : torch.Tensor,
+                    param_tuple : tuple | None = None) -> None:
         """
-        Cache a per-parameter loss tensor for deferred scalar logging.
+        Cache a loss tensor for deferred scalar logging. 
 
         `Iterate(...)` implementations should call this method at the point where a loss component
         is computed, but they should pass a detached tensor rather than calling `.item()`.  Keeping
@@ -580,9 +584,11 @@ class Trainer:
         device-to-CPU scalar transfer once per optimization step instead of synchronizing the GPU
         repeatedly throughout the forward/loss code.
 
-        Expected use inside trainers:
+        This method can be used to cache a loss for a particular parameter, or the total (sum 
+        across parameters). Expected use inside trainers:
 
-            self._cache_loss_by_param("LD", param_tuple, iter + 1, loss_LD_i.detach())
+            self._cache_loss("LD", iter + 1, loss_LD_i.detach(), param_tuple)
+            self._cache_loss("LD", iter + 1, loss_LD.detach())
 
         Do not pass Python floats and do not call `.item()` before caching.  The tensor must contain
         exactly one scalar value and must already be detached from the autograd graph.  The matching
@@ -595,60 +601,27 @@ class Trainer:
 
         loss_name : str
             Name of the loss component (e.g., 'recon', 'rollout_ROM')
-        param_tuple : tuple
-            Parameter combination as a tuple (can be used as dictionary key)
         epoch : int
             Epoch number
         loss_value : torch.Tensor
             Detached scalar tensor containing the loss value to cache.
+        param_tuple : tuple | None
+            Optional parameter combination as a tuple (can be used as dictionary key). If not 
+            specified, we assume `total`. 
         """
 
-        assert isinstance(loss_name, str), "loss_name must be a string";
-        assert isinstance(param_tuple, tuple), "param_tuple must be a tuple";
-        assert isinstance(epoch, int), "epoch must be an int";
-        assert isinstance(loss_value, torch.Tensor), "loss_value must be a torch.Tensor; pass loss.detach(), not loss.item()";
-        assert loss_value.numel() == 1, "loss_value must contain exactly one scalar value";
-        assert loss_value.requires_grad == False, "loss_value must be detached before caching; pass loss.detach()";
+        assert isinstance(loss_name, str),              "loss_name must be a string";
+        if param_tuple is not None:
+            assert isinstance(param_tuple, tuple),      "param_tuple must be a tuple or None";
+        assert isinstance(epoch, int),                  "epoch must be an int";
+        assert isinstance(loss_value, torch.Tensor),    "loss_value must be a torch.Tensor; pass loss.detach(), not loss.item()";
+        assert loss_value.numel() == 1,                 "loss_value must contain exactly one scalar value";
+        assert loss_value.requires_grad == False,       "loss_value must be detached before caching; pass loss.detach()";
 
-        self._loss_cache.append((loss_name, param_tuple, int(epoch), loss_value));
+        key : tuple | str = param_tuple if param_tuple is not None else 'total';
+        self._loss_cache.append((loss_name, key, int(epoch), loss_value));
         return;
     
-
-
-    def _cache_total_loss(self, loss_name: str, epoch: int, loss_value: torch.Tensor) -> None:
-        """
-        Cache a total loss tensor for deferred scalar logging.
-
-        This is the total-loss counterpart to `_cache_loss_by_param(...)`.  Trainer subclasses
-        should pass detached scalar tensors on their native device:
-
-            self._cache_total_loss("total", iter + 1, loss.detach())
-
-        Do not pass Python floats and do not call `.item()` before caching.  `_flush_loss_cache(...)`
-        should be called once per training step after `optimizer.step()` so all cached scalar losses
-        are transferred to CPU together and written into `self.loss_by_param`.
-
-
-        -------------------------------------------------------------------------------------------
-        Arguments:
-        -------------------------------------------------------------------------------------------
-        loss_name : str
-            Name of the loss component
-        epoch : int
-            Epoch number
-        loss_value : torch.Tensor
-            Detached scalar tensor containing the total loss value to cache.
-        """
-
-        assert isinstance(loss_name, str), "loss_name must be a string";
-        assert isinstance(epoch, int), "epoch must be an int";
-        assert isinstance(loss_value, torch.Tensor), "loss_value must be a torch.Tensor; pass loss.detach(), not loss.item()";
-        assert loss_value.numel() == 1, "loss_value must contain exactly one scalar value";
-        assert loss_value.requires_grad == False, "loss_value must be detached before caching; pass loss.detach()";
-
-        self._loss_cache.append((loss_name, 'total', int(epoch), loss_value));
-        return;
-
 
 
     def _flush_loss_cache(self) -> dict[tuple[str, tuple | str], float]:
@@ -903,8 +876,8 @@ class Trainer:
         and latent dynamic coefficients, respectively. 
 
         The function should also track specific losses for each training parameter combination
-        during each epoch using the `_cache_loss_by_param` and `_cache_total_loss` methods, then
-        call `_flush_loss_cache` once per epoch after the optimizer step.
+        during each epoch using `_cache_loss`, then call `_flush_loss_cache` once per epoch after 
+        the optimizer step.
 
         Finally, this function should record how long each part of the training process takes. 
         Specifically, it should track how long each loss function takes to compute, as well as how 

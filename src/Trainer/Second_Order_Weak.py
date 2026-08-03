@@ -160,7 +160,7 @@ class Second_Order_Weak(Second_Order_Rollout):
         **Loss logging**
 
         This method records both per-parameter losses and totals using the base-class helpers
-        `_cache_loss_by_param(...)` and `_cache_total_loss(...)`.
+        `_cache_loss(...)`.
 
 
         -------------------------------------------------------------------------------------------
@@ -398,8 +398,8 @@ class Second_Order_Weak(Second_Order_Rollout):
                     
                     # Store per-parameter-combination loss
                     param_tuple = tuple(self.param_space.train_space[i, :]);
-                    self._cache_loss_by_param('recon_D', param_tuple, iter + 1, recon_D_loss_ith_param.detach());
-                    self._cache_loss_by_param('recon_V', param_tuple, iter + 1, recon_V_loss_ith_param.detach());
+                    self._cache_loss('recon_D', iter + 1, recon_D_loss_ith_param.detach(), param_tuple);
+                    self._cache_loss('recon_V', iter + 1, recon_V_loss_ith_param.detach(), param_tuple);
 
                     LOGGER.debug("Reconstruction Loss (Autoencoder_Pair) - complete for parameter combination %d" % i);
                     self.timer.end("Reconstruction Loss");
@@ -443,8 +443,8 @@ class Second_Order_Weak(Second_Order_Rollout):
                     loss_consistency_U += consistency_U_loss_ith_param;
                     
                     param_tuple = tuple(self.param_space.train_space[i, :]);
-                    self._cache_loss_by_param('consistency_Z', param_tuple, iter + 1, consistency_Z_loss_ith_param.detach());
-                    self._cache_loss_by_param('consistency_U', param_tuple, iter + 1, consistency_U_loss_ith_param.detach());
+                    self._cache_loss('consistency_Z', iter + 1, consistency_Z_loss_ith_param.detach(), param_tuple);
+                    self._cache_loss('consistency_U', iter + 1, consistency_U_loss_ith_param.detach(), param_tuple);
 
                     LOGGER.debug("Consistency Loss (Autoencoder_Pair) - complete for parameter combination %d" % i);
                     self.timer.end("Consistency Loss");
@@ -490,19 +490,19 @@ class Second_Order_Weak(Second_Order_Rollout):
                     loss_chain_rule_Z += chain_rule_Z_loss_ith_param;
                     
                     param_tuple = tuple(self.param_space.train_space[i, :]);
-                    self._cache_loss_by_param('chain_rule_U', param_tuple, iter + 1, chain_rule_U_loss_ith_param.detach());
-                    self._cache_loss_by_param('chain_rule_Z', param_tuple, iter + 1, chain_rule_Z_loss_ith_param.detach());
+                    self._cache_loss('chain_rule_U', iter + 1, chain_rule_U_loss_ith_param.detach(), param_tuple);
+                    self._cache_loss('chain_rule_Z', iter + 1, chain_rule_Z_loss_ith_param.detach(), param_tuple);
 
                     LOGGER.debug("Chain Rule Loss (Autoencoder_Pair) - complete for parameter combination %d" % i);
                     self.timer.end("Chain Rule Loss");
 
             # Store the total recon, consistency, and chain rule losses.
-            self._cache_total_loss('recon_D', iter + 1, loss_recon_D.detach());
-            self._cache_total_loss('recon_V', iter + 1, loss_recon_V.detach());
-            self._cache_total_loss('consistency_Z', iter + 1, loss_consistency_Z.detach());
-            self._cache_total_loss('consistency_U', iter + 1, loss_consistency_U.detach());
-            self._cache_total_loss('chain_rule_U', iter + 1, loss_chain_rule_U.detach());
-            self._cache_total_loss('chain_rule_Z', iter + 1, loss_chain_rule_Z.detach());
+            self._cache_loss('recon_D', iter + 1, loss_recon_D.detach());
+            self._cache_loss('recon_V', iter + 1, loss_recon_V.detach());
+            self._cache_loss('consistency_Z', iter + 1, loss_consistency_Z.detach());
+            self._cache_loss('consistency_U', iter + 1, loss_consistency_U.detach());
+            self._cache_loss('chain_rule_U', iter + 1, loss_chain_rule_U.detach());
+            self._cache_loss('chain_rule_Z', iter + 1, loss_chain_rule_Z.detach());
 
 
             # --------------------------------------------------------------------------------
@@ -523,9 +523,9 @@ class Second_Order_Weak(Second_Order_Rollout):
             # Append the LD and stability losses to loss_by_param.
             for i in range(n_train):
                 param_tuple = tuple(self.param_space.train_space[i, :]);
-                self._cache_loss_by_param('LD', param_tuple, iter + 1, loss_LD_list[i].detach());
-                self._cache_loss_by_param('stab', param_tuple, iter + 1, loss_stab_list[i].detach());
-                self._cache_loss_by_param('coef', param_tuple, iter + 1, loss_coef_list[i].detach());
+                self._cache_loss('LD', iter + 1, loss_LD_list[i].detach(), param_tuple);
+                self._cache_loss('stab', iter + 1, loss_stab_list[i].detach(), param_tuple);
+                self._cache_loss('coef', iter + 1, loss_coef_list[i].detach(), param_tuple);
 
 
             # Compute the total loss.
@@ -534,9 +534,9 @@ class Second_Order_Weak(Second_Order_Rollout):
             loss_coef   = torch.sum(torch.stack(loss_coef_list));
 
             # Append the total loss to loss_by_param.
-            self._cache_total_loss('LD', iter + 1, loss_LD.detach());
-            self._cache_total_loss('stab', iter + 1, loss_stab.detach());
-            self._cache_total_loss('coef', iter + 1, loss_coef.detach());
+            self._cache_loss('LD', iter + 1, loss_LD.detach());
+            self._cache_loss('stab', iter + 1, loss_stab.detach());
+            self._cache_loss('coef', iter + 1, loss_coef.detach());
 
             LOGGER.debug("Latent Dynamics compute_losses - complete");
             self.timer.end("LD/Stability/Coefficient Losses");
@@ -696,16 +696,16 @@ class Second_Order_Weak(Second_Order_Rollout):
 
                     # Store results for this combination of parameters
                     param_tuple = tuple(self.param_space.train_space[i, :]);
-                    self._cache_loss_by_param('rollout_ROM_D', param_tuple, iter + 1, rollout_ROM_D_loss_ith_param.detach());
-                    self._cache_loss_by_param('rollout_ROM_V', param_tuple, iter + 1, rollout_ROM_V_loss_ith_param.detach());
-                    self._cache_loss_by_param('rollout_FOM_D', param_tuple, iter + 1, rollout_FOM_D_loss_ith_param.detach());
-                    self._cache_loss_by_param('rollout_FOM_V', param_tuple, iter + 1, rollout_FOM_V_loss_ith_param.detach());
+                    self._cache_loss('rollout_ROM_D', iter + 1, rollout_ROM_D_loss_ith_param.detach(), param_tuple);
+                    self._cache_loss('rollout_ROM_V', iter + 1, rollout_ROM_V_loss_ith_param.detach(), param_tuple);
+                    self._cache_loss('rollout_FOM_D', iter + 1, rollout_FOM_D_loss_ith_param.detach(), param_tuple);
+                    self._cache_loss('rollout_FOM_V', iter + 1, rollout_FOM_V_loss_ith_param.detach(), param_tuple);
 
                 # Store total rollout loss.
-                self._cache_total_loss('rollout_ROM_D', iter + 1, loss_rollout_ROM_D.detach());
-                self._cache_total_loss('rollout_ROM_V', iter + 1, loss_rollout_ROM_V.detach());
-                self._cache_total_loss('rollout_FOM_D', iter + 1, loss_rollout_FOM_D.detach());
-                self._cache_total_loss('rollout_FOM_V', iter + 1, loss_rollout_FOM_V.detach());
+                self._cache_loss('rollout_ROM_D', iter + 1, loss_rollout_ROM_D.detach());
+                self._cache_loss('rollout_ROM_V', iter + 1, loss_rollout_ROM_V.detach());
+                self._cache_loss('rollout_FOM_D', iter + 1, loss_rollout_FOM_D.detach());
+                self._cache_loss('rollout_FOM_V', iter + 1, loss_rollout_FOM_V.detach());
 
                 LOGGER.debug("Rollout Loss (Autoencoder_Pair) - complete");
                 self.timer.end("Rollout Loss");
@@ -792,16 +792,16 @@ class Second_Order_Weak(Second_Order_Rollout):
                     
                     # Store per-parameter-combination loss
                     param_tuple = tuple(self.param_space.train_space[i, :]);
-                    self._cache_loss_by_param('IC_rollout_Z_D', param_tuple, iter + 1, IC_rollout_Z_D_loss_ith_param.detach());
-                    self._cache_loss_by_param('IC_rollout_Z_V', param_tuple, iter + 1, IC_rollout_Z_V_loss_ith_param.detach());
-                    self._cache_loss_by_param('IC_rollout_D', param_tuple, iter + 1, IC_rollout_D_loss_ith_param.detach());
-                    self._cache_loss_by_param('IC_rollout_V', param_tuple, iter + 1, IC_rollout_V_loss_ith_param.detach());
+                    self._cache_loss('IC_rollout_Z_D', iter + 1, IC_rollout_Z_D_loss_ith_param.detach(), param_tuple);
+                    self._cache_loss('IC_rollout_Z_V', iter + 1, IC_rollout_Z_V_loss_ith_param.detach(), param_tuple);
+                    self._cache_loss('IC_rollout_D', iter + 1, IC_rollout_D_loss_ith_param.detach(), param_tuple);
+                    self._cache_loss('IC_rollout_V', iter + 1, IC_rollout_V_loss_ith_param.detach(), param_tuple);
 
                 # Store total IC rollout loss.
-                self._cache_total_loss('IC_rollout_Z_D', iter + 1, loss_IC_rollout_Z_D.detach());
-                self._cache_total_loss('IC_rollout_Z_V', iter + 1, loss_IC_rollout_Z_V.detach());
-                self._cache_total_loss('IC_rollout_D', iter + 1, loss_IC_rollout_D.detach());
-                self._cache_total_loss('IC_rollout_V', iter + 1, loss_IC_rollout_V.detach());
+                self._cache_loss('IC_rollout_Z_D', iter + 1, loss_IC_rollout_Z_D.detach());
+                self._cache_loss('IC_rollout_Z_V', iter + 1, loss_IC_rollout_Z_V.detach());
+                self._cache_loss('IC_rollout_D', iter + 1, loss_IC_rollout_D.detach());
+                self._cache_loss('IC_rollout_V', iter + 1, loss_IC_rollout_V.detach());
 
                 LOGGER.debug("IC Rollout Loss (Autoencoder_Pair) - complete");
                 self.timer.end("IC Rollout Loss");
@@ -826,7 +826,7 @@ class Second_Order_Weak(Second_Order_Rollout):
                     self.loss_weights['LD']             * loss_LD + 
                     self.loss_weights['stab']           * loss_stab + 
                     self.loss_weights['coef']           * loss_coef);
-            self._cache_total_loss('total', iter + 1, loss.detach());
+            self._cache_loss('total', iter + 1, loss.detach());
             LOGGER.debug("Total loss (Autoencoder_Pair) computed");
 
 
