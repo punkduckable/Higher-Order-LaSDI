@@ -20,7 +20,7 @@ Each piece has a base class that defines the interface used by the rest of the c
 - **EncoderDecoder Architectures**: Standard autoencoder, paired autoencoder for higher-order systems
 - **Rich Activation Functions**: Support for 20+ activation functions including sine, ReLU, tanh, GELU, and more
 - **Visualization Tools**: Automated plotting of latent trajectories, error heatmaps, and solution animations
-- **Training stability & diagnostics**: Gradient clipping (typically configured under `trainer.<TrainerType>.gradient_clip`) to prevent exploding gradients, and per-parameter loss logging to `results/*_loss_by_param.pkl` for post-hoc analysis
+- **Training stability & diagnostics**: Gradient clipping (typically configured under `trainer.<TrainerType>.gradient_clip`) to prevent exploding gradients, and per-parameter loss logging to `results/*_loss_by_param.jsonl` for post-hoc analysis
 
 ## Getting Started
 
@@ -361,7 +361,7 @@ Create a new file under `src/Trainer/`, for example `src/Trainer/MyTrainer.py`, 
 Follow the existing trainers (`First_Order_Rollout`, `First_Order_Weak`, `Second_Order_Rollout`, `Second_Order_Weak`) as templates. In particular, your
 `Iterate(...)` method should:
 
-- Log losses via `_store_loss_by_param(...)` / `_store_total_loss(...)`
+- Cache scalar loss tensors via `_cache_loss(...)`, then write one JSONL row per epoch via `_flush_loss_cache(epoch)`.
 - Use `_optimizer_parameters()` when you want the optimizer to include both
   `encoder_decoder.parameters()` and the trainable tensors in `latent_dynamics.train_coefs`
 - Call `_Save_Checkpoint(...)` when a new best model is found (so `train()` can restore it)
@@ -877,7 +877,7 @@ Training produces several outputs:
 
 ### Saved Files
 - **Checkpoint**: `checkpoint/checkpoint.pt` – EncoderDecoder weights plus exported `LatentDynamics` state, including `train_coefs`
-- **Results**: `results/<physics_type>_loss_by_param.pkl` – Per-epoch loss curves (per training parameter + totals)
+- **Results**: `results/<physics_type>_loss_by_param.jsonl` – One JSON object per epoch containing per-training-parameter losses and totals
 - **Figures**: `Figures/*.png` – Latent trajectory plots, error heatmaps
 - **Animations**: `Figures/*.mp4` – Solution animations (if generated)
 
@@ -885,18 +885,28 @@ Training produces several outputs:
 
 To prevent exploding gradients during training, Trainer subclasses apply global gradient-norm clipping via `torch.nn.utils.clip_grad_norm_`. The threshold is typically configured under `trainer.<TrainerType>.gradient_clip` (default varies by trainer; see the corresponding trainer subclass). When clipping activates, a warning is logged.
 
-### Per-parameter loss logging (`*_loss_by_param.pkl`)
+### Per-parameter loss logging (`*_loss_by_param.jsonl`)
 
-During training, the trainer writes a pickle file (see `src/Trainer/Trainer.py`):
+During training, the trainer appends one JSON object per epoch to a JSON Lines file (see `src/Trainer/Trainer.py`):
 
-- Path: `results/<physics_type>_loss_by_param.pkl` (where `<physics_type>` is `config['physics']['type']`)
-- Type: nested Python dictionaries
+- Path: `results/<physics_type>_loss_by_param.jsonl` (where `<physics_type>` is `config['physics']['type']`)
+- Type: UTF-8 JSON Lines (`.jsonl`), one row per epoch
 
-Structure:
+Each row has the structure:
 
-- `loss_by_param[loss_name][param_tuple] -> {'epochs': [...], 'losses': [...]}`
-- `param_tuple` is a tuple of training parameter values (in the same order as the parameter space)
-- Each `loss_name` also contains a `'total'` entry, which is the loss summed across all training parameters for that epoch.
+```json
+{
+  "epoch": 1,
+  "losses": [
+    {"loss_name": "recon", "param": null, "value": 0.123},
+    {"loss_name": "recon", "param": [0.1, 0.2], "value": 0.045}
+  ]
+}
+```
+
+- `param: null` denotes the total loss for that `loss_name`.
+- `param: [...]` denotes a per-training-parameter loss, with values in the same order as the parameter space.
+- `value` is a Python float produced from a detached scalar tensor.
 
 Common `loss_name` keys include:
 - `recon`, `LD`, `stab`, `rollout_ROM`, `rollout_FOM`, `IC_rollout_ROM`, `IC_rollout_FOM`, and `total`
@@ -905,20 +915,31 @@ Common `loss_name` keys include:
 Reading the file:
 
 ```python
-import pickle
+import json
 
-with open("results/Burgers_loss_by_param.pkl", "rb") as f:
-    loss_by_param = pickle.load(f)
+rows = []
+with open("results/Burgers_loss_by_param.jsonl", "r", encoding="utf-8") as f:
+    for line in f:
+        rows.append(json.loads(line))
 
-# Total reconstruction loss curve
-epochs = loss_by_param["recon"]["total"]["epochs"]
-losses = loss_by_param["recon"]["total"]["losses"]
+# Total reconstruction loss curve.
+epochs = []
+losses = []
+for row in rows:
+    for record in row["losses"]:
+        if record["loss_name"] == "recon" and record["param"] is None:
+            epochs.append(row["epoch"])
+            losses.append(record["value"])
 
-# Per-parameter reconstruction curve (example param tuple)
-# loss_by_param["recon"][(0.1, 0.2)] -> {'epochs': [...], 'losses': [...]}
+# Per-parameter reconstruction curve (example parameter list).
+target_param = [0.1, 0.2]
+param_losses = [
+    (row["epoch"], record["value"])
+    for row in rows
+    for record in row["losses"]
+    if record["loss_name"] == "recon" and record["param"] == target_param
+]
 ```
-
-For a ready-made parser/plotter, see the repo-root notebook `Analyze_Parameter_Losses.ipynb`, which loads `*_loss_by_param.pkl` and produces per-parameter loss plots.
 
 ### Logging
 - Real-time logging to console and `output.txt`

@@ -4,11 +4,12 @@
 
 import  os;
 
+import  json;
 import  logging;
+from    typing                      import Any;
 
 import  torch;
 import  numpy;
-import  pickle;
 
 from    EncoderDecoder              import  EncoderDecoder;
 from    Utilities.Timing            import  Timer;
@@ -201,8 +202,7 @@ class Trainer:
         which need to be de-normalized before their predictions can be evaluated.
 
         Finally, Trainer objects generally track timing data (time spent computing each loss; this
-        is managed by the timer attribute) and track losses (by training parameter! this is managed 
-        by the loss_by_param attribute).
+        is managed by the timer attribute) and track losses (by training parameter!).
 
         In addition to defining how training works, a `Trainer` instance owns the state of a 
         Higher-Order-LaSDI run:
@@ -277,11 +277,6 @@ class Trainer:
         # Initialize a timer object. We will use this while training.
         self.timer                          = Timer();
 
-        # Build a loss cache; this will be a list whose entries are tuples of the form:
-        #   (loss_name, param_tuple or "total", int(epoch), loss_value)
-        # The _flush_loss_cache method post-processes/serializes the contents of this list.
-        self._loss_cache                    = [];
-
         # Fetch trainer class information.
         self.n_iter                 : int   = trainer_config['n_iter'];             # Number of iterations for one train and greedy sampling
         self.max_iter               : int   = trainer_config['max_iter'];           # We stop training if restart_iter goes above this number. 
@@ -324,6 +319,15 @@ class Trainer:
         LOGGER.info("Checkpoint directory: %s" % self.path_checkpoint);
         LOGGER.info("Results directory: %s" % self.path_results);
 
+        # Build a loss cache; this will be a list whose entries are tuples of the form:
+        #   (loss_name, param_tuple or "total", loss_value)
+        # The _flush_loss_cache method post-processes/serializes the contents of this list.
+        self._loss_cache                    = [];
+
+        # Figure out where we will save cached losses.
+        base_filename           : str       = self.physics.config['type'];
+        self.loss_by_param_path : str       = os.path.join(self.path_results, base_filename + '_loss_by_param.jsonl');
+        
         # Final setup.
         self.restart_iter       = 0;                # Global iteration index at the start of the next training round
         self.best_epoch         = None;             # Optional: subclasses may set this when checkpointing
@@ -572,23 +576,22 @@ class Trainer:
 
     def _cache_loss(self, 
                     loss_name   : str, 
-                    epoch       : int, 
                     loss_value  : torch.Tensor,
                     param_tuple : tuple | None = None) -> None:
         """
         Cache a loss tensor for deferred scalar logging. 
 
         `Iterate(...)` implementations should call this method at the point where a loss component
-        is computed, but they should pass a detached tensor rather than calling `.item()`.  Keeping
-        the value as a tensor on its native device lets `_flush_loss_cache(...)` batch the
-        device-to-CPU scalar transfer once per optimization step instead of synchronizing the GPU
-        repeatedly throughout the forward/loss code.
+        is computed, but they should pass a detached tensor rather than calling `.item()`. At the 
+        end of a step, they should use `_flush_loss_cache(epoch)` to write all losses from that 
+        epoch to file. That method batches the device-to-CPU scalar transfer once per optimization 
+        step instead of synchronizing the GPU repeatedly throughout the forward/loss code.
 
         This method can be used to cache a loss for a particular parameter, or the total (sum 
         across parameters). Expected use inside trainers:
 
-            self._cache_loss("LD", iter + 1, loss_LD_i.detach(), param_tuple)
-            self._cache_loss("LD", iter + 1, loss_LD.detach())
+            self._cache_loss("LD", loss_LD_i.detach(), param_tuple) # LD loss for a specific parameter
+            self._cache_loss("LD", loss_LD.detach())                # Total LD loss
 
         Do not pass Python floats and do not call `.item()` before caching.  The tensor must contain
         exactly one scalar value and must already be detached from the autograd graph.  The matching
@@ -601,8 +604,6 @@ class Trainer:
 
         loss_name : str
             Name of the loss component (e.g., 'recon', 'rollout_ROM')
-        epoch : int
-            Epoch number
         loss_value : torch.Tensor
             Detached scalar tensor containing the loss value to cache.
         param_tuple : tuple | None
@@ -613,23 +614,39 @@ class Trainer:
         assert isinstance(loss_name, str),              "loss_name must be a string";
         if param_tuple is not None:
             assert isinstance(param_tuple, tuple),      "param_tuple must be a tuple or None";
-        assert isinstance(epoch, int),                  "epoch must be an int";
         assert isinstance(loss_value, torch.Tensor),    "loss_value must be a torch.Tensor; pass loss.detach(), not loss.item()";
         assert loss_value.numel() == 1,                 "loss_value must contain exactly one scalar value";
         assert loss_value.requires_grad == False,       "loss_value must be detached before caching; pass loss.detach()";
 
         key : tuple | str = param_tuple if param_tuple is not None else 'total';
-        self._loss_cache.append((loss_name, key, int(epoch), loss_value));
+        self._loss_cache.append((loss_name, key, loss_value));
         return;
     
 
 
-    def _flush_loss_cache(self) -> dict[tuple[str, tuple | str], float]:
+    @staticmethod
+    def _jsonable_param(param_tuple: tuple) -> list[Any]:
         """
-        Flush cached loss tensors into `self.loss_by_param`.
+        Convert a parameter tuple into JSON-compatible scalar values.
+        """
+
+        jsonable_param : list[Any] = [];
+        for value in param_tuple:
+            if isinstance(value, numpy.generic):
+                value = value.item();
+            assert isinstance(value, (int, float, str, bool)) or value is None, "parameter values must be JSON scalar values";
+            jsonable_param.append(value);
+        return jsonable_param;
+
+
+
+    def _flush_loss_cache(self, epoch: int) -> dict[tuple[str, tuple | str], float]:
+        """
+        Flush cached loss tensors gathered during one epoch to a row in the jsonl file 
+        self.loss_by_param_path.
 
         This method converts all cached detached scalar tensors into Python floats with a single
-        batched CPU transfer, then appends them to the existing loss-history dictionary.  Trainer
+        batched CPU transfer, then appends one JSON object to `self.loss_by_param_path`. Trainer
         subclasses should call this exactly once per training step, after `optimizer.step()` and
         before checkpoint/report logic that needs scalar loss values.
 
@@ -637,7 +654,15 @@ class Trainer:
         the current cache contents.  This lets trainers reuse the synchronized values for reporting
         and best-loss checkpoint decisions without calling `.item()` again.
 
+        
+        -------------------------------------------------------------------------------------------
+        Arguments:
+        -------------------------------------------------------------------------------------------
 
+        epoch : int
+            Epoch number
+
+        
         -------------------------------------------------------------------------------------------
         Returns:
         -------------------------------------------------------------------------------------------
@@ -647,28 +672,48 @@ class Trainer:
             `(loss_name, 'total')`.
         """
 
+        # Checks
+        assert isinstance(epoch, int),                  "epoch must be an int";
+
+        # Setup 
         if len(self._loss_cache) == 0:
             return {};
 
         # Stack first, then transfer once.  Losses for a trainer step should all live on one device.
-        first_device = self._loss_cache[0][3].device;
-        for _, _, _, loss_value in self._loss_cache:
+        first_device = self._loss_cache[0][2].device;
+        for _, _, loss_value in self._loss_cache:
             assert loss_value.device == first_device, "cached loss tensors must live on the same device for batched flushing";
 
         # Fetch loss values, then convert to cpu/list.
-        values_tensor : torch.Tensor = torch.stack([entry[3].reshape(()) for entry in self._loss_cache], dim = 0);
+        values_tensor : torch.Tensor = torch.stack([entry[2].reshape(()) for entry in self._loss_cache], dim = 0);
+        assert bool(torch.isfinite(values_tensor).all()), "cached loss tensors must be finite for JSONL logging";
         values_list   : list[float]  = [float(x) for x in values_tensor.cpu().tolist()];
 
         flushed_values : dict[tuple[str, tuple | str], float] = {};
-        for (loss_name, key, epoch, _), loss_float in zip(self._loss_cache, values_list):
-            if loss_name not in self.loss_by_param:
-                self.loss_by_param[loss_name] = {};
-            if key not in self.loss_by_param[loss_name]:
-                self.loss_by_param[loss_name][key] = {'epochs': [], 'losses': []};
-            self.loss_by_param[loss_name][key]['epochs'].append(epoch);
-            self.loss_by_param[loss_name][key]['losses'].append(loss_float);
+        loss_records   : list[dict[str, Any]] = [];
+        for (loss_name, key, _), loss_float in zip(self._loss_cache, values_list):
             flushed_values[(loss_name, key)] = loss_float;
+            if key == 'total':
+                loss_records.append({
+                    "loss_name" : loss_name,
+                    "param"     : None,
+                    "value"     : loss_float,
+                });
+            else:
+                assert isinstance(key, tuple), "cached non-total loss keys must be parameter tuples";
+                loss_records.append({
+                    "loss_name" : loss_name,
+                    "param"     : Trainer._jsonable_param(key),
+                    "value"     : loss_float,
+                });
 
+        # Now write to file.
+        with open(self.loss_by_param_path, "a", encoding = "utf-8") as handle:
+            json.dump({"epoch" : epoch, "losses" : loss_records}, handle, sort_keys = True, allow_nan = False);
+            handle.write("\n");
+            LOGGER.debug("Saved losses from epoch %d to %s" % (epoch, self.loss_by_param_path));
+
+        # Reset cache loss and return :) 
         self._loss_cache = [];
         return flushed_values;
 
@@ -954,32 +999,15 @@ class Trainer:
         # -----------------------------------------------------------------------------------------
         # Initialize loss tracking
         
-        # Set up filename for loss_by_param.
-        # NOTE: must match the filename we save at the end of training so restarts work.
-        base_filename       : str = self.physics.config['type'];
-        loss_by_param_path  : str = os.path.join(self.path_results, base_filename + '_loss_by_param.pkl');
-        
         # Delete existing files if starting fresh (restart_iter == 0)
         # This ensures we don't append to results from previous training runs
         if self.restart_iter == 0:
-            if os.path.exists(loss_by_param_path):
-                os.remove(loss_by_param_path);
-                LOGGER.info("Deleted existing loss_by_param file: %s" % loss_by_param_path);
-
-        # Load existing loss_by_param if restarting (always try to load, don't check hasattr)
-        if os.path.exists(loss_by_param_path) and self.restart_iter > 0:
-            LOGGER.info("Loading existing per-parameter loss tracking from %s" % loss_by_param_path);
-            with open(loss_by_param_path, 'rb') as f:
-                self.loss_by_param = pickle.load(f);
-        else:
-            # Initialize fresh if starting from scratch
-            if not hasattr(self, 'loss_by_param'):
-                self.loss_by_param = {};
+            if os.path.exists(self.loss_by_param_path):
+                os.remove(self.loss_by_param_path);
+                LOGGER.info("Deleted existing loss_by_param file: %s" % self.loss_by_param_path);
 
         # Reset loss cache.
         self._loss_cache = [];
-        
-        
 
 
         # -----------------------------------------------------------------------------------------
@@ -1018,24 +1046,10 @@ class Trainer:
         
 
         # -------------------------------------------------------------------------------------
-        # Serialize loss_by_param
+        # Load model/params from checkpoint.
 
         # We are ready to wrap up the training procedure.
         self.timer.start("finalize");
-    
-        # Keep filename consistent with the one used for restart/load above.
-        base_filename       : str   = self.physics.config['type'];
-        loss_by_param_path  : str   = os.path.join(self.path_results, base_filename + '_loss_by_param.pkl');
-
-        # Save self.loss_by_param to file.     
-        with open(loss_by_param_path, 'wb') as f:
-            pickle.dump(self.loss_by_param, f);
-        
-        LOGGER.info("Saved per-parameter loss tracking to %s" % loss_by_param_path);
-
-
-        # -------------------------------------------------------------------------------------
-        # Load model/params from checkpoint.
 
         self.encoder_decoder, iter = self.Load_Checkpoint();
         LOGGER.info("We attained our best performance on epoch %d. Replacing encoder_decoder, latent dynamics coefficients with the checkpoint from that epoch" % iter);

@@ -7,8 +7,8 @@ The script creates a dated run directory under ``Figures`` named like
 * moves requested stdout/stderr/log files into that directory if they exist,
 * copies the example YAML config into that directory,
 * copies the requested result save, or the most recent result save from
-  ``results`` that is not a ``*_loss_by_param.pkl`` file,
-* copies the matching ``*_loss_by_param.pkl`` file from ``results``, and
+  ``results`` that is not a ``*_loss_by_param.jsonl`` file,
+* copies the matching ``*_loss_by_param.jsonl`` file from ``results``, and
 * moves top-level files in ``Figures`` whose modification time is later than
   the archived result save, or later than ``--min-figure-mtime`` when supplied.
   Coefficient mean/std heatmap files are moved into a
@@ -35,7 +35,7 @@ DEFAULT_LOG_FILES = (
     "ho_lasdi_stderr.txt",
 )
 
-LOSS_BY_PARAM_SUFFIX = "_loss_by_param.pkl"
+LOSS_BY_PARAM_SUFFIX = "_loss_by_param.jsonl"
 
 
 def parse_args() -> argparse.Namespace:
@@ -302,7 +302,7 @@ def top_level_figures_after(figures_dir: Path, timestamp: float) -> list[Path]:
 
 
 def is_loss_by_param_file(path: Path) -> bool:
-    """Return True for per-parameter loss pickle files."""
+    """Return True for per-parameter loss JSONL files."""
 
     return path.name.endswith(LOSS_BY_PARAM_SUFFIX)
 
@@ -318,8 +318,8 @@ def loss_by_param_matches_save(loss_file: Path, result_save: Path) -> bool:
 
     Result saves include a timestamp (for example ``Thermal_07_30_2026_19_18.npy``),
     while loss files are overwritten under the physics-type prefix (for example
-    ``Thermal_loss_by_param.pkl``). Match by that prefix instead of modification
-    time only, because restart/resume workflows can leave the loss pickle older
+    ``Thermal_loss_by_param.jsonl``). Match by that prefix instead of modification
+    time only, because restart/resume workflows can leave the loss JSONL file older
     than ``--min-result-mtime`` even though it is the companion diagnostics file.
     """
 
@@ -463,7 +463,7 @@ def main() -> int:
 
     # Copy loss_by_param
     if latest_loss_by_param is None:
-        print("WARNING: no *_loss_by_param.pkl file found in results.")
+        print("WARNING: no *_loss_by_param.jsonl file found in results.")
     else:
         if (
             args.min_result_mtime is not None

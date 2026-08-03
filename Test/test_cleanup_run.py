@@ -27,8 +27,8 @@ def test_coefficient_heatmap_ignores_non_coefficient_heatmaps():
 
 def test_select_loss_by_param_uses_matching_save_prefix_even_if_filtered_out(tmp_path):
     save = tmp_path / "Thermal_07_30_2026_19_18.npy"
-    loss = tmp_path / "Thermal_loss_by_param.pkl"
-    other_loss = tmp_path / "OtherPhysics_loss_by_param.pkl"
+    loss = tmp_path / "Thermal_loss_by_param.jsonl"
+    other_loss = tmp_path / "OtherPhysics_loss_by_param.jsonl"
 
     save.write_bytes(b"save")
     loss.write_bytes(b"loss")
@@ -50,8 +50,8 @@ def test_select_loss_by_param_uses_matching_save_prefix_even_if_filtered_out(tmp
 
 def test_select_loss_by_param_prefers_longest_matching_prefix(tmp_path):
     save = tmp_path / "Thermal_Weak_07_30_2026_19_18.npy"
-    broad_loss = tmp_path / "Thermal_loss_by_param.pkl"
-    exact_loss = tmp_path / "Thermal_Weak_loss_by_param.pkl"
+    broad_loss = tmp_path / "Thermal_loss_by_param.jsonl"
+    exact_loss = tmp_path / "Thermal_Weak_loss_by_param.jsonl"
 
     save.write_bytes(b"save")
     broad_loss.write_bytes(b"broad")

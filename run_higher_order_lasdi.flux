@@ -141,12 +141,12 @@ ARTIFACT_FILE=""
 analysis_status=0
 if [[ "$workflow_status" -eq 0 ]]; then
     # Fetch the newest serialized experiment artifact created by this job. This excludes
-    # per-parameter loss pickle files and avoids accidentally analyzing a stale artifact.
+    # per-parameter loss JSONL files and avoids accidentally analyzing a stale artifact.
     ARTIFACT_FILE="$(
         uv run --no-sync python -c 'from pathlib import Path; import sys
 start = float(sys.argv[1])
 results = Path("results")
-files = [p for p in results.iterdir() if p.is_file() and not p.name.endswith("loss_by_param.pkl") and p.stat().st_mtime >= start] if results.is_dir() else []
+files = [p for p in results.iterdir() if p.is_file() and not p.name.endswith("loss_by_param.jsonl") and p.stat().st_mtime >= start] if results.is_dir() else []
 print(max(files, key=lambda p: p.stat().st_mtime).resolve() if files else "")' "$RUN_START_EPOCH"
     )"
 
