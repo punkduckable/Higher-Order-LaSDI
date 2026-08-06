@@ -16,6 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 notebooks = ["jupyter==1.0.0"]
+viz = ["tensorboard==2.17.1"]
 dev = ["pytest>=8.0"]
 pymfem = [
     "cmake==3.31.10",

@@ -443,10 +443,11 @@ uv lock
 uv sync
 ```
 
-If you want to install optional testing and/or notebook dependencies:
+If you want to install optional testing, notebook, and/or visualization dependencies:
 ```bash
 uv sync --extra dev
 uv sync --extra notebooks
+uv sync --extra viz
 ```
 
 Run experiments through `uv run` so the command uses the project environment:
@@ -479,6 +480,9 @@ source .venv/bin/activate
 
 **For Jupyter notebooks (error diagnostics):**
 - jupyter (1.0.0), installed with `uv sync --extra notebooks`
+
+**For TensorBoard metric visualization:**
+- tensorboard (2.17.1), installed with `uv sync --extra viz`
 
 ## Installing PyMFEM
 
@@ -939,6 +943,37 @@ param_losses = [
     for record in row["losses"]
     if record["loss_name"] == "recon" and record["param"] == target_param
 ]
+```
+
+#### TensorBoard visualization
+
+Training does **not** write TensorBoard files directly. The trainer writes package-agnostic
+JSONL metrics during the run, and TensorBoard event files can be generated afterward:
+
+```bash
+uv sync --extra viz
+
+uv run python scripts/jsonl_to_tensorboard.py \
+    results/Thermal_loss_by_param.jsonl \
+    --logdir tb_runs/Thermal
+
+uv run tensorboard --logdir tb_runs --host 127.0.0.1 --port 6006
+```
+
+The converter writes:
+- `loss/<loss_name>/total` for records with `param: null`
+- `loss/<loss_name>/by_param/...` for per-parameter records
+
+For large parameter spaces, per-parameter curves can be numerous. To visualize only aggregate
+losses, pass `--totals-only`.
+
+Optional parameter names make per-parameter tags easier to read:
+
+```bash
+uv run python scripts/jsonl_to_tensorboard.py \
+    results/Thermal_loss_by_param.jsonl \
+    --logdir tb_runs/Thermal \
+    --param-names laser_power,scan_speed,initial_temp
 ```
 
 ### Logging
