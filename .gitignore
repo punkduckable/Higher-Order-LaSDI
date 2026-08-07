@@ -28,3 +28,4 @@ env_lc.sh
 *.log
 uv.lock
 venv_mfem/*
+tb_runs/*

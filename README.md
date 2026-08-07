@@ -483,6 +483,7 @@ source .venv/bin/activate
 
 **For TensorBoard metric visualization:**
 - tensorboard (2.17.1), installed with `uv sync --extra viz`
+- setuptools (`>=70,<81`) for TensorBoard's legacy `pkg_resources` import
 
 ## Installing PyMFEM
 
@@ -957,7 +958,19 @@ uv run python scripts/jsonl_to_tensorboard.py \
     results/Thermal_loss_by_param.jsonl \
     --logdir tb_runs/Thermal
 
-uv run tensorboard --logdir tb_runs --host 127.0.0.1 --port 6006
+uv run tensorboard --logdir tb_runs --host 0.0.0.0 --port 6006
+```
+
+If TensorBoard fails with `ModuleNotFoundError: No module named 'pkg_resources'`, your
+environment likely has a newer setuptools release that no longer ships TensorBoard's legacy
+`pkg_resources` import. Resync the visualization extra after refreshing the lockfile, or downgrade
+setuptools in the current environment directly:
+
+```bash
+uv lock
+uv sync --extra viz
+# Existing-environment workaround if needed:
+uv pip install 'setuptools>=70,<81'
 ```
 
 The converter writes:
