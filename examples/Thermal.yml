@@ -1,15 +1,15 @@
 trainer:
-  type:                   "First_Order_Weak"
+  type:                     "First_Order_Weak"
 
-  max_iter:               4000
-  n_iter:                 2000
-  max_greedy_iter:        4000
+  max_iter:                 4000
+  n_iter:                   2000
+  max_greedy_iter:          4000
 
   # If true, compute a single global mean/std from TRAINING data only, and normalize
   # all training/testing trajectories using these values.
-  normalize:              true
+  normalize:                true
 
-  device:                 'cuda:0'
+  device:                   'cuda:0'
 
   noise_ratio:              0.0
   First_Order_Weak:       
@@ -18,17 +18,17 @@ trainer:
 
     # p_rollout grows from p_rollout_init by dp_per_update every rollout_update_freq epochs, capped at max_p_rollout.
     p_rollout_init:         0.0
-    rollout_update_freq:    10
-    dp_per_update:          0.005
-    max_p_rollout:          0.5         # Maximum proportion of the time window used for rollout loss.
-    n_rollouts:             12          # Frame-rollout mode: number of rollable start frames to rollout per training parameter per epoch.
+    rollout_update_freq:    20
+    dp_per_update:          0.01
+    max_p_rollout:          0.75        # Maximum proportion of the time window used for rollout loss.
+    n_rollouts:             8           # Frame-rollout mode: number of rollable start frames to rollout per training parameter per epoch.
 
     p_IC_rollout_init:      0.01
     IC_rollout_update_freq: 10
     IC_dp_per_update:       0.01
     max_p_IC_rollout:       1.0
 
-    warmup_epochs:          40        # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
+    warmup_epochs:          40          # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
 
     loss_weights:
       recon:                1.0
@@ -74,16 +74,16 @@ EncoderDecoder:
     n_Decoders:             1
 
     # Fully-connected (FC) part
-    hidden_widths_fc:       [500, 100]
-    activations_fc:         ["tanh", "tanh"]
-    latent_dimension:       5
+    hidden_widths_fc:       [1000, 250]
+    activations_fc:         ["silu", "silu"]
+    latent_dimension:       8
 
     # Convolutional part (3D)
     conv_channels:          [1, 16, 32, 64]            # Includes input channel.
     conv_kernel_sizes:      3
     conv_strides:           2 
     conv_paddings:          1
-    conv_activations:       ["relu", "relu", "relu"]
+    conv_activations:       ["silu", "silu", "silu"]
 
 latent_dynamics:
   interpolator:
@@ -107,8 +107,8 @@ latent_dynamics:
     stab:                   0.005
   switch_w:
     test_func_type:         'PC-poly'
-    test_func_width:        150.0
-    overlap:                0.9
+    test_func_width:        100.0
+    overlap:                0.85
 
 physics:
   type:                     Thermal
