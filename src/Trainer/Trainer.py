@@ -1024,7 +1024,6 @@ class Trainer:
             profiler_activities = [torch.profiler.ProfilerActivity.CPU];
             if torch.cuda.is_available():
                 profiler_activities.append(torch.profiler.ProfilerActivity.CUDA);
-            profiler_sort_by = "cuda_time_total" if torch.cuda.is_available() else "cpu_time_total";
 
             with torch.profiler.profile(
                 activities      = profiler_activities,
@@ -1038,9 +1037,41 @@ class Trainer:
                 profile_memory  = True,
             ) as prof:
                 self.Iterate(start_iter = start_iter, end_iter = end_iter, profiler = prof);
+
+            # Build a string to hold the profiler results.
+            profiler_results_list : list[str] = [
+                "=" * 120,
+                "HLaSDI training profiler results",
+                "=" * 120,
+                "",
+            ]
+            if torch.cuda.is_available():
+                profiler_results_list.extend(
+                    [
+                        "--- Sorted by CUDA time total ---",
+                        "",
+                        prof.key_averages().table(sort_by="cuda_time_total", row_limit=30),
+                        "",
+                    ]
+                )
+            profiler_results_list.extend(
+                [
+                    "--- Sorted by CPU time total ---",
+                    "",
+                    prof.key_averages().table(sort_by="cpu_time_total", row_limit=30),
+                    "",
+                    "=" * 120,
+                    "",
+                ]
+            )
+
+            # Write profile results to file.
+            profiler_table_str: str = "\n".join(profiler_results_list)
+            with open("./HLaSDI_train_profile.txt", "a", encoding="utf-8") as handle:
+                handle.write(profiler_table_str)
             
             # Now print the profiling results!
-            print(prof.key_averages().table(sort_by = profiler_sort_by, row_limit = 30), flush = True);
+            print(profiler_table_str, flush = True);
         else:
             self.Iterate(start_iter = start_iter, end_iter = end_iter);
         
