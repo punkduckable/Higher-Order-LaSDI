@@ -225,7 +225,7 @@ The base class provides:
 - `trainable_coef_tensors()`: subclass implementation returning the actual tensors passed to optimizers
 
 Missing coefficient entries intentionally raise errors. The sampler/data-generation path should
-initialize coefficients for every training parameter by calling `latent_dynamics.fit_coefficients(...)`.
+initialize coefficients for every training parameter by calling `latent_dynamics.initialize_coefficients(...)`.
 The Trainer checks this with `_check_train_coefficients()` before optimization and builds optimizers
 from encoder/decoder parameters plus `latent_dynamics.trainable_coef_tensors()`. Checkpoints serialize
 the full `LatentDynamics` export, including `train_coefs`, then restore those coefficient tensors as
@@ -756,7 +756,7 @@ New applications can be implemented by deriving from the appropriate base classe
    - `__init__(...)`: Initialize model metadata, loss functions, `n_IC`, and `n_coefs`; call
      `super().__init__(n_z=n_z, n_coefs=n_coefs, n_IC=n_IC, Uniform_t_Grid=Uniform_t_Grid,
      config=config)`.
-   - `fit_coefficients(self, Latent_States, t_Grid, params)`: Fit native coefficients for one or
+   - `initialize_coefficients(self, Latent_States, t_Grid, params)`: Fit native coefficients for one or
      more training parameters, then store them with `set_train_coefs(...)`. This method should
      return `None`.
    - `compute_losses(self, Latent_States, loss_type, t_Grid, params)`: Look up native coefficients

@@ -55,10 +55,10 @@ class DampedSpring(LatentDynamics):
 
         config : dict
             The latent-dynamics configuration dictionary. It must three keys: `type`, `trainable`,
-            and `spring`. It must have `config["type"] == "spring"` and `config["spring"]` should be a 
-            dictionary housing sub-class specific settings. The required `lstsq_reg` entry controls
-            ridge regularization used by `fit_coefficients(...)` when initializing coefficients
-            from encoded trajectories.
+            and `spring`. It must have `config["type"] == "spring"` and `config["spring"]` should 
+            be a dictionary housing sub-class specific settings. The required `lstsq_reg` entry 
+            controls ridge regularization used by `initialize_coefficients(...)` when initializing 
+            coefficients from encoded trajectories.
 
 
         -------------------------------------------------------------------------------------------
@@ -126,7 +126,7 @@ class DampedSpring(LatentDynamics):
 
 
 
-    def fit_coefficients(self,
+    def initialize_coefficients(self,
                          Latent_States : list[list[torch.Tensor]],
                          t_Grid        : list[torch.Tensor],
                          params        : numpy.ndarray | None = None) -> None:
@@ -166,7 +166,7 @@ class DampedSpring(LatentDynamics):
         """
 
         # Checks.
-        assert params is not None, "DampedSpring.fit_coefficients requires params so coefficients can be stored";
+        assert params is not None, "DampedSpring.initialize_coefficients requires params so coefficients can be stored";
         assert isinstance(t_Grid, list);
         assert isinstance(Latent_States, list);
         assert len(Latent_States) == len(t_Grid) == params.shape[0];
@@ -218,8 +218,9 @@ class DampedSpring(LatentDynamics):
 
             z''(t) = K z(t) + C z'(t) + b.
 
-        This method assumes coefficients have already been initialized by `fit_coefficients(...)`;
-        missing entries are hard errors and indicate a sampler/initialization bug.
+        This method assumes coefficients have already been initialized by 
+        `initialize_coefficients(...)`; missing entries are hard errors and indicate a 
+        sampler/initialization bug.
 
 
         -------------------------------------------------------------------------------------------

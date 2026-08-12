@@ -37,7 +37,7 @@ class LatentDynamics:
     the latent ODE associated with a particular parameter value, compute the Latent Dynamics, 
     coefficient, and stability losses associated with a collection of parameter values (via the 
     compute_losses method), or fit a set of coefficients to a time series of latent states for a 
-    particular parameter value (via the "fit_coefficients" method).
+    particular parameter value (via the "initialize_coefficients" method).
 
     LatentDynamics objects also store the latent dynamics coefficients (learnable parameters 
     that define the latent dynamics model) for the training set. These are stored in the 
@@ -104,7 +104,7 @@ class LatentDynamics:
     To define a new latent-dynamics model, subclass `LatentDynamics`, call `super().__init__(...)`,
     set `self.n_IC` and `self.n_coefs`, and implement:
 
-    - `fit_coefficients(Latent_States, t_Grid, params=None)`: estimate/initialize native
+    - `initialize_coefficients(Latent_States, t_Grid, params=None)`: estimate/initialize native
       coefficient dictionaries from encoded trajectories and store them with `set_train_coefs(...)`.
 
     - `trainable_coef_tensors()`: return the actual trainable tensors (if training is enabled) 
@@ -247,7 +247,7 @@ class LatentDynamics:
     # Fit Coefficients (compute initial coefficients for a particular training parameter).
     # ---------------------------------------------------------------------------------------------
 
-    def fit_coefficients(self,
+    def initialize_coefficients(self,
                          Latent_States   : list[list[torch.Tensor]],
                          t_Grid          : list[torch.Tensor],
                          params          : numpy.ndarray | None = None) -> torch.Tensor:
@@ -262,7 +262,7 @@ class LatentDynamics:
         Design rule:
         - `compute_losses(...)` computes the LD loss (and other regularizers) **given 
         coefficients**.
-        - `fit_coefficients(...)` estimates coefficients **from data**.
+        - `initialize_coefficients(...)` estimates coefficients **from data**.
 
 
         -------------------------------------------------------------------------------------------
@@ -291,7 +291,7 @@ class LatentDynamics:
         None. Subclasses store native coefficient dictionaries in `self.train_coefs`.
         """
 
-        raise RuntimeError("Abstract function LatentDynamics.fit_coefficients!");
+        raise RuntimeError("Abstract function LatentDynamics.initialize_coefficients!");
     
 
     

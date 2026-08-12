@@ -55,10 +55,10 @@ class SwitchSINDy(LatentDynamics):
 
         config : dict
             The latent-dynamics configuration dictionary. It must three keys: `type`, `trainable`,
-            and `switch`. It must have `config["type"] == "switch"` and `config["switch"]` should be a 
-            dictionary housing sub-class specific settings. The required `lstsq_reg` entry controls
-            ridge regularization used by `fit_coefficients(...)` when initializing coefficients
-            from encoded trajectories.
+            and `switch`. It must have `config["type"] == "switch"` and `config["switch"]` should 
+            be a dictionary housing sub-class specific settings. The required `lstsq_reg` entry 
+            controls ridge regularization used by `initialize_coefficients(...)` when initializing 
+            coefficients from encoded trajectories.
 
         -------------------------------------------------------------------------------------------
         Returns
@@ -123,7 +123,7 @@ class SwitchSINDy(LatentDynamics):
 
 
 
-    def fit_coefficients(self,
+    def initialize_coefficients(self,
                          Latent_States   : list[list[torch.Tensor]],
                          t_Grid          : list[torch.Tensor],
                          params          : numpy.ndarray | None = None) -> None:
@@ -160,7 +160,7 @@ class SwitchSINDy(LatentDynamics):
         """
 
         # Checks.
-        assert params is not None, "SwitchSINDy.fit_coefficients requires params";
+        assert params is not None, "SwitchSINDy.initialize_coefficients requires params";
         assert isinstance(t_Grid, list) and isinstance(Latent_States, list);
         assert len(Latent_States) == len(t_Grid) == params.shape[0];
 

@@ -374,7 +374,7 @@ class Sampler:
         # Initialize latent-dynamics coefficients for all newly added training points.
         # Missing coefficients are considered a hard error later in Trainer._check_train_coefficients.
         if len(new_U_Train) > 0:
-            LOGGER.info("Initializing coefficients for %d newly added training points using latent-dynamics fit_coefficients" % len(new_U_Train));
+            LOGGER.info("Initializing coefficients for %d newly added training points using latent-dynamics initialize_coefficients" % len(new_U_Train));
             
             # Move EncoderDecoder to CPU
             original_device = next(trainer.encoder_decoder.parameters()).device;
@@ -397,7 +397,7 @@ class Sampler:
                             params_row = new_train_params[i, :], 
                             timesteps  = new_t_Train[i].cpu());
 
-            trainer.latent_dynamics.fit_coefficients(
+            trainer.latent_dynamics.initialize_coefficients(
                 Latent_States   = Latent_States_list,
                 t_Grid          = [t.cpu() for t in new_t_Train],
                 params          = new_train_params);

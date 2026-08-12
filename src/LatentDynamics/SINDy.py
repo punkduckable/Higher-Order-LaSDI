@@ -54,8 +54,8 @@ class SINDy(LatentDynamics):
             The latent-dynamics configuration dictionary. It must three keys: `type`, `trainable`,
             and `sindy`. It must have `config["type"] == "sindy"` and `config["sindy"]` should be a 
             dictionary housing sub-class specific settings. The required `lstsq_reg` entry controls
-            ridge regularization used by `fit_coefficients(...)` when initializing coefficients
-            from encoded trajectories.
+            ridge regularization used by `initialize_coefficients(...)` when initializing 
+            coefficients from encoded trajectories.
 
 
         -------------------------------------------------------------------------------------------
@@ -129,7 +129,7 @@ class SINDy(LatentDynamics):
 
 
 
-    def fit_coefficients(self,
+    def initialize_coefficients(self,
                          Latent_States   : list[list[torch.Tensor]],
                          t_Grid          : list[torch.Tensor],
                          params          : numpy.ndarray | None = None) -> None:
@@ -167,7 +167,7 @@ class SINDy(LatentDynamics):
         """
 
         # Checks.
-        assert params is not None, "SINDy.fit_coefficients requires params so coefficients can be stored";
+        assert params is not None, "SINDy.initialize_coefficients requires params so coefficients can be stored";
         assert isinstance(t_Grid, list);
         assert isinstance(Latent_States, list);
         assert len(Latent_States) == len(t_Grid) == params.shape[0];

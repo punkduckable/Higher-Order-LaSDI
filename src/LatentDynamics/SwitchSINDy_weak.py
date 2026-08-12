@@ -116,10 +116,10 @@ class SwitchSINDy_weak(LatentDynamics):
 
 
     # ---------------------------------------------------------------------------------------------
-    # fit_coefficients
+    # initialize_coefficients
     # ---------------------------------------------------------------------------------------------
 
-    def fit_coefficients(self,
+    def initialize_coefficients(self,
                          Latent_States   : list[list[torch.Tensor]],
                          t_Grid          : list[torch.Tensor],
                          params          : numpy.ndarray | None = None) -> None:
@@ -131,7 +131,7 @@ class SwitchSINDy_weak(LatentDynamics):
         `b_after`; the optimizer learns them jointly with the encoder/decoder.
         """
 
-        assert params is not None, "SwitchSINDy_weak.fit_coefficients requires `params`";
+        assert params is not None, "SwitchSINDy_weak.initialize_coefficients requires `params`";
         assert isinstance(t_Grid, list);
         assert isinstance(Latent_States, list);
         assert len(Latent_States) == len(t_Grid) == params.shape[0];

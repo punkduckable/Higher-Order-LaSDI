@@ -107,10 +107,10 @@ class DampedSpring_weak(LatentDynamics):
 
 
     # ---------------------------------------------------------------------------------------------
-    # fit_coefficients
+    # initialize_coefficients
     # ---------------------------------------------------------------------------------------------
 
-    def fit_coefficients(self,
+    def initialize_coefficients(self,
                          Latent_States : list[list[torch.Tensor]],
                          t_Grid        : list[torch.Tensor],
                          params        : numpy.ndarray | None = None) -> None:
@@ -122,7 +122,7 @@ class DampedSpring_weak(LatentDynamics):
         poor starting point. Instead, each requested parameter receives trainable zero tensors for
         `K`, `C`, and `b`; the optimizer learns them jointly with the encoder/decoder.
         """
-        assert params is not None, "DampedSpring_weak.fit_coefficients requires `params`";
+        assert params is not None, "DampedSpring_weak.initialize_coefficients requires `params`";
         assert isinstance(t_Grid, list) and isinstance(Latent_States, list);
         assert len(Latent_States) == len(t_Grid) == params.shape[0];
 
@@ -166,8 +166,8 @@ class DampedSpring_weak(LatentDynamics):
         
                 z''(t) = K z(t) + C z'(t) + b
         
-        Coefficients are initialized by `fit_coefficients(...)` and then looked up directly from
-        `self.train_coefs` using `params`. Missing entries are intentional hard errors because
+        Coefficients are initialized by `initialize_coefficients(...)` and then looked up directly 
+        from `self.train_coefs` using `params`. Missing entries are intentional hard errors because
         they indicate that the sampler/training-data path failed to initialize a training
         parameter.
 

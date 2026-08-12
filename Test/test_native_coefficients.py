@@ -70,13 +70,13 @@ def test_missing_train_coefs_raises_keyerror():
         ld.get_train_coefs(numpy.array([0.0]))
 
 
-def test_sindy_fit_coefficients_stores_native_trainable_dict():
+def test_sindy_initialize_coefficients_stores_native_trainable_dict():
     ld = SINDy(n_z=1, Uniform_t_Grid=True, config=_sindy_config(lstsq_reg=0.0))
     t = torch.linspace(0.0, 1.0, 9)
     z = torch.exp(-t).reshape(-1, 1)
     params = numpy.array([[0.25]])
 
-    out = ld.fit_coefficients(Latent_States=[[z]], t_Grid=[t], params=params)
+    out = ld.initialize_coefficients(Latent_States=[[z]], t_Grid=[t], params=params)
 
     assert out is None
     coefs = ld.get_train_coefs(params[0])
@@ -151,14 +151,14 @@ from LatentDynamics import DampedSpring, DampedSpring_weak, SINDy_weak, SwitchSI
 from Utilities.FiniteDifference import Derivative1_Order4
 
 
-def test_damped_spring_fit_coefficients_uses_K_C_b_names():
+def test_damped_spring_initialize_coefficients_uses_K_C_b_names():
     ld = DampedSpring(n_z=1, Uniform_t_Grid=True, config=_spring_config())
     t = torch.linspace(0.0, 1.0, 9)
     z = torch.sin(t).reshape(-1, 1)
     dz = torch.cos(t).reshape(-1, 1)
     params = numpy.array([[0.5]])
 
-    out = ld.fit_coefficients(Latent_States=[[z, dz]], t_Grid=[t], params=params)
+    out = ld.initialize_coefficients(Latent_States=[[z, dz]], t_Grid=[t], params=params)
 
     assert out is None
     coefs = ld.get_train_coefs(params[0])
@@ -251,7 +251,7 @@ def test_damped_spring_weak_fit_zero_initializes_and_compute_losses_requires_wei
     dz = torch.cos(t).reshape(-1, 1)
     params = numpy.array([[0.25]])
 
-    out = ld.fit_coefficients([[z, dz]], [t], params)
+    out = ld.initialize_coefficients([[z, dz]], [t], params)
     coefs = ld.get_train_coefs(params[0])
 
     assert out is None
@@ -270,7 +270,7 @@ def test_sindy_weak_fit_zero_initializes_and_compute_losses_requires_weights():
     z = torch.sin(t).reshape(-1, 1)
     params = numpy.array([[0.25]])
 
-    out = ld.fit_coefficients([[z]], [t], params)
+    out = ld.initialize_coefficients([[z]], [t], params)
     coefs = ld.get_train_coefs(params[0])
 
     assert out is None
@@ -291,7 +291,7 @@ def test_sindy_weak_compute_losses_with_weight_functions_returns_losses():
     params = numpy.array([[0.25]])
 
     ld.add_weight_functions(params[0], t)
-    ld.fit_coefficients([[z]], [t], params)
+    ld.initialize_coefficients([[z]], [t], params)
     loss_LD_list, loss_coef_list, loss_stab_list = ld.compute_losses([[z]], "MSE", [t], params)
 
     assert len(loss_LD_list) == 1
@@ -306,7 +306,7 @@ def test_switch_sindy_weak_fit_zero_initializes_native_names():
     z = torch.sin(t).reshape(-1, 1)
     params = numpy.array([[0.25]])
 
-    out = ld.fit_coefficients([[z]], [t], params)
+    out = ld.initialize_coefficients([[z]], [t], params)
     coefs = ld.get_train_coefs(params[0])
 
     assert out is None
