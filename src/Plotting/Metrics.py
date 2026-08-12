@@ -13,7 +13,7 @@ from    LatentDynamics                  import  LatentDynamics;
 from    ParameterSpace                  import  ParameterSpace;
 from    Trainer                         import  Trainer;
 from    Interpolate                     import  Interpolate;
-from    Interpolate.Rollouts            import  Sample_Rollouts, Mean_Rollout;
+from    Rollouts                        import  Sample_Rollouts, Mean_Rollout;
 
 
 # Set up the logger

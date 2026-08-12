@@ -247,10 +247,11 @@ class LatentDynamics:
     # Fit Coefficients (compute initial coefficients for a particular training parameter).
     # ---------------------------------------------------------------------------------------------
 
-    def initialize_coefficients(self,
-                         Latent_States   : list[list[torch.Tensor]],
-                         t_Grid          : list[torch.Tensor],
-                         params          : numpy.ndarray | None = None) -> torch.Tensor:
+    def initialize_coefficients(
+            self,
+            Latent_States   : list[list[torch.Tensor]],
+            t_Grid          : list[torch.Tensor],
+            params          : numpy.ndarray | None = None) -> torch.Tensor:
         r"""
         Fit (initialize) latent dynamics coefficients from latent state data.
 

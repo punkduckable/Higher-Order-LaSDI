@@ -129,10 +129,11 @@ class SINDy(LatentDynamics):
 
 
 
-    def initialize_coefficients(self,
-                         Latent_States   : list[list[torch.Tensor]],
-                         t_Grid          : list[torch.Tensor],
-                         params          : numpy.ndarray | None = None) -> None:
+    def initialize_coefficients(
+            self,
+            Latent_States   : list[list[torch.Tensor]],
+            t_Grid          : list[torch.Tensor],
+            params          : numpy.ndarray | None = None) -> None:
         r"""
         Fit and store SINDy coefficients for one or more training parameters.
 

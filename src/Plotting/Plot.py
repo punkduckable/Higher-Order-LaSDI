@@ -22,7 +22,7 @@ from    Physics                         import  Physics;
 from    LatentDynamics                  import  LatentDynamics;
 from    ParameterSpace                  import  ParameterSpace;
 from    Trainer                         import  Trainer;
-from    Interpolate.Rollouts            import  Sample_Rollouts;
+from    Rollouts                        import  Sample_Rollouts;
 from    Interpolate                     import  Interpolate;
 
 

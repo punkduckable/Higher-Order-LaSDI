@@ -9,7 +9,7 @@ import  numpy;
 
 from    Enums                       import  NextStep;  
 from    Trainer                     import  Trainer;
-from    Interpolate.Rollouts        import  Sample_Rollouts;
+from    Rollouts                    import  Sample_Rollouts;
 from    Interpolate                 import  Interpolate;
 from    EncoderDecoder              import  EncoderDecoder;
 from    Sample.Sampler              import  Sampler;

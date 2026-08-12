@@ -51,6 +51,68 @@ class Interpolate:
         For a fixed tensor name (for example "A" or "K"), every training parameter must have a
         tensor with the same shape. We flatten that tensor component-wise and fit one independent GP
         per scalar component, using the parameter tuple as GP input.
+        
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        train_coefs : dict[tuple[float, ...], dict[str, torch.Tensor]]
+            LD-owned training coefficient dictionary. The outer key is an exact parameter tuple;
+            the inner dictionary maps coefficient tensor names to tensors.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        Nothing!
+        
+        """
+
+        # Set the training coefficients.
+        self.update_train_coefs(train_coefs)
+
+
+    @staticmethod
+    def _param_array(param : numpy.ndarray | torch.Tensor | list | tuple) -> numpy.ndarray:
+        r"""
+        Normalize a parameter input to a one-dimensional NumPy array for GP evaluation.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        param : numpy.ndarray or torch.Tensor or list or tuple
+            Parameter values for one requested point.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        param_np : numpy.ndarray, shape = (n_p,)
+            One-dimensional float64 NumPy array containing the parameter values.
+        """
+
+        if isinstance(param, torch.Tensor):
+            param = param.detach().cpu().numpy();
+        elif isinstance(param, (list, tuple)):
+            param = numpy.array(param);
+        assert isinstance(param, numpy.ndarray), "param must be numpy.ndarray, torch.Tensor, list, or tuple";
+        return param.reshape(-1).astype(numpy.float64);
+
+
+
+    def update_train_coefs(self, train_coefs : dict[tuple[float, ...], dict[str, torch.Tensor]]) -> None:
+        """
+        This method updates self's train_coefs attribute use the passed dictionary.
+
+        Specifically, this method builds one collection of GPs for each named coefficient tensor.
+
+        For a fixed tensor name (for example "A" or "K"), every training parameter must have a
+        tensor with the same shape. We flatten that tensor component-wise and fit one independent GP
+        per scalar component, using the parameter tuple as GP input.
 
 
         -------------------------------------------------------------------------------------------
@@ -115,38 +177,6 @@ class Interpolate:
             self.gps[name] = fit_gps(self.X, Y);
             LOGGER.info("Fit %d GPs for coefficient tensor '%s' with shape %s" % (Y.shape[1], name, tuple(self.coef_shapes[name])));
         return;
-
-
-
-    @staticmethod
-    def _param_array(param : numpy.ndarray | torch.Tensor | list | tuple) -> numpy.ndarray:
-        r"""
-        Normalize a parameter input to a one-dimensional NumPy array for GP evaluation.
-
-
-        -------------------------------------------------------------------------------------------
-        Arguments
-        -------------------------------------------------------------------------------------------
-
-        param : numpy.ndarray or torch.Tensor or list or tuple
-            Parameter values for one requested point.
-
-
-        -------------------------------------------------------------------------------------------
-        Returns
-        -------------------------------------------------------------------------------------------
-
-        param_np : numpy.ndarray, shape = (n_p,)
-            One-dimensional float64 NumPy array containing the parameter values.
-        """
-
-        if isinstance(param, torch.Tensor):
-            param = param.detach().cpu().numpy();
-        elif isinstance(param, (list, tuple)):
-            param = numpy.array(param);
-        assert isinstance(param, numpy.ndarray), "param must be numpy.ndarray, torch.Tensor, list, or tuple";
-        return param.reshape(-1).astype(numpy.float64);
-
 
 
     def sample(self, param : numpy.ndarray | torch.Tensor | list | tuple) -> dict[str, torch.Tensor]:

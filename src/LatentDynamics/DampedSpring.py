@@ -126,10 +126,11 @@ class DampedSpring(LatentDynamics):
 
 
 
-    def initialize_coefficients(self,
-                         Latent_States : list[list[torch.Tensor]],
-                         t_Grid        : list[torch.Tensor],
-                         params        : numpy.ndarray | None = None) -> None:
+    def initialize_coefficients(
+            self,
+            Latent_States : list[list[torch.Tensor]],
+            t_Grid        : list[torch.Tensor],
+            params        : numpy.ndarray | None = None) -> None:
         r"""
         Fit coefficients for the damped-spring latent dynamics model from latent trajectories.
 

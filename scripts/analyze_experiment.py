@@ -22,7 +22,7 @@ from    Plotting.Plot               import  Plot_Heatmap, Plot_Latent_Trajectori
 from    Plotting.Plot               import  trainSpace_RelativeErrors_Heatmap;
 from    Plotting.Animate            import  make_solution_movies;
 from    Interpolate                 import  Interpolate;
-from    Interpolate.Rollouts        import  Mean_Rollout; 
+from    Rollouts                    import  Mean_Rollout; 
 from    Utilities.Logging           import  Initialize_Logger;
 from    Initialize                  import  Initialize_Trainer;
 

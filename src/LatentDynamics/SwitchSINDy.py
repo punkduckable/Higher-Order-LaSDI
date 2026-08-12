@@ -124,10 +124,10 @@ class SwitchSINDy(LatentDynamics):
 
 
     def initialize_coefficients(
-                        self,
-                        Latent_States   : list[list[torch.Tensor]],
-                        t_Grid          : list[torch.Tensor],
-                        params          : numpy.ndarray | None = None) -> None:
+            self,
+            Latent_States   : list[list[torch.Tensor]],
+            t_Grid          : list[torch.Tensor],
+            params          : numpy.ndarray | None = None) -> None:
         r"""
         Fit coefficients for the two-regime switching SINDy model.
 

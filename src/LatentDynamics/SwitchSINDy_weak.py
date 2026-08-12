@@ -119,10 +119,11 @@ class SwitchSINDy_weak(LatentDynamics):
     # initialize_coefficients
     # ---------------------------------------------------------------------------------------------
 
-    def initialize_coefficients(self,
-                         Latent_States   : list[list[torch.Tensor]],
-                         t_Grid          : list[torch.Tensor],
-                         params          : numpy.ndarray | None = None) -> None:
+    def initialize_coefficients(
+            self,
+            Latent_States   : list[list[torch.Tensor]],
+            t_Grid          : list[torch.Tensor],
+            params          : numpy.ndarray | None = None) -> None:
         r"""
         Initialize weak-form switching-SINDy coefficients to zero.
 
