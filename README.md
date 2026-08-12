@@ -223,10 +223,6 @@ The base class provides:
 - `get_train_coefs(params_row)`: strict lookup of one native coefficient dictionary
 - `set_train_coefs(params_row, coefs)`: store native coefficient tensors as trainable leaves
 - `trainable_coef_tensors()`: subclass implementation returning the actual tensors passed to optimizers
-- `flatten_coefficients(coefs)`: default implementation used only at compatibility boundaries
-  such as coefficient heatmap output. It accepts one native coefficient dictionary or a list of
-  dictionaries, loops through each dictionary's items in insertion order, flattens each tensor, and
-  concatenates those flattened tensors into one row. Subclasses only need to override this if this approach is inappropriate.
 
 Missing coefficient entries intentionally raise errors. The sampler/data-generation path should
 initialize coefficients for every training parameter by calling `latent_dynamics.fit_coefficients(...)`.
@@ -770,11 +766,6 @@ New applications can be implemented by deriving from the appropriate base classe
      dictionaries (or a list of dictionaries) returned by `get_train_coefs(...)` or `Interpolate`.
    - `trainable_coef_tensors(self)`: Return the actual coefficient tensors stored in
      `self.train_coefs` so they can be passed to a torch optimizer.
-   - Optional: override `flatten_coefficients(self, coefs)` only if your model needs a specific
-     scalar ordering for plotting/heatmap output. The base class version accepts one native
-     coefficient dictionary or a list of dictionaries, loops through each dictionary's items in
-     insertion order, flattens each tensor, and concatenates those flattened tensors into an
-     `n_param x n_coef` array.
 3. **Register in `Initialize.py`**:
    ```python
    ld_dict = {

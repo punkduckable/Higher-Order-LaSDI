@@ -20,7 +20,6 @@ from    Interpolate.Rollouts            import  Sample_Rollouts, Mean_Rollout;
 LOGGER : logging.Logger = logging.getLogger(__name__);
 
 
-
 # -------------------------------------------------------------------------------------------------
 # Heatmap data
 # -------------------------------------------------------------------------------------------------
@@ -172,8 +171,8 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
     # then flatten to the legacy matrix shape used by heatmap plotting.
     coef_means_native : list[dict[str, torch.Tensor]] = [interpolator.mean(param_test[i, :]) for i in range(n_Test)];
     coef_stds_native  : list[dict[str, torch.Tensor]] = [interpolator.std(param_test[i, :])  for i in range(n_Test)];
-    coef_means = latent_dynamics.flatten_coefficients(coef_means_native);
-    coef_stds  = latent_dynamics.flatten_coefficients(coef_stds_native);
+    coef_means = flatten_coefficients(coef_means_native);
+    coef_stds  = flatten_coefficients(coef_stds_native);
 
 
     # ---------------------------------------------------------------------------------------------
@@ -299,4 +298,57 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
 
     # All done!
     return max_Rel_Error, max_STD, Rel_Error, STD, coef_means, coef_stds;
+
+
+# -------------------------------------------------------------------------------------------------
+# Helpers
+# -------------------------------------------------------------------------------------------------
+
+def flatten_coefficients(coefs : dict[str, torch.Tensor] | list[dict[str, torch.Tensor]]) -> numpy.ndarray:
+    r"""
+    Flatten a dictionary (or list of dictionaries) of tensors into one coefficient matrix. This 
+    is useful when trying to analyze coefficient dictionaries for interpolation style latent 
+    dynamics classes. 
+
+    For each coefficient dictionary, this method loops through the dictionary items in insertion
+    order, flattens each tensor, and concatenates those flattened arrays into one row.
+
+
+    -------------------------------------------------------------------------------------------
+    Arguments
+    -------------------------------------------------------------------------------------------
+
+    coefs : dict[str, torch.Tensor] or list[dict[str, torch.Tensor]]
+        One coefficient dictionary or a list of coefficient dictionaries.
+
+
+    -------------------------------------------------------------------------------------------
+    Returns
+    -------------------------------------------------------------------------------------------
+
+    coef_matrix : numpy.ndarray, shape = (n_param, n_coefs)
+        Flattened coefficient matrix. The i'th row contains all flattened coefficient tensors
+        from the i'th native coefficient dictionary, concatenated in dictionary item order.
+    """
+
+    # Normalize the input so the single-coefficient and multi-coefficient cases share the same
+    # validation/flattening logic.
+    coefs_list = [coefs] if isinstance(coefs, dict) else coefs;
+    assert isinstance(coefs_list, list), "coefs must be a dict or a list of dicts";
+    assert len(coefs_list) > 0, "coefs must be non-empty";
+
+    rows : list[numpy.ndarray] = [];
+    for coef_dict in coefs_list:
+        assert isinstance(coef_dict, dict), "Each coefficient set must be a dictionary";
+        assert len(coef_dict) > 0, "Coefficient dictionaries must be non-empty";
+
+        parts : list[numpy.ndarray] = [];
+        for name, tensor in coef_dict.items():
+            assert isinstance(name, str), "Coefficient names must be strings";
+            assert isinstance(tensor, torch.Tensor), "Coefficient %s must be a torch.Tensor" % name;
+            parts.append(tensor.detach().cpu().numpy().reshape(-1));
+
+        rows.append(numpy.concatenate(parts, axis = 0).reshape(1, -1));
+
+    return numpy.concatenate(rows, axis = 0);
 
