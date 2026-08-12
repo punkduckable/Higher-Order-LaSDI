@@ -21,7 +21,7 @@ from    Plotting.Metrics            import  Generate_Heatmap_Data;
 from    Plotting.Plot               import  Plot_Heatmap, Plot_Latent_Trajectories;
 from    Plotting.Plot               import  trainSpace_RelativeErrors_Heatmap;
 from    Plotting.Animate            import  make_solution_movies;
-from    Interpolate                 import  Interpolate;
+from    Interpolate                 import  GPInterpolate;
 from    Rollouts                    import  Mean_Rollout; 
 from    Utilities.Logging           import  Initialize_Logger;
 from    Initialize                  import  Initialize_Trainer;
@@ -118,7 +118,7 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
     # Set up coefficient interpolator. 
     encoder_decoder.cpu();
     trainer._check_train_coefficients();
-    interpolator : Interpolate = Interpolate(latent_dynamics.train_coefs);
+    interpolator : Interpolate = GPInterpolate(latent_dynamics.train_coefs);
 
     # Number of coefficient/ROM samples used for plotting + uncertainty metrics.
     # Most samplers expose this as an attribute; fall back to 20 for custom samplers.

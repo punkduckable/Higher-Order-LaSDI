@@ -9,7 +9,7 @@ SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.append(SRC)
 
 from LatentDynamics import SINDy
-from Interpolate import Interpolate
+from Interpolate import GPInterpolate
 from Plotting.Metrics import flatten_coefficients
 
 
@@ -111,7 +111,7 @@ def test_interpolate_sample_mean_and_std_preserve_keys_and_shapes():
         (0.0,): {"A": torch.zeros(1, 1), "b": torch.zeros(1)},
         (1.0,): {"A": torch.ones(1, 1), "b": torch.ones(1)},
     }
-    interp = Interpolate(train_coefs)
+    interp = GPInterpolate(train_coefs)
 
     mean = interp.mean(numpy.array([0.5]))
     std = interp.std(numpy.array([0.5]))
@@ -145,7 +145,7 @@ def test_base_flatten_coefficients_concatenates_native_dict_items():
 
 def test_interpolate_rejects_non_tensor_values():
     with pytest.raises(AssertionError):
-        Interpolate({(0.0,): {"A": numpy.zeros((1, 1))}})
+        GPInterpolate({(0.0,): {"A": numpy.zeros((1, 1))}})
 
 from LatentDynamics import DampedSpring, DampedSpring_weak, SINDy_weak, SwitchSINDy_weak
 from Utilities.FiniteDifference import Derivative1_Order4

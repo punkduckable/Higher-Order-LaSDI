@@ -9,7 +9,7 @@ import  numpy;
 
 from    Enums                       import  NextStep;  
 from    Trainer                     import  Trainer;
-from    Interpolate                 import  Interpolate;
+from    Interpolate                 import  GPInterpolate;
 from    EncoderDecoder              import  EncoderDecoder;
 from    Sample.Sampler              import  Sampler;
 
@@ -156,7 +156,7 @@ class FOM_Variance(Sampler):
 
         # Build coefficient interpolator from LD-owned native training coefficients.
         LOGGER.info("Building coefficient interpolator from %d training coefficient entries" % len(trainer.latent_dynamics.train_coefs));
-        interpolator : Interpolate = Interpolate(trainer.latent_dynamics.train_coefs);
+        interpolator : Interpolate = GPInterpolate(trainer.latent_dynamics.train_coefs);
 
         # Draw native coefficient samples for each candidate parameter.
         coef_samples : list[list[dict[str, torch.Tensor]]] = [

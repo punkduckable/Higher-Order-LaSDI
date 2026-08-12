@@ -10,7 +10,7 @@ import  numpy;
 from    Enums                       import  NextStep;  
 from    Trainer                     import  Trainer;
 from    Rollouts                    import  Sample_Rollouts;
-from    Interpolate                 import  Interpolate;
+from    Interpolate                 import  GPInterpolate;
 from    EncoderDecoder              import  EncoderDecoder;
 from    Sample.Sampler              import  Sampler;
 
@@ -182,7 +182,7 @@ class FOM_Rollout(Sampler):
 
         # Build coefficient interpolator from LD-owned native training coefficients.
         LOGGER.info("Building coefficient interpolator from %d training coefficient entries" % len(trainer.latent_dynamics.train_coefs));
-        interpolator : Interpolate = Interpolate(trainer.latent_dynamics.train_coefs);
+        interpolator : Interpolate = GPInterpolate(trainer.latent_dynamics.train_coefs);
 
 
 

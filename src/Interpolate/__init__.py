@@ -1,14 +1,15 @@
 """
 Latent-coefficient interpolation.
 
-`GaussianProcess` fits, evaluates, and samples independent Gaussian processes for latent-dynamics
-coefficients. `Interpolate` wraps those Gaussian processes around native coefficient dictionaries.
+`Interpolate` defines an abstract Interpolate class. 
+
+`GPInterpolate` is an Interpolate sub-class that uses Gaussian Processes to define the coefficient
+posterior distributions.
+coefficients. 
 """
 
-from    .GaussianProcess        import  fit_gps, eval_gp, sample_coefs;
+from    .GaussianProcess        import  GPInterpolate;
 from    .Interpolate            import  Interpolate;
 
-__all__ = [    "fit_gps",
-               "eval_gp",
-               "sample_coefs",
+__all__ = [    "GPInterpolate",
                "Interpolate"];
