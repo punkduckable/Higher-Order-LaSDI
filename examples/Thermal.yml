@@ -18,8 +18,8 @@ trainer:
 
     # p_rollout grows from p_rollout_init by dp_per_update every rollout_update_freq epochs, capped at max_p_rollout.
     p_rollout_init:         0.0
-    rollout_update_freq:    20
-    dp_per_update:          0.01
+    rollout_update_freq:    10
+    dp_per_update:          0.005
     max_p_rollout:          0.75        # Maximum proportion of the time window used for rollout loss.
     n_rollouts:             8           # Frame-rollout mode: number of rollable start frames to rollout per training parameter per epoch.
 
@@ -68,7 +68,7 @@ EncoderDecoder:
     n_Decoders:             1
 
     # Fully-connected (FC) part
-    hidden_widths_fc:       [1000, 250]
+    hidden_widths_fc:       [500, 100]
     activations_fc:         ["silu", "silu"]
     latent_dimension:       8
 
