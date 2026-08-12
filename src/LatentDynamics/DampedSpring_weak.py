@@ -313,196 +313,163 @@ class DampedSpring_weak(LatentDynamics):
 
 
     def simulate(   self,
-                    coefs   : dict[str, numpy.ndarray   | torch.Tensor] | list[dict[str, numpy.ndarray | torch.Tensor]], 
+                    coefs   : dict[str, numpy.ndarray   | torch.Tensor] | list[dict[str, numpy.ndarray | torch.Tensor]],
                     IC      : list[list[numpy.ndarray   | torch.Tensor]],
                     t_Grid  : list[numpy.ndarray        | torch.Tensor],
-                    params  : numpy.ndarray | None = None) -> list[list[numpy.ndarray | torch.Tensor]]:
+                    params  : numpy.ndarray) -> list[list[numpy.ndarray | torch.Tensor]]:
         r"""
         Time integrates the latent dynamics from multiple initial conditions for each combination
-        of coefficients in coefs. 
- 
+        of coefficients in coefs.
+
 
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
-        
+
         coefs : dict or list[dict]
-            Native coefficient dictionary/dictionaries. For DampedSpring_weak each dictionary
-            must contain `K` with shape (n_z, n_z), `C` with shape (n_z, n_z), and `b` with shape
+            Native coefficient dictionary/dictionaries. For DampedSpring_weak each dictionary must
+            contain `K` with shape (n_z, n_z), `C` with shape (n_z, n_z), and `b` with shape
             (n_z,). These are the coefficients in z'' = K z + C z' + b.
 
         IC : list[list[numpy.ndarray]] or list[list[torch.Tensor]], len = n_param
-            i'th element is an n_IC element list whose j'th element is a 2d numpy.ndarray or 
-            torch.Tensor object of shape (n(i), n_z). Here, n(i) is the number of initial 
-            conditions (for a fixed set of coefficients) we want to simulate forward using the i'th 
-            set of coefficients. Further, n_z is the latent dimension. If you want to simulate a 
-            single IC, for the i'th set of coefficients, then n(i) == 1. IC[i][j][k, :] should hold 
-            the k'th initial condition for the j'th derivative of the latent state when we use the 
-            i'th combination of parameter values. 
+            i'th element is an n_IC element list whose j'th element is a 2d numpy.ndarray or
+            torch.Tensor object of shape (n(i), n_z). Here, n(i) is the number of initial
+            conditions (for a fixed set of coefficients) we want to simulate forward using the i'th
+            set of coefficients. Further, n_z is the latent dimension. If you want to simulate a
+            single IC, for the i'th set of coefficients, then n(i) == 1. IC[i][j][k, :] should hold
+            the k'th initial condition for the j'th derivative of the latent state when we use the
+            i'th combination of parameter values.
 
         t_Grid : list[numpy.ndarray] or list[torch.Tensor], len = n_param
-            i'th entry is a 2d numpy.ndarray or torch.Tensor whose shape is either (n(i), n_t(i)) 
-            or shape (n_t(i)). The shape should be 2d if we want to use different times for each 
-            initial condition and 1d if we want to use the same times for all initial conditions. 
-        
-            In the former case, the j,k array entry specifies k'th time value at which we solve for 
-            the latent state when we use the j'th initial condition and the i'th set of 
-            coefficients. Each row should be in ascending order. 
-        
-            In the latter case, the j'th entry should specify the j'th time value at which we solve 
+            i'th entry is a 2d numpy.ndarray or torch.Tensor whose shape is either (n(i), n_t(i))
+            or shape (n_t(i)). The shape should be 2d if we want to use different times for each
+            initial condition and 1d if we want to use the same times for all initial conditions.
+
+            In the former case, the j,k array entry specifies k'th time value at which we solve for
+            the latent state when we use the j'th initial condition and the i'th set of
+            coefficients. Each row should be in ascending order.
+
+            In the latter case, the j'th entry should specify the j'th time value at which we solve
             for each latent state when we use the i'th combination of parameter values.
 
-        params: numpy.ndarray, shape = (n_param, n_p), optional
-            The i'th row holds the i'th combination of parameter values. This class doesn't use 
-            parameters, so it ignores this argument. Default is None.
+        params: numpy.ndarray, shape = (n_param, n_p)
+            The i'th row holds the i'th combination of parameter values.
 
 
         -------------------------------------------------------------------------------------------
         Returns
-        -------------------------------------------------------------------------------------------        
-        
+        -------------------------------------------------------------------------------------------
+
         Z : list[list[numpy.ndarray]] or list[list[torch.Tensor]], len = n_parm
-            i'th element is a list of length n_IC whose j'th entry is a 3d array of shape 
-            (n_t(i), n(i), n_z). The p, q, r entry of this array should hold the r'th component of 
-            the p'th frame of the j'th tine derivative of the solution to the latent dynamics when 
+            i'th element is a list of length n_IC whose j'th entry is a 3d array of shape
+            (n_t(i), n(i), n_z). The p, q, r entry of this array should hold the r'th component of
+            the p'th frame of the j'th tine derivative of the solution to the latent dynamics when
             we use the q'th initial condition for the i'th combination of parameter values.
         """
 
         # Normalize coefficient input to a list so the multi-parameter and single-parameter cases
-        # share the same validation and recursion logic.
+        # share the same validation and setup logic.
         if isinstance(coefs, dict):
             coefs_list = [coefs];
         else:
             coefs_list = coefs;
         assert isinstance(coefs_list, list);
-        n_param : int = len(coefs_list);
-        assert isinstance(t_Grid, list);
-        assert isinstance(IC, list);
-        assert len(IC)     == n_param;
-        assert len(t_Grid) == n_param;
+        assert isinstance(params, numpy.ndarray);
+        assert len(params.shape) == 2;
+        n_param : int = params.shape[0];
+        assert len(coefs_list) == n_param;
+        assert isinstance(t_Grid, list) and isinstance(IC, list);
+        assert len(IC) == n_param and len(t_Grid) == n_param;
 
-        assert isinstance(IC[0], list);
-        n_IC : int = len(IC[0]);
-        assert n_IC == 2;
+        # -----------------------------------------------------------------------------------------
+        # Loop through parameter combinations.
+        # -----------------------------------------------------------------------------------------
+
+        Z : list[list[numpy.ndarray | torch.Tensor]] = [];
+        LOGGER.debug("Simulating with %d parameter combinations" % n_param);
         for i in range(n_param):
-            assert isinstance(coefs_list[i], dict);
-            assert set(coefs_list[i].keys()) == {"K", "C", "b"};
-            assert isinstance(IC[i], list);
-            assert len(IC[i]) == n_IC;
-            assert len(t_Grid[i].shape) == 2 or len(t_Grid[i].shape) == 1;
-            for j in range(n_IC):
-                assert len(IC[i][j].shape) == 2;
-                assert IC[i][j].shape[1] == self.n_z;
-                if(len(t_Grid[i].shape) == 2):
-                    assert t_Grid[i].shape[0] == IC[i][j].shape[0];
+            # Fetch the i'th set of coefficients, initial conditions, and time grid.
+            ith_coefs  : dict[str, numpy.ndarray | torch.Tensor] = coefs_list[i];
+            ith_IC     : list[numpy.ndarray | torch.Tensor]      = IC[i];
+            ith_t_Grid : numpy.ndarray | torch.Tensor            = t_Grid[i];
 
+            # Set up the i'th single-parameter solve. 
+            assert isinstance(ith_coefs, dict) and set(ith_coefs.keys()) == {"K", "C", "b"};
+            assert isinstance(ith_IC, list) and len(ith_IC) == 2;
+            assert len(ith_t_Grid.shape) == 1 or len(ith_t_Grid.shape) == 2;
+            
+            if(isinstance(ith_t_Grid, torch.Tensor)):
+                # Support CUDA/MPS tensors by moving to CPU before NumPy conversion.
+                ith_t_Grid = ith_t_Grid.detach().cpu().numpy();
+            Same_t_Grid : bool = (len(ith_t_Grid.shape) == 1);
+            
+            ith_D0 : numpy.ndarray | torch.Tensor = ith_IC[0];
+            ith_V0 : numpy.ndarray | torch.Tensor = ith_IC[1];
+            n_i    : int                          = ith_D0.shape[0];
 
-        # -----------------------------------------------------------------------------------------
-        # If there are multiple combinations of parameter values, loop through them.
+            # Each element of IC should have shape (n(i), n_z). 
+            assert len(ith_D0.shape) == 2 and ith_D0.shape[1] == self.n_z;
+            assert len(ith_V0.shape) == 2 and ith_V0.shape[1] == self.n_z;
+            assert ith_D0.shape == ith_V0.shape;
+            if(Same_t_Grid == False):
+                assert ith_t_Grid.shape[0] == n_i;
 
-        # This function behaves differently if there is one set of coefficients or multiple of them.
-        if(n_param > 1):
-            LOGGER.debug("Simulating with %d parameter combinations" % n_param);
+            # Fetch native coefficients and match their backend/device/dtype to the initial condition.
+            K = ith_coefs["K"];
+            C = ith_coefs["C"];
+            b = ith_coefs["b"];
 
-            # Cycle through the parameter combinations
-            Z   : list[list[numpy.ndarray | torch.Tensor]]  = [];
-            for i in range(n_param): 
-                # Fetch the i'th set of coefficients, the corresponding collection of initial
-                # conditions, and the set of time values.
-                ith_coefs   : dict[str, numpy.ndarray | torch.Tensor]       = coefs_list[i];
-                ith_IC      : list[list[numpy.ndarray   | torch.Tensor]]    = [IC[i]];
-                ith_t_Grid  : list[numpy.ndarray        | torch.Tensor]     = [t_Grid[i]];
-                ith_params  = None if params is None else params[i, :].reshape(1, -1);
-
-                # Call this function using them. This should return a 2 element holding the 
-                # displacement and velocity of the solution for the i'th combination of 
-                # parameter values.
-                ith_Results : list[numpy.ndarray | torch.Tensor]    = self.simulate(coefs   = ith_coefs, 
-                                                                                    IC      = ith_IC, 
-                                                                                    t_Grid  = ith_t_Grid, 
-                                                                                    params  = ith_params)[0];
-
-                # Add these results to Z.
-                Z.append(ith_Results);
-
-            # All done.
-            return Z;
-
-
-        # -----------------------------------------------------------------------------------------
-        # Evaluate for one combination of parameter values case.
-
-        # In this case, there is just one parameter. Extract t_Grid, which has shape 
-        # (n(i), n_t(i)) or (n_t(i)).
-        t_Grid0  : numpy.ndarray | torch.Tensor  = t_Grid[0];
-        if(isinstance(t_Grid0, torch.Tensor)):
-            # Support CUDA/MPS tensors by moving to CPU before NumPy conversion.
-            t_Grid0 = t_Grid0.detach().cpu().numpy();
-        n_t_i   : int           = t_Grid0.shape[-1];
-        if(len(t_Grid0.shape) == 1):
-            Same_t_Grid : bool  = True;
-        else:
-            Same_t_Grid         = False;
-        
-        # Each element of IC should have shape (n(i), n_z). 
-        D0  : numpy.ndarray | torch.Tensor  = IC[0][0]; 
-        V0  : numpy.ndarray | torch.Tensor  = IC[0][1];
-        n_i : int                           = D0.shape[0];
-
-        # Fetch native coefficients and match their backend/device/dtype to the initial condition.
-        coef_dict = coefs_list[0];
-        K = coef_dict["K"];
-        C = coef_dict["C"];
-        b = coef_dict["b"];
-
-        # Set up a lambda function to approximate (d^2/dt^2)z(t) \approx K z(t) + C (d/dt)z(t) + b.
-        # In this case, we expect dz_dt and z to have shape (n(i), n_z). Thus, matmul(z, K.T) will 
-        # have shape (n(i), n_z). The i'th row of this should hold the z portion of the rhs of the 
-        # latent dynamics for the i'th IC. Similar results hold for dot(dz_dt, C.T). The final 
-        # result should have shape (n(i), n_z). The i'th row should hold the rhs of the latent 
-        # dynamics for the i'th IC.
-        if(isinstance(D0, numpy.ndarray)):
-            if isinstance(K, torch.Tensor):
-                K = K.detach().cpu().numpy();
-                C = C.detach().cpu().numpy();
-                b = b.detach().cpu().numpy();
-            b = b.reshape(1, -1);
-            f   = lambda t, z, dz_dt: numpy.matmul(z, K.T) + numpy.matmul(dz_dt, C.T) + b;
-        else:
-            if isinstance(K, numpy.ndarray):
-                K = torch.tensor(K, dtype = D0.dtype, device = D0.device);
-                C = torch.tensor(C, dtype = D0.dtype, device = D0.device);
-                b = torch.tensor(b, dtype = D0.dtype, device = D0.device);
+            # Set up a lambda function to approximate (d^2/dt^2)z(t) \approx K z(t) + C (d/dt)z(t) + b.
+            # In this case, we expect dz_dt and z to have shape (n(i), n_z). Thus, matmul(z, K.T) will
+            # have shape (n(i), n_z). The i'th row of this should hold the z portion of the rhs of the
+            # latent dynamics for the i'th IC. Similar results hold for dot(dz_dt, C.T). The final
+            # result should have shape (n(i), n_z). The i'th row should hold the rhs of the latent
+            # dynamics for the i'th IC.
+            if(isinstance(ith_D0, numpy.ndarray)):
+                if isinstance(K, torch.Tensor):
+                    K = K.detach().cpu().numpy();
+                    C = C.detach().cpu().numpy();
+                    b = b.detach().cpu().numpy();
+                b = b.reshape(1, -1);
+                f   = lambda t, z, dz_dt: numpy.matmul(z, K.T) + numpy.matmul(dz_dt, C.T) + b;
             else:
-                K = K.to(device = D0.device, dtype = D0.dtype);
-                C = C.to(device = D0.device, dtype = D0.dtype);
-                b = b.to(device = D0.device, dtype = D0.dtype);
-            b = b.reshape(1, -1);
-            f   = lambda t, z, dz_dt: torch.matmul(z, K.T) + torch.matmul(dz_dt, C.T) + b;
+                if isinstance(K, numpy.ndarray):
+                    K = torch.tensor(K, dtype = ith_D0.dtype, device = ith_D0.device);
+                    C = torch.tensor(C, dtype = ith_D0.dtype, device = ith_D0.device);
+                    b = torch.tensor(b, dtype = ith_D0.dtype, device = ith_D0.device);
+                else:
+                    K = K.to(device = ith_D0.device, dtype = ith_D0.dtype);
+                    C = C.to(device = ith_D0.device, dtype = ith_D0.dtype);
+                    b = b.to(device = ith_D0.device, dtype = ith_D0.dtype);
+                b = b.reshape(1, -1);
+                f   = lambda t, z, dz_dt: torch.matmul(z, K.T) + torch.matmul(dz_dt, C.T) + b;
 
-        # Solve the ODE forward in time. D and V should have shape (n_t, n(i), n_z). If we use the 
-        # same t values for each IC, then we can exploit the fact that the latent dynamics are 
-        # autonomous to solve using each IC simultaneously. Otherwise, we need to run the latent
-        # dynamics one IC at a time. 
-        if(Same_t_Grid == True):
-            D, V = RK4(f = f, y0 = D0, Dy0 = V0, t_Grid = t_Grid0);  # shape = (n_t, n_i, n_z)
-        else:
-            # Cycle through the ICs.
-            D_list : list[torch.Tensor | numpy.ndarray] = [];
-            V_list : list[torch.Tensor | numpy.ndarray] = []; 
-
-            for j in range(n_i):
-                D_j, V_j    = RK4(f = f, y0 = D0[j, :].reshape(1, -1), Dy0 = V0[j, :].reshape(1, -1), t_Grid = t_Grid0[j, :]);
-                D_list.append(D_j);
-                V_list.append(V_j);
-
-            # Stack the results.
-            if(isinstance(D0, numpy.ndarray)):
-                D = numpy.concatenate(D_list, axis = 1);    # shape = (n_t, n_i, n_z)
-                V = numpy.concatenate(V_list, axis = 1);    # shape = (n_t, n_i, n_z)
+            # Solve the ODE forward in time. D and V should have shape (n_t, n(i), n_z). If we use the
+            # same t values for each IC, then we can exploit the fact that the latent dynamics are
+            # autonomous to solve using each IC simultaneously. Otherwise, we need to run the latent
+            # dynamics one IC at a time.
+            if(Same_t_Grid == True):
+                ith_D, ith_V = RK4(f = f, y0 = ith_D0, Dy0 = ith_V0, t_Grid = ith_t_Grid);  # shape = (n_t, n_i, n_z)
             else:
-                D = torch.cat(D_list, dim = 1);            # shape = (n_t, n_i, n_z)
-                V = torch.cat(V_list, dim = 1);            # shape = (n_t, n_i, n_z)
-        
+                # Cycle through the ICs.
+                ith_D_list : list[torch.Tensor | numpy.ndarray] = [];
+                ith_V_list : list[torch.Tensor | numpy.ndarray] = [];
+
+                for j in range(n_i):
+                    D_ij, V_ij = RK4(f = f, y0 = ith_D0[j, :].reshape(1, -1), Dy0 = ith_V0[j, :].reshape(1, -1), t_Grid = ith_t_Grid[j, :]);
+                    ith_D_list.append(D_ij);
+                    ith_V_list.append(V_ij);
+
+                # Stack the results.
+                if(isinstance(ith_D0, numpy.ndarray)):
+                    ith_D = numpy.concatenate(ith_D_list, axis = 1);    # shape = (n_t, n_i, n_z)
+                    ith_V = numpy.concatenate(ith_V_list, axis = 1);    # shape = (n_t, n_i, n_z)
+                else:
+                    ith_D = torch.cat(ith_D_list, dim = 1);             # shape = (n_t, n_i, n_z)
+                    ith_V = torch.cat(ith_V_list, dim = 1);             # shape = (n_t, n_i, n_z)
+
+            # Add this parameter's trajectory to the output list.
+            Z.append([ith_D, ith_V]);
+
         # All done!
-        return [[D, V]];
+        return Z;

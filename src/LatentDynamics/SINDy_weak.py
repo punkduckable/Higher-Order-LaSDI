@@ -267,7 +267,7 @@ class SINDy_weak(LatentDynamics):
                     coefs   : dict[str, numpy.ndarray | torch.Tensor] | list[dict[str, numpy.ndarray | torch.Tensor]],
                     IC      : list[list[numpy.ndarray | torch.Tensor]],
                     t_Grid  : list[numpy.ndarray      | torch.Tensor],
-                    params  : numpy.ndarray | None = None) -> list[list[numpy.ndarray | torch.Tensor]]:
+                    params  : numpy.ndarray) -> list[list[numpy.ndarray | torch.Tensor]]:
         r"""
         Time-integrate the native SINDy latent dynamics.
 
@@ -281,8 +281,8 @@ class SINDy_weak(LatentDynamics):
         -------------------------------------------------------------------------------------------
 
         coefs : dict or list[dict]
-            Native coefficient dictionary/dictionaries. Each dictionary must contain `A` with
-            shape (n_z, n_z) and `b` with shape (n_z,).
+            Native coefficient dictionary/dictionaries. For SINDy each dictionary must contain
+            `A` with shape (n_z, n_z) and `b` with shape (n_z,).
 
         IC : list[list[numpy.ndarray | torch.Tensor]], len = n_param
             Initial latent states for each coefficient set. SINDy_weak has one IC component.
@@ -290,8 +290,8 @@ class SINDy_weak(LatentDynamics):
         t_Grid : list[numpy.ndarray | torch.Tensor], len = n_param
             Time grids for simulation.
 
-        params : numpy.ndarray, optional
-            Accepted for API consistency with parameter-dependent LD subclasses; unused here.
+        params : numpy.ndarray, shape = (n_param, n_p)
+            The i'th row holds the i'th combination of parameter values.
 
 
         -------------------------------------------------------------------------------------------
@@ -309,56 +309,76 @@ class SINDy_weak(LatentDynamics):
         else:
             coefs_list = coefs;
         assert isinstance(coefs_list, list);
-        n_param : int = len(coefs_list);
+        assert isinstance(params, numpy.ndarray);
+        assert len(params.shape) == 2;
+        n_param : int = params.shape[0];
+        assert len(coefs_list) == n_param;
         assert isinstance(t_Grid, list) and isinstance(IC, list);
         assert len(IC) == n_param and len(t_Grid) == n_param;
 
-        # Multi-parameter simulation: recurse one parameter at a time.
-        if n_param > 1:
-            return [self.simulate(coefs = coefs_list[i], IC = [IC[i]], t_Grid = [t_Grid[i]], params = None if params is None else params[i, :].reshape(1, -1))[0] for i in range(n_param)];
+        # -----------------------------------------------------------------------------------------
+        # Loop through parameter combinations.
+        # -----------------------------------------------------------------------------------------
 
-        # One-parameter simulation.
-        assert isinstance(IC[0], list) and len(IC[0]) == 1;
-        t_Grid0  : numpy.ndarray | torch.Tensor  = t_Grid[0];
-        if(isinstance(t_Grid0, torch.Tensor)):
-            t_Grid0 = t_Grid0.detach().cpu().numpy();
-        Same_t_Grid : bool = (len(t_Grid0.shape) == 1);
-        Z0  : numpy.ndarray | torch.Tensor  = IC[0][0];
-        n_i : int = Z0.shape[0];
+        Z : list[list[numpy.ndarray | torch.Tensor]] = [];
+        LOGGER.debug("Simulating with %d parameter combinations" % n_param);
+        for i in range(n_param):
+            # Fetch the i'th set of coefficients, initial conditions, and time grid.
+            ith_coefs  : dict[str, numpy.ndarray | torch.Tensor] = coefs_list[i];
+            ith_IC     : list[numpy.ndarray | torch.Tensor]      = IC[i];
+            ith_t_Grid : numpy.ndarray | torch.Tensor            = t_Grid[i];
 
-        # Fetch native coefficients for the single-parameter case.
-        coef_dict = coefs_list[0];
-        assert set(coef_dict.keys()) == {"A", "b"};
-        A = coef_dict["A"];
-        b = coef_dict["b"];
+            # Set up the i'th single-parameter solve.
+            assert isinstance(ith_coefs, dict) and set(ith_coefs.keys()) == {"A", "b"};
+            assert isinstance(ith_IC, list) and len(ith_IC) == 1;
+            assert len(ith_t_Grid.shape) == 1 or len(ith_t_Grid.shape) == 2;
+            if(isinstance(ith_t_Grid, torch.Tensor)):
+                ith_t_Grid = ith_t_Grid.detach().cpu().numpy();
+            Same_t_Grid : bool = (len(ith_t_Grid.shape) == 1);
+            ith_Z0 : numpy.ndarray | torch.Tensor = ith_IC[0];
+            n_i    : int                          = ith_Z0.shape[0];
+            assert len(ith_Z0.shape) == 2 and ith_Z0.shape[1] == self.n_z;
+            if(Same_t_Grid == False):
+                assert ith_t_Grid.shape[0] == n_i;
 
-        # Match the coefficient backend to the initial-condition backend.
-        if isinstance(Z0, numpy.ndarray):
-            if isinstance(A, torch.Tensor):
-                A = A.detach().cpu().numpy();
-                b = b.detach().cpu().numpy();
-            b = b.reshape(1, -1);
-            f = lambda t, z: b + numpy.matmul(z, A.T);
-        else:
-            if isinstance(A, numpy.ndarray):
-                A = torch.tensor(A, dtype = Z0.dtype, device = Z0.device);
-                b = torch.tensor(b, dtype = Z0.dtype, device = Z0.device);
+            # Fetch native coefficients for this parameter.
+            A = ith_coefs["A"];
+            b = ith_coefs["b"];
+
+            # Match the coefficient backend to the initial-condition backend. This keeps the solver
+            # purely NumPy for NumPy inputs and differentiable PyTorch for tensor inputs.
+            if isinstance(ith_Z0, numpy.ndarray):
+                if isinstance(A, torch.Tensor):
+                    A = A.detach().cpu().numpy();
+                    b = b.detach().cpu().numpy();
+                b = b.reshape(1, -1);
+                f = lambda t, z: b + numpy.matmul(z, A.T);
             else:
-                A = A.to(device = Z0.device, dtype = Z0.dtype);
-                b = b.to(device = Z0.device, dtype = Z0.dtype);
-            b = b.reshape(1, -1);
-            f = lambda t, z: b + torch.matmul(z, A.T);
+                if isinstance(A, numpy.ndarray):
+                    A = torch.tensor(A, dtype = ith_Z0.dtype, device = ith_Z0.device);
+                    b = torch.tensor(b, dtype = ith_Z0.dtype, device = ith_Z0.device);
+                else:
+                    A = A.to(device = ith_Z0.device, dtype = ith_Z0.dtype);
+                    b = b.to(device = ith_Z0.device, dtype = ith_Z0.dtype);
+                b = b.reshape(1, -1);
+                f = lambda t, z: b + torch.matmul(z, A.T);
 
-        # Solve the ODE.
-        if(Same_t_Grid == True):
-            Z = [[RK4(f = f, y0 = Z0, t_Grid = t_Grid0)]];
-        else:
-            Z_list : list[torch.Tensor | numpy.ndarray] = [];
-            for j in range(n_i):
-                Z_j = RK4(f = f, y0 = Z0[j, :].reshape(1, -1), t_Grid = t_Grid0[j, :]);
-                Z_list.append(Z_j);
-            if(isinstance(Z0, numpy.ndarray)):
-                Z = [[numpy.concatenate(Z_list, axis = 1)]];
+            # Solve the ODE. If all ICs share the same time grid we integrate them as a batch;
+            # otherwise, integrate each initial condition separately and concatenate the results.
+            if(Same_t_Grid == True):
+                ith_Z = RK4(f = f, y0 = ith_Z0, t_Grid = ith_t_Grid);
             else:
-                Z = [[torch.cat(Z_list, dim = 1)]];
+                Z_list : list[torch.Tensor | numpy.ndarray] = [];
+                for j in range(n_i):
+                    Z_j = RK4(f = f, y0 = ith_Z0[j, :].reshape(1, -1), t_Grid = ith_t_Grid[j, :]);
+                    Z_list.append(Z_j);
+                if(isinstance(ith_Z0, numpy.ndarray)):
+                    ith_Z = numpy.concatenate(Z_list, axis = 1);
+                else:
+                    ith_Z = torch.cat(Z_list, dim = 1);
+
+            # Add this parameter's trajectory to the output list.
+            Z.append([ith_Z]);
+
+        # All done!
         return Z;

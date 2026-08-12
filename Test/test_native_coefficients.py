@@ -10,6 +10,7 @@ sys.path.append(SRC)
 
 from LatentDynamics import SINDy
 from Interpolate import Interpolate
+from Plotting.Metrics import flatten_coefficients
 
 
 def _sindy_config(lstsq_reg=1.0, trainable=True):
@@ -128,13 +129,12 @@ def test_interpolate_sample_mean_and_std_preserve_keys_and_shapes():
 
 
 def test_base_flatten_coefficients_concatenates_native_dict_items():
-    ld = SINDy(n_z=2, Uniform_t_Grid=True, config=_sindy_config())
     native_coefs = [
         {"A": torch.tensor([[1.0, 2.0], [3.0, 4.0]]), "b": torch.tensor([5.0, 6.0])},
         {"A": torch.tensor([[7.0, 8.0], [9.0, 10.0]]), "b": torch.tensor([11.0, 12.0])},
     ]
 
-    flat = ld.flatten_coefficients(native_coefs)
+    flat = flatten_coefficients(native_coefs)
 
     assert flat.shape == (2, 6)
     assert numpy.allclose(flat, numpy.array([
@@ -196,11 +196,29 @@ def test_damped_spring_weak_simulate_uses_native_K_C_b_names():
     D0 = torch.zeros(1, 1)
     V0 = torch.zeros(1, 1)
     t = torch.linspace(0.0, 0.2, 3)
+    params = numpy.array([[0.25]])
 
-    D, V = ld.simulate(coefs=coefs, IC=[[D0, V0]], t_Grid=[t])[0]
+    D, V = ld.simulate(coefs=coefs, IC=[[D0, V0]], t_Grid=[t], params=params)[0]
 
     assert D.shape == (3, 1, 1)
     assert V.shape == (3, 1, 1)
+
+
+def test_sindy_simulate_handles_multiple_parameters_without_recursion():
+    ld = SINDy(n_z=1, Uniform_t_Grid=True, config=_sindy_config())
+    coefs = [
+        {"A": torch.zeros(1, 1), "b": torch.ones(1)},
+        {"A": torch.zeros(1, 1), "b": 2.0 * torch.ones(1)},
+    ]
+    IC = [[torch.zeros(1, 1)], [torch.zeros(1, 1)]]
+    t_Grid = [torch.linspace(0.0, 0.2, 3), torch.linspace(0.0, 0.2, 3)]
+    params = numpy.array([[0.25], [0.75]])
+
+    Z = ld.simulate(coefs=coefs, IC=IC, t_Grid=t_Grid, params=params)
+
+    assert len(Z) == 2
+    assert Z[0][0].shape == (3, 1, 1)
+    assert Z[1][0].shape == (3, 1, 1)
 
 from LatentDynamics import LatentDynamics
 

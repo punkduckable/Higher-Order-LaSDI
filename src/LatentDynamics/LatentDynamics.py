@@ -790,7 +790,7 @@ class LatentDynamics:
                     coefs   : numpy.ndarray             | torch.Tensor, 
                     IC      : list[list[numpy.ndarray   | torch.Tensor]],
                     t_Grid  : list[numpy.ndarray        | torch.Tensor],
-                    params  : numpy.ndarray | None = None) -> list[list[numpy.ndarray | torch.Tensor]]:
+                    params  : numpy.ndarray) -> list[list[numpy.ndarray | torch.Tensor]]:
         """
         Time integrates the latent dynamics from multiple initial conditions for each combination
         of coefficients in coefs. 
@@ -825,10 +825,10 @@ class LatentDynamics:
             In the latter case, the j'th entry should specify the j'th time value at which we solve 
             for each latent state when we use the i'th combination of parameter values.
         
-        params : numpy.ndarray, shape = (n_param, n_p), optional
+        params : numpy.ndarray, shape = (n_param, n_p)
             The i'th row holds the i'th combination of parameter values. This can be used by latent 
             dynamics models that depend explicitly on parameter values (e.g., for time-varying or 
-            parameterized forcing). Default is None for latent dynamics that don't use parameters.
+            parameterized forcing).
 
      
         -------------------------------------------------------------------------------------------
