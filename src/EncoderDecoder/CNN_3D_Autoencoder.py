@@ -171,7 +171,7 @@ class CNN_3D_Autoencoder(EncoderDecoder):
 
 
         # FC configuration (analogous to the AE's hidden_widths/activations).
-        hidden_widths_fc        : list[int]         = cnn_config.get('hidden_widths_fc', cnn_config.get('hidden_widths'));
+        hidden_widths_fc        : list[int]         = cnn_config['hidden_widths_fc'];
         latent_dimension        : int               = cnn_config['latent_dimension'];
 
         # Checks: FC params.
@@ -186,7 +186,7 @@ class CNN_3D_Autoencoder(EncoderDecoder):
 
         # FC activations can either be a string or a list of strings.
         n_hidden_layers         : int               = len(hidden_widths_fc);
-        act_cfg = cnn_config.get('activations_fc', cnn_config.get('activations'));
+        act_cfg = cnn_config['activations_fc'];
         if(isinstance(act_cfg, str)):
             activations_fc      : list[str]        = [act_cfg] * n_hidden_layers;
         elif(isinstance(act_cfg, list)):
@@ -206,9 +206,9 @@ class CNN_3D_Autoencoder(EncoderDecoder):
 
         # Conv configuration.
         conv_channels       : list[int]     = cnn_config['conv_channels'];
-        conv_kernel_sizes                   = cnn_config.get('conv_kernel_sizes', 3);
-        conv_strides                        = cnn_config.get('conv_strides', 2);
-        conv_paddings                       = cnn_config.get('conv_paddings', 1);
+        conv_kernel_sizes                   = cnn_config['conv_kernel_sizes'];
+        conv_strides                        = cnn_config['conv_strides'];
+        conv_paddings                       = cnn_config['conv_paddings'];
 
         # Checks: conv params.
         assert isinstance(conv_channels, list),                 "type(conv_channels) = %s, expected list" % str(type(conv_channels));
@@ -221,7 +221,7 @@ class CNN_3D_Autoencoder(EncoderDecoder):
 
         # Per-layer conv activations. This can be a string (use same activation for all conv layers)
         # or a list of strings of length len(conv_channels) - 1.
-        conv_act_cfg = cnn_config.get('conv_activations', 'relu');
+        conv_act_cfg = cnn_config['conv_activations'];
         if(isinstance(conv_act_cfg, str)):
             conv_activations : list[str] = [conv_act_cfg] * (len(conv_channels) - 1);
         elif(isinstance(conv_act_cfg, list)):

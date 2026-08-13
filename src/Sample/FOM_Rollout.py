@@ -85,7 +85,7 @@ class FOM_Rollout(Sampler):
         );
 
         # Optional epsilon used for std-based normalizations
-        self.eps : float = float(sub.get('eps', 0.01));
+        self.eps : float = float(sub['eps']);
 
 
     def Sample(self, trainer : Trainer) -> NextStep:

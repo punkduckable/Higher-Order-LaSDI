@@ -11,6 +11,8 @@ trainer:
 
   device:                 'cpu'
 
+  noise_ratio:            0.0
+
   Second_Order_Rollout:
     lr:                     0.001
     gradient_clip:          15.0        # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
@@ -84,6 +86,7 @@ EncoderDecoder:
 
 
 latent_dynamics:
+  interpolator_type:      GP
   type:                     spring
   trainable:                true
   spring:

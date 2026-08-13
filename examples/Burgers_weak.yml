@@ -104,6 +104,7 @@ EncoderDecoder:
     activations:            ["sin", "sin", "sin", "sin"]
 
 latent_dynamics:
+  interpolator_type:      GP
   type:                     spring_w
   trainable:                true
   spring_w:
@@ -124,12 +125,3 @@ physics:
     convergence_threshold:  0.00000001
     uniform_t_grid:         false
 
-  BurgersSecondOrder:
-    n_t:                    501
-    t_max:                  1.
-    n_x:                    1001
-    x_min:                  -3.
-    x_max:                  3.
-    maxk:                   10
-    convergence_threshold:  0.00000001
-    uniform_t_grid:         false

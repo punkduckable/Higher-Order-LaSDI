@@ -11,6 +11,8 @@ trainer:
 
   device:                 'cpu'
 
+  noise_ratio:            0.0
+
   Second_Order_Rollout:
     lr:                     0.001
     gradient_clip:          15.0      # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
@@ -36,6 +38,7 @@ trainer:
       rollout:              1.0
       IC_rollout:           1.0
       coef:                 0.0001
+      stab:                 0.0
       consistency:          1.0
 
     loss_types:
@@ -82,6 +85,7 @@ EncoderDecoder:
     activations:            ["sin", "sin", "sin", "sin"]
 
 latent_dynamics:
+  interpolator_type:      GP
   type:                     spring
   trainable:                true
   spring:

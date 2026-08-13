@@ -118,16 +118,16 @@ class First_Order_Rollout(Trainer):
 
 
         # Fetch training hyperparameters 
-        self.lr                     : float     = float(sub_config.get('lr', 0.001));               # Learning rate for the optimizer.
-        self.gradient_clip          : float     = float(sub_config.get('gradient_clip', 10.0));     # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
-        self.warmup_epochs          : int       = int(sub_config.get('warmup_epochs', 40));         # We warmup the learning rate for this many epochs after greedy sampling.
+        self.lr                     : float     = float(sub_config['lr']);               # Learning rate for the optimizer.
+        self.gradient_clip          : float     = float(sub_config['gradient_clip']);     # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
+        self.warmup_epochs          : int       = int(sub_config['warmup_epochs']);         # We warmup the learning rate for this many epochs after greedy sampling.
 
 
         # Fetch rollout hyperparameters
-        self.p_rollout_init         : float     = float(sub_config.get('p_rollout_init', 0.01));    # The proportion of the simulated we simulate forward when computing the rollout loss.
-        self.rollout_update_freq    : int       = int(sub_config.get('rollout_update_freq', 10));   # We increase p_rollout after this many iterations.
-        self.dp_per_update          : float     = float(sub_config.get('dp_per_update', 0.005));    # We increase p_rollout by this much each time we increase it.
-        self.max_p_rollout          : float     = float(sub_config.get('max_p_rollout', 0.75));     # Maximum value p_rollout is allowed to reach (curriculum ceiling for the frame rollout loss).
+        self.p_rollout_init         : float     = float(sub_config['p_rollout_init']);    # The proportion of the simulated we simulate forward when computing the rollout loss.
+        self.rollout_update_freq    : int       = int(sub_config['rollout_update_freq']);   # We increase p_rollout after this many iterations.
+        self.dp_per_update          : float     = float(sub_config['dp_per_update']);    # We increase p_rollout by this much each time we increase it.
+        self.max_p_rollout          : float     = float(sub_config['max_p_rollout']);     # Maximum value p_rollout is allowed to reach (curriculum ceiling for the frame rollout loss).
 
 
         # Rollout supervision (frame-rollout mode; safe for non-autonomous latent dynamics):
@@ -140,20 +140,14 @@ class First_Order_Rollout(Trainer):
         assert self.n_rollouts > 0, "trainer.n_rollouts must be > 0";
         
         # Fetch IC rollout hyperparameters.
-        self.p_IC_rollout_init      : float     = float(sub_config.get('p_IC_rollout_init', 0.01));    # The proportion of the simulation we simulate forward when computing the IC rollout loss.
-        self.IC_rollout_update_freq : int       = int(sub_config.get('IC_rollout_update_freq', 10));   # We increase p_IC_rollout after this many iterations.
-        self.IC_dp_per_update       : float     = float(sub_config.get('IC_dp_per_update', 0.005));    # We increase p_IC_rollout by this much each time we increase it.
-        self.max_p_IC_rollout       : float     = float(sub_config.get('max_p_IC_rollout', 1.0));      # Maximum value p_IC_rollout is allowed to reach (curriculum ceiling for the IC rollout loss).
+        self.p_IC_rollout_init      : float     = float(sub_config['p_IC_rollout_init']);    # The proportion of the simulation we simulate forward when computing the IC rollout loss.
+        self.IC_rollout_update_freq : int       = int(sub_config['IC_rollout_update_freq']);   # We increase p_IC_rollout after this many iterations.
+        self.IC_dp_per_update       : float     = float(sub_config['IC_dp_per_update']);    # We increase p_IC_rollout by this much each time we increase it.
+        self.max_p_IC_rollout       : float     = float(sub_config['max_p_IC_rollout']);      # Maximum value p_IC_rollout is allowed to reach (curriculum ceiling for the IC rollout loss).
 
         # Fetch loss information.
         self.loss_weights           : dict      = sub_config['loss_weights'];                   # A dictionary housing the weights of the various parts of the loss function.
         self.loss_types             : dict      = sub_config['loss_types'];                     # A dictionary housing the type of loss function (MSE or MAE) for each part of the loss function.
-
-        # Set default values for 'coef', 'stab' entries of loss_weights
-        if 'coef' not in self.loss_weights.keys():
-            self.loss_weights['coef'] = 0.0;
-        if 'stab' not in self.loss_weights.keys():
-            self.loss_weights['stab'] = 0.0;
 
         # Set up the loss functions.
         LOGGER.info("Setting up the optimizer with a learning rate of %f" % (self.lr));

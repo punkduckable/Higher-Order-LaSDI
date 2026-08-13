@@ -133,8 +133,9 @@ class InterpolatableLatentDynamics(LatentDynamics):
                                 stochastic         = True,
                                 config             = config)
 
-        # Set up the Interpolate object. GP is the only implemented interpolator at the moment,
-        # so existing configs that omit this key use GP by default.
+        # Set up the Interpolate object. GP is the only implemented interpolator at the moment.
+        # Validated experiment YAML must make this explicit; the fallback preserves direct
+        # programmatic construction in focused unit tests and downstream scripts.
         assert isinstance(config, dict), "config must be a dictionary";
         interpolator_type : str = config.get("interpolator_type", "GP");
         assert interpolator_type in {"GP"}, "Allowed interpolator types are `GP`, got %s" % interpolator_type;

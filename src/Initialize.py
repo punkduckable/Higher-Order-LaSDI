@@ -177,8 +177,6 @@ def Initialize_Trainer(
     # Initialize the latent dynamics model. If we are using a restart file, then load the saved
     # latent dynamics from this file. 
     ld_type                 = config['latent_dynamics']['type'];
-    assert(ld_type in config['latent_dynamics']);
-    assert(ld_type in ld_dict);
     if(ld_type == "switch" or ld_type == "switch_w"):
         latent_dynamics         = ld_dict[ld_type]( n_z             = encoder_decoder.n_z, 
                                                     Uniform_t_Grid  = physics.Uniform_t_Grid,
@@ -251,8 +249,6 @@ def Initialize_Encoder_Decoder(physics : Physics, config : dict) -> EncoderDecod
     # First, determine what encoder_decoder we are using in the latent dynamics. Make sure the user 
     # included all the information that is necessary to initialize the corresponding dynamics.
     encoder_decoder_type : str = config['EncoderDecoder']['type'];
-    assert(encoder_decoder_type in config['EncoderDecoder']);
-    assert(encoder_decoder_type in encoder_decoder_dict);
     LOGGER.info("Initializing EncoderDecoder (%s)" % encoder_decoder_type);
 
     encoder_decoder = encoder_decoder_dict[encoder_decoder_type]( 

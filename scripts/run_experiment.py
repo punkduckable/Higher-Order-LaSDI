@@ -26,6 +26,7 @@ from    LatentDynamics              import  LatentDynamics;
 from    Trainer                     import  Trainer;
 from    Initialize                  import  Initialize_Trainer;
 from    Sample                      import  Sampler;
+from    Schemas                     import  validate_experiment_config;
 from    Utilities.Logging           import  Initialize_Logger, Log_Dictionary;
 
 
@@ -62,9 +63,10 @@ def main():
 
     # Load the configuration file. 
     with open(args.config, 'r') as f:
-        config      = yaml.safe_load(f);
+        raw_config  = yaml.safe_load(f);
+    config = validate_experiment_config(raw_config);
     
-    # Report the configuration settings.
+    # Report the validated configuration settings.
     Log_Dictionary(LOGGER = LOGGER, D = config, level = logging.INFO);
 
     # Check if we are loading from a restart or not. If so, load it.

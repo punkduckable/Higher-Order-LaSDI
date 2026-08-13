@@ -11,6 +11,8 @@ trainer:
 
   device:                 'cpu'
 
+  noise_ratio:            0.0
+
   First_Order_Rollout:
     lr:                     0.001
     gradient_clip:          15.0      # Maximum allowable gradient magnitude; will rescale gradientsif exceeded.
@@ -35,6 +37,7 @@ trainer:
       rollout:              1.0
       IC_rollout:           0.0
       coef:                 0.0001
+      stab:                 0.0
 
     loss_types:
       recon:                "MAE"
@@ -75,6 +78,7 @@ EncoderDecoder:
     activations:            ["sin", "sin", "sin", "sin"]
 
 latent_dynamics:
+  interpolator_type:      GP
   type:                     sindy
   trainable:                true
   sindy:

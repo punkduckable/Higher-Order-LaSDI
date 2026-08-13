@@ -170,8 +170,8 @@ class Burgers2D(Physics):
         self.n_t        : int   = int(cfg['n_t']);
         self.t_max      : float = float(cfg['t_max']);
 
-        # IC frequency; can be user-configured
-        self.w          : float = float(cfg.get('w', 0.5));
+        # IC frequency.
+        self.w          : float = float(cfg['w']);
 
         # Build spatial coordinates for convenience and plotting
         self.x_values   : numpy.ndarray = numpy.linspace(self.x_min, self.x_max, self.n_x, dtype=numpy.float32);
@@ -349,5 +349,4 @@ if __name__ == "__main__":
                                 levels      = 300,
                                 fps         = 30,
                                 dpi         = 150);
-
 
