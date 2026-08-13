@@ -110,8 +110,8 @@ class SwitchSINDy(InterpolatableLatentDynamics):
 
 
 
-    def trainable_coef_tensors(self) -> list[torch.Tensor]:
-        r"""Return all trainable switching-SINDy coefficient tensors."""
+    def trainable_tensors(self) -> list[torch.Tensor]:
+        r"""Return all trainable switching-SINDy tensors."""
 
         if self.trainable == False:
             return [];
@@ -203,6 +203,7 @@ class SwitchSINDy(InterpolatableLatentDynamics):
 
         # Finally, update the interpolator using the new training coefficients!
         self.update_interpolator();
+
         # All done :) 
         return None;
 

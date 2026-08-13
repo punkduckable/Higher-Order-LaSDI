@@ -112,7 +112,7 @@ class SINDy_weak(WeakLatentDynamics, InterpolatableLatentDynamics):
 
 
 
-    def trainable_coef_tensors(self) -> list[torch.Tensor]:
+    def trainable_tensors(self) -> list[torch.Tensor]:
         r"""Return the actual weak-form SINDy coefficient tensors to optimize."""
 
         if self.trainable == False:
@@ -188,7 +188,7 @@ class SINDy_weak(WeakLatentDynamics, InterpolatableLatentDynamics):
 
         # Finally, update the interpolator using the new training coefficients!
         self.update_interpolator();
-        
+
         # All done :) 
         return None;
 

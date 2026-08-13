@@ -98,7 +98,7 @@ class Trainer:
 
     - `Iterate(start_iter, end_iter)`: perform optimizer steps for the requested global iteration
       range, compute reconstruction/latent/rollout/etc. losses appropriate to the strategy, update
-      encoder/decoder parameters and `latent_dynamics.train_coefs`, record timing and per-parameter
+      encoder/decoder/latent_dynamics parameters, record timing and per-parameter
       losses, and call `_Save_Checkpoint(...)` whenever a new best model for the round is found.
 
     Subclasses commonly use `_optimizer_parameters()` to build optimizers over both neural-network
@@ -178,7 +178,7 @@ class Trainer:
 
         The trainer essentially defines how everything gets trained. It should do this by 
         initializing an optimizer on the EncoderDecoder parameters and trainable coefficients 
-        in the LatentDynamics object (fetched via LatentDynamics.trainable_coef_tensors). It 
+        in the LatentDynamics object (fetched via LatentDynamics.trainable_tensors). It 
         should train these parameters via a sequence of epochs. During each epoch, the Trainer 
         should evaluate a number of loss functions, add them together, then back-prop through the 
         loss to get the derivative of the loss with respect to each EncoderDecoder parameter and 
@@ -754,10 +754,9 @@ class Trainer:
         """
         Collect EncoderDecoder parameters and LD-owned coefficient tensors for optimization.
 
-        The latent-dynamics coefficients live in `self.latent_dynamics.train_coefs`. This method
-        verifies that every training parameter has a native coefficient dictionary, then appends the
-        actual tensors returned by `latent_dynamics.trainable_coef_tensors()` to the neural-network
-        parameters.
+        The latent-dynamics coefficients live the latent dynamics object but can be fetched using 
+        the `trainable_tensors` method (which should return all trainable tensors in the 
+        LD object).
 
 
         -------------------------------------------------------------------------------------------
@@ -773,26 +772,9 @@ class Trainer:
             trainable_params.extend(list(self.encoder_decoder.parameters()));
         if self.latent_dynamics.trainable == True:
             self._check_train_coefficients();
-            trainable_params.extend(self.latent_dynamics.trainable_coef_tensors());
+            trainable_params.extend(self.latent_dynamics.trainable_tensors());
 
         return trainable_params;
-
-
-
-    def _move_train_coefficients_to_device(self, device : str) -> None:
-        """
-        Move LD-owned training coefficient tensors to the requested device as trainable leaves.
-
-        This is primarily important after loading a checkpoint: checkpoints are restored on CPU for
-        portability, but a later GPU training round should optimize the native coefficient tensors
-        on the same device as the encoder/decoder instead of copying them inside every loss call.
-        """
-
-        for coef_dict in self.latent_dynamics.train_coefs.values():
-            for name, tensor in list(coef_dict.items()):
-                assert isinstance(tensor, torch.Tensor), "coefficient %s must be a torch.Tensor" % name;
-                coef_dict[name] = tensor.detach().to(device = device).clone().requires_grad_(self.latent_dynamics.trainable);
-        return;
 
 
 
@@ -806,7 +788,7 @@ class Trainer:
 
         The latent-dynamics coefficients are owned by `self.latent_dynamics`, so checkpointing now
         stores the LatentDynamics export dictionary rather than separate flattened train/test
-        coefficient arrays. This includes `latent_dynamics.train_coefs`, whose values are native
+        coefficient arrays. This includes the latent dynamics tensors, whose values are native
         coefficient dictionaries.
 
 
@@ -862,8 +844,8 @@ class Trainer:
         checkpoint. Note that the loaded encoder_decoder will always be on cpu, so you may need to
         manually move it to another device if cpu is insufficient.
 
-        The LatentDynamics load method replaces `latent_dynamics.train_coefs` with the coefficient
-        dictionary stored in the checkpoint and restores each coefficient tensor as a trainable leaf
+        The LatentDynamics load method replaces the latent dynamics object's internal tensors 
+        with those from the checkpoint and restores each trainable tensor as a trainable leaf
         tensor.
 
 

@@ -55,12 +55,6 @@ class Second_Order_Rollout(Trainer):
           (learning rate, rollout curriculum settings, and loss weights/types). This lets weak
           subclasses reuse this initializer without duplicating rollout setup.
 
-        **Coefficient semantics**
-
-        This trainer optimizes native coefficient tensors stored in `latent_dynamics.train_coefs`
-        for the current training parameters. The LatentDynamics state is checkpointed so that after
-        each training round the coefficients are restored to the best epoch of that round.
-
         **Checkpointing**
 
         The implementation of `Iterate(...)` is responsible for calling the base-class
@@ -355,7 +349,7 @@ class Second_Order_Rollout(Trainer):
         # checkpoint-restored LD coefficients from staying on CPU during a GPU training round.
         device                  : str                       = self.device;
         encoder_decoder_device  : EncoderDecoder            = self.encoder_decoder.to(device);
-        self._move_train_coefficients_to_device(device);
+        self.latent_dynamics.move_trainable_tensors_to_device(device);
 
         # Reset optimizer.
         optimizer_parameters_list   : list[torch.Tensor] = self._optimizer_parameters();
@@ -689,9 +683,7 @@ class Second_Order_Rollout(Trainer):
             self.timer.start("LD/Coefficient/Stability Losses");
             LOGGER.debug("LD/Coefficient/Stability Losses - start");
 
-            # Compute the latent dynamics, coefficient, and stability losses using the native
-            # coefficient dictionaries stored in latent_dynamics.train_coefs. The LatentDynamics
-            # object looks up the coefficient dictionary for each row of param_space.train_space.
+            # Compute the latent dynamics, coefficient, and stability losses.
             loss_LD_list, loss_coef_list, loss_stab_list   = self.latent_dynamics.compute_losses(   
                                                                             Latent_States    = Latent_States, 
                                                                             t_Grid           = t_Train_device,
@@ -1005,7 +997,7 @@ class Second_Order_Rollout(Trainer):
             # Record coefficient scale and the most recent epoch index for fallback checkpointing.
             if self.latent_dynamics.trainable:
                 with torch.no_grad():
-                    coef_tensors_report = self.latent_dynamics.trainable_coef_tensors();
+                    coef_tensors_report = self.latent_dynamics.trainable_tensors();
                     train_coefs_flat_report = torch.cat([c.reshape(-1) for c in coef_tensors_report]);
                     max_train_coef = float(torch.abs(train_coefs_flat_report).max().item());
             last_iter_idx = int(iter);

@@ -75,7 +75,7 @@ class WeakLatentDynamics(LatentDynamics):
 
         trainable : bool
             Indicates if the trainer should train the latent dynamics parameters. If false,
-            `trainable_coef_tensors` should return an empty list.
+            `trainable_tensors` should return an empty list.
 
         config : dict
             The "latent_dynamics" sub-dictionary of the config file. If `type == "weak"`, the
@@ -117,7 +117,6 @@ class WeakLatentDynamics(LatentDynamics):
         self.overlap         = float(weak_config["overlap"]);
         self.pq              = n_IC + 2;
         self.weight_function_derivatives = [{} for _ in range(self.n_IC + 1)];
-
 
 
     # ---------------------------------------------------------------------------------------------

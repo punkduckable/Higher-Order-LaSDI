@@ -106,7 +106,7 @@ class DampedSpring_weak(InterpolatableLatentDynamics, WeakLatentDynamics):
         return;
 
 
-    def trainable_coef_tensors(self) -> list[torch.Tensor]:
+    def trainable_tensors(self) -> list[torch.Tensor]:
         r"""Return the actual weak-form coefficient tensors to optimize."""
 
         if self.trainable == False:
@@ -182,7 +182,7 @@ class DampedSpring_weak(InterpolatableLatentDynamics, WeakLatentDynamics):
 
         # Finally, update the interpolator using the new training coefficients!
         self.update_interpolator();
-        
+
         return None;
 
 
