@@ -8,6 +8,7 @@ import  warnings;
 from    sklearn.gaussian_process.kernels    import  ConstantKernel, RBF, Matern;
 from    sklearn.gaussian_process            import  GaussianProcessRegressor;
 from    sklearn.exceptions                  import  ConvergenceWarning;
+from    Interpolate.Interpolate             import  Interpolate;
 
 # Set up logging.
 import  logging;
@@ -19,7 +20,7 @@ LOGGER = logging.getLogger(__name__);
 # GP Interpolate class
 # -------------------------------------------------------------------------------------------------
 
-class GPInterpolate:
+class GPInterpolate(Interpolate):
     r"""
     GP-backed interpolation for `Interpolatable` latent-dynamics objects.
 
@@ -28,33 +29,56 @@ class GPInterpolate:
     keys and tensor shapes as the latent-dynamics model's `train_coefs` entries.
     """
 
-    def __init__(self, train_coefs : dict[tuple[float, ...], dict[str, torch.Tensor]]) -> None:
-        r"""
-        Build one collection of GPs for each named coefficient tensor.
+    def __init__(self) -> None:
+        r"""Initialize an empty GP interpolator. Fitting happens in `update_train_coefs(...)`."""
 
-        For a fixed tensor name (for example "A" or "K"), every training parameter must have a
-        tensor with the same shape. We flatten that tensor component-wise and fit one independent GP
-        per scalar component, using the parameter tuple as GP input.
-        
-        -------------------------------------------------------------------------------------------
-        Arguments
-        -------------------------------------------------------------------------------------------
-
-        train_coefs : dict[tuple[float, ...], dict[str, torch.Tensor]]
-            LD-owned training coefficient dictionary. The outer key is an exact parameter tuple;
-            the inner dictionary maps coefficient tensor names to tensors.
+        return;
 
 
-        -------------------------------------------------------------------------------------------
-        Returns
-        -------------------------------------------------------------------------------------------
 
-        Nothing!
-        
-        """
+    def _matches_snapshot(self, train_coefs : dict[tuple[float, ...], dict[str, torch.Tensor]]) -> bool:
+        r"""Return True if `train_coefs` matches the coefficients used for the last GP fit."""
 
-        # Set the training coefficients.
-        self.update_train_coefs(train_coefs)
+        snapshot = getattr(self, "_train_coefs_snapshot", None);
+        if snapshot is None:
+            return False;
+        if set(train_coefs.keys()) != set(snapshot.keys()):
+            return False;
+
+        for key, coef_dict in train_coefs.items():
+            if not isinstance(coef_dict, dict):
+                return False;
+            snapshot_dict = snapshot[key];
+            if set(coef_dict.keys()) != set(snapshot_dict.keys()):
+                return False;
+            for name, tensor in coef_dict.items():
+                if not isinstance(tensor, torch.Tensor):
+                    return False;
+                snapshot_tensor = snapshot_dict[name];
+                if tensor.shape != snapshot_tensor.shape:
+                    return False;
+                if tensor.dtype != snapshot_tensor.dtype:
+                    return False;
+                if tensor.device != snapshot_tensor.device:
+                    return False;
+                if torch.equal(tensor.detach(), snapshot_tensor) == False:
+                    return False;
+
+        return True;
+
+
+
+    @staticmethod
+    def _snapshot_train_coefs(train_coefs : dict[tuple[float, ...], dict[str, torch.Tensor]]) -> dict[tuple[float, ...], dict[str, torch.Tensor]]:
+        r"""Create a detached tensor snapshot of the coefficients used for the current GP fit."""
+
+        snapshot : dict[tuple[float, ...], dict[str, torch.Tensor]] = {};
+        for key, coef_dict in train_coefs.items():
+            snapshot[key] = {};
+            for name, tensor in coef_dict.items():
+                snapshot[key][name] = tensor.detach().clone();
+        return snapshot;
+
 
 
     @staticmethod
@@ -120,6 +144,10 @@ class GPInterpolate:
         assert isinstance(train_coefs, dict), "train_coefs must be a dictionary";
         assert len(train_coefs) > 0, "train_coefs must be non-empty";
 
+        if self._matches_snapshot(train_coefs) == True:
+            LOGGER.debug("Skipping GP refit because training coefficients have not changed.");
+            return;
+
         # Store parameter keys in a deterministic list. This order is used to build both the GP
         # input array X and the corresponding target rows for every coefficient tensor.
         self.train_coefs = train_coefs;
@@ -160,6 +188,8 @@ class GPInterpolate:
             Y : numpy.ndarray = numpy.concatenate(Y_rows, axis = 0);
             self.gps[name] = fit_gps(self.X, Y);
             LOGGER.info("Fit %d GPs for coefficient tensor '%s' with shape %s" % (Y.shape[1], name, tuple(self.coef_shapes[name])));
+
+        self._train_coefs_snapshot = self._snapshot_train_coefs(train_coefs);
         return;
 
 
@@ -168,8 +198,7 @@ class GPInterpolate:
         Draw one sample from the posterior distributions for each coefficient, when these 
         distributions are conditioned on the passed parameter value. 
         
-        The returned dictionary has the same keys and tensor shapes as each item in `train_coefs`,
-        so it can be passed directly to `LatentDynamics.simulate(...)`.
+        The returned dictionary has the same keys and tensor shapes as each item in `train_coefs`.
 
 
         -------------------------------------------------------------------------------------------
@@ -325,7 +354,8 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
     # This is especially important when parameters have very different magnitudes
     # (e.g., ~1e-9 and ~1e-4), which can trigger many ConvergenceWarnings.
     x_mean  : numpy.ndarray = numpy.mean(X, axis = 0);
-    x_std   : numpy.ndarray = numpy.std(X, axis = 0, ddof = 1);  # Use unbiased estimator
+    ddof    : int           = 1 if X.shape[0] > 1 else 0;
+    x_std   : numpy.ndarray = numpy.std(X, axis = 0, ddof = ddof);  # Use unbiased estimator when possible.
     LOGGER.info(f"Input scaling: X_mean = {x_mean}, X_std = {x_std}");
     
     # Protect against near-zero / non-finite std in any input dimension.
@@ -364,7 +394,7 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
 
         # Scale targets per coefficient (each GP has its own target distribution).
         ith_mean: float = float(numpy.mean(targets_i));
-        ith_std: float  = float(numpy.std(targets_i, ddof = 1));  # Use unbiased estimator
+        ith_std: float  = float(numpy.std(targets_i, ddof = ddof));  # Use unbiased estimator when possible.
 
         # Protect against non-finite / near-zero target std (e.g., ddof=1 with n_train < 2).
         # Use a scale-aware threshold based on the observed range of the targets.

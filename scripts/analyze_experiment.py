@@ -21,7 +21,6 @@ from    Plotting.Metrics            import  Generate_Heatmap_Data;
 from    Plotting.Plot               import  Plot_Heatmap, Plot_Latent_Trajectories;
 from    Plotting.Plot               import  trainSpace_RelativeErrors_Heatmap;
 from    Plotting.Animate            import  make_solution_movies;
-from    Interpolate                 import  GPInterpolate;
 from    Rollouts                    import  Mean_Rollout; 
 from    Utilities.Logging           import  Initialize_Logger;
 from    Initialize                  import  Initialize_Trainer;
@@ -118,7 +117,6 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
     # Set up coefficient interpolator. 
     encoder_decoder.cpu();
     trainer._check_train_coefficients();
-    interpolator : Interpolate = GPInterpolate(latent_dynamics.train_coefs);
 
     # Number of coefficient/ROM samples used for plotting + uncertainty metrics.
     # Most samplers expose this as an attribute; fall back to 20 for custom samplers.
@@ -131,7 +129,6 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
                                                                                         physics         = physics,
                                                                                         param_space     = param_space,
                                                                                         latent_dynamics = latent_dynamics,
-                                                                                        interpolator    = interpolator,
                                                                                         t_Test          = trainer.t_Test,
                                                                                         U_Test          = trainer.U_Test,
                                                                                         n_samples       = n_samples_plot,
@@ -146,7 +143,6 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
     Plot_Latent_Trajectories(  physics         = physics,
                                encoder_decoder = encoder_decoder,
                                latent_dynamics = latent_dynamics,
-                               interpolator    = interpolator,
                                param_grid      = param_space.test_space[i_worst, :].reshape(1, -1),
                                n_samples       = n_samples_plot,
                                U_True          = [trainer.U_Test[i_worst]],
@@ -302,7 +298,6 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
         Zi_mean_np     : list[numpy.ndarray]   = Mean_Rollout(  encoder_decoder = encoder_decoder, # n_IC element list whose j'th element has shape (n_t(i), n_z)
                                                                 physics         = physics, 
                                                                 latent_dynamics = latent_dynamics, 
-                                                                interpolator    = interpolator, 
                                                                 param_grid      = param_worst, 
                                                                 t_Grid          = [t_worst],
                                                                 trainer         = trainer)[0];
@@ -474,27 +469,29 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
                             save_file_name  = save_file_name);
 
 
-        # Plot the mean and std of each coefficient at each testing parameter.
-        for d in range(latent_dynamics.n_coefs):
-            title           : str   = "Coefficient %d mean" % d;
-            save_file_name  : str   = config["physics"]["type"] + "Coefficient_%d_mean.png" % d;
+        # Plot the mean and std of each coefficient (assuming the LD is interpolatable) at each 
+        # testing parameter.
+        if coef_means is not None and coef_stds is not None:
+            for d in range(latent_dynamics.n_coefs):
+                title           : str   = "Coefficient %d mean" % d;
+                save_file_name  : str   = config["physics"]["type"] + "Coefficient_%d_mean.png" % d;
 
-            Plot_Heatmap(   values          = coef_means[:, d].reshape(param_space.test_grid_sizes),
-                            param_space     = param_space, 
-                            title           = title,
-                            save_file_name  = save_file_name,
-                            show_plot       = False,
-                            annotate_cells  = False);
+                Plot_Heatmap(   values          = coef_means[:, d].reshape(param_space.test_grid_sizes),
+                                param_space     = param_space, 
+                                title           = title,
+                                save_file_name  = save_file_name,
+                                show_plot       = False,
+                                annotate_cells  = False);
 
-            title           : str   = "Coefficient %d std" % d;
-            save_file_name  : str   = config["physics"]["type"] + "Coefficient_%d_std.png" % d;
+                title           : str   = "Coefficient %d std" % d;
+                save_file_name  : str   = config["physics"]["type"] + "Coefficient_%d_std.png" % d;
 
-            Plot_Heatmap(   values          = coef_stds[:, d].reshape(param_space.test_grid_sizes),
-                            param_space     = param_space, 
-                            title           = title,
-                            save_file_name  = save_file_name,
-                            show_plot       = False,
-                            annotate_cells  = False);
+                Plot_Heatmap(   values          = coef_stds[:, d].reshape(param_space.test_grid_sizes),
+                                param_space     = param_space, 
+                                title           = title,
+                                save_file_name  = save_file_name,
+                                show_plot       = False,
+                                annotate_cells  = False);
     else:
         LOGGER.warning("Skipping parameter-space heatmaps because param_space.n_p = %d; Plot_Heatmap supports only 2D or 3D parameter spaces." % param_space.n_p);
 

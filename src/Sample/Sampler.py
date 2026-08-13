@@ -26,10 +26,9 @@ class Sampler:
     In the HLaSDI framework, a ROM consists of an EncoderDecoder model and a LatentDynamics 
     object (acting as the Encoder/Decoder and Latent Dynamics portions of the ROM, respectively). 
     These are jointly trained via a Trainer object using data from a Physics object. The 
-    LatentDynamics object holds the learnedLatentDynamics coefficients for the training set,
-    while an Interpolate object samples LatentDynamics coefficients for testing parameter 
-    combinations. A Sampler object determines how the model picks which testing example to add
-    to the training set after each round of training.
+    LatentDynamics object holds the learnedLatentDynamics coefficients for the training set. A 
+    Sampler object determines how the model picks which testing example to add to the training 
+    set after each round of training.
 
     A `Sampler` decides which parameter point should be added to the HLaSDI training set after a
     round of training.  Concrete samplers can be intrusive, using held-out full-order solutions to
@@ -391,7 +390,8 @@ class Sampler:
             trainer.encoder_decoder.to(original_device);
 
             # If using weak forms, set up bump functions for these parameter combinations.
-            if getattr(trainer.latent_dynamics, "type", "strong") == "weak":
+            from LatentDynamics import WeakLatentDynamics;
+            if isinstance(trainer.latent_dynamics, WeakLatentDynamics):
                 for i in range(len(new_t_Train)):
                     trainer.latent_dynamics.add_weight_functions(
                             params_row = new_train_params[i, :], 
@@ -400,14 +400,8 @@ class Sampler:
             trainer.latent_dynamics.initialize_coefficients(
                 Latent_States   = Latent_States_list,
                 t_Grid          = [t.cpu() for t in new_t_Train],
-                params          = new_train_params);
-
-            # Move initialized coefficient tensors to the trainer device while keeping them trainable leaves.
-            for i in range(new_train_params.shape[0]):
-                coef_dict = trainer.latent_dynamics.get_train_coefs(new_train_params[i, :]);
-                for name, tensor in list(coef_dict.items()):
-                    coef_dict[name] = tensor.detach().to(dtype = torch.float32, device = trainer.device).clone().requires_grad_(True);
-
+                params          = new_train_params,
+                device          = trainer.device);
 
 
         # ---------------------------------------------------------------------------------------------

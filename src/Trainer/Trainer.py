@@ -15,7 +15,7 @@ from    EncoderDecoder              import  EncoderDecoder;
 from    Utilities.Timing            import  Timer;
 from    ParameterSpace              import  ParameterSpace;
 from    Physics                     import  Physics;
-from    LatentDynamics              import  LatentDynamics;
+from    LatentDynamics              import  LatentDynamics, InterpolatableLatentDynamics;
 
 # Setup Logger
 LOGGER : logging.Logger = logging.getLogger(__name__);
@@ -172,10 +172,9 @@ class Trainer:
         In the HLaSDI framework, a ROM consists of an EncoderDecoder model and a LatentDynamics 
         object (acting as the Encoder/Decoder and Latent Dynamics portions of the ROM, respectively). 
         These are jointly trained via a Trainer object using data from a Physics object. The 
-        LatentDynamics object holds the learnedLatentDynamics coefficients for the training set,
-        while an Interpolate object samples LatentDynamics coefficients for testing parameter 
-        combinations. A Sampler object determines how the model picks which testing example to add
-        to the training set after each round of training.
+        LatentDynamics object holds the learnedLatentDynamics coefficients for the training set. 
+        A Sampler object determines how the model picks which testing example to add to the 
+        training set after each round of training.
 
         The trainer essentially defines how everything gets trained. It should do this by 
         initializing an optimizer on the EncoderDecoder parameters and trainable coefficients 

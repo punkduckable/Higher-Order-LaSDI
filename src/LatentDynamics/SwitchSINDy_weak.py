@@ -7,7 +7,8 @@ import  logging;
 import  numpy;
 import  torch;
 
-from    LatentDynamics                  import  LatentDynamics;
+from    LatentDynamics.Weak             import  WeakLatentDynamics;
+from    LatentDynamics.Interpolatable   import  InterpolatableLatentDynamics;
 from    Utilities.FirstOrderSolvers     import  RK4;
 
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
@@ -18,7 +19,7 @@ LOGGER  : logging.Logger    = logging.getLogger(__name__);
 # SwitchSINDy_weak class
 # -------------------------------------------------------------------------------------------------
 
-class SwitchSINDy_weak(LatentDynamics):
+class SwitchSINDy_weak(WeakLatentDynamics, InterpolatableLatentDynamics):
     def __init__(   self,
                     n_z             : int,
                     Uniform_t_Grid  : bool,
@@ -79,13 +80,23 @@ class SwitchSINDy_weak(LatentDynamics):
 
         # Run the base class initializer. There are two affine systems, each with n_z*(n_z + 1)
         # scalar coefficients.
-        super().__init__(   n_z             = n_z,
-                            n_coefs         = n_z*(n_z + 1)*2,
-                            n_IC            = 1,
-                            Uniform_t_Grid  = Uniform_t_Grid,
-                            trainable       = config["trainable"],
-                            config          = config,
-                            type            = "weak");
+        InterpolatableLatentDynamics.__init__(   
+            self,
+            n_z             = n_z,
+            n_coefs         = n_z*(n_z + 1)*2,
+            n_IC            = 1,
+            Uniform_t_Grid  = Uniform_t_Grid,
+            trainable       = config["trainable"],
+            config          = config);
+
+        WeakLatentDynamics.__init__(   
+            self,
+            n_z             = n_z,
+            n_coefs         = n_z*(n_z + 1)*2,
+            n_IC            = 1,
+            Uniform_t_Grid  = Uniform_t_Grid,
+            trainable       = config["trainable"],
+            config          = config);
 
         # Class-specific initialization.
         self.switch_time : callable = switch_time;
@@ -123,13 +134,42 @@ class SwitchSINDy_weak(LatentDynamics):
             self,
             Latent_States   : list[list[torch.Tensor]],
             t_Grid          : list[torch.Tensor],
-            params          : numpy.ndarray | None = None) -> None:
+            device          : torch.device,
+            params          : numpy.ndarray) -> None:
         r"""
         Initialize weak-form switching-SINDy coefficients to zero.
 
         This method intentionally does not solve a weak-form least-squares system. Each requested
         parameter receives trainable zero tensors for `A_before`, `b_before`, `A_after`, and
         `b_after`; the optimizer learns them jointly with the encoder/decoder.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        Latent_States : list[list[torch.Tensor]], len = n_param
+            The i'th list element contains one latent trajectory tensor with shape (n_t(i), n_z).
+            This method uses the tensor dtype/device to initialize coefficients with matching
+            precision and placement.
+
+        t_Grid : list[torch.Tensor], len = n_param
+            Time grids corresponding to the latent trajectories. These are checked for length
+            consistency but are not otherwise used because weak coefficients are zero-initialized.
+
+        device : torch.device
+            Device on which the new coefficient tensors should be stored.
+
+        params : numpy.ndarray, shape = (n_param, n_p)
+            Parameter rows used as keys in `self.train_coefs`.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        None. Zero coefficient dictionaries are stored in `self.train_coefs`, and the interpolator
+        is updated from the full training-coefficient dictionary.
         """
 
         assert params is not None, "SwitchSINDy_weak.initialize_coefficients requires `params`";
@@ -141,7 +181,6 @@ class SwitchSINDy_weak(LatentDynamics):
             assert isinstance(Latent_States[i], list);
             assert len(Latent_States[i]) == self.n_IC;
             assert isinstance(Latent_States[i][0], torch.Tensor);
-            device = Latent_States[i][0].device;
             dtype  = Latent_States[i][0].dtype;
 
             A_before : torch.Tensor = torch.zeros((self.n_z, self.n_z), device = device, dtype = dtype, requires_grad = True);
@@ -153,8 +192,11 @@ class SwitchSINDy_weak(LatentDynamics):
                 "b_before": b_before,
                 "A_after":  A_after,
                 "b_after":  b_after,
-            });
+            }, device);
 
+        # Finally, update the interpolator using the new training coefficients!
+        self.update_interpolator();
+        # All done :) 
         return None;
 
 
@@ -283,10 +325,10 @@ class SwitchSINDy_weak(LatentDynamics):
 
 
     def simulate(   self,
-                    coefs   : dict[str, numpy.ndarray | torch.Tensor] | list[dict[str, numpy.ndarray | torch.Tensor]],
                     IC      : list[list[numpy.ndarray | torch.Tensor]],
                     t_Grid  : list[numpy.ndarray      | torch.Tensor],
-                    params  : numpy.ndarray) -> list[list[numpy.ndarray | torch.Tensor]]:
+                    params  : numpy.ndarray,
+                    sample  : bool  = False) -> list[list[numpy.ndarray | torch.Tensor]]:
         r"""
         Time integrates the switching SINDy latent dynamics.
 
@@ -298,9 +340,6 @@ class SwitchSINDy_weak(LatentDynamics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        coefs : dict or list[dict]
-            Native coefficient dictionary/dictionaries for the switching affine systems.
-
         IC : list[list[numpy.ndarray | torch.Tensor]], len = n_param
             Initial latent states for each parameter/coefficient set. SwitchSINDy_weak has one IC
             component.
@@ -311,6 +350,11 @@ class SwitchSINDy_weak(LatentDynamics):
         params : numpy.ndarray, shape = (n_param, n_p)
             Parameter rows used to compute the switch time for each simulation.
 
+        sample : bool 
+            If self is stochastic, setting this to true will sample from the posterior distribution 
+            of the latent dynamics at each parameter value, then solve the latent dynamics using 
+            the resulting sample. Otherwise, setting this to true will use the mean of that 
+            posterior distribution. If self is not stochastic, this does nothing.
 
         -------------------------------------------------------------------------------------------
         Returns
@@ -321,19 +365,20 @@ class SwitchSINDy_weak(LatentDynamics):
             (n_t(i), n_initial_conditions, n_z).
         """
 
-        # Normalize coefficient input to a list so the multi-parameter and single-parameter paths
-        # share the same validation/bookkeeping.
-        if isinstance(coefs, dict):
-            coefs_list = [coefs];
-        else:
-            coefs_list = coefs;
-        assert isinstance(coefs_list, list);
+        # Checks.
         assert isinstance(params, numpy.ndarray);
         assert len(params.shape) == 2;
         n_param : int = params.shape[0];
-        assert len(coefs_list) == n_param;
         assert isinstance(t_Grid, list) and isinstance(IC, list);
         assert len(IC) == n_param and len(t_Grid) == n_param;
+
+
+        # -----------------------------------------------------------------------------------------
+        # Fetch coefficient dictionaries for the passed parameters.
+        # -----------------------------------------------------------------------------------------
+
+        coefs_list : list[dict[str, torch.Tensor]] = self._coefs_for_params(params = params, sample = sample);
+
 
         # -----------------------------------------------------------------------------------------
         # Loop through parameter combinations.

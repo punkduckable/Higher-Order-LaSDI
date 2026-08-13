@@ -7,12 +7,14 @@ defines second-order latent dynamics, and the `_weak` variants use weak-form res
 """
 
 from    .LatentDynamics         import  LatentDynamics;
+from    .DampedSpring           import  DampedSpring;
+from    .DampedSpring_weak      import  DampedSpring_weak;
+from    .Interpolatable         import  InterpolatableLatentDynamics;
 from    .SINDy                  import  SINDy;
 from    .SINDy_weak             import  SINDy_weak;
 from    .SwitchSINDy            import  SwitchSINDy;
 from    .SwitchSINDy_weak       import  SwitchSINDy_weak;
-from    .DampedSpring           import  DampedSpring;
-from    .DampedSpring_weak      import  DampedSpring_weak;
+from    .Weak                   import  WeakLatentDynamics;
 
 __all__ = [    "LatentDynamics",
                "SINDy",
@@ -20,4 +22,6 @@ __all__ = [    "LatentDynamics",
                "SwitchSINDy",
                "SwitchSINDy_weak",
                "DampedSpring",
-               "DampedSpring_weak"];
+               "DampedSpring_weak",
+               "WeakLatentDynamics",
+               "InterpolatableLatentDynamics"];

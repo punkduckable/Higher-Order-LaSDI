@@ -10,6 +10,7 @@ sys.path.append(SRC)
 
 from LatentDynamics import SINDy
 from Interpolate import GPInterpolate
+import Interpolate.GaussianProcess as GPModule
 from Plotting.Metrics import flatten_coefficients
 
 
@@ -77,7 +78,7 @@ def test_sindy_initialize_coefficients_stores_native_trainable_dict():
     z = torch.exp(-t).reshape(-1, 1)
     params = numpy.array([[0.25]])
 
-    out = ld.initialize_coefficients(Latent_States=[[z]], t_Grid=[t], params=params)
+    out = ld.initialize_coefficients(Latent_States=[[z]], t_Grid=[t], device=torch.device("cpu"), params=params)
 
     assert out is None
     coefs = ld.get_train_coefs(params[0])
@@ -93,7 +94,7 @@ def test_sindy_initialize_coefficients_stores_native_trainable_dict():
 
 def test_latent_dynamics_export_load_restores_trainable_coefs():
     ld = SINDy(n_z=1, Uniform_t_Grid=True, config=_sindy_config())
-    ld.set_train_coefs(numpy.array([1.0]), {"A": torch.ones(1, 1), "b": torch.zeros(1)})
+    ld.set_train_coefs(numpy.array([1.0]), {"A": torch.ones(1, 1), "b": torch.zeros(1)}, torch.device("cpu"))
     exported = ld.export()
 
     ld2 = SINDy(n_z=1, Uniform_t_Grid=True, config=_sindy_config())
@@ -111,7 +112,8 @@ def test_interpolate_sample_mean_and_std_preserve_keys_and_shapes():
         (0.0,): {"A": torch.zeros(1, 1), "b": torch.zeros(1)},
         (1.0,): {"A": torch.ones(1, 1), "b": torch.ones(1)},
     }
-    interp = GPInterpolate(train_coefs)
+    interp = GPInterpolate()
+    interp.update_train_coefs(train_coefs)
 
     mean = interp.mean(numpy.array([0.5]))
     std = interp.std(numpy.array([0.5]))
@@ -126,6 +128,32 @@ def test_interpolate_sample_mean_and_std_preserve_keys_and_shapes():
     assert std["b"].shape == (1,)
     assert sample["A"].shape == (1, 1)
     assert sample["b"].shape == (1,)
+
+
+def test_gp_interpolate_update_train_coefs_skips_unchanged_refit(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_fit_gps(X, Y):
+        calls["n"] += 1
+        return [object() for _ in range(Y.shape[1])]
+
+    monkeypatch.setattr(GPModule, "fit_gps", fake_fit_gps)
+    train_coefs = {
+        (0.0,): {"A": torch.zeros(1, 1), "b": torch.zeros(1)},
+        (1.0,): {"A": torch.ones(1, 1), "b": torch.ones(1)},
+    }
+    interp = GPInterpolate()
+    assert calls["n"] == 0
+
+    interp.update_train_coefs(train_coefs)
+    assert calls["n"] == 2
+
+    interp.update_train_coefs(train_coefs)
+    assert calls["n"] == 2
+
+    train_coefs[(1.0,)]["b"] = 2.0 * torch.ones(1)
+    interp.update_train_coefs(train_coefs)
+    assert calls["n"] == 4
 
 
 def test_base_flatten_coefficients_concatenates_native_dict_items():
@@ -145,7 +173,8 @@ def test_base_flatten_coefficients_concatenates_native_dict_items():
 
 def test_interpolate_rejects_non_tensor_values():
     with pytest.raises(AssertionError):
-        GPInterpolate({(0.0,): {"A": numpy.zeros((1, 1))}})
+        interp = GPInterpolate()
+        interp.update_train_coefs({(0.0,): {"A": numpy.zeros((1, 1))}})
 
 from LatentDynamics import DampedSpring, DampedSpring_weak, SINDy_weak, SwitchSINDy_weak
 from Utilities.FiniteDifference import Derivative1_Order4
@@ -158,7 +187,7 @@ def test_damped_spring_initialize_coefficients_uses_K_C_b_names():
     dz = torch.cos(t).reshape(-1, 1)
     params = numpy.array([[0.5]])
 
-    out = ld.initialize_coefficients(Latent_States=[[z, dz]], t_Grid=[t], params=params)
+    out = ld.initialize_coefficients(Latent_States=[[z, dz]], t_Grid=[t], device=torch.device("cpu"), params=params)
 
     assert out is None
     coefs = ld.get_train_coefs(params[0])
@@ -178,7 +207,7 @@ def test_damped_spring_compute_losses_uses_native_K_C_b_rhs():
     K = torch.tensor([[2.0]])
     C = torch.tensor([[-0.5]])
     b = torch.tensor([0.1])
-    ld.set_train_coefs(params[0], {"K": K, "C": C, "b": b})
+    ld.set_train_coefs(params[0], {"K": K, "C": C, "b": b}, torch.device("cpu"))
 
     loss_LD_list, loss_coef_list, loss_stab_list = ld.compute_losses([[z, dz]], "MSE", [t], params)
 
@@ -197,8 +226,9 @@ def test_damped_spring_weak_simulate_uses_native_K_C_b_names():
     V0 = torch.zeros(1, 1)
     t = torch.linspace(0.0, 0.2, 3)
     params = numpy.array([[0.25]])
+    ld.set_train_coefs(params[0], coefs, torch.device("cpu"))
 
-    D, V = ld.simulate(coefs=coefs, IC=[[D0, V0]], t_Grid=[t], params=params)[0]
+    D, V = ld.simulate(IC=[[D0, V0]], t_Grid=[t], params=params)[0]
 
     assert D.shape == (3, 1, 1)
     assert V.shape == (3, 1, 1)
@@ -213,14 +243,50 @@ def test_sindy_simulate_handles_multiple_parameters_without_recursion():
     IC = [[torch.zeros(1, 1)], [torch.zeros(1, 1)]]
     t_Grid = [torch.linspace(0.0, 0.2, 3), torch.linspace(0.0, 0.2, 3)]
     params = numpy.array([[0.25], [0.75]])
+    for i in range(params.shape[0]):
+        ld.set_train_coefs(params[i, :], coefs[i], torch.device("cpu"))
 
-    Z = ld.simulate(coefs=coefs, IC=IC, t_Grid=t_Grid, params=params)
+    Z = ld.simulate(IC=IC, t_Grid=t_Grid, params=params)
 
     assert len(Z) == 2
     assert Z[0][0].shape == (3, 1, 1)
     assert Z[1][0].shape == (3, 1, 1)
 
-from LatentDynamics import LatentDynamics
+
+def test_interpolatable_simulate_uses_train_coefs_before_interpolator():
+    class DummyInterpolator:
+        def __init__(self):
+            self.mean_calls = 0
+            self.sample_calls = 0
+
+        def update_train_coefs(self, train_coefs):
+            return None
+
+        def mean(self, param):
+            self.mean_calls += 1
+            return {"A": torch.zeros(1, 1), "b": 7.0 * torch.ones(1)}
+
+        def sample(self, param):
+            self.sample_calls += 1
+            return {"A": torch.zeros(1, 1), "b": 11.0 * torch.ones(1)}
+
+    ld = SINDy(n_z=1, Uniform_t_Grid=True, config=_sindy_config())
+    dummy = DummyInterpolator()
+    ld.interpolator = dummy
+    train_params = numpy.array([[0.25]])
+    ld.set_train_coefs(train_params[0], {"A": torch.zeros(1, 1), "b": 3.0 * torch.ones(1)}, torch.device("cpu"))
+
+    Z_train = ld.simulate(IC=[[torch.zeros(1, 1)]], t_Grid=[torch.tensor([0.0, 0.1])], params=train_params, sample=True)[0][0]
+    assert torch.allclose(Z_train[-1, 0, 0], torch.tensor(0.3), atol=1.0e-6)
+    assert dummy.sample_calls == 0
+
+    test_params = numpy.array([[0.75]])
+    Z_test = ld.simulate(IC=[[torch.zeros(1, 1)]], t_Grid=[torch.tensor([0.0, 0.1])], params=test_params, sample=False)[0][0]
+    assert torch.allclose(Z_test[-1, 0, 0], torch.tensor(0.7), atol=1.0e-6)
+    assert dummy.mean_calls == 1
+
+
+from LatentDynamics import LatentDynamics, WeakLatentDynamics
 
 
 def _weak_base_config(test_func_type="PC-poly"):
@@ -238,11 +304,11 @@ def _weak_base_config(test_func_type="PC-poly"):
 def test_weak_latent_dynamics_requires_weak_config_keys():
     bad_config = {"type": "dummy", "trainable": True, "dummy": {"test_func_width": 0.5, "overlap": 0.5}}
     with pytest.raises(AssertionError):
-        LatentDynamics(n_z=1, n_coefs=1, n_IC=2, Uniform_t_Grid=True, trainable=True, config=bad_config, type="weak")
+        WeakLatentDynamics(n_z=1, n_coefs=1, n_IC=2, Uniform_t_Grid=True, trainable=True, config=bad_config)
 
 
 def test_add_and_get_weight_functions_store_arbitrary_derivatives():
-    ld = LatentDynamics(n_z=1, n_coefs=1, n_IC=2, Uniform_t_Grid=True, trainable=True, config=_weak_base_config(), type="weak")
+    ld = WeakLatentDynamics(n_z=1, n_coefs=1, n_IC=2, Uniform_t_Grid=True, trainable=True, config=_weak_base_config())
     params = numpy.array([0.25])
     t = torch.linspace(0.0, 1.0, 11)
 
@@ -257,7 +323,7 @@ def test_add_and_get_weight_functions_store_arbitrary_derivatives():
 
 
 def test_get_test_functions_missing_param_raises_keyerror():
-    ld = LatentDynamics(n_z=1, n_coefs=1, n_IC=2, Uniform_t_Grid=True, trainable=True, config=_weak_base_config(), type="weak")
+    ld = WeakLatentDynamics(n_z=1, n_coefs=1, n_IC=2, Uniform_t_Grid=True, trainable=True, config=_weak_base_config())
     with pytest.raises(KeyError):
         ld.get_test_functions(numpy.array([0.25]))
 
@@ -269,7 +335,7 @@ def test_damped_spring_weak_fit_zero_initializes_and_compute_losses_requires_wei
     dz = torch.cos(t).reshape(-1, 1)
     params = numpy.array([[0.25]])
 
-    out = ld.initialize_coefficients([[z, dz]], [t], params)
+    out = ld.initialize_coefficients([[z, dz]], [t], torch.device("cpu"), params)
     coefs = ld.get_train_coefs(params[0])
 
     assert out is None
@@ -288,7 +354,7 @@ def test_sindy_weak_fit_zero_initializes_and_compute_losses_requires_weights():
     z = torch.sin(t).reshape(-1, 1)
     params = numpy.array([[0.25]])
 
-    out = ld.initialize_coefficients([[z]], [t], params)
+    out = ld.initialize_coefficients([[z]], [t], torch.device("cpu"), params)
     coefs = ld.get_train_coefs(params[0])
 
     assert out is None
@@ -309,7 +375,7 @@ def test_sindy_weak_compute_losses_with_weight_functions_returns_losses():
     params = numpy.array([[0.25]])
 
     ld.add_weight_functions(params[0], t)
-    ld.initialize_coefficients([[z]], [t], params)
+    ld.initialize_coefficients([[z]], [t], torch.device("cpu"), params)
     loss_LD_list, loss_coef_list, loss_stab_list = ld.compute_losses([[z]], "MSE", [t], params)
 
     assert len(loss_LD_list) == 1
@@ -324,7 +390,7 @@ def test_switch_sindy_weak_fit_zero_initializes_native_names():
     z = torch.sin(t).reshape(-1, 1)
     params = numpy.array([[0.25]])
 
-    out = ld.initialize_coefficients([[z]], [t], params)
+    out = ld.initialize_coefficients([[z]], [t], torch.device("cpu"), params)
     coefs = ld.get_train_coefs(params[0])
 
     assert out is None
@@ -347,14 +413,15 @@ def test_switch_sindy_weak_simulate_returns_first_order_trajectory_shape():
     Z0 = torch.zeros(1, 1)
     t = torch.linspace(0.0, 1.0, 5)
     params = numpy.array([[0.25]])
+    ld.set_train_coefs(params[0], coefs, torch.device("cpu"))
 
-    Z = ld.simulate(coefs=coefs, IC=[[Z0]], t_Grid=[t], params=params)[0][0]
+    Z = ld.simulate(IC=[[Z0]], t_Grid=[t], params=params)[0][0]
 
     assert Z.shape == (5, 1, 1)
 
 
 def test_get_uniform_grid_no_p_argument():
-    ld = LatentDynamics(n_z=1, n_coefs=1, n_IC=1, Uniform_t_Grid=True, trainable=True, config={})
+    ld = WeakLatentDynamics(n_z=1, n_coefs=1, n_IC=1, Uniform_t_Grid=True, trainable=True, config=_weak_base_config())
     a_s, b_s = ld._get_support_intervals(T=1.0, L=0.5, s=0.25)
 
     assert numpy.allclose(a_s, numpy.array([0.0, 0.25, 0.5]))

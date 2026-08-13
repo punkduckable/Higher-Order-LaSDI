@@ -9,7 +9,7 @@ import  torch;
 from    EncoderDecoder                  import  EncoderDecoder;
 from    ParameterSpace                  import  ParameterSpace;
 from    Physics                         import  Physics;
-from    LatentDynamics                  import  LatentDynamics;
+from    LatentDynamics                  import  LatentDynamics, WeakLatentDynamics;
 from    Trainer.First_Order_Rollout     import  First_Order_Rollout;
 
 # Setup Logger
@@ -44,7 +44,7 @@ class First_Order_Weak(First_Order_Rollout):
         LOGGER.info("Initializing a First_Order_Weak object");
 
         # Make sure we are set up to work with a weak-form latent dynamics object.
-        assert getattr(latent_dynamics, "type", None) == "weak",        "First_Order_Weak requires latent_dynamics.type == 'weak'";
+        assert isinstance(latent_dynamics, WeakLatentDynamics),         "First_Order_Weak a weak latent dynamics object";
         assert hasattr(latent_dynamics, "add_weight_functions"),        "latent dynamics must have an `add_weight_functions` method";
         assert hasattr(latent_dynamics, "get_test_functions"),          "latent dynamics must have a `get_test_functions` method";
 

@@ -7,7 +7,7 @@ import  logging;
 import  numpy;
 import  torch;
 
-from    LatentDynamics                  import  LatentDynamics;
+from    LatentDynamics.Interpolatable   import  InterpolatableLatentDynamics;
 from    Utilities.FiniteDifference      import  Derivative1_Order4, Derivative1_Order2_NonUniform;
 from    Utilities.FirstOrderSolvers     import  RK4;
 
@@ -19,7 +19,7 @@ LOGGER  : logging.Logger    = logging.getLogger(__name__);
 # SINDy class
 # -------------------------------------------------------------------------------------------------
 
-class SINDy(LatentDynamics):
+class SINDy(InterpolatableLatentDynamics):
     def __init__(   self, 
                     n_z             : int,
                     Uniform_t_Grid  : bool,
@@ -74,14 +74,15 @@ class SINDy(LatentDynamics):
         assert  "sindy"     in config;
 
         # Run the base class initializer. Note that this initializes self.train_coefs.
-        super().__init__(n_z            = n_z, 
-                         n_coefs        = n_z*(n_z + 1), 
-                         n_IC           = 1, 
-                         Uniform_t_Grid = Uniform_t_Grid,
-                         trainable      = config["trainable"],
-                         config         = config,
-                         type           = "strong");
-        
+        InterpolatableLatentDynamics.__init__(
+            self,
+            n_z            = n_z, 
+            n_coefs        = n_z*(n_z + 1), 
+            n_IC           = 1, 
+            Uniform_t_Grid = Uniform_t_Grid,
+            trainable      = config["trainable"],
+            config         = config);
+
         # Set up class-specific variables.
         self.lstsq_reg : float = config["sindy"]["lstsq_reg"];
         LOGGER.info("Initializing a SINDY object with n_z = %d, Uniform_t_Grid = %s, lstsq_reg = %s" % (self.n_z, str(self.Uniform_t_Grid), str(self.lstsq_reg)));
@@ -133,7 +134,8 @@ class SINDy(LatentDynamics):
             self,
             Latent_States   : list[list[torch.Tensor]],
             t_Grid          : list[torch.Tensor],
-            params          : numpy.ndarray | None = None) -> None:
+            device          : torch.device,
+            params          : numpy.ndarray) -> None:
         r"""
         Fit and store SINDy coefficients for one or more training parameters.
 
@@ -155,11 +157,12 @@ class SINDy(LatentDynamics):
         t_Grid : list[torch.Tensor], len = n_param
             Time grid for each latent trajectory.
 
+        device : torch.device
+            The device where we want to store the new coefficients.
+            
         params : numpy.ndarray, shape = (n_param, n_p)
-            Parameter rows used as keys in `self.train_coefs`. This is required; omitting it is a
-            bookkeeping error and should stop the run.
-
-
+            Parameter rows used as keys in `self.train_coefs`. 
+            
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
@@ -199,7 +202,12 @@ class SINDy(LatentDynamics):
 
             # Store the result in native form. This intentionally overwrites the coefficient entry
             # for this exact parameter if it already exists.
-            self.set_train_coefs(params[i, :], self._native_from_matrix(coefs));
+            self.set_train_coefs(params[i, :], self._native_from_matrix(coefs), device);
+
+        # Finally, update the interpolator using the new training coefficients!
+        self.update_interpolator();
+
+        # All done :) 
         return None;
 
 
@@ -304,25 +312,19 @@ class SINDy(LatentDynamics):
 
 
     def simulate(   self,
-                    coefs   : dict[str, numpy.ndarray | torch.Tensor] | list[dict[str, numpy.ndarray | torch.Tensor]],
                     IC      : list[list[numpy.ndarray | torch.Tensor]],
                     t_Grid  : list[numpy.ndarray      | torch.Tensor],
-                    params  : numpy.ndarray) -> list[list[numpy.ndarray | torch.Tensor]]:
+                    params  : numpy.ndarray,
+                    sample  : bool = False) -> list[list[numpy.ndarray | torch.Tensor]]:
         r"""
         Time-integrate the native SINDy latent dynamics.
 
-        The coefficient argument is now either a single native dictionary {"A", "b"} or a list of
-        such dictionaries. This lets callers pass coefficients returned by `Interpolate.sample`,
-        `Interpolate.mean`, or direct `train_coefs` lookups without any flattened unpacking.
-
+        Coefficients are fetched from `self.train_coefs` for training parameters and from
+        `self.interpolator` for non-training parameters.
 
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
-
-        coefs : dict or list[dict]
-            Native coefficient dictionary/dictionaries. For SINDy each dictionary must contain
-            `A` with shape (n_z, n_z) and `b` with shape (n_z,).
 
         IC : list[list[numpy.ndarray | torch.Tensor]], len = n_param
             Initial latent states for each coefficient set. SINDy has one IC component.
@@ -332,7 +334,13 @@ class SINDy(LatentDynamics):
 
         params : numpy.ndarray, shape = (n_param, n_p)
             The i'th row holds the i'th combination of parameter values.
-
+        
+        sample : bool 
+            If self is stochastic, setting this to true will sample from the posterior distribution 
+            of the latent dynamics at each parameter value, then solve the latent dynamics using 
+            the resulting sample. Otherwise, setting this to true will use the mean of that 
+            posterior distribution. If self is not stochastic, this does nothing.
+            
 
         -------------------------------------------------------------------------------------------
         Returns
@@ -342,19 +350,20 @@ class SINDy(LatentDynamics):
             Simulated latent trajectories. Z[i][0] has shape (n_t(i), n_initial_conditions, n_z).
         """
 
-        # Normalize the coefficient input to a list so the multi-parameter and single-parameter
-        # cases share the same bookkeeping.
-        if isinstance(coefs, dict):
-            coefs_list = [coefs];
-        else:
-            coefs_list = coefs;
-        assert isinstance(coefs_list, list);
+        # Checks.
         assert isinstance(params, numpy.ndarray);
         assert len(params.shape) == 2;
         n_param : int = params.shape[0];
-        assert len(coefs_list) == n_param;
         assert isinstance(t_Grid, list) and isinstance(IC, list);
         assert len(IC) == n_param and len(t_Grid) == n_param;
+
+
+        # -----------------------------------------------------------------------------------------
+        # Fetch coefficient dictionaries for the passed parameters.
+        # -----------------------------------------------------------------------------------------
+
+        coefs_list : list[dict[str, torch.Tensor]] = self._coefs_for_params(params = params, sample = sample);
+
 
         # -----------------------------------------------------------------------------------------
         # Loop through parameter combinations.

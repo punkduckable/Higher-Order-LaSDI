@@ -753,7 +753,6 @@ class Second_Order_Rollout(Trainer):
                     start_idx = numpy.random.choice(rollable, size = n_roll_i, replace = False);
 
                     param_i = self.param_space.train_space[i, :].reshape(1, -1);
-                    coef_i  = self.latent_dynamics.get_train_coefs(self.param_space.train_space[i, :]);
 
                     Z_D_i : torch.Tensor = Latent_States[i][0];
                     Z_V_i : torch.Tensor = Latent_States[i][1];
@@ -807,7 +806,6 @@ class Second_Order_Rollout(Trainer):
                         Z_V0 : torch.Tensor = Z_V_i[k_int:(k_int + 1), :];
 
                         Z_pred_all : list[list[torch.Tensor]] = self.latent_dynamics.simulate(
-                            coefs  = coef_i,
                             IC     = [[Z_D0, Z_V0]],
                             t_Grid = [t_win_np],
                             params = param_i);
@@ -910,13 +908,9 @@ class Second_Order_Rollout(Trainer):
                     
                     # Encode the FOM initial conditions
                     Z_D_IC_i, Z_V_IC_i = encoder_decoder_device.Encode(D_IC_i, V_IC_i);
-                    
-                    # Get the coefficients for this combination of parameters
-                    train_coef_i            : dict[str, torch.Tensor]     = self.latent_dynamics.get_train_coefs(param_i);
-                    
+
                     # Simulate the latent dynamics forward in time
-                    Z_IC_Rollout_i    : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(  coefs   = train_coef_i, 
-                                                                                                    IC      = [[Z_D_IC_i, Z_V_IC_i]], 
+                    Z_IC_Rollout_i    : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(  IC      = [[Z_D_IC_i, Z_V_IC_i]], 
                                                                                                     t_Grid  = [t_Grid_IC_rollout[i]], 
                                                                                                     params  = param_i.reshape(1, -1));
                     

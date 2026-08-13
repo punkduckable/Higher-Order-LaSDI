@@ -24,9 +24,8 @@ class Physics:
     In the HLaSDI framework, a ROM consists of an EncoderDecoder model and a LatentDynamics 
     object (acting as the Encoder/Decoder and Latent Dynamics portions of the ROM, respectively). 
     These are jointly trained via a Trainer object using data from a Physics object. The 
-    LatentDynamics object holds the learnedLatentDynamics coefficients for the training set,
-    while an Interpolate object samples LatentDynamics coefficients for testing parameter 
-    combinations. A Sampler object determines how the model picks which testing example to add
+    LatentDynamics object holds the learnedLatentDynamics coefficients for the training set. 
+    A Sampler object determines how the model picks which testing example to add
     to the training set after each round of training.
 
     A `Physics` subclass wraps the full-order model (FOM) used to generate HLaSDI training and

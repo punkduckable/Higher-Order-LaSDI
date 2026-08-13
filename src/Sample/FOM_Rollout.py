@@ -10,7 +10,6 @@ import  numpy;
 from    Enums                       import  NextStep;  
 from    Trainer                     import  Trainer;
 from    Rollouts                    import  Sample_Rollouts;
-from    Interpolate                 import  GPInterpolate;
 from    EncoderDecoder              import  EncoderDecoder;
 from    Sample.Sampler              import  Sampler;
 
@@ -138,7 +137,7 @@ class FOM_Rollout(Sampler):
 
         # Move the encoder_decoder to the cpu (this is where all the GP stuff happens). Remember 
         # that train_coefs should specify the coefficients from that iteration. 
-        encoder_decoder_device : torch.device = next(trainer.encoder_decoder.parameters()).device;
+        encoder_decoder_device : torch.device= next(trainer.encoder_decoder.parameters()).device;
         encoder_decoder : EncoderDecoder    = trainer.encoder_decoder.cpu();
         n_test          : int               = trainer.param_space.n_test();
         n_train         : int               = trainer.param_space.n_train();
@@ -176,16 +175,6 @@ class FOM_Rollout(Sampler):
         candidate_parameters    = numpy.array(candidate_parameters);
 
 
-
-        # ---------------------------------------------------------------------------------------------
-        # Fit an Interpolator
-
-        # Build coefficient interpolator from LD-owned native training coefficients.
-        LOGGER.info("Building coefficient interpolator from %d training coefficient entries" % len(trainer.latent_dynamics.train_coefs));
-        interpolator : Interpolate = GPInterpolate(trainer.latent_dynamics.train_coefs);
-
-
-
         # ---------------------------------------------------------------------------------------------
         # Generate the latent trajectories.
 
@@ -194,7 +183,6 @@ class FOM_Rollout(Sampler):
                                                     encoder_decoder     = encoder_decoder, 
                                                     physics             = trainer.physics,
                                                     latent_dynamics     = trainer.latent_dynamics, 
-                                                    interpolator        = interpolator, 
                                                     param_grid          = candidate_parameters, 
                                                     t_Grid              = t_Candidates, 
                                                     n_samples           = self.n_samples, 

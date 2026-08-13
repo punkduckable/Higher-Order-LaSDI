@@ -9,7 +9,6 @@ import  numpy;
 
 from    Enums                       import  NextStep;  
 from    Trainer                     import  Trainer;
-from    Interpolate                 import  GPInterpolate;
 from    EncoderDecoder              import  EncoderDecoder;
 from    Sample.Sampler              import  Sampler;
 
@@ -103,6 +102,8 @@ class FOM_Variance(Sampler):
             corresponding parameter values for the IC/physics. 
         """
 
+        # This only works if the latent dynamics is stochastic.
+        assert trainer.latent_dynamics.stochastic == True, "Latent Dynamics must be stochastic to use FOM Variance sampling."
 
         trainer.timer.start("new_sample");
         assert len(trainer.U_Test)             >  0,                                    "len(trainer.U_Test) = %d" % len(trainer.U_Test);
@@ -154,19 +155,9 @@ class FOM_Variance(Sampler):
                                                                     physics     = trainer.physics,
                                                                     trainer     = trainer);
 
-        # Build coefficient interpolator from LD-owned native training coefficients.
-        LOGGER.info("Building coefficient interpolator from %d training coefficient entries" % len(trainer.latent_dynamics.train_coefs));
-        interpolator : Interpolate = GPInterpolate(trainer.latent_dynamics.train_coefs);
-
-        # Draw native coefficient samples for each candidate parameter.
-        coef_samples : list[list[dict[str, torch.Tensor]]] = [
-            [interpolator.sample(candidate_parameters[i, :]) for _ in range(self.n_samples)]
-            for i in range(n_candidates)
-        ];
-
-        # Now, solve the latent dynamics forward in time for each set of coefficients in 
-        # coef_samples. There are n_candidates combinations of parameter values, and we have 
-        # n_samples sets of coefficients for each combination of parameter values. For the i'th one
+        # Now, solve the latent dynamics forward in time using samples of samples of the latent
+        # dynamics. There are n_candidates combinations of parameter values, and we want 
+        # n_samples sets of LD samples for each combination of parameter values. For the i'th one
         # of those, we want to solve the latent dynamics for n_t(i) times steps. Each solution 
         # frame consists of n_IC elements of \marthbb{R}^{n_z}.
         # 
@@ -194,10 +185,10 @@ class FOM_Variance(Sampler):
             # Simulate one sample at a time; store the resulting frames.           
             for j in range(self.n_samples):
                 LatentState_ij : list[list[numpy.ndarray]] = trainer.latent_dynamics.simulate( 
-                                                                    coefs   = coef_samples[i][j], 
                                                                     IC      = [Z0[i]], 
                                                                     t_Grid  = [t_Grid], 
-                                                                    params  = candidate_parameters[i, :].reshape(1, -1));
+                                                                    params  = candidate_parameters[i, :].reshape(1, -1),
+                                                                    sample  = True);
                 for k in range(trainer.n_IC):
                     LatentStates[i][k][j, :, :] = LatentState_ij[0][k][:, 0, :];
 

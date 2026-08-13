@@ -10,7 +10,7 @@ import  numpy;
 from    EncoderDecoder                  import  EncoderDecoder;
 from    ParameterSpace                  import  ParameterSpace;
 from    Physics                         import  Physics;
-from    LatentDynamics                  import  LatentDynamics;
+from    LatentDynamics                  import  LatentDynamics, WeakLatentDynamics;
 from    Utilities.Optimizer             import  Reset_Optimizer;
 from    Trainer.Second_Order_Rollout    import  Second_Order_Rollout;
 
@@ -78,7 +78,7 @@ class Second_Order_Weak(Second_Order_Rollout):
         LOGGER.info("Initializing a Second_Order_Weak object"); 
 
         # Make sure we are set up to work with a weak-form latent dynamics object.
-        assert getattr(latent_dynamics, "type", None) == "weak", "Second_Order_Weak requires latent_dynamics.type == 'weak'";
+        assert isinstance(latent_dynamics, WeakLatentDynamics), "Second_Order_Weak requires a weak latent dynamics object.";
         assert hasattr(latent_dynamics, "add_weight_functions"), "latent dynamics must have an `add_weight_functions` method";
         assert hasattr(latent_dynamics, "get_test_functions"), "latent dynamics must have a `get_test_functions` method";
 
@@ -576,7 +576,6 @@ class Second_Order_Weak(Second_Order_Rollout):
                     start_idx = numpy.random.choice(rollable, size = n_roll_i, replace = False);
 
                     param_i = self.param_space.train_space[i, :].reshape(1, -1);
-                    coef_i  = self.latent_dynamics.get_train_coefs(self.param_space.train_space[i, :]);
 
                     Z_D_i : torch.Tensor = Latent_States[i][0];
                     Z_V_i : torch.Tensor = Latent_States[i][1];
@@ -630,7 +629,6 @@ class Second_Order_Weak(Second_Order_Rollout):
                         Z_V0 : torch.Tensor = Z_V_i[k_int:(k_int + 1), :];
 
                         Z_pred_all : list[list[torch.Tensor]] = self.latent_dynamics.simulate(
-                            coefs  = coef_i,
                             IC     = [[Z_D0, Z_V0]],
                             t_Grid = [t_win_np],
                             params = param_i);
@@ -734,12 +732,8 @@ class Second_Order_Weak(Second_Order_Rollout):
                     # Encode the FOM initial conditions
                     Z_D_IC_i, Z_V_IC_i = encoder_decoder_device.Encode(D_IC_i, V_IC_i);
                     
-                    # Get the coefficients for this combination of parameters
-                    train_coef_i            : dict[str, torch.Tensor]     = self.latent_dynamics.get_train_coefs(param_i);
-                    
                     # Simulate the latent dynamics forward in time
-                    Z_IC_Rollout_i    : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(  coefs   = train_coef_i, 
-                                                                                                    IC      = [[Z_D_IC_i, Z_V_IC_i]], 
+                    Z_IC_Rollout_i    : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(  IC      = [[Z_D_IC_i, Z_V_IC_i]], 
                                                                                                     t_Grid  = [t_Grid_IC_rollout[i]], 
                                                                                                     params  = param_i.reshape(1, -1));
                     

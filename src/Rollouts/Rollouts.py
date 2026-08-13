@@ -4,7 +4,6 @@
 
 import  torch;
 import  numpy;
-from    Interpolate                 import  Interpolate;
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics;
 from    EncoderDecoder              import  EncoderDecoder;
@@ -24,7 +23,6 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 def Mean_Rollout(   encoder_decoder : EncoderDecoder, 
                     physics         : Physics, 
                     latent_dynamics : LatentDynamics, 
-                    interpolator    : Interpolate, 
                     param_grid      : numpy.ndarray,
                     t_Grid          : list[numpy.ndarray | torch.Tensor],
                     trainer         : Trainer) -> list[list[numpy.ndarray]]:
@@ -52,11 +50,7 @@ def Mean_Rollout(   encoder_decoder : EncoderDecoder,
         describes how we specify the dynamics in the EncoderDecoder's latent space. We assume that 
         physics, latent_dynamics, and EncoderDecoder all have the same number of initial 
         conditions.
-
-    interpolator : Interpolate
-        Interpolator object that returns native latent-dynamics coefficient dictionaries from the
-        posterior mean, posterior standard deviation, or posterior samples.
-
+    
     param_grid : numpy.ndarray, shape = (n_param, n_p)
         i,j element holds the value of the j'th parameter in the i'th combination of parameter 
         values. Here, n_p is the number of parameters and n_param is the number of combinations
@@ -105,9 +99,6 @@ def Mean_Rollout(   encoder_decoder : EncoderDecoder,
     LOGGER.debug("Fetching latent space initial conditions for %d combinations of parameters." % n_param);
     Z0      : list[list[numpy.ndarray]] = encoder_decoder.latent_initial_conditions(param_grid, physics, trainer = trainer);
 
-    LOGGER.debug("Finding native coefficient means from the interpolator");
-    coef_means = [interpolator.mean(param_grid[i, :]) for i in range(n_param)];
-
     # Make each element of t_Grid into a numpy.ndarray of shape (1, n_t(i)). This is what 
     # simulate expects.
     t_Grid_np : list[numpy.ndarray] = [];
@@ -121,10 +112,10 @@ def Mean_Rollout(   encoder_decoder : EncoderDecoder,
     # Simulate the laten dynamics! For each testing parameter, use the mean value of each posterior 
     # distribution to define the coefficients. 
     LOGGER.info("simulating initial conditions for %d combinations of parameters forward in time" % n_param);
-    Zis : list[list[numpy.ndarray]] = latent_dynamics.simulate( coefs   = coef_means, 
-                                                                IC      = Z0, 
+    Zis : list[list[numpy.ndarray]] = latent_dynamics.simulate( IC      = Z0, 
                                                                 t_Grid  = t_Grid_np,
-                                                                params  = param_grid);
+                                                                params  = param_grid,
+                                                                sample  = False);
     
     # At this point, Zis[i][j] has shape (n_t_i, 1, n_z). We remove the extra dimension.
     for i in range(n_param):
@@ -146,7 +137,6 @@ def Mean_Rollout(   encoder_decoder : EncoderDecoder,
 def Sample_Rollouts(encoder_decoder : EncoderDecoder, 
                     physics         : Physics, 
                     latent_dynamics : LatentDynamics, 
-                    interpolator    : Interpolate, 
                     param_grid      : numpy.ndarray, 
                     t_Grid          : list[numpy.ndarray | torch.Tensor],
                     n_samples       : int,
@@ -173,10 +163,6 @@ def Sample_Rollouts(encoder_decoder : EncoderDecoder,
         describes how we specify the dynamics in the encoder_decoder's latent space. We use this
         to simulate the latent dynamics forward in time. physics, latent_dynamics, and 
         encoder_decoder should have the same number of initial conditions.
-
-    interpolator : Interpolate
-        Interpolator object that samples native latent-dynamics coefficient dictionaries at each
-        requested parameter value.
 
     param_grid : numpy.ndarray, shape = (n_param, n_p)
         i,j element of holds the value of the j'th parameter in the i'th combination of parameter 
@@ -296,38 +282,30 @@ def Sample_Rollouts(encoder_decoder : EncoderDecoder,
                 );
 
                 # Generate the remaining samples even if they might diverge
-                coef_samples_needed = [interpolator.sample(param_grid[i, :]) for _ in range(n_needed)];
                 for sample_idx in range(n_needed):
-                    coef_sample = coef_samples_needed[sample_idx];
                     Z0_i = [Z0[i][j] for j in range(n_IC)];
                     traj = latent_dynamics.simulate( 
-                                            coefs   = coef_sample, 
                                             IC      = [Z0_i], 
                                             t_Grid  = [t_Grid_np[i]], 
-                                            params  = param_grid[i, :].reshape(1, -1));
+                                            params  = param_grid[i, :].reshape(1, -1),
+                                            sample  = True);
                     sample_trajectories.append(traj[0]);  # traj[0] is the trajectory for the i-th parameter
                 break;
-            
-            # Sample n_needed coefficient sets for this parameter
-            coef_samples = [interpolator.sample(param_grid[i, :]) for _ in range(n_needed)];
             
             # Simulate each coefficient set individually and check for divergence
             for sample_idx in range(n_needed):
                 total_resample_attempts += 1;
-                
-                # Extract this sample's native coefficient dictionary.
-                coef_sample = coef_samples[sample_idx];
-                
+                                
                 # Get IC for this parameter (list of n_IC arrays, each shape (1, n_z))
                 Z0_i = [Z0[i][j] for j in range(n_IC)];
                 
                 # Simulate: returns list[list[array]], outer list has 1 element (1 param), 
                 # inner list has n_IC elements
                 traj = latent_dynamics.simulate( 
-                                        coefs   = coef_sample, 
                                         IC      = [Z0_i], 
                                         t_Grid  = [t_Grid_np[i]], 
-                                        params  = param_grid[i, :].reshape(1, -1));
+                                        params  = param_grid[i, :].reshape(1, -1),
+                                        sample   = True);
                 
                 # Check if this trajectory diverged (check all ICs for this parameter)
                 is_divergent = False;

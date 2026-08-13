@@ -23,7 +23,6 @@ from    LatentDynamics                  import  LatentDynamics;
 from    ParameterSpace                  import  ParameterSpace;
 from    Trainer                         import  Trainer;
 from    Rollouts                        import  Sample_Rollouts;
-from    Interpolate                     import  Interpolate;
 
 
 # Set up the logger
@@ -52,7 +51,6 @@ mpl.rcParams['ytick.direction'] = 'in';
 def Plot_Latent_Trajectories(physics         : Physics,
                              encoder_decoder : EncoderDecoder,
                              latent_dynamics : LatentDynamics,
-                             interpolator    : Interpolate,
                              param_grid      : numpy.ndarray,
                              U_True          : list[list[torch.Tensor]],
                              t_Grid          : list[torch.Tensor],
@@ -63,9 +61,8 @@ def Plot_Latent_Trajectories(physics         : Physics,
     """
     This function plots the latent trajectories of the latent dynamics model for a combination of 
     parameter values. Specifically, we fetch the FOM IC for the given parameter values, encode then, 
-    and then use the Interpolate object to sample native latent-dynamics coefficient dictionaries,
-    solve and plot each resulting dynamical solution, and then plot the encodings of the FOM
-    trajectory. 
+    and then sample native latent-dynamics coefficient dictionaries, solve and plot each resulting 
+    dynamical solution, and then plot the encodings of the FOM trajectory. 
 
 
     -----------------------------------------------------------------------------------------------
@@ -80,10 +77,6 @@ def Plot_Latent_Trajectories(physics         : Physics,
 
     latent_dynamics : LatentDynamics
         The LatentDynamics model we use to simulate the latent dynamics forward in time.
-
-    interpolator : Interpolate
-        An Interpolate object that returns native coefficient dictionaries via `sample(...)`,
-        `mean(...)`, and `std(...)`. We use it to draw coefficient samples for latent rollouts.
 
     param_grid : numpy.ndarray, shape = (n_param, n_p)
         A numpy array whose rows holds the parameter values whose latent dynamics we want to plot.
@@ -102,8 +95,8 @@ def Plot_Latent_Trajectories(physics         : Physics,
         The prefix of the file name we use to save the plots. Usually the name of the FOM model.
     
     n_samples : int
-        The number of coefficient samples we want to draw from `interpolator` for each combination
-        of parameter values.
+        The number of coefficient samples we want to draw for each combination of parameter 
+        values.
         
     figsize : tuple[int], len = 2
         A two element tuple specifying the size of the overall figure size. 
@@ -120,7 +113,6 @@ def Plot_Latent_Trajectories(physics         : Physics,
     assert isinstance(physics, Physics),                "type(physics) = %s" % type(physics);
     assert isinstance(encoder_decoder, EncoderDecoder), "type(encoder_decoder) = %s" % type(EncoderDecoder);
     assert isinstance(latent_dynamics, LatentDynamics), "type(latent_dynamics) = %s" % type(latent_dynamics);
-    assert isinstance(interpolator, Interpolate), "type(interpolator) = %s" % type(interpolator);
 
     assert isinstance(param_grid, numpy.ndarray),        "type(param_grid) = %s" % type(param_grid);
     assert param_grid.ndim     == 2,                     "param_grid.ndim = %d != 2" % param_grid.ndim;
@@ -158,7 +150,6 @@ def Plot_Latent_Trajectories(physics         : Physics,
                                                                     encoder_decoder = encoder_decoder, 
                                                                     physics         = physics, 
                                                                     latent_dynamics = latent_dynamics, 
-                                                                    interpolator    = interpolator, 
                                                                     param_grid      = param_grid,
                                                                     t_Grid          = t_Grid,
                                                                     n_samples       = n_samples,

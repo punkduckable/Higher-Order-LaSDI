@@ -9,10 +9,9 @@ import  numpy;
 
 from    EncoderDecoder                  import  EncoderDecoder;
 from    Physics                         import  Physics;
-from    LatentDynamics                  import  LatentDynamics;
+from    LatentDynamics                  import  LatentDynamics, InterpolatableLatentDynamics;
 from    ParameterSpace                  import  ParameterSpace;
 from    Trainer                         import  Trainer;
-from    Interpolate                     import  Interpolate;
 from    Rollouts                        import  Sample_Rollouts, Mean_Rollout;
 
 
@@ -28,7 +27,6 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
                             physics         : Physics,
                             param_space     : ParameterSpace,
                             latent_dynamics : LatentDynamics,
-                            interpolator    : Interpolate,
                             t_Test          : list[torch.Tensor],
                             U_Test          : list[list[torch.Tensor]],
                             trainer         : Trainer,
@@ -80,11 +78,6 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
         The LatentDynamics object we use to generate the latent space data. For each combination 
         of parameter values, we fetch the corresponding coefficients to define the latent dynamics.
     
-    interpolator : Interpolate
-        Interpolator object for the native latent-dynamics coefficients. For each combination of
-        parameter values, we sample coefficient dictionaries from this object and use them to sample
-        the predicted dynamics produced by that combination of parameter values.
-
     t_Test : list[torch.Tensor], len = n_test
         i'th element is a 1d numpy.ndarray object of length n_t(i) whose j'th element holds the 
         value of the j'th time value at which we solve the latent dynamics for the i'th combination
@@ -99,7 +92,8 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
         A Trainer object.
 
     n_samples : int
-        The number of coefficient samples we draw from the Interpolate posterior. Each sample gives us 
+        If the `LD` is Interpolatable, this is the number of coefficient samples we draw from 
+        each coefficient posterior. Otherwise, this does nothing. Each sample gives us 
         a set of coefficients which we can use to define the latent dynamics that we then solve 
         forward in time. 
 
@@ -129,17 +123,18 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
         the samples) of the k'th frame of the reconstruction of the j'th derivative of the FOM 
         solution when we use the i'th combination of testing parameters.
     
-    coef_means : numpy.ndarray, shape = (n_Test, n_Coef)
+    coef_means : numpy.ndarray, shape = (n_Test, n_Coef) | None
         i, j element holds the mean of the posterior distribution for the j'th coefficient 
-        evaluated at the i'th combination of testing parameters.
+        evaluated at the i'th combination of testing parameters. None if the LD is not 
+        Interpolatable.
 
-    coef_stds : numpy.ndarray, shape = (n_Test, n_Coef)
+    coef_stds : numpy.ndarray, shape = (n_Test, n_Coef) | None
         i, j element holds the stds of the posterior distribution for the j'th coefficient 
-        evaluated at the i'th combination of testing parameters.
+        evaluated at the i'th combination of testing parameters. None if the LD is not 
+        Interpolatable.
     """ 
 
     # Run checks
-    assert isinstance(interpolator,      Interpolate), "type(interpolator) = %s, expected Interpolate" % (type(interpolator));
     assert isinstance(t_Test,           list),      "type(t_Test) = %s, expected list" % (type(t_Test));
     assert isinstance(U_Test,           list),      "type(U_Test) = %s, expected list" % (type(U_Test));
     assert isinstance(n_samples,        int),       "type(n_samples) = %s, expected int" % (type(n_samples));
@@ -167,13 +162,15 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
             assert isinstance(U_Test[i][j], torch.Tensor),  "type(U_Test[%d][%d]) = %s, expected torch.Tensor" % (i, j, type(U_Test[i][j]));
             assert U_Test[i][j].shape[0]    == n_t_i,       "U_Test[%d][%d].shape = %s, n_t_i = %d" % (i, j, str(U_Test[i][j].shape), n_t_i);
     
-    # Evaluate posterior means/stds through the Interpolate interface in native coefficient format,
-    # then flatten to the legacy matrix shape used by heatmap plotting.
-    coef_means_native : list[dict[str, torch.Tensor]] = [interpolator.mean(param_test[i, :]) for i in range(n_Test)];
-    coef_stds_native  : list[dict[str, torch.Tensor]] = [interpolator.std(param_test[i, :])  for i in range(n_Test)];
-    coef_means = flatten_coefficients(coef_means_native);
-    coef_stds  = flatten_coefficients(coef_stds_native);
-
+    # Evaluate posterior means/stds if the LD is interpolatable.
+    if isinstance(latent_dynamics, InterpolatableLatentDynamics):
+        coef_means_native : list[dict[str, torch.Tensor]] = [latent_dynamics.interpolator.mean(param_test[i, :]) for i in range(n_Test)];
+        coef_stds_native  : list[dict[str, torch.Tensor]] = [latent_dynamics.interpolator.std(param_test[i, :])  for i in range(n_Test)];
+        coef_means = flatten_coefficients(coef_means_native);
+        coef_stds  = flatten_coefficients(coef_stds_native);
+    else:
+        coef_means = None
+        coef_stds = None;
 
     # ---------------------------------------------------------------------------------------------
     # Draw n_samples samples of the posterior distribution.
@@ -181,10 +178,10 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
     # For each combination of parameter values in the testing set, sample the latent coefficients 
     # and solve the latent dynamics forward in time. 
     LOGGER.info("Generating latent dynamics trajectories for %d samples of the coefficients for %d combinations of testing parameter" % (n_samples, n_Test));
-    Zis_samples     : list[list[numpy.ndarray]] = Sample_Rollouts(encoder_decoder, physics, latent_dynamics, interpolator, param_test, t_Test, n_samples, trainer = trainer);    # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_samples, n_z)
+    Zis_samples     : list[list[numpy.ndarray]] = Sample_Rollouts(encoder_decoder, physics, latent_dynamics, param_test, t_Test, n_samples, trainer = trainer);    # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_samples, n_z)
 
     LOGGER.info("Generating latent dynamics trajectories using posterior distribution means for %d combinations of testing parameter" % (n_Test));
-    Zis_mean        : list[list[numpy.ndarray]] = Mean_Rollout(encoder_decoder, physics, latent_dynamics, interpolator, param_test, t_Test, trainer = trainer);               # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_z)
+    Zis_mean        : list[list[numpy.ndarray]] = Mean_Rollout(encoder_decoder, physics, latent_dynamics, param_test, t_Test, trainer = trainer);               # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_z)
         
 
     # ---------------------------------------------------------------------------------------------

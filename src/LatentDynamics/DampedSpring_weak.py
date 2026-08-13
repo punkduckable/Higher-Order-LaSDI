@@ -7,7 +7,8 @@ import  logging;
 import  numpy;
 import  torch;
 
-from    LatentDynamics                  import  LatentDynamics;
+from    LatentDynamics.Weak             import  WeakLatentDynamics;
+from    LatentDynamics.Interpolatable   import  InterpolatableLatentDynamics;
 from    Utilities.SecondOrderSolvers    import  RK4;
 
 
@@ -20,7 +21,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # DampedSpring class
 # -------------------------------------------------------------------------------------------------
 
-class DampedSpring_weak(LatentDynamics):
+class DampedSpring_weak(InterpolatableLatentDynamics, WeakLatentDynamics):
     def __init__(   self, 
                     n_z             :   int, 
                     Uniform_t_Grid  :   bool,
@@ -74,13 +75,25 @@ class DampedSpring_weak(LatentDynamics):
         # Run the base class initializer. This does not set the n_t attribute. 
         # Because K and C are n_z x n_z matrices, and b is in \mathbb{R}^n_z, there are 
         # n_z*(2*n_z + 1) coefficients in the latent dynamics.
-        super().__init__(   n_z             = n_z,
-                            n_coefs         = n_z*(2*n_z + 1),
-                            n_IC            = 2, 
-                            Uniform_t_Grid  = Uniform_t_Grid, 
-                            trainable       = config["trainable"],
-                            config          = config,
-                            type            = "weak");
+        InterpolatableLatentDynamics.__init__(   
+            self,
+            n_z             = n_z,
+            n_coefs         = n_z*(2*n_z + 1),
+            n_IC            = 2, 
+            Uniform_t_Grid  = Uniform_t_Grid, 
+            trainable       = config["trainable"],
+            config          = config);
+
+        WeakLatentDynamics.__init__(   
+            self,
+            n_z             = n_z,
+            n_coefs         = n_z*(2*n_z + 1),
+            n_IC            = 2, 
+            Uniform_t_Grid  = Uniform_t_Grid, 
+            trainable       = config["trainable"],
+            config          = config);
+
+        
         LOGGER.info("Initializing a DampedSpring_weak object with n_z = %d, Uniform_t_Grid = %s" % (
             self.n_z,
             str(self.Uniform_t_Grid),
@@ -114,7 +127,8 @@ class DampedSpring_weak(LatentDynamics):
             self,
             Latent_States : list[list[torch.Tensor]],
             t_Grid        : list[torch.Tensor],
-            params        : numpy.ndarray | None = None) -> None:
+            device        : torch.device,
+            params        : numpy.ndarray) -> None:
         r"""
         Initialize weak-form damped-spring coefficients to zero.
 
@@ -122,6 +136,34 @@ class DampedSpring_weak(LatentDynamics):
         training, least-squares coefficients computed from a randomly initialized encoder can be a
         poor starting point. Instead, each requested parameter receives trainable zero tensors for
         `K`, `C`, and `b`; the optimizer learns them jointly with the encoder/decoder.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        Latent_States : list[list[torch.Tensor]], len = n_param
+            The i'th list element contains two tensors: latent displacement and latent velocity,
+            each with shape (n_t(i), n_z). This method uses the displacement dtype to initialize
+            coefficients with matching precision.
+
+        t_Grid : list[torch.Tensor], len = n_param
+            Time grids corresponding to the latent trajectories. These are checked for length
+            consistency but are not otherwise used because weak coefficients are zero-initialized.
+
+        device : torch.device
+            Device on which the new coefficient tensors should be stored.
+
+        params : numpy.ndarray, shape = (n_param, n_p)
+            Parameter rows used as keys in `self.train_coefs`.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        None. Zero coefficient dictionaries are stored in `self.train_coefs`, and the interpolator
+        is updated from the full training-coefficient dictionary.
         """
         assert params is not None, "DampedSpring_weak.initialize_coefficients requires `params`";
         assert isinstance(t_Grid, list) and isinstance(Latent_States, list);
@@ -131,14 +173,16 @@ class DampedSpring_weak(LatentDynamics):
             assert isinstance(Latent_States[i], list);
             assert len(Latent_States[i]) == self.n_IC;
             assert isinstance(Latent_States[i][0], torch.Tensor);
-            device = Latent_States[i][0].device;
             dtype  = Latent_States[i][0].dtype;
 
             K : torch.Tensor = torch.zeros((self.n_z, self.n_z), device = device, dtype = dtype, requires_grad = True);
             C : torch.Tensor = torch.zeros((self.n_z, self.n_z), device = device, dtype = dtype, requires_grad = True);
             b : torch.Tensor = torch.zeros((self.n_z,),          device = device, dtype = dtype, requires_grad = True);
-            self.set_train_coefs(params[i, :], {"K": K, "C": C, "b": b});
+            self.set_train_coefs(params[i, :], {"K": K, "C": C, "b": b}, device);
 
+        # Finally, update the interpolator using the new training coefficients!
+        self.update_interpolator();
+        
         return None;
 
 
@@ -314,23 +358,18 @@ class DampedSpring_weak(LatentDynamics):
 
 
     def simulate(   self,
-                    coefs   : dict[str, numpy.ndarray   | torch.Tensor] | list[dict[str, numpy.ndarray | torch.Tensor]],
                     IC      : list[list[numpy.ndarray   | torch.Tensor]],
                     t_Grid  : list[numpy.ndarray        | torch.Tensor],
-                    params  : numpy.ndarray) -> list[list[numpy.ndarray | torch.Tensor]]:
+                    params  : numpy.ndarray, 
+                    sample  : bool = False) -> list[list[numpy.ndarray | torch.Tensor]]:
         r"""
         Time integrates the latent dynamics from multiple initial conditions for each combination
-        of coefficients in coefs.
+        of parameter values.
 
 
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
-
-        coefs : dict or list[dict]
-            Native coefficient dictionary/dictionaries. For DampedSpring_weak each dictionary must
-            contain `K` with shape (n_z, n_z), `C` with shape (n_z, n_z), and `b` with shape
-            (n_z,). These are the coefficients in z'' = K z + C z' + b.
 
         IC : list[list[numpy.ndarray]] or list[list[torch.Tensor]], len = n_param
             i'th element is an n_IC element list whose j'th element is a 2d numpy.ndarray or
@@ -356,7 +395,13 @@ class DampedSpring_weak(LatentDynamics):
         params: numpy.ndarray, shape = (n_param, n_p)
             The i'th row holds the i'th combination of parameter values.
 
+        sample : bool 
+            If self is stochastic, setting this to true will sample from the posterior distribution 
+            of the latent dynamics at each parameter value, then solve the latent dynamics using 
+            the resulting sample. Otherwise, setting this to true will use the mean of that 
+            posterior distribution. If self is not stochastic, this does nothing.
 
+            
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
@@ -368,19 +413,20 @@ class DampedSpring_weak(LatentDynamics):
             we use the q'th initial condition for the i'th combination of parameter values.
         """
 
-        # Normalize coefficient input to a list so the multi-parameter and single-parameter cases
-        # share the same validation and setup logic.
-        if isinstance(coefs, dict):
-            coefs_list = [coefs];
-        else:
-            coefs_list = coefs;
-        assert isinstance(coefs_list, list);
+        # Checks.
         assert isinstance(params, numpy.ndarray);
         assert len(params.shape) == 2;
         n_param : int = params.shape[0];
-        assert len(coefs_list) == n_param;
         assert isinstance(t_Grid, list) and isinstance(IC, list);
         assert len(IC) == n_param and len(t_Grid) == n_param;
+
+
+        # -----------------------------------------------------------------------------------------
+        # Fetch coefficient dictionaries for the passed parameters.
+        # -----------------------------------------------------------------------------------------
+
+        coefs_list : list[dict[str, torch.Tensor]] = self._coefs_for_params(params = params, sample = sample);
+
 
         # -----------------------------------------------------------------------------------------
         # Loop through parameter combinations.

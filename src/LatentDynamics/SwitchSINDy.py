@@ -7,7 +7,7 @@ import  logging;
 import  numpy;
 import  torch;
 
-from    LatentDynamics                  import  LatentDynamics;
+from    LatentDynamics.Interpolatable   import  InterpolatableLatentDynamics;
 from    Utilities.FiniteDifference      import  Derivative1_Order4, Derivative1_Order2_NonUniform;
 from    Utilities.FirstOrderSolvers     import  RK4;
 
@@ -19,7 +19,7 @@ LOGGER  : logging.Logger    = logging.getLogger(__name__);
 # SwitchSINDy class
 # -------------------------------------------------------------------------------------------------
 
-class SwitchSINDy(LatentDynamics):
+class SwitchSINDy(InterpolatableLatentDynamics):
     def __init__(   self, 
                     n_z             : int,
                     Uniform_t_Grid  : bool, 
@@ -52,7 +52,7 @@ class SwitchSINDy(LatentDynamics):
         switch_time : callable
             A function that takes a numpy.ndarray of parameter values and returns the switch time
             for those parameter values.
-
+        
         config : dict
             The latent-dynamics configuration dictionary. It must three keys: `type`, `trainable`,
             and `switch`. It must have `config["type"] == "switch"` and `config["switch"]` should 
@@ -76,14 +76,14 @@ class SwitchSINDy(LatentDynamics):
         assert  "switch"    in config;
 
         # Run the base class initializer. Note that this sets self.train_coefs.
-        super().__init__(   n_z             = n_z, 
-                            n_coefs         = n_z*(n_z + 1)*2,
-                            n_IC            = 1,
-                            Uniform_t_Grid  = Uniform_t_Grid, 
-                            trainable       = config["trainable"],
-                            config          = config,
-                            type            = "strong");
-
+        InterpolatableLatentDynamics.__init__(   
+            self,
+            n_z             = n_z, 
+            n_coefs         = n_z*(n_z + 1)*2,
+            n_IC            = 1,
+            Uniform_t_Grid  = Uniform_t_Grid, 
+            trainable       = config["trainable"],
+            config          = config);
 
         # Class-specific initialization.
         self.lstsq_reg      : float     = config["switch"]["lstsq_reg"];
@@ -127,7 +127,8 @@ class SwitchSINDy(LatentDynamics):
             self,
             Latent_States   : list[list[torch.Tensor]],
             t_Grid          : list[torch.Tensor],
-            params          : numpy.ndarray | None = None) -> None:
+            device          : torch.device, 
+            params          : numpy.ndarray) -> None:
         r"""
         Fit coefficients for the two-regime switching SINDy model.
 
@@ -148,6 +149,9 @@ class SwitchSINDy(LatentDynamics):
             The i'th element is a 1D tensor of shape (n_t(i)) holding the time grid for the i'th
             parameter combination.
 
+        device : torch.device
+            The device where we want to store the new coefficients.
+        
         params : numpy.ndarray, shape = (n_param, n_p)
             The i'th row holds the parameter values used both to compute the switch time and to key
             `self.train_coefs`.
@@ -195,7 +199,11 @@ class SwitchSINDy(LatentDynamics):
 
             coefs_before = fit_segment(Z_with_ones[mask_before], dZdt[mask_before]);
             coefs_after  = fit_segment(Z_with_ones[mask_after],  dZdt[mask_after]);
-            self.set_train_coefs(params[i, :], self._native_from_matrices(coefs_before, coefs_after));
+            self.set_train_coefs(params[i, :], self._native_from_matrices(coefs_before, coefs_after), device);
+
+        # Finally, update the interpolator using the new training coefficients!
+        self.update_interpolator();
+        # All done :) 
         return None;
 
 
@@ -342,24 +350,21 @@ class SwitchSINDy(LatentDynamics):
 
 
     def simulate(   self,
-                    coefs   : dict[str, numpy.ndarray | torch.Tensor] | list[dict[str, numpy.ndarray | torch.Tensor]],
                     IC      : list[list[numpy.ndarray | torch.Tensor]],
                     t_Grid  : list[numpy.ndarray      | torch.Tensor],
-                    params  : numpy.ndarray) -> list[list[numpy.ndarray | torch.Tensor]]:
+                    params  : numpy.ndarray,
+                    sample  : bool = False) -> list[list[numpy.ndarray | torch.Tensor]]:
         r"""
         Time integrates the switching SINDy latent dynamics.
 
-        The coefficient input is either one native dictionary or a list of native dictionaries. Each
-        dictionary must contain `A_before`, `b_before`, `A_after`, and `b_after`. Unlike plain
-        SINDy, `params` is required because the right-hand side depends on the switch time.
+        Coefficients are fetched from `self.train_coefs` for training parameters and from
+        `self.interpolator` for non-training parameters. Unlike plain SINDy, `params` is required
+        because the right-hand side depends on the switch time.
 
 
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
-
-        coefs : dict or list[dict]
-            Native coefficient dictionary/dictionaries for the switching affine systems.
 
         IC : list[list[numpy.ndarray | torch.Tensor]], len = n_param
             Initial latent states for each parameter/coefficient set. SwitchSINDy has one IC
@@ -371,6 +376,11 @@ class SwitchSINDy(LatentDynamics):
         params : numpy.ndarray, shape = (n_param, n_p)
             Parameter rows used to compute the switch time for each simulation.
 
+        sample : bool 
+            If self is stochastic, setting this to true will sample from the posterior distribution 
+            of the latent dynamics at each parameter value, then solve the latent dynamics using 
+            the resulting sample. Otherwise, setting this to true will use the mean of that 
+            posterior distribution. If self is not stochastic, this does nothing.
 
         -------------------------------------------------------------------------------------------
         Returns
@@ -381,19 +391,20 @@ class SwitchSINDy(LatentDynamics):
             (n_t(i), n_initial_conditions, n_z).
         """
 
-        # Normalize coefficient input to a list so the multi-parameter and single-parameter paths
-        # share the same validation/bookkeeping.
-        if isinstance(coefs, dict):
-            coefs_list = [coefs];
-        else:
-            coefs_list = coefs;
-        assert isinstance(coefs_list, list);
+        # Checks.
         assert isinstance(params, numpy.ndarray);
         assert len(params.shape) == 2;
         n_param : int = params.shape[0];
-        assert len(coefs_list) == n_param;
         assert isinstance(t_Grid, list) and isinstance(IC, list);
         assert len(IC) == n_param and len(t_Grid) == n_param;
+
+
+        # -----------------------------------------------------------------------------------------
+        # Fetch coefficient dictionaries for the passed parameters.
+        # -----------------------------------------------------------------------------------------
+
+        coefs_list : list[dict[str, torch.Tensor]] = self._coefs_for_params(params = params, sample = sample);
+
 
         # -----------------------------------------------------------------------------------------
         # Loop through parameter combinations.
