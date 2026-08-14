@@ -76,8 +76,8 @@ class Autoencoder_Pair(EncoderDecoder):
 
         assert isinstance(config, (PairEncoderDecoderConfig, AutoencoderPairEncoderDecoderConfig)), \
             "config must be a PairEncoderDecoderConfig or AutoencoderPairEncoderDecoderConfig, got %s" % str(type(config));
-        pair_key  : str = config['type'];
-        pair_config             : dict              = config[pair_key];
+        pair_key    : str   = config.type;
+        pair_config         = getattr(config, pair_key);
 
         assert isinstance(Frame_Shape, list),                 "type(Frame_Shape) == %s, expected list" % (str(type(Frame_Shape)));
         for i in range(len(Frame_Shape)):
@@ -87,16 +87,16 @@ class Autoencoder_Pair(EncoderDecoder):
 
 
         # Next, fetch the hidden widths and latent dimension (n_z). 
-        hidden_widths           : list[int]         = pair_config['hidden_widths'];
-        n_z                     : int               = pair_config['latent_dimension'];
+        hidden_widths           : list[int]         = pair_config.hidden_widths;
+        n_z                     : int               = pair_config.latent_dimension;
 
         # Fetch the activations. This can either be a string or a list of strings. If it's 
         # a string, then we use that activation for all layers.
         n_hidden_layers     : int               = len(hidden_widths);
-        if(isinstance(pair_config['activations'], str)):
-            activations         : list[str]     = [pair_config['activations']] * n_hidden_layers;   # The final layer has no activation.
-        elif(isinstance(pair_config['activations'], list)):
-            activations         : list[str]     = pair_config['activations'];
+        if(isinstance(pair_config.activations, str)):
+            activations         : list[str]     = [pair_config.activations] * n_hidden_layers;   # The final layer has no activation.
+        elif(isinstance(pair_config.activations, list)):
+            activations         : list[str]     = pair_config.activations;
         else:
             raise ValueError("Activations must be a string or a list of strings.");
 
@@ -106,13 +106,13 @@ class Autoencoder_Pair(EncoderDecoder):
         assert numpy.prod(Frame_Shape) == widths[0],            "numpy.prod(self.Frame_Shape) = %d, widths[0] = %d; must be equal" % (numpy.prod(Frame_Shape), widths[0]);
 
         # Extract the number of decoders.
-        n_Decoders = config[pair_key]['n_Decoders'];
+        n_Decoders = pair_config.n_Decoders;
 
         # Run the superclass initializer.
         super().__init__(n_IC       = 2, 
                          n_z        = widths[-1], 
                          n_Decoders = n_Decoders, 
-                         trainable  = config["trainable"], 
+                         trainable  = config.trainable,
                          config     = config);
         LOGGER.info("Initializing an Autoencoder_Pair");
 
@@ -127,7 +127,7 @@ class Autoencoder_Pair(EncoderDecoder):
         self.activations    : list[str]     =  activations;
 
         # Make a schema config for the component AEs.
-        ae_config = AEEncoderDecoderConfig(type = 'ae', trainable = config.trainable, ae = config[pair_key]);
+        ae_config = AEEncoderDecoderConfig(type = 'ae', trainable = config.trainable, ae = pair_config);
 
         # Next, build the velocity and displacement auto-encoders.
         LOGGER.info("Initializing the Displacement Autoencoder...");
@@ -315,7 +315,7 @@ def load_Autoencoder_Pair(dict_ : dict, config_ : dict) -> Autoencoder_Pair:
         config = config.model_dump(mode = "python", by_alias = True);
 
     # Override the trainable argument
-    config['trainable']         = config_['trainable'];
+    config['trainable']         = config_.trainable;
     if config['type'] == "pair":
         config = PairEncoderDecoderConfig.model_validate(config);
     else:

@@ -62,9 +62,9 @@ class Burgers(Physics):
         assert isinstance(config, BurgersPhysicsConfig), "config must be a BurgersPhysicsConfig, got %s" % str(type(config));
 
         # Other setup
-        self.n_x            : int       = config['Burgers']['n_x'];
-        self.x_min          : float     = config['Burgers']['x_min'];                   # Minimum value of the spatial variable in the problem domain
-        self.x_max          : float     = config['Burgers']['x_max'];                   # Maximum value of the spatial variable in the problem domain
+        self.n_x            : int       = config.Burgers.n_x;
+        self.x_min          : float     = config.Burgers.x_min;                   # Minimum value of the spatial variable in the problem domain
+        self.x_max          : float     = config.Burgers.x_max;                   # Maximum value of the spatial variable in the problem domain
         self.dx             : float     = (self.x_max - self.x_min) / (self.n_x - 1);   # Spacing between grid points along the spatial axis.
         assert self.dx > 0.,          "self.dx = %s, self.dx must be positive" % self.dx;
 
@@ -74,12 +74,12 @@ class Burgers(Physics):
                          X_Positions    = numpy.linspace(self.x_min, self.x_max, self.n_x, dtype = numpy.float32),
                          Frame_Shape    = [self.n_x],
                          param_names    = param_names, 
-                         Uniform_t_Grid = config['Burgers']['uniform_t_grid'],
+                         Uniform_t_Grid = config.Burgers.uniform_t_grid,
                          n_IC           = 1);
 
         # Set up the maximum number of corrections and the convergence threshold.
-        self.maxk                   : int   = config['Burgers']['maxk'];
-        self.convergence_threshold  : float = config['Burgers']['convergence_threshold'];
+        self.maxk                   : int   = config.Burgers.maxk;
+        self.convergence_threshold  : float = config.Burgers.convergence_threshold;
 
         # Determine which index corresponds to 'a' and 'w' (we pass an array of parameter values, 
         # we need this information to figure out which element corresponds to which variable).
@@ -174,8 +174,8 @@ class Burgers(Physics):
         u0 : numpy.ndarray = self.initial_condition(param)[0];
         
         # Compute dt. Set up the t_Grid.
-        n_t     : int           = self.config['Burgers']['n_t'];
-        t_max   : float         = self.config['Burgers']['t_max']; 
+        n_t     : int           = self.config.Burgers.n_t;
+        t_max   : float         = self.config.Burgers.t_max;
         t_Grid  : numpy.ndarray = numpy.linspace(0, t_max, n_t, dtype = numpy.float32);
         if(self.Uniform_t_Grid == False):
             r               : float = 0.2*(t_Grid[1] - t_Grid[0]).item();

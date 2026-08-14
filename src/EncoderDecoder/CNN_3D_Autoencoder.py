@@ -164,18 +164,18 @@ class CNN_3D_Autoencoder(EncoderDecoder):
 
         assert isinstance(config, (CNN3DEncoderDecoderConfig, CNN3DAEEncoderDecoderConfig, CNN3DAutoencoderEncoderDecoderConfig)), \
             "config must be a CNN3D encoder/decoder schema, got %s" % str(type(config));
-        cnn_key  : str = config['type'];
-        cnn_config              : dict              = config[cnn_key];
+        cnn_key     : str   = config.type;
+        cnn_config          = getattr(config, cnn_key);
 
 
 
         # FC configuration (analogous to the AE's hidden_widths/activations).
-        hidden_widths_fc        : list[int]         = cnn_config['hidden_widths_fc'];
-        latent_dimension        : int               = cnn_config['latent_dimension'];
+        hidden_widths_fc        : list[int]         = cnn_config.hidden_widths_fc;
+        latent_dimension        : int               = cnn_config.latent_dimension;
 
         # FC activations can either be a string or a list of strings.
         n_hidden_layers         : int               = len(hidden_widths_fc);
-        act_cfg = cnn_config['activations_fc'];
+        act_cfg = cnn_config.activations_fc;
         if(isinstance(act_cfg, str)):
             activations_fc      : list[str]        = [act_cfg] * n_hidden_layers;
         elif(isinstance(act_cfg, list)):
@@ -184,14 +184,14 @@ class CNN_3D_Autoencoder(EncoderDecoder):
             raise ValueError("activations_fc must be a string or a list of strings.");
 
         # Conv configuration.
-        conv_channels       : list[int]     = cnn_config['conv_channels'];
-        conv_kernel_sizes                   = cnn_config['conv_kernel_sizes'];
-        conv_strides                        = cnn_config['conv_strides'];
-        conv_paddings                       = cnn_config['conv_paddings'];
+        conv_channels       : list[int]     = cnn_config.conv_channels;
+        conv_kernel_sizes                   = cnn_config.conv_kernel_sizes;
+        conv_strides                        = cnn_config.conv_strides;
+        conv_paddings                       = cnn_config.conv_paddings;
 
         # Per-layer conv activations. This can be a string (use same activation for all conv layers)
         # or a list of strings of length len(conv_channels) - 1.
-        conv_act_cfg = cnn_config['conv_activations'];
+        conv_act_cfg = cnn_config.conv_activations;
         if(isinstance(conv_act_cfg, str)):
             conv_activations : list[str] = [conv_act_cfg] * (len(conv_channels) - 1);
         elif(isinstance(conv_act_cfg, list)):
@@ -216,13 +216,13 @@ class CNN_3D_Autoencoder(EncoderDecoder):
 
 
         # Extract n_Decoders
-        n_Decoders = config[cnn_key]['n_Decoders'];
+        n_Decoders = cnn_config.n_Decoders;
 
         # Run the superclass initializer.
         super().__init__(n_IC       = 1, 
                          n_z        = latent_dimension, 
                          n_Decoders = n_Decoders, 
-                         trainable  = config["trainable"], 
+                         trainable  = config.trainable,
                          config     = config);
 
         # Store information (for return purposes).
@@ -511,7 +511,7 @@ def load_CNN_3D_Autoencoder(dict_ : dict, config_ : dict) -> CNN_3D_Autoencoder:
         config = config.model_dump(mode = "python", by_alias = True);
 
     # Override the trainable argument
-    config['trainable']         = config_['trainable'];
+    config['trainable']         = config_.trainable;
     if config['type'] == "cnn_3d":
         config = CNN3DEncoderDecoderConfig.model_validate(config);
     elif config['type'] == "cnn_3d_ae":

@@ -267,7 +267,7 @@ class ParameterSpace:
         # runtime copy instead of mutating the frozen schema contract.
         parameter_space_schema : ParameterSpaceConfig = config.parameter_space if isinstance(config, ExperimentConfig) else config;
         parameter_space_config : dict   = parameter_space_schema.model_dump(mode = "python", by_alias = True);
-        self.param_list : list[dict]    = parameter_space_config.parameters;
+        self.param_list : list[dict]    = parameter_space_config['parameters'];
         self.n_p        : int           = len(self.param_list);
 
         # Fetch the parameter names.
@@ -277,7 +277,7 @@ class ParameterSpace:
         LOGGER.info("Initializing a ParameterSpace object with parameters %s" % (str(self.param_names)));
 
         # First, let's make a set of parameter combinations to test at.
-        test_space_type : str = parameter_space_config.test_space.type
+        test_space_type : str = parameter_space_config['test_space']['type']
         if (test_space_type == 'grid'):
             # Generate the set possible parameter combinations. See the docstring for 
             # "createTestGridSpace" for details.

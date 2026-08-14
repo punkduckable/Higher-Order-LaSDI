@@ -59,7 +59,7 @@ class Thermal(Physics):
         assert isinstance(config, ThermalPhysicsConfig), "config must be a ThermalPhysicsConfig, got %s" % str(type(config));
 
         # First, let's fetch the hdf5 directory.
-        self.hdf5_dir : str  = config['Thermal']['hdf5_dir'];
+        self.hdf5_dir : str  = config.Thermal.hdf5_dir;
 
         # Set things we know.
         n_IC            : int   = 1;        # The heat equation has one time derivative.
@@ -94,7 +94,7 @@ class Thermal(Physics):
             assert nodes_coords_shape[1] == 3,              "nodes_coords_shape = %s" % str(nodes_coords_shape);
 
             # Check if we should use a CNN model.
-            self.use_cnn : bool = config['Thermal']['use_cnn'];
+            self.use_cnn : bool = config.Thermal.use_cnn;
 
             if(self.use_cnn == True):
                 self.use_cnn    : bool          = True;
@@ -249,8 +249,8 @@ class Thermal(Physics):
         self.switch_time = switch_time;
 
         # Set threshold.
-        LOGGER.info("Setting plotting threshold to %f" % config['Thermal']['threshold']);
-        self.threshold = lambda t, D_t, X: (D_t >= config['Thermal']['threshold'])
+        LOGGER.info("Setting plotting threshold to %f" % config.Thermal.threshold);
+        self.threshold = lambda t, D_t, X: (D_t >= config.Thermal.threshold)
 
         # All done!
         return;

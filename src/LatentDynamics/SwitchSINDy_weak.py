@@ -81,7 +81,7 @@ class SwitchSINDy_weak(WeakLatentDynamics, InterpolatableLatentDynamics):
             n_coefs         = n_z*(n_z + 1)*2,
             n_IC            = 1,
             Uniform_t_Grid  = Uniform_t_Grid,
-            trainable       = config["trainable"],
+            trainable       = config.trainable,
             config          = config);
 
         WeakLatentDynamics.__init__(   
@@ -90,7 +90,7 @@ class SwitchSINDy_weak(WeakLatentDynamics, InterpolatableLatentDynamics):
             n_coefs         = n_z*(n_z + 1)*2,
             n_IC            = 1,
             Uniform_t_Grid  = Uniform_t_Grid,
-            trainable       = config["trainable"],
+            trainable       = config.trainable,
             config          = config);
 
         # Class-specific initialization.

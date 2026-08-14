@@ -75,7 +75,7 @@ class KleinGordon(Physics):
                             X_Positions    = numpy.copy(X),
                             Frame_Shape    = list(U.shape[1:]),
                             param_names    = param_names,
-                            Uniform_t_Grid = config['KleinGordon']['uniform_t_grid'],
+                            Uniform_t_Grid = config.KleinGordon.uniform_t_grid,
                             n_IC           = 2);
 
         # Record the default value of k (for the initial condition).
@@ -178,8 +178,8 @@ class KleinGordon(Physics):
         assert param.shape[0]   == self.n_p,     "param.shape = %s, self.n_p = %d" % (str(param.shape), self.n_p);
 
         # Set up the t_Grid.
-        n_t     : int           = self.config['KleinGordon']['n_t'];
-        t_max   : float         = self.config['KleinGordon']['t_max']; 
+        n_t     : int           = self.config.KleinGordon.n_t;
+        t_max   : float         = self.config.KleinGordon.t_max;
         t_Grid  : numpy.ndarray = numpy.linspace(0, t_max, n_t, dtype = numpy.float32);
         if(self.Uniform_t_Grid == False):
             r               : float = 0.2*(t_Grid[1] - t_Grid[0]);

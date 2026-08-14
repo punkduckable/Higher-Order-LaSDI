@@ -153,25 +153,25 @@ class Burgers2D(Physics):
         assert 'nu' in param_names,             "param_names must include 'nu' for the PDE viscosity";
         assert isinstance(config, Burgers2DPhysicsConfig), "config must be a Burgers2DPhysicsConfig, got %s" % str(type(config));
 
-        cfg = config['Burgers2D'];
+        cfg = config.Burgers2D;
 
         # Required spatial settings
-        self.n_x        : int   = int(cfg['n_x']);
-        self.x_min      : float = float(cfg['x_min']);
-        self.x_max      : float = float(cfg['x_max']);
-        self.n_y        : int   = int(cfg['n_y']);
-        self.y_min      : float = float(cfg['y_min']);
-        self.y_max      : float = float(cfg['y_max']);
+        self.n_x        : int   = int(cfg.n_x);
+        self.x_min      : float = float(cfg.x_min);
+        self.x_max      : float = float(cfg.x_max);
+        self.n_y        : int   = int(cfg.n_y);
+        self.y_min      : float = float(cfg.y_min);
+        self.y_max      : float = float(cfg.y_max);
         self.dx         : float = (self.x_max - self.x_min) / max(1, (self.n_x - 1));
         self.dy         : float = (self.y_max - self.y_min) / max(1, (self.n_y - 1));
         assert self.dx > 0.0 and self.dy > 0.0;
 
         # Time grid controls (mirror 1D Burgers expectations)
-        self.n_t        : int   = int(cfg['n_t']);
-        self.t_max      : float = float(cfg['t_max']);
+        self.n_t        : int   = int(cfg.n_t);
+        self.t_max      : float = float(cfg.t_max);
 
         # IC frequency.
-        self.w          : float = float(cfg['w']);
+        self.w          : float = float(cfg.w);
 
         # Build spatial coordinates for convenience and plotting
         self.x_values   : numpy.ndarray = numpy.linspace(self.x_min, self.x_max, self.n_x, dtype=numpy.float32);
@@ -187,7 +187,7 @@ class Burgers2D(Physics):
                             X_Positions     = coordinates,
                             config          = config,
                             param_names     = param_names,
-                            Uniform_t_Grid  = bool(cfg['uniform_t_grid']),
+                            Uniform_t_Grid  = bool(cfg.uniform_t_grid),
                             n_IC            = 1);
 
         # Parameter indices for fast lookup

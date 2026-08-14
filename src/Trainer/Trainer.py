@@ -280,11 +280,11 @@ class Trainer:
         assert isinstance(trainer_config, BaseTrainerConfig), "trainer_config must be a BaseTrainerConfig, got %s" % str(type(trainer_config));
 
         # Fetch trainer class information.
-        self.n_iter                 : int   = trainer_config['n_iter'];             # Number of iterations for one train and greedy sampling
-        self.max_iter               : int   = trainer_config['max_iter'];           # We stop training if restart_iter goes above this number. 
-        self.max_greedy_iter        : int   = trainer_config['max_greedy_iter'];    # We stop performing greedy sampling if restart_iter goes above this number.
-        device                      : str   = trainer_config['device'];  # The device we want to map the trainer and its attributes to (and where we will perform training).
-        self.noise_ratio            : float = float(trainer_config['noise_ratio']);
+        self.n_iter                 : int   = trainer_config.n_iter;             # Number of iterations for one train and greedy sampling
+        self.max_iter               : int   = trainer_config.max_iter;           # We stop training if restart_iter goes above this number.
+        self.max_greedy_iter        : int   = trainer_config.max_greedy_iter;    # We stop performing greedy sampling if restart_iter goes above this number.
+        device                      : str   = trainer_config.device;  # The device we want to map the trainer and its attributes to (and where we will perform training).
+        self.noise_ratio            : float = float(trainer_config.noise_ratio);
         assert self.noise_ratio >= 0.0, "trainer.noise_ratio must be non-negative";
         if self.noise_ratio > 0.0:
             LOGGER.info("Noise injection enabled: noise_ratio = %f" % self.noise_ratio);
@@ -294,7 +294,7 @@ class Trainer:
         # Optional normalization (training-only stats).
         # If enabled, we compute a single mean/std across ALL training trajectories (per IC),
         # then normalize both training + testing trajectories using these values.
-        self.normalize              : bool                      = trainer_config['normalize'];
+        self.normalize              : bool                      = trainer_config.normalize;
         self.data_mean              : list[torch.Tensor] | None = None;   # per-IC scalar tensors (CPU)
         self.data_std               : list[torch.Tensor] | None = None;   # per-IC scalar tensors (CPU)
 
@@ -327,7 +327,7 @@ class Trainer:
         self._loss_cache                    = [];
 
         # Figure out where we will save cached losses.
-        base_filename           : str       = self.physics.config['type'];
+        base_filename           : str       = self.physics.config.type;
         self.loss_by_param_path : str       = os.path.join(self.path_results, base_filename + '_loss_by_param.jsonl');
         
         # Final setup.

@@ -70,10 +70,10 @@ def main():
     Log_Dictionary(LOGGER = LOGGER, D = config.to_runtime_dict(), level = logging.INFO);
 
     # Check if we are loading from a restart or not. If so, load it.
-    use_restart         : bool  = config['workflow']['use_restart'];
+    use_restart         : bool  = config.workflow.use_restart;
     restart_filename    : str   = "";
     if (use_restart == True):
-        restart_filename    : str   = config['workflow']['restart_file'];
+        restart_filename    : str   = config.workflow.restart_file;
         LOGGER.info("Loading from restart (%s)" % restart_filename);
 
         # Set up the restart path under Higher-Order-LaSDI/results (independent of CWD).
@@ -324,7 +324,7 @@ def Save(   param_space         : ParameterSpace,
         # now append the new date to the restart filename.
         restart_filename = restart_filename_no_ext + '__' + date_str + '.npy';
     else:
-        restart_filename : str = config["physics"]["type"] + '_' + date_str + '.npy';
+        restart_filename : str = config.physics.type + '_' + date_str + '.npy';
     # Set up the restart path.
     # Use an absolute results directory under the project root (Higher-Order-LaSDI/results),
     # independent of the current working directory.

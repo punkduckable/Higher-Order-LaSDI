@@ -25,9 +25,9 @@ def test_all_example_configs_validate():
     for path in sorted(EXAMPLES.glob("*.yml")):
         with open(path, "r") as f:
             validated = validate_experiment_config(yaml.safe_load(f))
-        assert validated["trainer"]["type"]
-        assert validated["latent_dynamics"]["type"]
-        assert validated["physics"]["type"]
+        assert validated.trainer.type
+        assert validated.latent_dynamics.type
+        assert validated.physics.type
 
 
 def test_schema_rejects_unknown_keys():

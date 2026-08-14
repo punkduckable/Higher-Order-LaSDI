@@ -83,7 +83,7 @@ class SINDy_weak(WeakLatentDynamics, InterpolatableLatentDynamics):
             n_coefs        = n_z*(n_z + 1),
             n_IC           = 1,
             Uniform_t_Grid = Uniform_t_Grid,
-            trainable      = config["trainable"],
+            trainable      = config.trainable,
             config         = config);
 
         WeakLatentDynamics.__init__(
@@ -92,7 +92,7 @@ class SINDy_weak(WeakLatentDynamics, InterpolatableLatentDynamics):
             n_coefs        = n_z*(n_z + 1),
             n_IC           = 1,
             Uniform_t_Grid = Uniform_t_Grid,
-            trainable      = config["trainable"],
+            trainable      = config.trainable,
             config         = config);
 
         LOGGER.info("Initializing a SINDy_weak object with n_z = %d, Uniform_t_Grid = %s" % (

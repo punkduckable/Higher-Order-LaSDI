@@ -79,8 +79,8 @@ class Autoencoder(EncoderDecoder):
         
         assert isinstance(config, (AEEncoderDecoderConfig, AutoencoderEncoderDecoderConfig)), \
             "config must be an AEEncoderDecoderConfig or AutoencoderEncoderDecoderConfig, got %s" % str(type(config));
-        ae_key  : str = config['type'];
-        ae_config               : dict              = config[ae_key];
+        ae_key      : str   = config.type;
+        ae_config           = getattr(config, ae_key);
 
         assert isinstance(Frame_Shape, list),                 "type(Frame_Shape) == %s, expected list" % (str(type(Frame_Shape)));
         for i in range(len(Frame_Shape)):
@@ -90,16 +90,16 @@ class Autoencoder(EncoderDecoder):
 
 
         # Next, fetch the hidden widths and latent dimension (n_z). 
-        hidden_widths           : list[int]         = ae_config['hidden_widths'];
-        n_z                     : int               = ae_config['latent_dimension'];
+        hidden_widths           : list[int]         = ae_config.hidden_widths;
+        n_z                     : int               = ae_config.latent_dimension;
 
         # Fetch the activations. This can either be a string or a list of strings. If it's 
         # a string, then we use that activation for all layers.
         n_hidden_layers     : int               = len(hidden_widths);
-        if(isinstance(ae_config['activations'], str)):
-            activations         : list[str]     = [ae_config['activations']] * n_hidden_layers;   # The final layer has no activation.
-        elif(isinstance(ae_config['activations'], list)):
-            activations         : list[str]     = ae_config['activations'];
+        if(isinstance(ae_config.activations, str)):
+            activations         : list[str]     = [ae_config.activations] * n_hidden_layers;   # The final layer has no activation.
+        elif(isinstance(ae_config.activations, list)):
+            activations         : list[str]     = ae_config.activations;
         else:
             raise ValueError("Activations must be a string or a list of strings.");
         
@@ -110,13 +110,13 @@ class Autoencoder(EncoderDecoder):
         assert numpy.prod(Frame_Shape) == widths[0],            "numpy.prod(self.Frame_Shape) = %d, widths[0] = %d; must be equal" % (numpy.prod(Frame_Shape), widths[0]);
 
         # Extract the number of decoders.
-        n_Decoders = config[ae_key]['n_Decoders'];
+        n_Decoders = ae_config.n_Decoders;
 
         # Run the superclass initializer.
         super().__init__(n_IC       = 1, 
                          n_z        = widths[-1], 
                          n_Decoders = n_Decoders,
-                         trainable  = config["trainable"], 
+                         trainable  = config.trainable,
                          config     = config);
         
         # Store information (for return purposes).
@@ -291,7 +291,7 @@ def load_Autoencoder(dict_ : dict, config_ : dict) -> Autoencoder:
         config = config.model_dump(mode = "python", by_alias = True);
 
     # Override the trainable argument
-    config['trainable']         = config_['trainable'];
+    config['trainable']         = config_.trainable;
     if config['type'] == "ae":
         config = AEEncoderDecoderConfig.model_validate(config);
     else:

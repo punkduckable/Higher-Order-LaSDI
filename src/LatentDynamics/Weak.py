@@ -104,13 +104,13 @@ class WeakLatentDynamics(LatentDynamics):
                                 config             = config)
 
         assert isinstance(config, LatentDynamicsBaseConfig), "config must be a LatentDynamicsBaseConfig, got %s" % str(type(config));
-        model_type  : str   = config["type"];
-        weak_config : dict  = config[model_type];
+        model_type  : str    = config.type;
+        weak_config          = getattr(config, model_type);
 
         # Weak form setup.
-        self.test_func_type  = weak_config["test_func_type"];
-        self.test_func_width = float(weak_config["test_func_width"]);
-        self.overlap         = float(weak_config["overlap"]);
+        self.test_func_type  = weak_config.test_func_type;
+        self.test_func_width = float(weak_config.test_func_width);
+        self.overlap         = float(weak_config.overlap);
         self.pq              = n_IC + 2;
         self.weight_function_derivatives = [{} for _ in range(self.n_IC + 1)];
 

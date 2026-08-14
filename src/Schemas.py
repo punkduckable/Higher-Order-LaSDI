@@ -23,50 +23,6 @@ class ConfigBase(BaseModel):
 
     model_config = ConfigDict(extra = "forbid", populate_by_name = True)
 
-    def _resolve_field_name(self, key: str) -> str:
-        """Map a field name or alias to the corresponding model attribute name."""
-
-        fields = type(self).model_fields
-        if key in fields:
-            return key
-
-        for field_name, field_info in fields.items():
-            if field_info.alias == key:
-                return field_name
-
-        raise KeyError(key)
-
-    def __getitem__(self, key: str) -> Any:
-        """Provide read-only dict-style access for legacy runtime code."""
-
-        return getattr(self, self._resolve_field_name(key))
-
-    def __contains__(self, key: object) -> bool:
-        if not isinstance(key, str):
-            return False
-        try:
-            self._resolve_field_name(key)
-            return True
-        except KeyError:
-            return False
-
-    def get(self, key: str, default: Any = None) -> Any:
-        """Dict-compatible ``get`` for legacy runtime code."""
-
-        try:
-            return self[key]
-        except KeyError:
-            return default
-
-    def keys(self):
-        return self.model_dump(mode = "python", by_alias = True).keys()
-
-    def items(self):
-        return self.model_dump(mode = "python", by_alias = True).items()
-
-    def values(self):
-        return self.model_dump(mode = "python", by_alias = True).values()
-
 # Some commonly used constrained datatypes
 PositiveInt         = Annotated[int,   Field(ge = 1)]
 NonNegativeInt      = Annotated[int,   Field(ge = 0)]

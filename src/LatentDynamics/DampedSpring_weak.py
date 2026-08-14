@@ -76,7 +76,7 @@ class DampedSpring_weak(InterpolatableLatentDynamics, WeakLatentDynamics):
             n_coefs         = n_z*(2*n_z + 1),
             n_IC            = 2, 
             Uniform_t_Grid  = Uniform_t_Grid, 
-            trainable       = config["trainable"],
+            trainable       = config.trainable,
             config          = config);
 
         WeakLatentDynamics.__init__(   
@@ -85,7 +85,7 @@ class DampedSpring_weak(InterpolatableLatentDynamics, WeakLatentDynamics):
             n_coefs         = n_z*(2*n_z + 1),
             n_IC            = 2, 
             Uniform_t_Grid  = Uniform_t_Grid, 
-            trainable       = config["trainable"],
+            trainable       = config.trainable,
             config          = config);
 
         

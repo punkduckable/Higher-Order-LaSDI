@@ -174,30 +174,30 @@ def Initialize_Trainer(
     # this encoder_decoder evolve over time. If we are using a restart file, then load the saved 
     # encoder_decoder parameters from file.
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
-        encoder_decoder_type : str    = config['EncoderDecoder']['type'];
-        encoder_decoder               = encoder_decoder_load_dict[encoder_decoder_type](restart_dict['encoder_decoder'], config['EncoderDecoder']);
+        encoder_decoder_type : str    = config.EncoderDecoder.type;
+        encoder_decoder               = encoder_decoder_load_dict[encoder_decoder_type](restart_dict['encoder_decoder'], config.EncoderDecoder);
     else: 
         encoder_decoder               = Initialize_Encoder_Decoder(physics, config);
 
     # Initialize the latent dynamics model. If we are using a restart file, then load the saved
     # latent dynamics from this file. 
-    ld_type                 = config['latent_dynamics']['type'];
+    ld_type                 = config.latent_dynamics.type;
     if(ld_type == "switch" or ld_type == "switch_w"):
         latent_dynamics         = ld_dict[ld_type]( n_z             = encoder_decoder.n_z, 
                                                     Uniform_t_Grid  = physics.Uniform_t_Grid,
                                                     switch_time     = physics.switch_time,
-                                                    config          = config['latent_dynamics']);
+                                                    config          = config.latent_dynamics);
     else:
         latent_dynamics         = ld_dict[ld_type]( n_z             = encoder_decoder.n_z, 
                                                     Uniform_t_Grid  = physics.Uniform_t_Grid,
-                                                    config          = config['latent_dynamics']);
+                                                    config          = config.latent_dynamics);
     
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
         latent_dynamics.load(restart_dict['latent_dynamics']);
 
     # Initialize the trainer object. If we are using a restart file, then load the 
     # trainer from that file.
-    trainer_type            = config['trainer']['type'];
+    trainer_type            = config.trainer.type;
     trainer                 = trainer_dict[trainer_type](physics, encoder_decoder, latent_dynamics, param_space, config);
     
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
@@ -209,8 +209,8 @@ def Initialize_Trainer(
                                     iter            = trainer.restart_iter);
 
     # Load the sampler.
-    sampler_type    : str       = config['sampler']['type'];
-    sampler         : Sampler   = sampler_dict[sampler_type](config['sampler']);
+    sampler_type    : str       = config.sampler.type;
+    sampler         : Sampler   = sampler_dict[sampler_type](config.sampler);
     
     # All done!
     return trainer, sampler, param_space, physics, encoder_decoder, latent_dynamics;
@@ -253,12 +253,12 @@ def Initialize_Encoder_Decoder(physics : Physics, config : ExperimentConfig) -> 
     
     # First, determine what encoder_decoder we are using in the latent dynamics. Make sure the user 
     # included all the information that is necessary to initialize the corresponding dynamics.
-    encoder_decoder_type : str = config['EncoderDecoder']['type'];
+    encoder_decoder_type : str = config.EncoderDecoder.type;
     LOGGER.info("Initializing EncoderDecoder (%s)" % encoder_decoder_type);
 
     encoder_decoder = encoder_decoder_dict[encoder_decoder_type]( 
                                                 Frame_Shape = physics.Frame_Shape,
-                                                config      = config['EncoderDecoder']);
+                                                config      = config.EncoderDecoder);
 
     return encoder_decoder;
 
@@ -297,8 +297,8 @@ def Initialize_Physics(config: ExperimentConfig, param_names : list[str]) -> Phy
     '''
 
     # First, determine what kind of "physics" object we want to load.
-    physics_cfg     : dict      = config['physics'];
-    physics_type    : str       = physics_cfg['type'];
+    physics_cfg                 = config.physics;
+    physics_type    : str       = physics_cfg.type;
     LOGGER.info("Initializing Physics (%s)" % physics_type);
 
     # Next, initialize the "physics" object we are using to build the simulations.

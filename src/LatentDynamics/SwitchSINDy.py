@@ -77,11 +77,11 @@ class SwitchSINDy(InterpolatableLatentDynamics):
             n_coefs         = n_z*(n_z + 1)*2,
             n_IC            = 1,
             Uniform_t_Grid  = Uniform_t_Grid, 
-            trainable       = config["trainable"],
+            trainable       = config.trainable,
             config          = config);
 
         # Class-specific initialization.
-        self.lstsq_reg      : float     = config["switch"]["lstsq_reg"];
+        self.lstsq_reg      : float     = config.switch.lstsq_reg;
         self.switch_time    : callable  = switch_time;
         
         # Setup the loss functions used by compute_losses.

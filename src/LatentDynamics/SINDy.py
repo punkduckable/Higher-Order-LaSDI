@@ -75,11 +75,11 @@ class SINDy(InterpolatableLatentDynamics):
             n_coefs        = n_z*(n_z + 1), 
             n_IC           = 1, 
             Uniform_t_Grid = Uniform_t_Grid,
-            trainable      = config["trainable"],
+            trainable      = config.trainable,
             config         = config);
 
         # Set up class-specific variables.
-        self.lstsq_reg : float = config["sindy"]["lstsq_reg"];
+        self.lstsq_reg : float = config.sindy.lstsq_reg;
         LOGGER.info("Initializing a SINDY object with n_z = %d, Uniform_t_Grid = %s, lstsq_reg = %s" % (self.n_z, str(self.Uniform_t_Grid), str(self.lstsq_reg)));
 
         # Setup the loss functions used by compute_losses.

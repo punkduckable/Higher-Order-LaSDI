@@ -51,11 +51,11 @@ class Explicit(Physics):
         assert isinstance(config, ExplicitSecondOrderPhysicsConfig), "config must be an ExplicitSecondOrderPhysicsConfig, got %s" % str(type(config));
 
         # Set up spatial variables
-        self.n_positions            : int       = config['Explicit']['n_positions'];    
-        self.x_min                  : float     = config['Explicit']['x_min'];
-        self.x_max                  : float     = config['Explicit']['x_max'];
-        self.y_min                  : float     = config['Explicit']['y_min'];
-        self.y_max                  : float     = config['Explicit']['y_max'];
+        self.n_positions            : int       = config.Explicit.n_positions;
+        self.x_min                  : float     = config.Explicit.x_min;
+        self.x_max                  : float     = config.Explicit.x_max;
+        self.y_min                  : float     = config.Explicit.y_min;
+        self.y_max                  : float     = config.Explicit.y_max;
 
         # Set up the spatial grid.
         x_coords                    : numpy.ndarray = numpy.random.uniform(low = self.x_min, high = self.x_max, size = self.n_positions).astype(numpy.float32);
@@ -68,7 +68,7 @@ class Explicit(Physics):
                          X_Positions    = X_Positions,
                          Frame_Shape    = [1, self.n_positions],
                          param_names    = param_names, 
-                         Uniform_t_Grid = config['Explicit']['uniform_t_grid'],
+                         Uniform_t_Grid = config.Explicit.uniform_t_grid,
                          n_IC           = 2);
      
         # Determine which index corresponds to 'a' and 'w' (we pass an array of parameter values, 
@@ -180,8 +180,8 @@ class Explicit(Physics):
 
         # Make the t_grid. If we are not using uniform t spacing, then add a random perturbation to 
         # the intermediate time steps.
-        n_t     : int           = self.config['Explicit']['n_t'];
-        t_max   : float         = self.config['Explicit']['t_max']; # We solve from t = 0 to t = t_max. 
+        n_t     : int           = self.config.Explicit.n_t;
+        t_max   : float         = self.config.Explicit.t_max; # We solve from t = 0 to t = t_max.
         t_Grid  : numpy.ndarray = numpy.linspace(0, t_max, n_t, dtype = numpy.float32);
         if(self.Uniform_t_Grid == False):
             r               : float = 0.2*(t_Grid[1] - t_Grid[0]);
