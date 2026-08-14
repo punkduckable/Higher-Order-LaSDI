@@ -305,6 +305,112 @@ class SINDy(InterpolatableLatentDynamics):
         return loss_LD_list, loss_coef_list, loss_stab_list;
 
 
+    def RHS(    self,
+                Z       : list[list[torch.Tensor | numpy.ndarray]],
+                t_Grid  : list[numpy.ndarray | torch.Tensor],
+                params  : numpy.ndarray,
+                sample  : bool = False) -> list[torch.Tensor | numpy.ndarray]:
+        r"""
+        Evaluate the affine SINDy right-hand side at a set of latent states and parameters.
+
+        For each parameter value, theta, we evaluate
+
+            z'(t) = A(theta) z(t) + b(theta)
+
+        at each latent state in `Z[i][0]`. Training parameters use exact coefficients from
+        `self.train_coefs`; testing parameters use the interpolator mean or a sample.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        Z : list[list[torch.Tensor | numpy.ndarray]], len = n_param
+            The i'th element is a one-element list whose first entry is a tensor/array of shape
+            (n_t(i), n_z) or (n_t(i), n_batch(i), n_z).
+
+        t_Grid : list[numpy.ndarray | torch.Tensor], len = n_param
+            The i'th entry is a one-dimensional time grid with length n_t(i). The SINDy RHS is
+            autonomous, so these values are checked for consistency but not otherwise used.
+
+        params : numpy.ndarray, shape = (n_param, n_p)
+            Parameter rows corresponding to the latent states stored in Z.
+
+        sample : bool
+            If True, use one interpolator sample for each non-training parameter. Otherwise, use
+            interpolator posterior means. Training parameters always use exact training
+            coefficients.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        RH_Sides : list[numpy.ndarray | torch.Tensor], len = n_param
+            The i'th entry has the same backend and leading dimensions as `Z[i][0]` and last
+            dimension n_z. It stores A(theta) z + b evaluated at the supplied states.
+        """
+
+        # Checks.
+        assert isinstance(params, numpy.ndarray), "params must be a 2d numpy.ndarray, not %s" % str(type(params));
+        assert len(params.shape) == 2, "params must be a 2d numpy.ndarray of shape (n_param, n_p). Got shape %s" % str(params.shape);
+        n_param : int = params.shape[0];
+        assert isinstance(Z, list) and len(Z) == n_param;
+        assert isinstance(t_Grid, list) and len(t_Grid) == n_param;
+
+
+        # -----------------------------------------------------------------------------------------
+        # Fetch coefficient dictionaries for the passed parameters.
+        # -----------------------------------------------------------------------------------------
+
+        coefs_list : list[dict[str, torch.Tensor]] = self._coefs_for_params(params = params, sample = sample);
+
+
+        # -----------------------------------------------------------------------------------------
+        # Compute right-hand sides.
+        # -----------------------------------------------------------------------------------------
+
+        RH_Sides : list[numpy.ndarray | torch.Tensor] = [];
+        LOGGER.debug("Computing RHS with %d parameter combinations" % n_param);
+        for i in range(n_param):
+            ith_coefs  : dict[str, numpy.ndarray | torch.Tensor] = coefs_list[i];
+            ith_Z      : list[numpy.ndarray | torch.Tensor]      = Z[i];
+            ith_t_Grid : numpy.ndarray | torch.Tensor            = t_Grid[i];
+
+            # Checks.
+            assert isinstance(ith_coefs, dict) and set(ith_coefs.keys()) == {"A", "b"};
+            assert isinstance(ith_Z, list) and len(ith_Z) == 1;
+            ith_Z0 : numpy.ndarray | torch.Tensor = ith_Z[0];
+            assert isinstance(ith_Z0, (numpy.ndarray, torch.Tensor));
+            assert len(ith_Z0.shape) in {2, 3};
+            assert ith_Z0.shape[-1] == self.n_z;
+            assert len(ith_t_Grid.shape) == 1;
+            assert ith_Z0.shape[0] == ith_t_Grid.shape[0];
+
+            # Fetch native coefficients.
+            A = ith_coefs["A"];
+            b = ith_coefs["b"];
+            b_shape : tuple[int, ...] = (1,)*(len(ith_Z0.shape) - 1) + (-1,);
+
+            # Evaluate the affine RHS using the same backend as the latent states.
+            if isinstance(ith_Z0, numpy.ndarray):
+                if isinstance(A, torch.Tensor):
+                    A = A.detach().cpu().numpy();
+                    b = b.detach().cpu().numpy();
+                RH_Sides.append(numpy.matmul(ith_Z0, A.T) + b.reshape(b_shape));
+            else:
+                if isinstance(A, numpy.ndarray):
+                    A = torch.tensor(A, dtype = ith_Z0.dtype, device = ith_Z0.device);
+                    b = torch.tensor(b, dtype = ith_Z0.dtype, device = ith_Z0.device);
+                else:
+                    A = A.to(device = ith_Z0.device, dtype = ith_Z0.dtype);
+                    b = b.to(device = ith_Z0.device, dtype = ith_Z0.dtype);
+                RH_Sides.append(torch.matmul(ith_Z0, A.T) + b.reshape(b_shape));
+
+        # All done!
+        return RH_Sides;
+
+
 
     def simulate(   self,
                     IC      : list[list[numpy.ndarray | torch.Tensor]],

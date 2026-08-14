@@ -9,8 +9,8 @@ import  torch;
 
 from    LatentDynamics.Weak             import  WeakLatentDynamics;
 from    LatentDynamics.Interpolatable   import  InterpolatableLatentDynamics;
+from    LatentDynamics.SwitchSINDy      import  SwitchSINDy;
 from    Schemas                         import  SwitchSINDyWeakLatentDynamicsConfig;
-from    Utilities.FirstOrderSolvers     import  RK4;
 
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
@@ -20,7 +20,7 @@ LOGGER  : logging.Logger    = logging.getLogger(__name__);
 # SwitchSINDy_weak class
 # -------------------------------------------------------------------------------------------------
 
-class SwitchSINDy_weak(WeakLatentDynamics, InterpolatableLatentDynamics):
+class SwitchSINDy_weak(WeakLatentDynamics, SwitchSINDy):
     def __init__(   self,
                     n_z             : int,
                     Uniform_t_Grid  : bool,
@@ -37,6 +37,8 @@ class SwitchSINDy_weak(WeakLatentDynamics, InterpolatableLatentDynamics):
 
         Coefficients are stored natively in `self.train_coefs` using the keys `A_before`,
         `b_before`, `A_after`, and `b_after`.
+
+        Note: This class inherits `simulate`, `trainable_tensors`, and `RHS` from SwitchSINDy.
 
 
         -------------------------------------------------------------------------------------------
@@ -105,20 +107,6 @@ class SwitchSINDy_weak(WeakLatentDynamics, InterpolatableLatentDynamics):
             str(self.Uniform_t_Grid),
         ));
         return;
-
-
-
-    def trainable_tensors(self) -> list[torch.Tensor]:
-        r"""Return all trainable weak-form switching-SINDy coefficient tensors."""
-
-        if self.trainable == False:
-            return [];
-
-        tensors : list[torch.Tensor] = [];
-        for coef_dict in self.train_coefs.values():
-            tensors.extend([coef_dict["A_before"], coef_dict["b_before"], coef_dict["A_after"], coef_dict["b_after"]]);
-        return tensors;
-
 
 
     # ---------------------------------------------------------------------------------------------
@@ -317,126 +305,3 @@ class SwitchSINDy_weak(WeakLatentDynamics, InterpolatableLatentDynamics):
             loss_stab_list.append(loss_stab);
 
         return loss_LD_list, loss_coef_list, loss_stab_list;
-
-
-
-    def simulate(   self,
-                    IC      : list[list[numpy.ndarray | torch.Tensor]],
-                    t_Grid  : list[numpy.ndarray      | torch.Tensor],
-                    params  : numpy.ndarray,
-                    sample  : bool  = False) -> list[list[numpy.ndarray | torch.Tensor]]:
-        r"""
-        Time integrates the switching SINDy latent dynamics.
-
-        The weak formulation only changes the LD loss; rollouts still solve the native
-        before/after switching affine ODE.
-
-
-        -------------------------------------------------------------------------------------------
-        Arguments
-        -------------------------------------------------------------------------------------------
-
-        IC : list[list[numpy.ndarray | torch.Tensor]], len = n_param
-            Initial latent states for each parameter/coefficient set. SwitchSINDy_weak has one IC
-            component.
-
-        t_Grid : list[numpy.ndarray | torch.Tensor], len = n_param
-            Time grids at which to solve the latent dynamics.
-
-        params : numpy.ndarray, shape = (n_param, n_p)
-            Parameter rows used to compute the switch time for each simulation.
-
-        sample : bool 
-            If self is stochastic, setting this to true will sample from the posterior distribution 
-            of the latent dynamics at each parameter value, then solve the latent dynamics using 
-            the resulting sample. Otherwise, setting this to true will use the mean of that 
-            posterior distribution. If self is not stochastic, this does nothing.
-
-        -------------------------------------------------------------------------------------------
-        Returns
-        -------------------------------------------------------------------------------------------
-
-        Z : list[list[numpy.ndarray | torch.Tensor]], len = n_param
-            The simulated latent trajectories. Z[i][0] has shape
-            (n_t(i), n_initial_conditions, n_z).
-        """
-
-        # Checks.
-        assert isinstance(params, numpy.ndarray);
-        assert len(params.shape) == 2;
-        n_param : int = params.shape[0];
-        assert isinstance(t_Grid, list) and isinstance(IC, list);
-        assert len(IC) == n_param and len(t_Grid) == n_param;
-
-
-        # -----------------------------------------------------------------------------------------
-        # Fetch coefficient dictionaries for the passed parameters.
-        # -----------------------------------------------------------------------------------------
-
-        coefs_list : list[dict[str, torch.Tensor]] = self._coefs_for_params(params = params, sample = sample);
-
-
-        # -----------------------------------------------------------------------------------------
-        # Loop through parameter combinations.
-        # -----------------------------------------------------------------------------------------
-
-        Z : list[list[numpy.ndarray | torch.Tensor]] = [];
-        LOGGER.debug("Simulating with %d parameter combinations" % n_param);
-        for i in range(n_param):
-            # Fetch this parameter's data and switch time.
-            ith_coefs  : dict[str, numpy.ndarray | torch.Tensor] = coefs_list[i];
-            ith_IC     : list[numpy.ndarray | torch.Tensor]      = IC[i];
-            ith_t_Grid : numpy.ndarray | torch.Tensor            = t_Grid[i];
-            ith_params : numpy.ndarray                           = params[i, :].reshape(1, -1);
-
-            # Set up the i'th single-parameter solve.
-            assert isinstance(ith_coefs, dict) and set(ith_coefs.keys()) == {"A_before", "b_before", "A_after", "b_after"};
-            assert isinstance(ith_IC, list) and len(ith_IC) == 1;
-            assert len(ith_t_Grid.shape) == 1 or len(ith_t_Grid.shape) == 2;
-            if isinstance(ith_t_Grid, torch.Tensor):
-                ith_t_Grid = ith_t_Grid.detach().cpu().numpy();
-            Same_t_Grid = (len(ith_t_Grid.shape) == 1);
-            ith_Z0 = ith_IC[0];
-            n_i = ith_Z0.shape[0];
-            assert len(ith_Z0.shape) == 2 and ith_Z0.shape[1] == self.n_z;
-            if(Same_t_Grid == False):
-                assert ith_t_Grid.shape[0] == n_i;
-            switch_time_theta = self.switch_time(ith_params);
-
-            # Fetch native coefficients and match them to the IC backend below.
-            A_before, b_before, A_after, b_after = ith_coefs["A_before"], ith_coefs["b_before"], ith_coefs["A_after"], ith_coefs["b_after"];
-
-            # Define the right-hand side in either NumPy or PyTorch. The solver backend follows the
-            # initial-condition backend; this preserves differentiability for tensor rollouts in
-            # training and keeps plotting/sampling paths lightweight with NumPy arrays.
-            if isinstance(ith_Z0, numpy.ndarray):
-                vals = [];
-                for x in [A_before, b_before, A_after, b_after]:
-                    vals.append(x.detach().cpu().numpy() if isinstance(x, torch.Tensor) else x);
-                A_before, b_before, A_after, b_after = vals;
-                b_before = b_before.reshape(1, -1); b_after = b_after.reshape(1, -1);
-                def f(t : float, z : numpy.ndarray) -> numpy.ndarray:
-                    return b_before + numpy.matmul(z, A_before.T) if t < switch_time_theta else b_after + numpy.matmul(z, A_after.T);
-            else:
-                def to_z(x):
-                    return torch.tensor(x, dtype = ith_Z0.dtype, device = ith_Z0.device) if isinstance(x, numpy.ndarray) else x.to(device = ith_Z0.device, dtype = ith_Z0.dtype);
-                A_before, b_before, A_after, b_after = to_z(A_before), to_z(b_before), to_z(A_after), to_z(b_after);
-                b_before = b_before.reshape(1, -1); b_after = b_after.reshape(1, -1);
-                def f(t : float, z : torch.Tensor) -> torch.Tensor:
-                    return b_before + torch.matmul(z, A_before.T) if t < switch_time_theta else b_after + torch.matmul(z, A_after.T);
-
-            # Integrate all initial conditions together when they share a time grid; otherwise integrate
-            # each row of the IC array with its corresponding row of the time-grid array.
-            if(Same_t_Grid == True):
-                ith_Z = RK4(f = f, y0 = ith_Z0, t_Grid = ith_t_Grid);
-            else:
-                Z_list : list[torch.Tensor | numpy.ndarray] = [];
-                for j in range(n_i):
-                    Z_list.append(RK4(f = f, y0 = ith_Z0[j, :].reshape(1, -1), t_Grid = ith_t_Grid[j, :]));
-                ith_Z = numpy.concatenate(Z_list, axis = 1) if isinstance(ith_Z0, numpy.ndarray) else torch.cat(Z_list, dim = 1);
-
-            # Add this parameter's trajectory to the output list.
-            Z.append([ith_Z]);
-
-        # All done!
-        return Z;

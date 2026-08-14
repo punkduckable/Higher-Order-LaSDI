@@ -9,8 +9,8 @@ import  torch;
 
 from    LatentDynamics.Weak             import  WeakLatentDynamics;
 from    LatentDynamics.Interpolatable   import  InterpolatableLatentDynamics;
+from    LatentDynamics.SINDy            import  SINDy;
 from    Schemas                         import  SINDyWeakLatentDynamicsConfig;
-from    Utilities.FirstOrderSolvers     import  RK4;
 
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
@@ -20,7 +20,7 @@ LOGGER  : logging.Logger    = logging.getLogger(__name__);
 # SINDy_weak class
 # -------------------------------------------------------------------------------------------------
 
-class SINDy_weak(WeakLatentDynamics, InterpolatableLatentDynamics):
+class SINDy_weak(WeakLatentDynamics, SINDy):
     def __init__(   self,
                     n_z             : int,
                     Uniform_t_Grid  : bool,
@@ -44,6 +44,8 @@ class SINDy_weak(WeakLatentDynamics, InterpolatableLatentDynamics):
 
         where phi is one of the compactly supported test functions owned by the base class.
 
+        
+        Note: This class inherits `trainable_tensors`, `RHS`, and `simulate` from SINDy.
 
         -------------------------------------------------------------------------------------------
         Arguments
@@ -104,19 +106,6 @@ class SINDy_weak(WeakLatentDynamics, InterpolatableLatentDynamics):
         self.MSE = torch.nn.MSELoss(reduction = 'mean');
         self.MAE = torch.nn.L1Loss(reduction = 'mean');
         return;
-
-
-
-    def trainable_tensors(self) -> list[torch.Tensor]:
-        r"""Return the actual weak-form SINDy coefficient tensors to optimize."""
-
-        if self.trainable == False:
-            return [];
-
-        tensors : list[torch.Tensor] = [];
-        for coef_dict in self.train_coefs.values():
-            tensors.extend([coef_dict["A"], coef_dict["b"]]);
-        return tensors;
 
 
 
@@ -298,127 +287,3 @@ class SINDy_weak(WeakLatentDynamics, InterpolatableLatentDynamics):
             loss_stab_list.append(loss_stab);
 
         return loss_LD_list, loss_coef_list, loss_stab_list;
-
-
-
-    def simulate(   self,
-                    IC      : list[list[numpy.ndarray | torch.Tensor]],
-                    t_Grid  : list[numpy.ndarray      | torch.Tensor],
-                    params  : numpy.ndarray,
-                    sample  : bool = False) -> list[list[numpy.ndarray | torch.Tensor]]:
-        r"""
-        Time-integrate the native SINDy latent dynamics.
-
-        The weak formulation only changes the LD loss; rollouts still solve
-
-            z'(t) = A z(t) + b.
-
-
-        -------------------------------------------------------------------------------------------
-        Arguments
-        -------------------------------------------------------------------------------------------
-
-        IC : list[list[numpy.ndarray | torch.Tensor]], len = n_param
-            Initial latent states for each coefficient set. SINDy_weak has one IC component.
-
-        t_Grid : list[numpy.ndarray | torch.Tensor], len = n_param
-            Time grids for simulation.
-
-        params : numpy.ndarray, shape = (n_param, n_p)
-            The i'th row holds the i'th combination of parameter values.
-
-        sample : bool 
-            If self is stochastic, setting this to true will sample from the posterior distribution 
-            of the latent dynamics at each parameter value, then solve the latent dynamics using 
-            the resulting sample. Otherwise, setting this to true will use the mean of that 
-            posterior distribution. If self is not stochastic, this does nothing.
-            
-        -------------------------------------------------------------------------------------------
-        Returns
-        -------------------------------------------------------------------------------------------
-
-        Z : list[list[numpy.ndarray | torch.Tensor]]
-            Simulated latent trajectories. Z[i][0] has shape (n_t(i), n_initial_conditions, n_z).
-        """
-
-        # Checks.
-        assert isinstance(params, numpy.ndarray);
-        assert len(params.shape) == 2;
-        n_param : int = params.shape[0];
-        assert isinstance(t_Grid, list) and isinstance(IC, list);
-        assert len(IC) == n_param and len(t_Grid) == n_param;
-
-
-        # -----------------------------------------------------------------------------------------
-        # Fetch coefficient dictionaries for the passed parameters.
-        # -----------------------------------------------------------------------------------------
-
-        coefs_list : list[dict[str, torch.Tensor]] = self._coefs_for_params(params = params, sample = sample);
-
-
-        # -----------------------------------------------------------------------------------------
-        # Loop through parameter combinations.
-        # -----------------------------------------------------------------------------------------
-
-        Z : list[list[numpy.ndarray | torch.Tensor]] = [];
-        LOGGER.debug("Simulating with %d parameter combinations" % n_param);
-        for i in range(n_param):
-            # Fetch the i'th set of coefficients, initial conditions, and time grid.
-            ith_coefs  : dict[str, numpy.ndarray | torch.Tensor] = coefs_list[i];
-            ith_IC     : list[numpy.ndarray | torch.Tensor]      = IC[i];
-            ith_t_Grid : numpy.ndarray | torch.Tensor            = t_Grid[i];
-
-            # Set up the i'th single-parameter solve.
-            assert isinstance(ith_coefs, dict) and set(ith_coefs.keys()) == {"A", "b"};
-            assert isinstance(ith_IC, list) and len(ith_IC) == 1;
-            assert len(ith_t_Grid.shape) == 1 or len(ith_t_Grid.shape) == 2;
-            if(isinstance(ith_t_Grid, torch.Tensor)):
-                ith_t_Grid = ith_t_Grid.detach().cpu().numpy();
-            Same_t_Grid : bool = (len(ith_t_Grid.shape) == 1);
-            ith_Z0 : numpy.ndarray | torch.Tensor = ith_IC[0];
-            n_i    : int                          = ith_Z0.shape[0];
-            assert len(ith_Z0.shape) == 2 and ith_Z0.shape[1] == self.n_z;
-            if(Same_t_Grid == False):
-                assert ith_t_Grid.shape[0] == n_i;
-
-            # Fetch native coefficients for this parameter.
-            A = ith_coefs["A"];
-            b = ith_coefs["b"];
-
-            # Match the coefficient backend to the initial-condition backend. This keeps the solver
-            # purely NumPy for NumPy inputs and differentiable PyTorch for tensor inputs.
-            if isinstance(ith_Z0, numpy.ndarray):
-                if isinstance(A, torch.Tensor):
-                    A = A.detach().cpu().numpy();
-                    b = b.detach().cpu().numpy();
-                b = b.reshape(1, -1);
-                f = lambda t, z: b + numpy.matmul(z, A.T);
-            else:
-                if isinstance(A, numpy.ndarray):
-                    A = torch.tensor(A, dtype = ith_Z0.dtype, device = ith_Z0.device);
-                    b = torch.tensor(b, dtype = ith_Z0.dtype, device = ith_Z0.device);
-                else:
-                    A = A.to(device = ith_Z0.device, dtype = ith_Z0.dtype);
-                    b = b.to(device = ith_Z0.device, dtype = ith_Z0.dtype);
-                b = b.reshape(1, -1);
-                f = lambda t, z: b + torch.matmul(z, A.T);
-
-            # Solve the ODE. If all ICs share the same time grid we integrate them as a batch;
-            # otherwise, integrate each initial condition separately and concatenate the results.
-            if(Same_t_Grid == True):
-                ith_Z = RK4(f = f, y0 = ith_Z0, t_Grid = ith_t_Grid);
-            else:
-                Z_list : list[torch.Tensor | numpy.ndarray] = [];
-                for j in range(n_i):
-                    Z_j = RK4(f = f, y0 = ith_Z0[j, :].reshape(1, -1), t_Grid = ith_t_Grid[j, :]);
-                    Z_list.append(Z_j);
-                if(isinstance(ith_Z0, numpy.ndarray)):
-                    ith_Z = numpy.concatenate(Z_list, axis = 1);
-                else:
-                    ith_Z = torch.cat(Z_list, dim = 1);
-
-            # Add this parameter's trajectory to the output list.
-            Z.append([ith_Z]);
-
-        # All done!
-        return Z;

@@ -242,6 +242,18 @@ If a row of `params` is present in `train_coefs`, the exact training coefficient
 the latent dynamics object queries its interpolator. `sample=False` uses interpolator posterior means,
 while `sample=True` draws one posterior sample per requested non-training parameter.
 
+Pointwise latent-dynamics right-hand sides use the same coefficient lookup rule:
+
+```python
+rhs = latent_dynamics.RHS(Z=Z, t_Grid=t_grid, params=param_grid, sample=False)
+```
+
+Here `Z[i]` is a list of the latent state components needed by the model (for example `[z]` for
+SINDy/SwitchSINDy and `[z, z_dot]` for damped-spring dynamics). Each returned `rhs[i]` preserves the
+backend, dtype, device, and leading dimensions of `Z[i][0]`; its last dimension is `n_z`. Strong and
+weak variants of the same latent ODE share the same pointwise RHS because weak/strong form only
+changes the training residual, not the ODE being evaluated.
+
 #### Weak and Strong form Latent-dynamics 
 
 LatentDynamics objects can either be `strong` or `weak`. This distinction reflects how they enforce 
@@ -776,6 +788,9 @@ New applications can be implemented by deriving from the appropriate base classe
    - `compute_losses(self, Latent_States, loss_type, t_Grid, params)`: Look up native coefficients
      from `self.train_coefs` using `params`, then return latent-dynamics, coefficient, and stability
      loss lists. It should not accept flattened `input_coefs`.
+   - `RHS(self, Z, t_Grid, params, sample=False)`: Evaluate the pointwise latent ODE right-hand
+     side using exact training coefficients or interpolated mean/sample coefficients. Strong and
+     weak forms of the same ODE should normally delegate to the same RHS implementation.
    - `simulate(self, IC, t_Grid, params, sample=False)`: Simulate forward by using exact
      `train_coefs` for training parameters and `self.interpolator.mean(...)` or
      `self.interpolator.sample(...)` for non-training parameters.

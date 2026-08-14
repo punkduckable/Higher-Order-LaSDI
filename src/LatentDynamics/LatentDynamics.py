@@ -107,6 +107,11 @@ class LatentDynamics:
     - `simulate(IC, t_Grid, params, sample=False)`: integrate the latent ODE from one or more latent
       initial conditions and return latent trajectories in the expected `n_IC`-component format.
 
+    - `RHS(Z, t_Grid, params, sample=False)`: evaluate the pointwise right-hand side of the latent
+      ODE at supplied latent states. Strong and weak forms of the same latent ODE should normally
+      use the same RHS implementation because the weak/strong distinction changes only how
+      residual losses are computed.
+
     - `export`, `load`: export
     """
     # Instance variables
@@ -471,6 +476,70 @@ class LatentDynamics:
 
         raise RuntimeError('Abstract function LatentDynamics.compute_losses!');
     
+
+    # ---------------------------------------------------------------------------------------------
+    # RHS: Evaluate the right hand side of the latent dynamics for a particular parameter.
+    # ---------------------------------------------------------------------------------------------
+
+    def RHS(    self, 
+                Z       : list[list[torch.Tensor | numpy.ndarray]], 
+                t_Grid  : list[numpy.ndarray | torch.Tensor],
+                params  : numpy.ndarray,
+                sample  : bool = False) -> list[torch.Tensor | numpy.ndarray]:
+        """
+        Evaluate the RHS of the latent dynamics at a set of latent states, times, and parameters. 
+
+        Specifically, we assume that Z, t_Grid, and params have n_param elements. For each 
+        parameter value, theta, we evaluate the right hand side of the latent dynamics for theta 
+        at each time in t_Grid[i]. That is, we compute
+
+            f(Z[i][0][k, :], Z[i][1][k, :], ... Z[i][n_IC][k, :], t_Grid[i][k], params[k, :])
+        
+        Where f denotes the right hand side of the latent dynamics;
+
+            D^{(n_IC)} z(t) = f(z(t), z'(t), ... , D^{(n_IC - 1)} z(t), t, \theta)
+        
+        We compute this quantity for each time and parameter value, returning the results in a 
+        list of lists.
+        
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        Z : list[list[torch.Tensor]], len = n_param
+            i'th element is an list of length n_IC whose j'th element is a tensor of shape 
+            [n_t(i), n_z] or [n_t(i), n_batch(i), n_z], where n_t(i) = len(t_Grid[i]). The k'th
+            time slice should represent the j'th time derivative of the latent state
+            corresponding to i'th parameter combination at the k'th time step.
+
+        t_Grid : list[numpy.ndarray | torch.Tensor], len = n_param
+            i'th element is a numpy.ndarray or torch.Tensor of shape [n_t(i)] whose j'th element
+            holds the time when the latent state for parameter i was (Z[i][0][k, :], ... 
+            Z[i][n_IC][k, :]).
+        
+        params : numpy.ndarray, shape = (n_param, n_p)
+            Parameters at corresponding to the latent solutions stored in Z.
+            
+        sample : bool
+            If True, we draw a sample of the latent dynamics at each parameter value to compute 
+            the right hand sides. Otherwise, we use the mean.
+       
+        
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        RH_Sides : list[numpy.ndarray | torch.Tensor], len = n_param
+            i'th element is a numpy.ndarray or torch.Tensor with the same leading dimensions and
+            backend as Z[i][0] and last dimension n_z. Its j'th time slice holds the right-hand
+            side of the sampled (or mean) latent dynamics at params[i, :] evaluated at
+            Z[i][0][j, ...], Z[i][1][j, ...], ... Z[i][n_IC - 1][j, ...], t_Grid[i][j],
+            params[i, :]. For first-order dynamics this is z'; for second-order dynamics this is
+            z''.
+        """
+
+        raise RuntimeError('Abstract function LatentDynamics.RHS!');
 
 
     # ---------------------------------------------------------------------------------------------
