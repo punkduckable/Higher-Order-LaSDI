@@ -6,6 +6,7 @@ import  numpy;
 import  torch;
 
 from    Physics                     import  Physics;
+from    Schemas                     import  BurgersSecondOrderPhysicsConfig;
 from    Utilities.FiniteDifference  import  Derivative1_Order4, Derivative1_Order2_NonUniform;
 from    Physics.Burgers             import  solver;
 
@@ -16,7 +17,7 @@ from    Physics.Burgers             import  solver;
 # -------------------------------------------------------------------------------------------------
 
 class Burgers(Physics):
-    def __init__(self, config : dict, param_names : list[str]) -> None:
+    def __init__(self, config : BurgersSecondOrderPhysicsConfig, param_names : list[str]) -> None:
         """
         This is the initializer for the Burgers Physics class. This class essentially acts as a 
         wrapper around a 1D Burgers solver.
@@ -50,15 +51,12 @@ class Burgers(Physics):
 
         Nothing!
         """
-
         # Checks
         assert isinstance(param_names, list), "type(param_names) = %s" % str(type(param_names));
         assert len(param_names) == 2,         "len(param_names) = %d" % len(param_names);
         assert 'a' in param_names,            "param_names = %s" % str(param_names);
         assert 'w' in param_names,            "param_names = %s" % str(param_names);
-
-        # Make sure the config dictionary is actually for Burgers' equation.
-        assert('Burgers' in config);
+        assert isinstance(config, BurgersSecondOrderPhysicsConfig), "config must be a BurgersSecondOrderPhysicsConfig, got %s" % str(type(config));
 
         # Other setup
         self.n_x            : int       = config['Burgers']['n_x'];

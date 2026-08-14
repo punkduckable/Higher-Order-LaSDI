@@ -8,6 +8,7 @@ import  logging;
 import  numpy;
 import  torch;
 
+from    Schemas                         import  WaveEquationPhysicsConfig;
 from    Physics                         import  Physics;
 from    Physics.PyMFEM.wave_equation    import  Simulate, Initial_Displacement, Initial_Velocity;
 
@@ -22,7 +23,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class WaveEquation(Physics):
-    def __init__(self, config : dict, param_names : list[str]) -> None:
+    def __init__(self, config : WaveEquationPhysicsConfig, param_names : list[str]) -> None:
         """
         Initialize a WaveEquation object. This class acts as a wrapper around the MFEM-based solver 
         implemented in ``wave_equation.py`` within the ``PyMFEM`` sub-directory. The solver models 
@@ -59,12 +60,12 @@ class WaveEquation(Physics):
         None
         """
 
-        # Run checks
+        # Run Checks.
         assert isinstance(param_names, list),   "type(param_names) = %s" % str(type(param_names));
         assert len(param_names) == 2,           "len(param_names) = %d" % len(param_names);
         assert 'c' in param_names,              "param_names = %s" % str(param_names);
         assert 'k' in param_names,              "param_names = %s" % str(param_names);
-        assert('WaveEquation' in config);
+        assert isinstance(config, WaveEquationPhysicsConfig), "config must be a WaveEquationPhysicsConfig, got %s" % str(type(config));
 
         # Run a short simulation to determine the frame shape and positions.
         U, DtU, X, T                        = Simulate(t_Grid = numpy.linspace(0, 0, 2), VisIt = False);

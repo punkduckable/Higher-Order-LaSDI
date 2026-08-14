@@ -23,6 +23,50 @@ class ConfigBase(BaseModel):
 
     model_config = ConfigDict(extra = "forbid", populate_by_name = True)
 
+    def _resolve_field_name(self, key: str) -> str:
+        """Map a field name or alias to the corresponding model attribute name."""
+
+        fields = type(self).model_fields
+        if key in fields:
+            return key
+
+        for field_name, field_info in fields.items():
+            if field_info.alias == key:
+                return field_name
+
+        raise KeyError(key)
+
+    def __getitem__(self, key: str) -> Any:
+        """Provide read-only dict-style access for legacy runtime code."""
+
+        return getattr(self, self._resolve_field_name(key))
+
+    def __contains__(self, key: object) -> bool:
+        if not isinstance(key, str):
+            return False
+        try:
+            self._resolve_field_name(key)
+            return True
+        except KeyError:
+            return False
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Dict-compatible ``get`` for legacy runtime code."""
+
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def keys(self):
+        return self.model_dump(mode = "python", by_alias = True).keys()
+
+    def items(self):
+        return self.model_dump(mode = "python", by_alias = True).items()
+
+    def values(self):
+        return self.model_dump(mode = "python", by_alias = True).values()
+
 # Some commonly used constrained datatypes
 PositiveInt         = Annotated[int,   Field(ge = 1)]
 NonNegativeInt      = Annotated[int,   Field(ge = 0)]
@@ -187,7 +231,7 @@ class ListParameterConfig(BaseParameterConfig):
     test_space_type: Literal["list"]
 
     # Specific values to use for this parameter.
-    values: list[float] = Field(alias = "list", min_length = 1)
+    value_list: list[float] = Field(alias = "list", min_length = 1)
 
 
 class FileParameterConfig(BaseParameterConfig):
@@ -389,6 +433,9 @@ class LatentDynamicsBaseConfig(ConfigBase):
 
     type: str
 
+    # How should we determine the latent dynamics at testing parameter combinations?
+    interpolator_type: Literal["GP"]
+
     # Should we learn the latent coefficients during training, or keep them fixed?
     trainable: bool
 
@@ -397,18 +444,12 @@ class LatentDynamicsBaseConfig(ConfigBase):
 class InterpolatableLatentDynamicsSettings(ConfigBase):
     """Latent dynamics settings for strong-form least-squares coefficient initialization."""
 
-    # How should we determine the latent dynamics at testing parameter combination? 
-    interpolator_type: Literal["GP"]
-
     # What L2 regularization penalty should we apply when solving for initial coefficients?
     lstsq_reg: NonNegativeFloat
 
 
 class WeakInterpolatableLatentDynamicsSettings(ConfigBase):
     """Weak-form latent dynamics test-function settings."""
-
-    # How should we determine the latent dynamics at testing parameter combination? 
-    interpolator_type: Literal["GP"]
 
     # Should the test functions be polynomials or bumps? If polynomial, the polynomial order 
     # is always 2 more than n_IC.
@@ -965,7 +1006,7 @@ class ExperimentConfig(ConfigBase):
         }
         if mismatches:
             raise ValueError(
-                f"trainer.type = {trainer_type!r} requires n_IC = {expected_n_ic}, but got "
+                f"trainer.type = {trainer_type!r} requires n_IC={expected_n_ic}, but got "
                 f"{mismatches}."
             )
 
@@ -1001,7 +1042,7 @@ class ExperimentConfig(ConfigBase):
 ExperimentConfigAdapter = TypeAdapter(ExperimentConfig)
 
 
-def validate_experiment_config(config: dict[str, Any]) -> dict[str, Any]:
+def validate_experiment_config(config: dict[str, Any]) -> ExperimentConfig:
     """Validate and normalize a raw YAML-loaded experiment configuration."""
 
-    return ExperimentConfigAdapter.validate_python(config).to_runtime_dict()
+    return ExperimentConfigAdapter.validate_python(config)

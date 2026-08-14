@@ -8,6 +8,7 @@ import  numpy;
 import  torch;
 
 from    LatentDynamics.Interpolatable   import  InterpolatableLatentDynamics;
+from    Schemas                         import  DampedSpringLatentDynamicsConfig;
 from    Utilities.FiniteDifference      import  Derivative1_Order4, Derivative1_Order2_NonUniform;
 from    Utilities.SecondOrderSolvers    import  RK4;
 
@@ -68,13 +69,7 @@ class DampedSpring(InterpolatableLatentDynamics):
         Nothing!
         """
         
-        # Checks
-        assert  'type'      in config;
-        assert  'trainable' in config;
-        assert  isinstance(config["type"], str);
-        assert  isinstance(config["trainable"], bool);
-        assert  config['type'] == "spring";
-        assert  "spring"    in config;
+        assert isinstance(config, DampedSpringLatentDynamicsConfig), "config must be a DampedSpringLatentDynamicsConfig, got %s" % str(type(config));
 
         # Run the base class initializer. This also creates the LD-owned train_coefs dictionary.
         InterpolatableLatentDynamics.__init__(   

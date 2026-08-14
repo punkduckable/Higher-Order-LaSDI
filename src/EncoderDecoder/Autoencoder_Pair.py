@@ -12,6 +12,8 @@ import  numpy;
 from    EncoderDecoder              import  EncoderDecoder;
 from    EncoderDecoder.MLP          import  act_dict;
 from    EncoderDecoder.Autoencoder  import  Autoencoder, load_Autoencoder;
+from    Schemas                     import  AEEncoderDecoderConfig;
+from    Schemas                     import  PairEncoderDecoderConfig, AutoencoderPairEncoderDecoderConfig;
 # Set up logging.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
@@ -29,7 +31,7 @@ class Autoencoder_Pair(EncoderDecoder):
 
     def __init__(   self,
                     Frame_Shape         : list[int],
-                    config              : dict) -> None:
+                    config              : PairEncoderDecoderConfig | AutoencoderPairEncoderDecoderConfig) -> None:
         """
         The initializer for the Autoencoder_Pair class. We assume that each input is a tuple 
         of data, (D, V), representing the displacement and velocity of some system at some point 
@@ -72,19 +74,11 @@ class Autoencoder_Pair(EncoderDecoder):
         Nothing!
         """
 
-        # Input checks.
-        assert  'type'      in config;
-        assert  'trainable' in config;
-        assert (config['type'] == "pair") or (config['type'] == "autoencoder_pair");
+        assert isinstance(config, (PairEncoderDecoderConfig, AutoencoderPairEncoderDecoderConfig)), \
+            "config must be a PairEncoderDecoderConfig or AutoencoderPairEncoderDecoderConfig, got %s" % str(type(config));
         pair_key  : str = config['type'];
-        assert pair_key in config;
         pair_config             : dict              = config[pair_key];
 
-        assert "hidden_widths"      in pair_config;
-        assert "latent_dimension"   in pair_config;
-        assert "activations"        in pair_config;
-        assert "n_Decoders"         in pair_config;
-        
         assert isinstance(Frame_Shape, list),                 "type(Frame_Shape) == %s, expected list" % (str(type(Frame_Shape)));
         for i in range(len(Frame_Shape)):
             assert isinstance(Frame_Shape[i], int),           "type(Frame_Shape[%d]) = %s, expected int" % (i, str(type(Frame_Shape[i])));
@@ -103,21 +97,12 @@ class Autoencoder_Pair(EncoderDecoder):
             activations         : list[str]     = [pair_config['activations']] * n_hidden_layers;   # The final layer has no activation.
         elif(isinstance(pair_config['activations'], list)):
             activations         : list[str]     = pair_config['activations'];
-            assert(len(activations) == n_hidden_layers);
         else:
             raise ValueError("Activations must be a string or a list of strings.");
-        
-        for i in range(len(activations)):
-            assert isinstance(activations[i], str),             "type(activations[%d]) = %s, must be str" % (i, str(type(activations[i])));
-            assert activations[i].lower() in act_dict.keys(),   "activations[%d] = %s; not in act_dict keys" % (i, activations[i].lower());
-        
 
         # Now build the widths attribute + fetch Frame_Shape from physics.
         space_dim           : int               = numpy.prod(Frame_Shape).item();
         widths              : list[int]         = [space_dim] + hidden_widths + [n_z];
-        for i in range(len(widths)):
-            assert isinstance(widths[i], int),                  "type(widths[%d]) = %s, must be int" % (i, str(type(widths[i])));
-            assert widths[i] > 0,                               "widths[%d] = %d, must be positive" % (i, widths[i]);
         assert numpy.prod(Frame_Shape) == widths[0],            "numpy.prod(self.Frame_Shape) = %d, widths[0] = %d; must be equal" % (numpy.prod(Frame_Shape), widths[0]);
 
         # Extract the number of decoders.
@@ -141,11 +126,8 @@ class Autoencoder_Pair(EncoderDecoder):
         # Use the settings to set up the activation information for the encoder.
         self.activations    : list[str]     =  activations;
 
-        # Make a config for the AE.
-        ae_config = deepcopy(config);
-        ae_config['type']   = 'ae';
-        ae_config['ae']     = deepcopy(config[pair_key]);
-        del ae_config[pair_key];
+        # Make a schema config for the component AEs.
+        ae_config = AEEncoderDecoderConfig(type = 'ae', trainable = config.trainable, ae = config[pair_key]);
 
         # Next, build the velocity and displacement auto-encoders.
         LOGGER.info("Initializing the Displacement Autoencoder...");
@@ -289,7 +271,7 @@ class Autoencoder_Pair(EncoderDecoder):
                     'activations'           : self.activations,
                     'Displacement dict'     : self.cpu().Displacement_Autoencoder.export(),
                     'Velocity dict'         : self.cpu().Velocity_Autoencoder.export(),
-                    'config'                : self.config};
+                    'config'                : self.config.model_dump(mode = "python", by_alias = True)};
         return dict_;
     
 
@@ -329,9 +311,15 @@ def load_Autoencoder_Pair(dict_ : dict, config_ : dict) -> Autoencoder_Pair:
     # architecture as the one that created dict_.
     Frame_Shape     : list[int] = dict_['Frame_Shape'];
     config          : dict      = deepcopy(dict_['config']);
+    if hasattr(config, "model_dump"):
+        config = config.model_dump(mode = "python", by_alias = True);
 
     # Override the trainable argument
     config['trainable']         = config_['trainable'];
+    if config['type'] == "pair":
+        config = PairEncoderDecoderConfig.model_validate(config);
+    else:
+        config = AutoencoderPairEncoderDecoderConfig.model_validate(config);
 
     # Now initialize the Autoencoder_Pair.
     AEP                     = Autoencoder_Pair( Frame_Shape     = Frame_Shape,

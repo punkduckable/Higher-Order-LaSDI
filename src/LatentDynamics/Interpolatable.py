@@ -9,6 +9,7 @@ import  numpy;
 
 from    Interpolate                     import Interpolate, GPInterpolate;
 from    LatentDynamics.LatentDynamics   import LatentDynamics;
+from    Schemas                         import LatentDynamicsBaseConfig;
 
 # Logger setup.
 LOGGER : logging.Logger = logging.getLogger(__name__);
@@ -134,10 +135,8 @@ class InterpolatableLatentDynamics(LatentDynamics):
                                 config             = config)
 
         # Set up the Interpolate object. GP is the only implemented interpolator at the moment.
-        # Validated experiment YAML must make this explicit; the fallback preserves direct
-        # programmatic construction in focused unit tests and downstream scripts.
-        assert isinstance(config, dict), "config must be a dictionary";
-        interpolator_type : str = config.get("interpolator_type", "GP");
+        assert isinstance(config, LatentDynamicsBaseConfig), "config must be a LatentDynamicsBaseConfig, got %s" % str(type(config));
+        interpolator_type : str = config.interpolator_type;
         assert interpolator_type in {"GP"}, "Allowed interpolator types are `GP`, got %s" % interpolator_type;
         self.interpolator = GPInterpolate();
 
@@ -327,7 +326,7 @@ class InterpolatableLatentDynamics(LatentDynamics):
         param_dict = {'n_z'             : self.n_z, 
                       'n_coefs'         : self.n_coefs, 
                       'n_IC'            : self.n_IC,
-                      'config'          : self.config,
+                      'config'          : self.config.model_dump(mode = "python", by_alias = True),
                       'Uniform_t_Grid'  : self.Uniform_t_Grid,
                       'train_coefs'     : train_coefs_cpu};
         return param_dict;

@@ -14,6 +14,7 @@ from    LatentDynamics              import  LatentDynamics;
 from    Utilities.FiniteDifference  import  Derivative1_Order4, Derivative1_Order2_NonUniform;
 from    Utilities.Optimizer         import  Reset_Optimizer;
 from    Trainer.Trainer             import  Trainer;
+from    Schemas                     import  ExperimentConfig;
 
 # Setup Logger
 LOGGER : logging.Logger = logging.getLogger(__name__);
@@ -30,7 +31,7 @@ class Second_Order_Rollout(Trainer):
                  encoder_decoder    : EncoderDecoder, 
                  latent_dynamics    : LatentDynamics, 
                  param_space        : ParameterSpace, 
-                 config             : dict):
+                 config             : ExperimentConfig):
         """
         This defines a Trainer sub-class which is designed to run Rollouts on latent dynamics
         that have two initial conditions (n_IC = 2). It uses the following loss functions:
@@ -98,10 +99,8 @@ class Second_Order_Rollout(Trainer):
         assert physics.n_IC         == n_IC, "physics.n_IC = %d, n_IC = %d" % (physics.n_IC, n_IC);
         self.n_IC                   =  n_IC; 
 
-        assert 'trainer' in config,                                 "config must contain a 'trainer' sub-dictionary";
-        assert 'type' in config['trainer'],                         "trainer dictionary must contain a 'type' attribute";
+        assert isinstance(config, ExperimentConfig), "config must be an ExperimentConfig, got %s" % str(type(config));
         trainer_type : str = config['trainer']['type'];
-        assert trainer_type in config['trainer'], "%s must be in config['trainer']" % trainer_type;
 
         LOGGER.info("Initializing a %s object with Second_Order_Rollout setup" % trainer_type); 
 
@@ -135,9 +134,7 @@ class Second_Order_Rollout(Trainer):
         # Randomly select `n_rollouts` rollable start frames per training trajectory per epoch,
         # rollout each one using the *true* absolute-time grid slice t[k:j], and compare full
         # predicted trajectories against the true trajectory slice (no interpolation).
-        assert 'n_rollouts' in sub_config, "%s config must include `n_rollouts` (int > 0) for rollout supervision" % trainer_type;
         self.n_rollouts             : int       = int(sub_config['n_rollouts']);
-        assert self.n_rollouts > 0, "trainer.n_rollouts must be > 0";
         
         # Fetch IC rollout hyperparameters.
         self.p_IC_rollout_init      : float     = float(sub_config['p_IC_rollout_init']);    # The proportion of the simulation we simulate forward when computing the IC rollout loss.

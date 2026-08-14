@@ -7,6 +7,7 @@ import  torch;
 
 from    Physics                     import  Physics;
 from    Plotting.Animate            import  Animate_2D_Grid_Scalar;
+from    Schemas                     import  Burgers2DPhysicsConfig;
 
 
 
@@ -112,7 +113,7 @@ def solver_2d_burgers(  u0      : numpy.ndarray,
 # -------------------------------------------------------------------------------------------------
 
 class Burgers2D(Physics):
-    def __init__(self, config: dict, param_names: list[str]) -> None:
+    def __init__(self, config: Burgers2DPhysicsConfig, param_names: list[str]) -> None:
         """
         Initialize a 2D scalar Burgers solver that conforms to the Physics interface.
 
@@ -146,12 +147,11 @@ class Burgers2D(Physics):
             List of parameter names. Must include 'k' (IC parameter) and 'nu' (viscosity in PDE).
         """
 
-        # Basic checks
-        assert isinstance(config, dict),        "config must be a dictionary, not a %s" % type(config);
+        # Checks
         assert isinstance(param_names, list),   "param_names must be a list, not a %s" % type(param_names);
-        assert 'Burgers2D' in config,           "Config must contain a 'Burgers2D' section";
         assert 'k' in param_names,              "param_names must include 'k' for the IC";
         assert 'nu' in param_names,             "param_names must include 'nu' for the PDE viscosity";
+        assert isinstance(config, Burgers2DPhysicsConfig), "config must be a Burgers2DPhysicsConfig, got %s" % str(type(config));
 
         cfg = config['Burgers2D'];
 
@@ -349,4 +349,3 @@ if __name__ == "__main__":
                                 levels      = 300,
                                 fps         = 30,
                                 dpi         = 150);
-

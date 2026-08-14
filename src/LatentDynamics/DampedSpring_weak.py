@@ -9,6 +9,7 @@ import  torch;
 
 from    LatentDynamics.Weak             import  WeakLatentDynamics;
 from    LatentDynamics.Interpolatable   import  InterpolatableLatentDynamics;
+from    Schemas                         import  DampedSpringWeakLatentDynamicsConfig;
 from    Utilities.SecondOrderSolvers    import  RK4;
 
 
@@ -64,13 +65,7 @@ class DampedSpring_weak(InterpolatableLatentDynamics, WeakLatentDynamics):
         Nothing!
         """
 
-        # Checks
-        assert  'type'      in config;
-        assert  'trainable' in config;
-        assert  isinstance(config["type"], str);
-        assert  isinstance(config["trainable"], bool);
-        assert  config['type'] == "spring_w";
-        assert  "spring_w"  in config;
+        assert isinstance(config, DampedSpringWeakLatentDynamicsConfig), "config must be a DampedSpringWeakLatentDynamicsConfig, got %s" % str(type(config));
 
         # Run the base class initializer. This does not set the n_t attribute. 
         # Because K and C are n_z x n_z matrices, and b is in \mathbb{R}^n_z, there are 

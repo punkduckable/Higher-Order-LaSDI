@@ -10,6 +10,7 @@ import  numpy;
 from    Enums                       import  NextStep;  
 from    Trainer                     import  Trainer;
 from    EncoderDecoder              import  EncoderDecoder;
+from    Schemas                     import  FOMVarianceSamplerConfig
 from    Sample.Sampler              import  Sampler;
 
 
@@ -25,7 +26,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class FOM_Variance(Sampler):
-    def __init__(self, config):
+    def __init__(self, config : FOMVarianceSamplerConfig):
         """
         Initializes a "FOM_Variance" Sampler object. This class defines the "worst" parameter 
         as the testing parameter combination (outside of the training set) whose (denormalized)
@@ -45,16 +46,18 @@ class FOM_Variance(Sampler):
         Arguments:
         -------------------------------------------------------------------------------------------
 
-        config: dict
+        config: FOMVarianceSamplerConfig
             The 'sampler' portion of the .yml configuration file. Should contain a 'type' 
             attribute whose value is "FOM_Variance", as well as a "FOM_Variance" key whose value 
             is a dictionary with one key: `n_samples`.
         """
-        # Checks
+        
+        # Schema validation happens at configuration load time, so this check is only a boundary
+        # assertion that Initialize passed the right sampler schema object.
+        assert isinstance(config, FOMVarianceSamplerConfig), "config object SamplerConfig, got %s" % str(type(config))
+
         super().__init__(config);
-        assert 'FOM_Variance' in config, "sampler config must contain a 'FOM_Variance' key";
-        assert isinstance(config['FOM_Variance'], dict), "sampler.FOM_Variance must be a dict";
-        self.n_samples : int = int(config['FOM_Variance']['n_samples']);
+        self.n_samples : int = int(config.FOM_Variance.n_samples);
 
 
 

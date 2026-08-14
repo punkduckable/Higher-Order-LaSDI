@@ -9,6 +9,7 @@ import  torch;
 
 from    LatentDynamics.Weak             import  WeakLatentDynamics;
 from    LatentDynamics.Interpolatable   import  InterpolatableLatentDynamics;
+from    Schemas                         import  SINDyWeakLatentDynamicsConfig;
 from    Utilities.FirstOrderSolvers     import  RK4;
 
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
@@ -23,7 +24,7 @@ class SINDy_weak(WeakLatentDynamics, InterpolatableLatentDynamics):
     def __init__(   self,
                     n_z             : int,
                     Uniform_t_Grid  : bool,
-                    config          : dict) -> None:
+                    config          : SINDyWeakLatentDynamicsConfig) -> None:
         r"""
         Initializes a SINDy_weak latent-dynamics object.
 
@@ -72,13 +73,7 @@ class SINDy_weak(WeakLatentDynamics, InterpolatableLatentDynamics):
         Nothing!
         """
 
-        # Checks
-        assert  'type'      in config;
-        assert  'trainable' in config;
-        assert  isinstance(config["type"], str);
-        assert  isinstance(config["trainable"], bool);
-        assert  config['type'] == "sindy_w";
-        assert  "sindy_w"   in config;
+        assert isinstance(config, SINDyWeakLatentDynamicsConfig), "config must be a SINDyWeakLatentDynamicsConfig, got %s" % str(type(config));
 
         # Run the base class initializer. Since A has n_z^2 entries and b has n_z entries, there
         # are n_z*(n_z + 1) scalar coefficients.

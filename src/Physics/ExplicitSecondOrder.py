@@ -6,6 +6,7 @@ import  numpy;
 import  torch;
 
 from    Physics                         import  Physics;
+from    Schemas                         import  ExplicitSecondOrderPhysicsConfig;
 
 
 
@@ -14,7 +15,7 @@ from    Physics                         import  Physics;
 # -------------------------------------------------------------------------------------------------
 
 class Explicit(Physics):    
-    def __init__(self, config : dict, param_names : list[str]) -> None:
+    def __init__(self, config : ExplicitSecondOrderPhysicsConfig, param_names : list[str]) -> None:
         """
         This is the initializer for the Explicit class. This class essentially acts as a wrapper
         around the following function of t and x:
@@ -47,9 +48,7 @@ class Explicit(Physics):
         assert len(param_names) == 2,           "len(param_names) = %d" % len(param_names);
         assert 'A' in param_names,              "param_names = %s" % str(param_names);
         assert 'w' in param_names,              "param_names = %s" % str(param_names);
-
-        # Make sure the config dictionary is actually for the Explicit physics model.
-        assert('Explicit' in config);
+        assert isinstance(config, ExplicitSecondOrderPhysicsConfig), "config must be an ExplicitSecondOrderPhysicsConfig, got %s" % str(type(config));
 
         # Set up spatial variables
         self.n_positions            : int       = config['Explicit']['n_positions'];    

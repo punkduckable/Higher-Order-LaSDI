@@ -7,6 +7,7 @@ import  logging;
 import  numpy;
 import  torch;
 
+from    Schemas                         import  NonlinearElasticityPhysicsConfig;
 from    Physics                                 import  Physics;
 from    Physics.PyMFEM.nonlinear_elasticity     import  Simulate, Initial_Displacement;
 from    Physics.PyMFEM.nonlinear_elasticity     import  Initial_Velocity;
@@ -21,7 +22,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class NonlinearElasticity(Physics):    
-    def __init__(self, config : dict, param_names : list[str]) -> None:
+    def __init__(self, config : NonlinearElasticityPhysicsConfig, param_names : list[str]) -> None:
         """
         This is the initializer the NonlinearElasticity class. This class acts as a wrapper around
         an MFEM script that solves the following PDE from non-linear elasticity:
@@ -57,7 +58,7 @@ class NonlinearElasticity(Physics):
         assert len(param_names) == 2,         "len(param_names) = %d, param_names = %s" % (len(param_names), str(param_names));
         assert 's'  in param_names,           "param_names = %s" % str(param_names);
         assert 'mu' in param_names,           "param_names = %s" % str(param_names);
-        assert('NonlinearElasticity' in config);
+        assert isinstance(config, NonlinearElasticityPhysicsConfig), "config must be a NonlinearElasticityPhysicsConfig, got %s" % str(type(config));
 
         # Next, we need to setup X_Positions and Frame_Shape. Doing this is a bit tricky, because 
         # the solver actually picks both quantities. Specifically, in this case, Frame_Shape is 

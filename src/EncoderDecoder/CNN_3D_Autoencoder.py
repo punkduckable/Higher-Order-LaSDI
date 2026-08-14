@@ -11,6 +11,8 @@ import  numpy;
 
 from    EncoderDecoder              import  EncoderDecoder;
 from    EncoderDecoder.MLP          import  MultiLayerPerceptron, act_dict;
+from    Schemas                     import  CNN3DEncoderDecoderConfig, CNN3DAEEncoderDecoderConfig;
+from    Schemas                     import  CNN3DAutoencoderEncoderDecoderConfig;
 # Set up logging.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
@@ -87,7 +89,7 @@ def _conv3d_out_shape(  in_shape    : tuple[int, int, int],
 class CNN_3D_Autoencoder(EncoderDecoder):
     def __init__(   self,
                     Frame_Shape         : list[int],
-                    config              : dict) -> None:
+                    config              : CNN3DEncoderDecoderConfig | CNN3DAEEncoderDecoderConfig | CNN3DAutoencoderEncoderDecoderConfig) -> None:
         r"""
         Initializes a convolutional autoencoder for 3D spatial data. This model applies a stack
         of 3D convolutions to a 3D image, flattens the resulting feature map, and then applies a
@@ -160,12 +162,9 @@ class CNN_3D_Autoencoder(EncoderDecoder):
         Nothing!
         """
 
-        # Input checks.
-        assert 'type'       in config;
-        assert 'trainable'  in config;
-        assert (config['type'] == "cnn_3d") or (config['type'] == "cnn_3d_ae") or (config['type'] == "cnn_3d_autoencoder");
+        assert isinstance(config, (CNN3DEncoderDecoderConfig, CNN3DAEEncoderDecoderConfig, CNN3DAutoencoderEncoderDecoderConfig)), \
+            "config must be a CNN3D encoder/decoder schema, got %s" % str(type(config));
         cnn_key  : str = config['type'];
-        assert cnn_key in config;
         cnn_config              : dict              = config[cnn_key];
 
 
@@ -174,16 +173,6 @@ class CNN_3D_Autoencoder(EncoderDecoder):
         hidden_widths_fc        : list[int]         = cnn_config['hidden_widths_fc'];
         latent_dimension        : int               = cnn_config['latent_dimension'];
 
-        # Checks: FC params.
-        assert isinstance(hidden_widths_fc, list),              "type(hidden_widths_fc) = %s, expected list" % str(type(hidden_widths_fc));
-        for i in range(len(hidden_widths_fc)):
-            assert isinstance(hidden_widths_fc[i], int),            "type(hidden_widths_fc[%d]) = %s, must be int" % (i, str(type(hidden_widths_fc[i])));
-            assert hidden_widths_fc[i] > 0,                         "hidden_widths_fc[%d] = %d, must be positive" % (i, hidden_widths_fc[i]);
-        assert isinstance(latent_dimension, int),               "type(latent_dimension) = %s, must be int" % str(type(latent_dimension));
-        assert latent_dimension > 0,                            "latent_dimension = %d, must be positive" % latent_dimension;
-
-
-
         # FC activations can either be a string or a list of strings.
         n_hidden_layers         : int               = len(hidden_widths_fc);
         act_cfg = cnn_config['activations_fc'];
@@ -191,33 +180,14 @@ class CNN_3D_Autoencoder(EncoderDecoder):
             activations_fc      : list[str]        = [act_cfg] * n_hidden_layers;
         elif(isinstance(act_cfg, list)):
             activations_fc      : list[str]        = act_cfg;
-            assert(len(activations_fc) == n_hidden_layers);
         else:
             raise ValueError("activations_fc must be a string or a list of strings.");
-
-        # Checks: activations_fc
-        assert len(activations_fc) == len(hidden_widths_fc), \
-            "len(activations_fc) = %d, len(hidden_widths_fc) = %d; must match" % (len(activations_fc), len(hidden_widths_fc));
-        for i in range(len(activations_fc)):
-            assert isinstance(activations_fc[i], str),             "type(activations_fc[%d]) = %s, must be str" % (i, str(type(activations_fc[i])));
-            assert activations_fc[i].lower() in act_dict.keys(),   "activations_fc[%d] = %s; not in act_dict keys" % (i, activations_fc[i].lower());
-
-
 
         # Conv configuration.
         conv_channels       : list[int]     = cnn_config['conv_channels'];
         conv_kernel_sizes                   = cnn_config['conv_kernel_sizes'];
         conv_strides                        = cnn_config['conv_strides'];
         conv_paddings                       = cnn_config['conv_paddings'];
-
-        # Checks: conv params.
-        assert isinstance(conv_channels, list),                 "type(conv_channels) = %s, expected list" % str(type(conv_channels));
-        assert len(conv_channels) >= 2,                         "len(conv_channels) = %d; must be at least 2 (input + output channels)" % len(conv_channels);
-        for i in range(len(conv_channels)):
-            assert isinstance(conv_channels[i], int),               "type(conv_channels[%d]) = %s, must be int" % (i, str(type(conv_channels[i])));
-            assert conv_channels[i] > 0,                            "conv_channels[%d] = %d, must be positive" % (i, conv_channels[i]);
-
-
 
         # Per-layer conv activations. This can be a string (use same activation for all conv layers)
         # or a list of strings of length len(conv_channels) - 1.
@@ -226,20 +196,10 @@ class CNN_3D_Autoencoder(EncoderDecoder):
             conv_activations : list[str] = [conv_act_cfg] * (len(conv_channels) - 1);
         elif(isinstance(conv_act_cfg, list)):
             conv_activations = conv_act_cfg;
-            assert(len(conv_activations) == len(conv_channels) - 1);
         else:
             raise ValueError("conv_activations must be a string or a list of strings.");
 
-        # Checks: conv_activations
-        assert isinstance(conv_activations, list),                "type(conv_activations) = %s, must be list" % str(type(conv_activations));
         n_conv_layers : int = len(conv_channels) - 1;
-        assert len(conv_activations) == n_conv_layers, \
-            "len(conv_activations) = %d, n_conv_layers = %d; must match" % (len(conv_activations), n_conv_layers);
-        for i in range(len(conv_activations)):
-            assert isinstance(conv_activations[i], str),            "type(conv_activations[%d]) = %s; must be str" % (i, str(type(conv_activations[i])));
-            assert conv_activations[i].lower() in act_dict.keys(),  "conv_activations[%d] = %s; not in act_dict keys" % (i, conv_activations[i].lower());
-
-
 
         # Fetch Frame_Shape from physics (must be 3D for Conv3d).
         assert(len(Frame_Shape) == 4), "physics.Frame_Shape = %s; Conv_Autoencoder requires a 3D spatial shape" % str(Frame_Shape);
@@ -506,7 +466,7 @@ class CNN_3D_Autoencoder(EncoderDecoder):
                     'conv_paddings'       : self.conv_paddings,
                     'conv_activations'    : self.conv_activations,
                     'Frame_Shape'         : self.Frame_Shape,
-                    'config'              : self.config};
+                    'config'              : self.config.model_dump(mode = "python", by_alias = True)};
         return dict_;
 
 
@@ -547,9 +507,17 @@ def load_CNN_3D_Autoencoder(dict_ : dict, config_ : dict) -> CNN_3D_Autoencoder:
     # architecture as the one that created dict_.
     Frame_Shape     : list[int] = dict_['Frame_Shape'];
     config          : dict      = deepcopy(dict_['config']);
+    if hasattr(config, "model_dump"):
+        config = config.model_dump(mode = "python", by_alias = True);
 
     # Override the trainable argument
     config['trainable']         = config_['trainable'];
+    if config['type'] == "cnn_3d":
+        config = CNN3DEncoderDecoderConfig.model_validate(config);
+    elif config['type'] == "cnn_3d_ae":
+        config = CNN3DAEEncoderDecoderConfig.model_validate(config);
+    else:
+        config = CNN3DAutoencoderEncoderDecoderConfig.model_validate(config);
 
     # Build the model.
     CNN = CNN_3D_Autoencoder(   Frame_Shape     = Frame_Shape,

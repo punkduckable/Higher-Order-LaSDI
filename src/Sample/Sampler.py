@@ -7,6 +7,7 @@ import  torch;
 
 from    Trainer                     import  Trainer;
 from    Enums                       import  NextStep;  
+from    Schemas                     import  BaseSamplerConfig
 
 import  logging;
 
@@ -73,7 +74,7 @@ class Sampler:
     of the workflow.
     """
     
-    def __init__(self, config : dict):
+    def __init__(self, config : BaseSamplerConfig):
         """
         The Sampler class defines how Greedy Sampling picks new parameter combinations. 
         We use it at the end of each round of training to pick the "worst" parameter combination, 
@@ -97,19 +98,17 @@ class Sampler:
         Arguments:
         -------------------------------------------------------------------------------------------
 
-        config: dict
+        config: BaseSamplerConfig
             The 'sampler' portion of the .yml configuration file. Should contain a 'type' 
             attribute.
         """
 
-        # Check that there is "type" attribute in the config.
-        assert isinstance(config, dict),            "config must be a dictionary! got %s" % str(type(config));
-        assert 'type'           in config.keys(),   "sampler config must have a `type` key!";
-        assert isinstance(config['type'], str),     "sampler type must be a str, not %s" % str(type(config['type']));
-
+        # Schema validation happens at configuration load time, so the initializer only needs to
+        # verify it received a sampler schema object rather than a raw/unvalidated dictionary.
+        assert isinstance(config, BaseSamplerConfig), "config object must be a BaseSamplerConfig, got %s" % str(type(config))
         # store the config.
-        self.config : dict  = config;
-        self.type   : str   = config['type']; 
+        self.config : BaseSamplerConfig  = config;
+        self.type   : str                = config.type; 
 
 
     def Sample(self, trainer : Trainer) -> NextStep:

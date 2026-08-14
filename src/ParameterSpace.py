@@ -7,6 +7,8 @@ from    typing      import  Callable;
 
 import  numpy;
 
+from    Schemas     import  ExperimentConfig, ParameterSpaceConfig;
+
 # Setup the logger
 LOGGER : logging.Logger = logging.getLogger(__name__);
 
@@ -229,7 +231,7 @@ class ParameterSpace:
 
 
 
-    def __init__(self, config : dict) -> None:
+    def __init__(self, config : ExperimentConfig | ParameterSpaceConfig) -> None:
         """
         Initializes a ParameterSpace object using the settings passed in the conf dictionary (which 
         should have been read from a yaml file).
@@ -258,14 +260,14 @@ class ParameterSpace:
         Nothing!
         """
 
-        # Make sure the configuration dictionary has a "parameter_space" setting. This should house 
-        # information about which variables are present in the code, as well as how we want to test
-        # the various possible parameter values. 
-        assert('parameter_space' in config);
+        assert isinstance(config, (ExperimentConfig, ParameterSpaceConfig)), "config must be an ExperimentConfig or ParameterSpaceConfig, got %s" % str(type(config));
 
-        # Load the parameter_space settings. Each parameters has a name, min and max, and 
-        # information on how many instances we want. 
-        self.param_list : list[dict]    = config['parameter_space']['parameters'];
+        # Load a mutable plain-dict copy of the validated parameter-space settings. ParameterSpace
+        # computes and stores min/max values for list/file parameters, so it intentionally owns a
+        # runtime copy instead of mutating the frozen schema contract.
+        parameter_space_schema : ParameterSpaceConfig = config.parameter_space if isinstance(config, ExperimentConfig) else config;
+        parameter_space_config : dict   = parameter_space_schema.model_dump(mode = "python", by_alias = True);
+        self.param_list : list[dict]    = parameter_space_config.parameters;
         self.n_p        : int           = len(self.param_list);
 
         # Fetch the parameter names.
@@ -275,7 +277,7 @@ class ParameterSpace:
         LOGGER.info("Initializing a ParameterSpace object with parameters %s" % (str(self.param_names)));
 
         # First, let's make a set of parameter combinations to test at.
-        test_space_type : str = config['parameter_space']['test_space']['type']
+        test_space_type : str = parameter_space_config.test_space.type
         if (test_space_type == 'grid'):
             # Generate the set possible parameter combinations. See the docstring for 
             # "createTestGridSpace" for details.

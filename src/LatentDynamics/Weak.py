@@ -8,6 +8,7 @@ import  numpy;
 import  torch;
 
 from    LatentDynamics.LatentDynamics   import LatentDynamics;
+from    Schemas                         import LatentDynamicsBaseConfig;
 
 # Logger setup.
 LOGGER : logging.Logger = logging.getLogger(__name__);
@@ -102,14 +103,9 @@ class WeakLatentDynamics(LatentDynamics):
                                 stochastic         = getattr(self, "stochastic", False),
                                 config             = config)
 
-        # Weak form specific checks
-        assert isinstance(config, dict),    "Weak LatentDynamics requires a config dictionary";
-        assert "type" in config,            "Weak LatentDynamics config must contain the model selector key 'type'";
+        assert isinstance(config, LatentDynamicsBaseConfig), "config must be a LatentDynamicsBaseConfig, got %s" % str(type(config));
         model_type  : str   = config["type"];
-        assert model_type in config,        "Weak LatentDynamics config must contain config[config['type']]";
         weak_config : dict  = config[model_type];
-        for key in ["overlap", "test_func_width", "test_func_type"]:
-            assert key in weak_config,          "Weak LatentDynamics config[%s] must contain '%s'" % (model_type, key);
 
         # Weak form setup.
         self.test_func_type  = weak_config["test_func_type"];

@@ -7,6 +7,7 @@ import  logging;
 import  numpy;
 import  torch;
 
+from    Schemas                         import  AdvectionPhysicsConfig;
 from    Physics                         import  Physics;
 from    Physics.PyMFEM.advection        import  Simulate, Initial_Displacement;
 
@@ -21,7 +22,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class Advection(Physics):
-    def __init__(self, config : dict, param_names : list[str] = []) -> None:
+    def __init__(self, config : AdvectionPhysicsConfig, param_names : list[str] = []) -> None:
         r"""
         Initialize an Advection object. This class acts as a wrapper around the MFEM-based solver 
         implemented in ``advection.py`` within the ``PyMFEM`` sub-directory. The solver models 
@@ -67,8 +68,7 @@ class Advection(Physics):
         assert len(param_names) == 2,         "len(param_names) = %d" % len(param_names);
         assert 'w' in param_names,            "param_names = %s" % str(param_names);
         assert 'g' in param_names,            "param_names = %s" % str(param_names);
-        assert('Advection' in config);
-
+        assert isinstance(config, AdvectionPhysicsConfig), "config must be a AdvectionPhysicsConfig, got %s" % str(type(config));
 
         # Run a short simulation to determine the frame shape and positions.
         Sol, X, T, bb_min, bb_max           = Simulate(t_Grid = numpy.linspace(0, 0.01, 2), VisIt = False);

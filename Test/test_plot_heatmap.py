@@ -10,27 +10,25 @@ sys.path.append(SRC)
 import Plotting.Plot as Plot
 from ParameterSpace import ParameterSpace
 from Plotting.Plot import Plot_Heatmap
+from Schemas import ParameterSpaceConfig
 
 
 def _parameter_space(sample_sizes):
-    return ParameterSpace(
-        {
-            "parameter_space": {
-                "parameters": [
-                    {
-                        "name": f"p{i}",
-                        "min": 0.0,
-                        "max": float(sample_size - 1),
-                        "test_space_type": "uniform",
-                        "sample_size": sample_size,
-                        "log_scale": False,
-                    }
-                    for i, sample_size in enumerate(sample_sizes)
-                ],
-                "test_space": {"type": "grid"},
+    config = ParameterSpaceConfig.model_validate({
+        "parameters": [
+            {
+                "name": f"p{i}",
+                "min": 0.0,
+                "max": float(sample_size - 1),
+                "test_space_type": "uniform",
+                "sample_size": sample_size,
+                "log_scale": False,
             }
-        }
-    )
+            for i, sample_size in enumerate(sample_sizes)
+        ],
+        "test_space": {"type": "grid"},
+    })
+    return ParameterSpace(config)
 
 
 def test_plot_heatmap_writes_single_2d_file(tmp_path, monkeypatch):

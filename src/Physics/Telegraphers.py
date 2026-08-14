@@ -7,6 +7,7 @@ import  logging;
 import  numpy;
 import  torch;
 
+from    Schemas                         import  TelegraphersPhysicsConfig;
 from    Physics                         import  Physics;
 from    Physics.PyMFEM.telegraphers     import  Simulate, Initial_Displacement, Initial_Velocity;
 
@@ -20,7 +21,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class Telegraphers(Physics):
-    def __init__(self, config : dict, param_names : list[str]) -> None:
+    def __init__(self, config : TelegraphersPhysicsConfig, param_names : list[str]) -> None:
         """
         Initialize a Telegraphers object. This class acts as a wrapper around the MFEM-based solver 
         implemented in ``Telegraphers.py`` within the ``PyMFEM`` sub-directory. We solve the 
@@ -62,8 +63,7 @@ class Telegraphers(Physics):
         assert len(param_names) == 2,           "len(param_names) = %d, param_names = %s" % (len(param_names), str(param_names));
         assert 'alpha'          in param_names, "param_names = %s" % str(param_names);
         assert 'w'              in param_names, "param_names = %s" % str(param_names);
-        assert('Telegraphers'   in config);
-
+        assert isinstance(config, TelegraphersPhysicsConfig), "config must be a TelegraphersPhysicsConfig, got %s" % str(type(config));
 
         # Run a short simulation to determine the frame shape and positions.
         U, DtU, X, T                        = Simulate(t_Grid = numpy.linspace(0, 0, 2), VisIt = False);

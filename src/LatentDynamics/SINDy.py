@@ -8,6 +8,7 @@ import  numpy;
 import  torch;
 
 from    LatentDynamics.Interpolatable   import  InterpolatableLatentDynamics;
+from    Schemas                         import  SINDyLatentDynamicsConfig;
 from    Utilities.FiniteDifference      import  Derivative1_Order4, Derivative1_Order2_NonUniform;
 from    Utilities.FirstOrderSolvers     import  RK4;
 
@@ -23,7 +24,7 @@ class SINDy(InterpolatableLatentDynamics):
     def __init__(   self, 
                     n_z             : int,
                     Uniform_t_Grid  : bool,
-                    config          : dict) -> None:
+                    config          : SINDyLatentDynamicsConfig) -> None:
         r"""
         Initializes a SINDy latent-dynamics object.
 
@@ -65,13 +66,7 @@ class SINDy(InterpolatableLatentDynamics):
         Nothing!
         """
 
-        # Checks
-        assert  'type'      in config;
-        assert  'trainable' in config;
-        assert  isinstance(config["type"], str);
-        assert  isinstance(config["trainable"], bool);
-        assert  config['type'] == "sindy";
-        assert  "sindy"     in config;
+        assert isinstance(config, SINDyLatentDynamicsConfig), "config must be a SINDyLatentDynamicsConfig, got %s" % str(type(config));
 
         # Run the base class initializer. Note that this initializes self.train_coefs.
         InterpolatableLatentDynamics.__init__(

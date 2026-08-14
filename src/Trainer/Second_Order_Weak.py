@@ -13,6 +13,7 @@ from    Physics                         import  Physics;
 from    LatentDynamics                  import  LatentDynamics, WeakLatentDynamics;
 from    Utilities.Optimizer             import  Reset_Optimizer;
 from    Trainer.Second_Order_Rollout    import  Second_Order_Rollout;
+from    Schemas                         import  ExperimentConfig;
 
 # Setup Logger
 LOGGER : logging.Logger = logging.getLogger(__name__);
@@ -29,7 +30,7 @@ class Second_Order_Weak(Second_Order_Rollout):
                  encoder_decoder    : EncoderDecoder, 
                  latent_dynamics    : LatentDynamics, 
                  param_space        : ParameterSpace, 
-                 config             : dict):
+                 config             : ExperimentConfig):
         """
         This defines a Trainer class designed to train second-order dynamics using latent dynamics
         based on the weak formulation.
@@ -69,11 +70,8 @@ class Second_Order_Weak(Second_Order_Rollout):
         Nothing!
         """
         
-        # Make sure this config is for a "Second_Order_Weak" tainer.
-        assert 'trainer' in config,                                     "config must contain a 'trainer' sub-dictionary";
-        assert 'type' in config['trainer'],                             "trainer dictionary must contain a 'type' attribute";
-        assert config['trainer']['type'] == "Second_Order_Weak",  "config['trainer']['type'] = %s, should be Second_Order_Weak" % config['trainer']['type'];
-        assert "Second_Order_Weak" in config['trainer'],          "Second_Order_Weak must be in config['trainer']";
+        assert isinstance(config, ExperimentConfig), "config must be an ExperimentConfig, got %s" % str(type(config));
+        assert config.trainer.type == "Second_Order_Weak", "config.trainer.type = %s, should be Second_Order_Weak" % config.trainer.type;
 
         LOGGER.info("Initializing a Second_Order_Weak object"); 
 

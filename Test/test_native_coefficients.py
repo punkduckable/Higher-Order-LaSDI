@@ -4,6 +4,7 @@ import sys
 import numpy
 import pytest
 import torch
+from pydantic import ValidationError
 
 SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.append(SRC)
@@ -12,58 +13,70 @@ from LatentDynamics import LatentDynamics, SINDy
 from Interpolate import GPInterpolate
 import Interpolate.GaussianProcess as GPModule
 from Plotting.Metrics import flatten_coefficients
+from Schemas import (
+    DampedSpringLatentDynamicsConfig,
+    DampedSpringWeakLatentDynamicsConfig,
+    SINDyLatentDynamicsConfig,
+    SINDyWeakLatentDynamicsConfig,
+    SwitchSINDyWeakLatentDynamicsConfig,
+)
 
 
 def _sindy_config(lstsq_reg=1.0, trainable=True):
-    return {
+    return SINDyLatentDynamicsConfig.model_validate({
         "type": "sindy",
+        "interpolator_type": "GP",
         "trainable": trainable,
         "sindy": {"lstsq_reg": lstsq_reg},
-    }
+    })
 
 
 def _spring_config(lstsq_reg=1.0, trainable=True):
-    return {
+    return DampedSpringLatentDynamicsConfig.model_validate({
         "type": "spring",
+        "interpolator_type": "GP",
         "trainable": trainable,
         "spring": {"lstsq_reg": lstsq_reg},
-    }
+    })
 
 
 def _sindy_w_config(test_func_type="PC-poly", trainable=True):
-    return {
+    return SINDyWeakLatentDynamicsConfig.model_validate({
         "type": "sindy_w",
+        "interpolator_type": "GP",
         "trainable": trainable,
         "sindy_w": {
             "test_func_type": test_func_type,
             "test_func_width": 0.5,
             "overlap": 0.5,
         },
-    }
+    })
 
 
 def _spring_w_config(test_func_type="PC-poly", trainable=True):
-    return {
+    return DampedSpringWeakLatentDynamicsConfig.model_validate({
         "type": "spring_w",
+        "interpolator_type": "GP",
         "trainable": trainable,
         "spring_w": {
             "test_func_type": test_func_type,
             "test_func_width": 0.5,
             "overlap": 0.5,
         },
-    }
+    })
 
 
 def _switch_w_config(test_func_type="PC-poly", trainable=True):
-    return {
+    return SwitchSINDyWeakLatentDynamicsConfig.model_validate({
         "type": "switch_w",
+        "interpolator_type": "GP",
         "trainable": trainable,
         "switch_w": {
             "test_func_type": test_func_type,
             "test_func_width": 0.5,
             "overlap": 0.5,
         },
-    }
+    })
 
 
 def test_missing_train_coefs_raises_keyerror():
@@ -326,21 +339,27 @@ from LatentDynamics import LatentDynamics, WeakLatentDynamics
 
 
 def _weak_base_config(test_func_type="PC-poly"):
-    return {
-        "type": "dummy",
+    return SINDyWeakLatentDynamicsConfig.model_validate({
+        "type": "sindy_w",
+        "interpolator_type": "GP",
         "trainable": True,
-        "dummy": {
+        "sindy_w": {
             "test_func_type": test_func_type,
             "test_func_width": 0.5,
             "overlap": 0.5,
         },
-    }
+    })
 
 
 def test_weak_latent_dynamics_requires_weak_config_keys():
-    bad_config = {"type": "dummy", "trainable": True, "dummy": {"test_func_width": 0.5, "overlap": 0.5}}
-    with pytest.raises(AssertionError):
-        WeakLatentDynamics(n_z=1, n_coefs=1, n_IC=2, Uniform_t_Grid=True, trainable=True, config=bad_config)
+    bad_config = {
+        "type": "sindy_w",
+        "interpolator_type": "GP",
+        "trainable": True,
+        "sindy_w": {"test_func_width": 0.5, "overlap": 0.5},
+    }
+    with pytest.raises(ValidationError, match="test_func_type"):
+        SINDyWeakLatentDynamicsConfig.model_validate(bad_config)
 
 
 def test_add_and_get_weight_functions_store_arbitrary_derivatives():

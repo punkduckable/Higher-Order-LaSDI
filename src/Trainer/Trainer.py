@@ -16,6 +16,7 @@ from    Utilities.Timing            import  Timer;
 from    ParameterSpace              import  ParameterSpace;
 from    Physics                     import  Physics;
 from    LatentDynamics              import  LatentDynamics, InterpolatableLatentDynamics;
+from    Schemas                     import  BaseTrainerConfig;
 
 # Setup Logger
 LOGGER : logging.Logger = logging.getLogger(__name__);
@@ -164,7 +165,7 @@ class Trainer:
                     encoder_decoder    : EncoderDecoder, 
                     latent_dynamics    : LatentDynamics, 
                     param_space        : ParameterSpace, 
-                    trainer_config     : dict):
+                    trainer_config     : BaseTrainerConfig):
         """
         Abstract base class that defines how each round of training proceeds (the loss functions, 
         and optimizer).
@@ -275,6 +276,8 @@ class Trainer:
         
         # Initialize a timer object. We will use this while training.
         self.timer                          = Timer();
+
+        assert isinstance(trainer_config, BaseTrainerConfig), "trainer_config must be a BaseTrainerConfig, got %s" % str(type(trainer_config));
 
         # Fetch trainer class information.
         self.n_iter                 : int   = trainer_config['n_iter'];             # Number of iterations for one train and greedy sampling
@@ -1101,6 +1104,7 @@ class Trainer:
             self.
         """
 
+        config = self.config.model_dump(mode = "python", by_alias = True) if hasattr(self.config, "model_dump") else self.config;
         dict_ = {'U_Train'                  : self.U_Train,
                  'U_Train_Clean'            : self.U_Train_Clean,
                  'noise_ratio'              : self.noise_ratio,
@@ -1109,7 +1113,7 @@ class Trainer:
                  't_Test'                   : self.t_Test,
                  'restart_iter'             : self.restart_iter, 
                  'timer'                    : self.timer.export(), 
-                 'config'                   : self.config,
+                 'config'                   : config,
                  'normalize'                : self.normalize,
                  'data_mean'                : None if self.data_mean is None else [float(m.detach().cpu().item()) for m in self.data_mean],
                  'data_std'                 : None if self.data_std  is None else [float(s.detach().cpu().item()) for s in self.data_std]};

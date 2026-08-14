@@ -67,7 +67,7 @@ def main():
     config = validate_experiment_config(raw_config);
     
     # Report the validated configuration settings.
-    Log_Dictionary(LOGGER = LOGGER, D = config, level = logging.INFO);
+    Log_Dictionary(LOGGER = LOGGER, D = config.to_runtime_dict(), level = logging.INFO);
 
     # Check if we are loading from a restart or not. If so, load it.
     use_restart         : bool  = config['workflow']['use_restart'];
@@ -340,8 +340,9 @@ def Save(   param_space         : ParameterSpace,
     LOGGER.info("Saving results to %s" % restart_path);
 
     # Build the restart save dictionary and then save it.
+    config_dict = config.to_runtime_dict() if hasattr(config, "to_runtime_dict") else config;
     restart_dict = {'parameter_space'   : param_space.export(),
-                    'config'            : config,
+                    'config'            : config_dict,
                     'physics'           : physics.export(),
                     'encoder_decoder'   : encoder_decoder.export(),
                     'latent_dynamics'   : latent_dynamics.export(),

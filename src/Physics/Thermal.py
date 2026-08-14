@@ -11,6 +11,7 @@ import  torch;
 import  h5py;
 
 from    Physics                         import  Physics;
+from    Schemas                         import  ThermalPhysicsConfig;
 
 # Setup the logger
 LOGGER : logging.Logger = logging.getLogger(__name__);
@@ -38,7 +39,7 @@ class Thermal(Physics):
     the grid of parameter values. Thus, the IC function will protest if the user specifies 
     parameters outside of the grid.
     """
-    def __init__(self, config : dict, param_names : list[str]) -> None:
+    def __init__(self, config : ThermalPhysicsConfig, param_names : list[str]) -> None:
         """
         Initialize a Thermal object.
 
@@ -55,10 +56,9 @@ class Thermal(Physics):
             A list of the parameter names. In this case, we expect "laser power" and "scan speed".
         """
 
+        assert isinstance(config, ThermalPhysicsConfig), "config must be a ThermalPhysicsConfig, got %s" % str(type(config));
+
         # First, let's fetch the hdf5 directory.
-        assert config['type'] == "Thermal",         "config['type'] = %s, should be Thermal" % config['type'];
-        assert 'Thermal' in config,                 "config must have a Thermal attribute";
-        assert 'hdf5_dir' in config['Thermal'],     "Thermal sub-dictionary must have an `hdf5_dir` attribute."
         self.hdf5_dir : str  = config['Thermal']['hdf5_dir'];
 
         # Set things we know.
@@ -94,7 +94,6 @@ class Thermal(Physics):
             assert nodes_coords_shape[1] == 3,              "nodes_coords_shape = %s" % str(nodes_coords_shape);
 
             # Check if we should use a CNN model.
-            assert 'use_cnn' in config['Thermal'],          "Thermal sub-dictionary must have an `use-cnn` attribute."
             self.use_cnn : bool = config['Thermal']['use_cnn'];
 
             if(self.use_cnn == True):

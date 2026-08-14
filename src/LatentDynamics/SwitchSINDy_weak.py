@@ -9,6 +9,7 @@ import  torch;
 
 from    LatentDynamics.Weak             import  WeakLatentDynamics;
 from    LatentDynamics.Interpolatable   import  InterpolatableLatentDynamics;
+from    Schemas                         import  SwitchSINDyWeakLatentDynamicsConfig;
 from    Utilities.FirstOrderSolvers     import  RK4;
 
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
@@ -24,7 +25,7 @@ class SwitchSINDy_weak(WeakLatentDynamics, InterpolatableLatentDynamics):
                     n_z             : int,
                     Uniform_t_Grid  : bool,
                     switch_time     : callable,
-                    config          : dict) -> None:
+                    config          : SwitchSINDyWeakLatentDynamicsConfig) -> None:
         r"""
         Initializes a SwitchSINDy_weak latent-dynamics object.
 
@@ -70,13 +71,7 @@ class SwitchSINDy_weak(WeakLatentDynamics, InterpolatableLatentDynamics):
         Nothing!
         """
 
-        # Checks
-        assert  'type'      in config;
-        assert  'trainable' in config;
-        assert  isinstance(config["type"], str);
-        assert  isinstance(config["trainable"], bool);
-        assert  config['type'] == "switch_w";
-        assert  "switch_w"   in config;
+        assert isinstance(config, SwitchSINDyWeakLatentDynamicsConfig), "config must be a SwitchSINDyWeakLatentDynamicsConfig, got %s" % str(type(config));
 
         # Run the base class initializer. There are two affine systems, each with n_z*(n_z + 1)
         # scalar coefficients.

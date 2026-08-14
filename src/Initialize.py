@@ -29,6 +29,7 @@ from    Physics                 import  Explicit, ExplicitSecondOrder;
 # from  Physics.Telegraphers            import  Telegraphers;          # mfem dependency.
 
 from    Sample                  import  Sampler, FOM_Rollout, FOM_Variance;
+from    Schemas                 import  ExperimentConfig, validate_experiment_config;
 
 # Set up logger.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
@@ -86,7 +87,7 @@ physics_dict = {                'Burgers'                   : Burgers.Burgers,
 # -------------------------------------------------------------------------------------------------
 
 def Initialize_Trainer( 
-        config                  : dict, 
+        config                  : ExperimentConfig | dict, 
         restart_dict            : dict  = {},
         make_restart_checkpoint : bool  = True,
     ) -> tuple[Trainer, Sampler, ParameterSpace, Physics, EncoderDecoder, LatentDynamics]:
@@ -152,6 +153,10 @@ def Initialize_Trainer(
         object must match the n_IC attribute of encoder_decoder.
     """
 
+    if isinstance(config, dict):
+        config = validate_experiment_config(config);
+    assert isinstance(config, ExperimentConfig), "config must be an ExperimentConfig, got %s" % str(type(config));
+
     # Set up a ParameterSpace object. This will keep track of all parameter combinations we want
     # to try during testing and training. We load the set of possible parameters and their possible
     # values using the configuration file. If we are using a restart file, then load it's 
@@ -212,7 +217,7 @@ def Initialize_Trainer(
 
 
 
-def Initialize_Encoder_Decoder(physics : Physics, config : dict) -> EncoderDecoder:
+def Initialize_Encoder_Decoder(physics : Physics, config : ExperimentConfig) -> EncoderDecoder:
     """
     Initialize a encoder_decoder (autoencoder) according to config file. 
     
@@ -259,7 +264,7 @@ def Initialize_Encoder_Decoder(physics : Physics, config : dict) -> EncoderDecod
 
 
 
-def Initialize_Physics(config: dict, param_names : list[str]) -> Physics:
+def Initialize_Physics(config: ExperimentConfig, param_names : list[str]) -> Physics:
     '''
     Initialize a physics FOM model according to config file.
 

@@ -11,6 +11,7 @@ from    ParameterSpace                  import  ParameterSpace;
 from    Physics                         import  Physics;
 from    LatentDynamics                  import  LatentDynamics, WeakLatentDynamics;
 from    Trainer.First_Order_Rollout     import  First_Order_Rollout;
+from    Schemas                         import  ExperimentConfig;
 
 # Setup Logger
 LOGGER : logging.Logger = logging.getLogger(__name__);
@@ -27,7 +28,7 @@ class First_Order_Weak(First_Order_Rollout):
                  encoder_decoder    : EncoderDecoder,
                  latent_dynamics    : LatentDynamics,
                  param_space        : ParameterSpace,
-                 config             : dict):
+                 config             : ExperimentConfig):
         """
         First-order rollout trainer for weak-form latent dynamics.
 
@@ -36,10 +37,8 @@ class First_Order_Weak(First_Order_Rollout):
         is controlled by the base `Trainer` through top-level `trainer.noise_ratio`.
         """
 
-        assert 'trainer' in config,                                 "config must contain a 'trainer' sub-dictionary";
-        assert 'type' in config['trainer'],                         "trainer dictionary must contain a 'type' attribute";
-        assert config['trainer']['type'] == "First_Order_Weak",     "config['trainer']['type'] = %s, should be First_Order_Weak" % config['trainer']['type'];
-        assert "First_Order_Weak" in config['trainer'],             "First_Order_Weak must be in config['trainer']";
+        assert isinstance(config, ExperimentConfig), "config must be an ExperimentConfig, got %s" % str(type(config));
+        assert config.trainer.type == "First_Order_Weak", "config.trainer.type = %s, should be First_Order_Weak" % config.trainer.type;
 
         LOGGER.info("Initializing a First_Order_Weak object");
 

@@ -8,6 +8,8 @@ from typing import Dict;
 import  numpy;
 import  torch;
 
+from    Schemas import BasePhysicsConfig;
+
 
 # Setup logger
 LOGGER : logging.Logger = logging.getLogger(__name__);
@@ -134,7 +136,7 @@ class Physics:
                     spatial_dim     : int,
                     Frame_Shape     : list[int],
                     X_Positions     : numpy.ndarray,
-                    config          : dict, 
+                    config          : BasePhysicsConfig,
                     param_names     : list[str], 
                     Uniform_t_Grid  : bool,
                     n_IC            : int) -> None:
@@ -199,7 +201,7 @@ class Physics:
         assert(isinstance(Frame_Shape, list));
         assert(len(Frame_Shape) > 0);
         assert(isinstance(X_Positions, numpy.ndarray));
-        assert(isinstance(config, dict));
+        assert isinstance(config, BasePhysicsConfig), "config must be a BasePhysicsConfig, got %s" % str(type(config));
         assert(isinstance(param_names, list));
         assert(isinstance(Uniform_t_Grid, bool));
         assert(isinstance(n_IC, int));
@@ -219,7 +221,7 @@ class Physics:
         self.spatial_dim    : int           = spatial_dim;
         self.Frame_Shape    : list[int]     = Frame_Shape;
         self.X_Positions    : numpy.ndarray = X_Positions;
-        self.config         : dict          = config;
+        self.config         : BasePhysicsConfig = config;
         self.param_names    : list[str]     = param_names;
         self.Uniform_t_Grid : bool          = Uniform_t_Grid;
         self.n_IC           : int           = n_IC;
@@ -296,7 +298,8 @@ class Physics:
         effectively serialize self.
         """
 
-        dict_ : dict = {'config'            : self.config, 
+        config = self.config.model_dump(mode = "python", by_alias = True) if hasattr(self.config, "model_dump") else self.config;
+        dict_ : dict = {'config'            : config, 
                         'param_names'       : self.param_names,
                         'X_Positions'       : self.X_Positions,
                         'Frame_Shape'       : self.Frame_Shape,

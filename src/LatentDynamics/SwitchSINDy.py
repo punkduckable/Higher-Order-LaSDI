@@ -8,6 +8,7 @@ import  numpy;
 import  torch;
 
 from    LatentDynamics.Interpolatable   import  InterpolatableLatentDynamics;
+from    Schemas                         import  SwitchSINDyLatentDynamicsConfig;
 from    Utilities.FiniteDifference      import  Derivative1_Order4, Derivative1_Order2_NonUniform;
 from    Utilities.FirstOrderSolvers     import  RK4;
 
@@ -24,7 +25,7 @@ class SwitchSINDy(InterpolatableLatentDynamics):
                     n_z             : int,
                     Uniform_t_Grid  : bool, 
                     switch_time     : callable,
-                    config          : dict) -> None:
+                    config          : SwitchSINDyLatentDynamicsConfig) -> None:
         r"""
         Initializes a SwitchSINDy object.
 
@@ -67,13 +68,7 @@ class SwitchSINDy(InterpolatableLatentDynamics):
         Nothing!
         """
 
-        # Checks
-        assert  'type'      in config;
-        assert  'trainable' in config;
-        assert  isinstance(config["type"], str);
-        assert  isinstance(config["trainable"], bool);
-        assert  config['type'] == "switch";
-        assert  "switch"    in config;
+        assert isinstance(config, SwitchSINDyLatentDynamicsConfig), "config must be a SwitchSINDyLatentDynamicsConfig, got %s" % str(type(config));
 
         # Run the base class initializer. Note that this sets self.train_coefs.
         InterpolatableLatentDynamics.__init__(   

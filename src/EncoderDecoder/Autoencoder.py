@@ -10,6 +10,7 @@ import  numpy;
 
 from    EncoderDecoder      import  EncoderDecoder;
 from    EncoderDecoder.MLP  import  MultiLayerPerceptron, act_dict;
+from    Schemas             import  AEEncoderDecoderConfig, AutoencoderEncoderDecoderConfig;
 # Set up logging.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
@@ -23,7 +24,7 @@ LOGGER  : logging.Logger    = logging.getLogger(__name__);
 class Autoencoder(EncoderDecoder):
     def __init__(   self,         
                     Frame_Shape     : list[int],    
-                    config          : dict) -> None:
+                    config          : AEEncoderDecoderConfig | AutoencoderEncoderDecoderConfig) -> None:
         r"""
         Initializes an Autoencoder object. An Autoencoder consists of two networks, an encoder, 
         E : \mathbb{R}^F -> \mathbb{R}^L, and a Decoder, D : \mathbb{R}^L -> \marthbb{R}^F. 
@@ -76,19 +77,11 @@ class Autoencoder(EncoderDecoder):
         Nothing!
         """
         
-        # Input checks.
-        assert 'type'       in config;
-        assert 'trainable'  in config;
-        assert (config['type'] == "ae") or (config['type'] == "autoencoder");
+        assert isinstance(config, (AEEncoderDecoderConfig, AutoencoderEncoderDecoderConfig)), \
+            "config must be an AEEncoderDecoderConfig or AutoencoderEncoderDecoderConfig, got %s" % str(type(config));
         ae_key  : str = config['type'];
-        assert ae_key in config;
         ae_config               : dict              = config[ae_key];
 
-        assert "hidden_widths"      in ae_config;
-        assert "latent_dimension"   in ae_config;
-        assert "activations"        in ae_config;
-        assert "n_Decoders"         in ae_config;
-        
         assert isinstance(Frame_Shape, list),                 "type(Frame_Shape) == %s, expected list" % (str(type(Frame_Shape)));
         for i in range(len(Frame_Shape)):
             assert isinstance(Frame_Shape[i], int),           "type(Frame_Shape[%d]) = %s, expected int" % (i, str(type(Frame_Shape[i])));
@@ -107,21 +100,13 @@ class Autoencoder(EncoderDecoder):
             activations         : list[str]     = [ae_config['activations']] * n_hidden_layers;   # The final layer has no activation.
         elif(isinstance(ae_config['activations'], list)):
             activations         : list[str]     = ae_config['activations'];
-            assert(len(activations) == n_hidden_layers);
         else:
             raise ValueError("Activations must be a string or a list of strings.");
-        
-        for i in range(len(activations)):
-            assert isinstance(activations[i], str),             "type(activations[%d]) = %s, must be str" % (i, str(type(activations[i])));
-            assert activations[i].lower() in act_dict.keys(),   "activations[%d] = %s; not in act_dict keys" % (i, activations[i].lower());
         
 
         # Now build the widths attribute + fetch Frame_Shape from physics.
         space_dim           : int               = numpy.prod(Frame_Shape).item();
         widths              : list[int]         = [space_dim] + hidden_widths + [n_z];
-        for i in range(len(widths)):
-            assert isinstance(widths[i], int),                  "type(widths[%d]) = %s, must be int" % (i, str(type(widths[i])));
-            assert widths[i] > 0,                               "widths[%d] = %d, must be positive" % (i, widths[i]);
         assert numpy.prod(Frame_Shape) == widths[0],            "numpy.prod(self.Frame_Shape) = %d, widths[0] = %d; must be equal" % (numpy.prod(Frame_Shape), widths[0]);
 
         # Extract the number of decoders.
@@ -263,7 +248,7 @@ class Autoencoder(EncoderDecoder):
                     'widths'                : self.widths, 
                     'activations'           : self.activations, 
                     'Frame_Shape'           : self.Frame_Shape,
-                    'config'                : self.config};
+                    'config'                : self.config.model_dump(mode = "python", by_alias = True)};
         return dict_;
 
 
@@ -302,9 +287,15 @@ def load_Autoencoder(dict_ : dict, config_ : dict) -> Autoencoder:
     # architecture as the one that created dict_.
     Frame_Shape     : list[int] = dict_['Frame_Shape'];
     config          : dict      = deepcopy(dict_['config']);
+    if hasattr(config, "model_dump"):
+        config = config.model_dump(mode = "python", by_alias = True);
 
     # Override the trainable argument
     config['trainable']         = config_['trainable'];
+    if config['type'] == "ae":
+        config = AEEncoderDecoderConfig.model_validate(config);
+    else:
+        config = AutoencoderEncoderDecoderConfig.model_validate(config);
 
     # Now... initialize an Autoencoder object.
     AE = Autoencoder(Frame_Shape = Frame_Shape, config = config);

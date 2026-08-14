@@ -11,6 +11,7 @@ from    Enums                       import  NextStep;
 from    Trainer                     import  Trainer;
 from    Rollouts                    import  Sample_Rollouts;
 from    EncoderDecoder              import  EncoderDecoder;
+from    Schemas                     import  FOMRolloutSamplerConfig
 from    Sample.Sampler              import  Sampler;
 
 
@@ -25,7 +26,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class FOM_Rollout(Sampler):
-    def __init__(self, config : dict):
+    def __init__(self, config : FOMRolloutSamplerConfig):
         """
         Initializes a "FOM_Rollout" Sampler object. This class defines the "worst" parameter 
         as the testing parameter combination (outside of the training set) that produces the 
@@ -58,34 +59,31 @@ class FOM_Rollout(Sampler):
         Arguments:
         -------------------------------------------------------------------------------------------
 
-        config: dict
+        config: FOMRolloutSamplerConfig
             The 'sampler' portion of the .yml configuration file. Should contain a 'type' 
             attribute whose value is "FOM_Rollout", as well as a "FOM_Rollout" key whose value 
             is a dictionary with three keys: `normalized_FOM`, and `error_normalization`. 
             See above.
         """
-        # Checks
+        
+        # Schema validation happens at configuration load time, so this check is only a boundary
+        # assertion that Initialize passed the right sampler schema object.
+        assert isinstance(config, FOMRolloutSamplerConfig), "config object SamplerConfig, got %s" % str(type(config))
+
         super().__init__(config);
 
-        assert 'FOM_Rollout' in config, "sampler config must contain a 'FOM_Rollout' key";
-        sub = config['FOM_Rollout'];
-        assert isinstance(sub, dict), "sampler.FOM_Rollout must be a dict";
-        self.n_samples : int = int(sub['n_samples']);
+        sub = config.FOM_Rollout;
+        self.n_samples : int = int(sub.n_samples);
 
         # Config key: normalized_FOM (bool). If True, compute errors in normalized units;
         # if False, compute errors in physical units (requires trainer normalization stats).
-        assert 'normalized_FOM' in sub, "FOM_Rollout config must include boolean key normalized_FOM";
-        self.normalized_FOM : bool = bool(sub['normalized_FOM']);
+        self.normalized_FOM : bool = bool(sub.normalized_FOM);
 
         # Config key: error_normalization
-        assert 'error_normalization' in sub, "FOM_Rollout config must include key error_normalization";
-        self.error_normalization : str = str(sub['error_normalization']).lower();
-        assert self.error_normalization in ['none', 'global_std', 'trajectory_std'], (
-            f"FOM_Rollout.error_normalization must be none|global_std|trajectory_std, got {self.error_normalization}"
-        );
+        self.error_normalization : str = str(sub.error_normalization).lower();
 
         # Optional epsilon used for std-based normalizations
-        self.eps : float = float(sub['eps']);
+        self.eps : float = float(sub.eps);
 
 
     def Sample(self, trainer : Trainer) -> NextStep:

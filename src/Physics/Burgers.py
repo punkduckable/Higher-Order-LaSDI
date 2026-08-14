@@ -10,6 +10,7 @@ import  torch;
 import  matplotlib.pyplot   as      plt;
 
 from    Physics             import  Physics;
+from    Schemas             import  BurgersPhysicsConfig;
 
 
 
@@ -18,7 +19,7 @@ from    Physics             import  Physics;
 # -------------------------------------------------------------------------------------------------
 
 class Burgers(Physics):
-    def __init__(self, config : dict, param_names : list[str]) -> None:
+    def __init__(self, config : BurgersPhysicsConfig, param_names : list[str]) -> None:
         """
         This is the initializer for the Burgers Physics class. This class essentially acts as a 
         wrapper around a 1D Burgers solver. The Burgers equation is given by
@@ -56,12 +57,9 @@ class Burgers(Physics):
         # Checks
         assert isinstance(param_names, list), "type(param_names) = %s" % str(type(param_names));
         assert len(param_names) == 2,         "len(param_names) = %d" % len(param_names);
-        assert isinstance(config, dict),      "type(config) = %s" % str(type(config));
         assert 'a' in param_names,            "param_names = %s" % str(param_names);
         assert 'w' in param_names,            "param_names = %s" % str(param_names);
-        
-        # Make sure the config dictionary is actually for Burgers' equation.
-        assert('Burgers' in config);
+        assert isinstance(config, BurgersPhysicsConfig), "config must be a BurgersPhysicsConfig, got %s" % str(type(config));
 
         # Other setup
         self.n_x            : int       = config['Burgers']['n_x'];

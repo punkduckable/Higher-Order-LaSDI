@@ -7,6 +7,7 @@ import  logging;
 import  numpy;
 import  torch;
 
+from    Schemas                         import  KleinGordonPhysicsConfig;
 from    Physics                         import  Physics;
 from    Physics.PyMFEM.klein_gordon     import  Simulate, Initial_Displacement, Initial_Velocity;
 
@@ -20,7 +21,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # -------------------------------------------------------------------------------------------------
 
 class KleinGordon(Physics):
-    def __init__(self, config : dict, param_names : list[str]) -> None:
+    def __init__(self, config : KleinGordonPhysicsConfig, param_names : list[str]) -> None:
         """
         Initialize a KleinGordon object. This class acts as a wrapper around the MFEM-based solver 
         implemented in ``klein_gordon.py`` within the ``PyMFEM`` sub-directory. We solve the 
@@ -63,7 +64,7 @@ class KleinGordon(Physics):
         assert len(param_names) == 2,         "len(param_names) = %d, param_names = %s" % (len(param_names), str(param_names));
         assert 'w' in param_names,            "param_names = %s" % str(param_names);
         assert 'm' in param_names,            "param_names = %s" % str(param_names);
-        assert('KleinGordon' in config);
+        assert isinstance(config, KleinGordonPhysicsConfig), "config must be a KleinGordonPhysicsConfig, got %s" % str(type(config));
 
         # Run a short simulation to determine the frame shape and positions.
         U, DtU, X, T                        = Simulate(t_Grid = numpy.linspace(0, 0, 2), VisIt = False);
