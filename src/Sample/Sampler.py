@@ -55,6 +55,9 @@ class Sampler:
     type : str
         Name of the concrete sampler selected by the configuration and factory code.
 
+    requires_stochastic_LD : bool
+        True if this sampling procedure requires a stochastic LD model, false otherwise.
+
         
 
     -----------------------------------------------------------------------------------------------
@@ -74,7 +77,7 @@ class Sampler:
     of the workflow.
     """
     
-    def __init__(self, config : BaseSamplerConfig):
+    def __init__(self, requires_stochastic_LD : bool, config : BaseSamplerConfig):
         """
         The Sampler class defines how Greedy Sampling picks new parameter combinations. 
         We use it at the end of each round of training to pick the "worst" parameter combination, 
@@ -98,6 +101,9 @@ class Sampler:
         Arguments:
         -------------------------------------------------------------------------------------------
 
+        requires_stochastic_LD : bool
+            If true, this sampler can only be paired with a LD model that is stochastic.
+
         config: BaseSamplerConfig
             The 'sampler' portion of the .yml configuration file. Should contain a 'type' 
             attribute.
@@ -107,8 +113,9 @@ class Sampler:
         # verify it received a sampler schema object rather than a raw/unvalidated dictionary.
         assert isinstance(config, BaseSamplerConfig), "config object must be a BaseSamplerConfig, got %s" % str(type(config))
         # store the config.
-        self.config : BaseSamplerConfig  = config;
-        self.type   : str                = config.type; 
+        self.requires_stochastic_LD : bool              = requires_stochastic_LD;
+        self.config                 : BaseSamplerConfig = config;
+        self.type                   : str               = config.type; 
 
 
     def Sample(self, trainer : Trainer) -> NextStep:

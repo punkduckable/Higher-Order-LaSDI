@@ -656,8 +656,13 @@ class FOMVarianceSettings(ConfigBase):
 
 
 class FOMRolloutSettings(ConfigBase):
-    # How many samples should we draw for each testing parameter combination?
-    n_samples: PositiveInt
+    # Should we draw samples of the latent dynamics, or use the mean? Note that if our LD model 
+    # is not stochastic, may not be supported (at the very best, it will do nothing).
+    sample_test_LD: bool
+
+    # How many samples should we draw for each testing parameter combination? Only required 
+    # if `sample_test_LD = True`. Ignored when `sample_test_LD = False`.
+    n_samples: PositiveInt | None = None
 
     # If True, compute errors in normalized units, if False, compute errors in physical 
     # units (requires trainer normalization stats).
@@ -668,6 +673,28 @@ class FOMRolloutSettings(ConfigBase):
 
     # Small divisor for STD normalization to ensure we don't divide by zero.
     eps: PositiveFloat
+
+    @model_validator(mode = "after")
+    def validate_sampling(self) -> "FOMRolloutSettings":
+        if self.sample_test_LD and self.n_samples is None:
+            raise ValueError("n_samples must be set if sample_test_LD = True.");
+        return self
+
+
+class ROMDiscrepancySettings(ConfigBase):
+    # Should we draw samples of the latent dynamics, or use the mean? Note that if our LD model 
+    # is not stochastic, may not be supported (at the very best, it will do nothing).
+    sample_test_LD: bool
+
+    # How many samples should we draw for each testing parameter combination? Only required 
+    # if `sample_test_LD = True`. Ignored when `sample_test_LD = False`.
+    n_samples: PositiveInt | None = None
+
+    @model_validator(mode = "after")
+    def validate_sampling(self) -> "ROMDiscrepancySettings":
+        if self.sample_test_LD and self.n_samples is None:
+            raise ValueError("n_samples must be set if sample_test_LD = True.");
+        return self
 
 
 class FOMVarianceSamplerConfig(BaseSamplerConfig):
@@ -680,8 +707,13 @@ class FOMRolloutSamplerConfig(BaseSamplerConfig):
     FOM_Rollout     : FOMRolloutSettings
 
 
+class ROMDiscrepancySamplerConfig(BaseSamplerConfig):
+    type            : Literal["ROM_Discrepancy"]
+    ROM_Discrepancy : ROMDiscrepancySettings
+
+
 SamplerConfig = Annotated[
-    FOMVarianceSamplerConfig | FOMRolloutSamplerConfig,
+    FOMVarianceSamplerConfig | FOMRolloutSamplerConfig | ROMDiscrepancySamplerConfig,
     Field(discriminator = "type"),
 ]
 

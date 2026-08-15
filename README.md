@@ -337,7 +337,12 @@ Configuration files are YAML-based and specify:
 - `sampler.type` selects a sampler implementation (e.g., `FOM_Variance` or `FOM_Rollout`).
 - Each sampler has its own settings block under `sampler.<TypeName>`. For example:
   - `sampler.FOM_Variance.n_samples`
-  - `sampler.FOM_Rollout.n_samples`, `sampler.FOM_Rollout.normalized_FOM`, `sampler.FOM_Rollout.error_normalization`
+  - `sampler.FOM_Rollout.sample_test_LD`, `sampler.FOM_Rollout.n_samples`,
+    `sampler.FOM_Rollout.normalized_FOM`, `sampler.FOM_Rollout.error_normalization`
+    - Set `sample_test_LD: true` (the default) to average the rollout error over `n_samples`
+      sampled latent dynamics rollouts.
+    - Set `sample_test_LD: false` to skip latent-dynamics sampling and score each candidate using
+      the posterior mean rollout; in this case `n_samples` can be omitted.
 
 ### Workflow Settings (`workflow`)
 - Restart capability (load from checkpoint)

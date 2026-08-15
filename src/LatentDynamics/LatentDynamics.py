@@ -553,7 +553,8 @@ class LatentDynamics:
                     sample  : bool = False) -> list[list[numpy.ndarray | torch.Tensor]]:
         """
         Time integrates the latent dynamics from multiple initial conditions for each combination
-        of coefficients in coefs. 
+        of coefficients in coefs. Note that if self is not stochastic, we should generally not 
+        allow sampling.
  
 
         -------------------------------------------------------------------------------------------

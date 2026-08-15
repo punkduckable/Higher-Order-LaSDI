@@ -183,14 +183,16 @@ def Initialize_Trainer(
     # latent dynamics from this file. 
     ld_type                 = config.latent_dynamics.type;
     if(ld_type == "switch" or ld_type == "switch_w"):
-        latent_dynamics         = ld_dict[ld_type]( n_z             = encoder_decoder.n_z, 
-                                                    Uniform_t_Grid  = physics.Uniform_t_Grid,
-                                                    switch_time     = physics.switch_time,
-                                                    config          = config.latent_dynamics);
+        latent_dynamics : LatentDynamics = ld_dict[ld_type]( 
+                                                n_z             = encoder_decoder.n_z, 
+                                                Uniform_t_Grid  = physics.Uniform_t_Grid,
+                                                switch_time     = physics.switch_time,
+                                                config          = config.latent_dynamics);
     else:
-        latent_dynamics         = ld_dict[ld_type]( n_z             = encoder_decoder.n_z, 
-                                                    Uniform_t_Grid  = physics.Uniform_t_Grid,
-                                                    config          = config.latent_dynamics);
+        latent_dynamics : LatentDynamics = ld_dict[ld_type]( 
+                                            n_z             = encoder_decoder.n_z, 
+                                            Uniform_t_Grid  = physics.Uniform_t_Grid,
+                                            config          = config.latent_dynamics);
     
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
         latent_dynamics.load(restart_dict['latent_dynamics']);
@@ -211,6 +213,10 @@ def Initialize_Trainer(
     # Load the sampler.
     sampler_type    : str       = config.sampler.type;
     sampler         : Sampler   = sampler_dict[sampler_type](config.sampler);
+
+    # Make sure the LD model is stochastic if the sampler requires one
+    if sampler.requires_stochastic_LD:
+        assert latent_dynamics.stochastic, "sampler requires stochastic LD, but the LD model we build is not stochastic.";
     
     # All done!
     return trainer, sampler, param_space, physics, encoder_decoder, latent_dynamics;

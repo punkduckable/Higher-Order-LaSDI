@@ -9,7 +9,7 @@ import  numpy;
 
 from    Enums                       import  NextStep;  
 from    Trainer                     import  Trainer;
-from    Rollouts                    import  Sample_Rollouts;
+from    Rollouts                    import  Sample_Rollouts, Mean_Rollout;
 from    EncoderDecoder              import  EncoderDecoder;
 from    Schemas                     import  FOMRolloutSamplerConfig
 from    Sample.Sampler              import  Sampler;
@@ -30,18 +30,24 @@ class FOM_Rollout(Sampler):
         """
         Initializes a "FOM_Rollout" Sampler object. This class defines the "worst" parameter 
         as the testing parameter combination (outside of the training set) that produces the 
-        largest average (computed empirically using samples of the coefficient posterior 
-        distribution) rollout error. This works by first computing the absolute rollout error,
-        then optionally normalizing it to get a relative error.
+        largest rollout error. The rollout error is either averaged empirically over samples of
+        the coefficient posterior distribution, or computed from the posterior mean latent
+        dynamics when sampling is disabled. This works by first computing the absolute rollout
+        error, then optionally normalizing it to get a relative error.
 
         This is an intrusive sampler in that it assumes we have access to the true solution for 
         every parameter combination in the testing set.
         
-        A FOM_Rollout object has a few settings: `n_samples`, `normalized_FOM`, and 
-        `error_normalization`.
+        A FOM_Rollout object has a few settings: `sample_test_LD`, `n_samples`,
+        `normalized_FOM`, and `error_normalization`.
 
-        `n_samples` is an integer specifying the number of samples we draw from the coefficient 
-        posterior distribution (see above). 
+        `sample_test_LD` specifies whether we draw samples from the latent-dynamics coefficient
+        posterior. If this is False, we use the posterior mean latent dynamics instead.
+        It defaults to True for compatibility with the historical sampled-rollout behavior.
+
+        `n_samples` is an integer specifying the number of samples we draw from the coefficient
+        posterior distribution when `sample_test_LD` is True. It is not required when
+        `sample_test_LD` is False.
 
         `normalized_FOM` is a boolean specifying if we should use normalized or denormalized 
         FOM values to compute the absolute error.
@@ -62,18 +68,22 @@ class FOM_Rollout(Sampler):
         config: FOMRolloutSamplerConfig
             The 'sampler' portion of the .yml configuration file. Should contain a 'type' 
             attribute whose value is "FOM_Rollout", as well as a "FOM_Rollout" key whose value 
-            is a dictionary with three keys: `normalized_FOM`, and `error_normalization`. 
-            See above.
+            is a dictionary with `sample_test_LD`, `normalized_FOM`, and
+            `error_normalization`, plus `n_samples` when `sample_test_LD` is True. See above.
         """
         
         # Schema validation happens at configuration load time, so this check is only a boundary
         # assertion that Initialize passed the right sampler schema object.
         assert isinstance(config, FOMRolloutSamplerConfig), "config object SamplerConfig, got %s" % str(type(config))
 
-        super().__init__(config);
-
         sub = config.FOM_Rollout;
-        self.n_samples : int = int(sub.n_samples);
+        super().__init__(requires_stochastic_LD = sub.sample_test_LD, config = config);
+
+        self.sample_test_LD : bool = sub.sample_test_LD;
+        if self.sample_test_LD == True:
+            self.n_samples : int = int(sub.n_samples);
+        else:
+            self.n_samples : int | None = None;
 
         # Config key: normalized_FOM (bool). If True, compute errors in normalized units;
         # if False, compute errors in physical units (requires trainer normalization stats).
@@ -89,16 +99,19 @@ class FOM_Rollout(Sampler):
     def Sample(self, trainer : Trainer) -> NextStep:
         """
         This function identifies the combination of testing parameters (which are not in the training 
-        set) that has the average (across n_samples samples) rollout error with the corresponding 
-        true solution. We add this combination of parameters to the training set, then hand it off 
-        ready to generate the new training solution (and add it to the trainer).
+        set) that has the largest rollout error with the corresponding true solution. If
+        `sample_test_LD` is True, this error is averaged across `n_samples` sampled rollouts. If it
+        is False, the error is computed from the posterior mean latent dynamics. We add this
+        combination of parameters to the training set, then hand it off ready to generate the new
+        training solution (and add it to the trainer).
 
         How this works is fairly simple: We begin by finding every testing parameter which is not 
-        in the training set. For each parameter combination, we encode its IC and draw n_sample 
-        samples of the posterior distribution for the coefficients evaluated at the current combination
-        of parameters. This gives us n_samples IVPs in the latent space, which we solve forward in 
-        time to predict the future latent states. We decode these trajectories and compare each one 
-        to the ground truth for this combination of parameter values. 
+        in the training set. For each parameter combination, we encode its IC and either draw
+        `n_samples` samples of the posterior distribution for the coefficients evaluated at the
+        current combination of parameters, or use the posterior mean coefficients. This gives us
+        one or more IVPs in the latent space, which we solve forward in time to predict the future
+        latent states. We decode these trajectories and compare each one to the ground truth for
+        this combination of parameter values.
         
         Next, we compute the sum (across samples, time derivatives/number of ICs, and time steps) of 
         the relative errors between the samples and the corresponding ground truth. We do this for 
@@ -131,7 +144,10 @@ class FOM_Rollout(Sampler):
         assert len(trainer.U_Test)             >  0,                                    "len(trainer.U_Test) = %d" % len(trainer.U_Test);
         assert len(trainer.U_Test)             == trainer.param_space.n_test(),         "len(trainer.U_Test) = %d, trainer.param_space.n_test() = %d" % (len(trainer.U_Test), trainer.param_space.n_test());
         trainer._check_train_coefficients();
+        if self.requires_stochastic_LD:
+            assert trainer.latent_dynamics.stochastic,                                  "This sampler requires a stochastic LD model, but got one that is not.";
         LOGGER.info('\n~~~~~~~ Finding New Point ~~~~~~~');
+
 
         # Move the encoder_decoder to the cpu (this is where all the GP stuff happens). Remember 
         # that train_coefs should specify the coefficients from that iteration. 
@@ -176,22 +192,41 @@ class FOM_Rollout(Sampler):
         # ---------------------------------------------------------------------------------------------
         # Generate the latent trajectories.
 
-        LOGGER.debug("Sampling roms with %d rollouts per candidate" % self.n_samples);
-        Zis_Samples : list[list[torch.Tensor]] = Sample_Rollouts(
-                                                    encoder_decoder     = encoder_decoder, 
-                                                    physics             = trainer.physics,
-                                                    latent_dynamics     = trainer.latent_dynamics, 
-                                                    param_grid          = candidate_parameters, 
-                                                    t_Grid              = t_Candidates, 
-                                                    n_samples           = self.n_samples, 
-                                                    trainer             = trainer);
-        
+        if self.sample_test_LD:
+            LOGGER.debug("Sampling roms with %d rollouts per candidate" % self.n_samples);
+            Zis_Samples : list[list[numpy.ndarray]] = Sample_Rollouts(
+                                                        encoder_decoder     = encoder_decoder, 
+                                                        physics             = trainer.physics,
+                                                        latent_dynamics     = trainer.latent_dynamics, 
+                                                        param_grid          = candidate_parameters, 
+                                                        t_Grid              = t_Candidates, 
+                                                        n_samples           = self.n_samples, 
+                                                        trainer             = trainer);
+        else:
+            LOGGER.debug("Using mean latent dynamics rollout for each candidate (no sampling)");
+            Zis_Raw : list[list[numpy.ndarray]] = Mean_Rollout(
+                                                        encoder_decoder     = encoder_decoder, 
+                                                        physics             = trainer.physics,
+                                                        latent_dynamics     = trainer.latent_dynamics, 
+                                                        param_grid          = candidate_parameters, 
+                                                        t_Grid              = t_Candidates, 
+                                                        trainer             = trainer);  
+
+            # Reshape each component of Zi to have shape [n_t_i, 1, n_z]. This matches the
+            # Sample_Rollouts output contract, using a single pseudo-sample for the mean rollout.
+            Zis_Samples : list[list[numpy.ndarray]] = [];
+            for Zi_raw in Zis_Raw:
+                ith_Zs : list[numpy.ndarray] = [];
+                for Zij_raw in Zi_raw:
+                    ith_Zs.append(numpy.expand_dims(Zij_raw, axis = 1));
+                Zis_Samples.append(ith_Zs);
+                    
 
         # ---------------------------------------------------------------------------------------------
         # Decode the samples and compute relative errors
 
         LOGGER.debug("Setting up arrays to hold relative errors");
-        n_samples   : int   = self.n_samples;
+        n_samples   : int   = self.n_samples if self.n_samples is not None else 1;
         n_IC        : int   = trainer.n_IC;
 
         # i'th element is an n_IC element list whose j'th element is an array of shape

@@ -51,7 +51,8 @@ workflow:
 sampler: 
   type:                     'FOM_Rollout'
   FOM_Rollout:
-    n_samples:              20              # Number of samples to compute avg rollout loss.
+    sample_test_LD:         True            # True: sample LD rollouts; False: use mean LD rollout.
+    n_samples:              20              # Required only when sample_test_LD is True.
     normalized_FOM:         True            # Compute absolute errors using normalized or de-normalized values?
     error_normalization:    none            # none | global_std | trajectory_std
     eps:                    0.01
