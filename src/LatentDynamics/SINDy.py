@@ -167,7 +167,7 @@ class SINDy(InterpolatableLatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------
 
-        None. Coefficients are stored in `self.train_coefs`.
+        None. 
         """
 
         # Checks.

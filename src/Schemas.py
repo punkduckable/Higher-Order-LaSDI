@@ -396,7 +396,6 @@ class LatentDynamicsBaseConfig(ConfigBase):
     trainable: bool
 
 
-
 class InterpolatableLatentDynamicsSettings(ConfigBase):
     """Latent dynamics settings for strong-form least-squares coefficient initialization."""
 
@@ -404,7 +403,7 @@ class InterpolatableLatentDynamicsSettings(ConfigBase):
     lstsq_reg: NonNegativeFloat
 
 
-class WeakInterpolatableLatentDynamicsSettings(ConfigBase):
+class WeakLatentDynamicsSettings(ConfigBase):
     """Weak-form latent dynamics test-function settings."""
 
     # Should the test functions be polynomials or bumps? If polynomial, the polynomial order 
@@ -419,6 +418,34 @@ class WeakInterpolatableLatentDynamicsSettings(ConfigBase):
     overlap: Annotated[float, Field(ge = 0.0, lt = 1.0)]
 
 
+class CABLELatentDynamicsSettings(ConfigBase):
+    """CABLE mixture-of-experts latent dynamics settings."""
+
+    # How many experts should we use?
+    n_experts: PositiveInt 
+
+    # How many experts do we want to be active each step? Setting it >= n_experts effectively 
+    # disables this feature.
+    top_k : PositiveInt 
+
+    # Hidden widths of the gate network (input dim is 1 + n_param and the output is n_experts).
+    hidden_widths: list[PositiveInt] = Field(min_length = 1)
+
+    # Activations to use; the i'th activation is applied just after the i'th layer. Note that
+    # we use a soft-max on the final layer.
+    activations: ActivationSpec
+
+    @model_validator(mode = "after")
+    def validate_activations(self) -> "CABLELatentDynamicsSettings":
+        # Ensure the number of activations matches the number of hidden layers.
+        _check_activation_spec(
+            self.activations,
+            n_layers    = len(self.hidden_widths),
+            field_name  = "activations",
+        )
+        return self
+
+
 class SINDyLatentDynamicsConfig(LatentDynamicsBaseConfig):
     type        : Literal["sindy"]
     sindy       : InterpolatableLatentDynamicsSettings
@@ -426,7 +453,7 @@ class SINDyLatentDynamicsConfig(LatentDynamicsBaseConfig):
 
 class SINDyWeakLatentDynamicsConfig(LatentDynamicsBaseConfig):
     type        : Literal["sindy_w"]
-    sindy_w     : WeakInterpolatableLatentDynamicsSettings
+    sindy_w     : WeakLatentDynamicsSettings
 
 
 class DampedSpringLatentDynamicsConfig(LatentDynamicsBaseConfig):
@@ -436,7 +463,7 @@ class DampedSpringLatentDynamicsConfig(LatentDynamicsBaseConfig):
 
 class DampedSpringWeakLatentDynamicsConfig(LatentDynamicsBaseConfig):
     type        : Literal["spring_w"]
-    spring_w    : WeakInterpolatableLatentDynamicsSettings
+    spring_w    : WeakLatentDynamicsSettings
 
 
 class SwitchSINDyLatentDynamicsConfig(LatentDynamicsBaseConfig):
@@ -446,8 +473,11 @@ class SwitchSINDyLatentDynamicsConfig(LatentDynamicsBaseConfig):
 
 class SwitchSINDyWeakLatentDynamicsConfig(LatentDynamicsBaseConfig):
     type        : Literal["switch_w"]
-    switch_w    : WeakInterpolatableLatentDynamicsSettings
+    switch_w    : WeakLatentDynamicsSettings
 
+class CABLELatentDynamicsConfig(LatentDynamicsBaseConfig):
+    type        : Literal["cable"]
+    cable       : CABLELatentDynamicsSettings
 
 LatentDynamicsConfig = Annotated[
     SINDyLatentDynamicsConfig
@@ -455,7 +485,8 @@ LatentDynamicsConfig = Annotated[
     | DampedSpringLatentDynamicsConfig
     | DampedSpringWeakLatentDynamicsConfig
     | SwitchSINDyLatentDynamicsConfig
-    | SwitchSINDyWeakLatentDynamicsConfig,
+    | SwitchSINDyWeakLatentDynamicsConfig
+    | CABLELatentDynamicsConfig,
     Field(discriminator = "type"),
 ]
 
@@ -902,6 +933,7 @@ _LATENT_DYNAMICS_N_IC = {
     "sindy_w": 1,
     "switch": 1,
     "switch_w": 1,
+    "cable": 1,
     "spring": 2,
     "spring_w": 2,
 }

@@ -9,7 +9,7 @@ import  torch;
 
 
 from    LatentDynamics          import  LatentDynamics, SINDy, SINDy_weak, SwitchSINDy;
-from    LatentDynamics          import  SwitchSINDy_weak, DampedSpring, DampedSpring_weak;
+from    LatentDynamics          import  SwitchSINDy_weak, DampedSpring, DampedSpring_weak, CABLE;
 
 from    ParameterSpace          import  ParameterSpace;
 
@@ -57,7 +57,8 @@ ld_dict = {                     'sindy'                     : SINDy,
                                 'spring'                    : DampedSpring,
                                 'spring_w'                  : DampedSpring_weak,
                                 'switch'                    : SwitchSINDy,
-                                'switch_w'                  : SwitchSINDy_weak};
+                                'switch_w'                  : SwitchSINDy_weak,
+                                'cable'                     : CABLE};
 
 trainer_dict = {                'First_Order_Rollout'       : First_Order_Rollout,
                                 'First_Order_Weak'          : First_Order_Weak,
@@ -187,14 +188,14 @@ def Initialize_Trainer(
         latent_dynamics : LatentDynamics = ld_dict[ld_type]( 
                                                 n_z             = encoder_decoder.n_z, 
                                                 Uniform_t_Grid  = physics.Uniform_t_Grid,
-                                                n_p             = param_space.n_p
+                                                n_p             = param_space.n_p,
                                                 switch_time     = physics.switch_time,
                                                 config          = config.latent_dynamics);
     else:
         latent_dynamics : LatentDynamics = ld_dict[ld_type]( 
                                             n_z             = encoder_decoder.n_z, 
                                             Uniform_t_Grid  = physics.Uniform_t_Grid,
-                                            n_p             = param_space.n_p
+                                            n_p             = param_space.n_p,
                                             config          = config.latent_dynamics);
     
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.

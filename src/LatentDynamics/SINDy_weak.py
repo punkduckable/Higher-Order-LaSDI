@@ -86,6 +86,7 @@ class SINDy_weak(WeakLatentDynamics, SINDy):
         InterpolatableLatentDynamics.__init__(
             self,
             n_z            = n_z,
+            n_coefs        = n_z*(n_z + 1),
             n_IC           = 1,
             n_p            = n_p,
             Uniform_t_Grid = Uniform_t_Grid,
@@ -95,7 +96,6 @@ class SINDy_weak(WeakLatentDynamics, SINDy):
         WeakLatentDynamics.__init__(
             self,
             n_z            = n_z,
-            n_coefs        = n_z*(n_z + 1),
             n_IC           = 1,
             n_p            = n_p,
             Uniform_t_Grid = Uniform_t_Grid,
