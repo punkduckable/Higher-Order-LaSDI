@@ -32,15 +32,11 @@ trainer:
 
     loss_weights:
       recon:                1.0
-      LD:                   20.0
       rollout:              1.0
       IC_rollout:           0.0
-      stab:                 0.005
-      coef:                 1.0
 
     loss_types:
       recon:                "MSE"
-      LD:                   "MSE"
       rollout:              "MSE"
       IC_rollout:           "MSE"
     
@@ -87,9 +83,13 @@ EncoderDecoder:
     conv_activations:       ["relu", "relu", "relu"]
 
 latent_dynamics:
-  interpolator_type:      GP
+  interpolator_type:        GP
   type:                     switch_w
   trainable:                true
+  loss_weights: 
+    LD:                     20.0
+    coef:                   1.0
+    stab:                   0.005
   switch_w:
     test_func_type:         'PC-poly'
     test_func_width:        150.0

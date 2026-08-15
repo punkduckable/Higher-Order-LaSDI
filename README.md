@@ -184,6 +184,10 @@ In general, every `Physics`, `EncoderDecoder`, `Trainer`, and `LatentDynamics` o
 - **`src/LatentDynamics/SwitchSINDy_weak.py`** – Weak-form switching affine SINDy dynamics
   - Select with the config key `latent_dynamics.type: switch_w`
   - Stores native coefficient dictionaries of the form `{"A_before": A_before, "b_before": b_before, "A_after": A_after, "b_after": b_after}`
+- **`src/LatentDynamics/CABLE.py`** – Deterministic mixture-of-affine-experts latent dynamics
+  - Select with the config key `latent_dynamics.type: cable`
+  - Owns one global set of expert matrices/biases plus a trainable gate network
+  - Uses `n_active` as a soft target in the tail-mass loss rather than hard top-k thresholding the RHS
 
 
 #### Latent-dynamics coefficient ownership
@@ -231,6 +235,24 @@ The Trainer checks this with `_check_train_coefficients()` before optimization a
 from encoder/decoder parameters plus `latent_dynamics.trainable_tensors()`. Checkpoints serialize
 the full `LatentDynamics` export, including `train_coefs`, then restore those coefficient tensors as
 trainable leaves when loading.
+
+#### Latent-dynamics loss ownership
+
+Latent-dynamics losses are also owned by the `LatentDynamics` object. Configure them under
+`latent_dynamics.loss_weights`, not under `trainer.<Type>.loss_weights`. The concrete LD class
+chooses the residual metric internally, so there is no `loss_types.LD` setting and
+`compute_losses(...)` does not accept a `loss_type` argument.
+
+`compute_losses(Latent_States, t_Grid, params)` returns a dictionary whose keys exactly match
+`latent_dynamics.loss_weights`. Values are either:
+
+- a length-`n_param` list of scalar tensors for parameter-specific losses, or
+- one scalar tensor for a global loss shared across all training parameters.
+
+Current loss keys:
+
+- SINDy, damped spring, switching SINDy, and weak variants: `LD`, `coef`, `stab`
+- CABLE: `LD`, `coef`, `diversity`, `tail`
 
 Latent rollouts now use the parameter values directly:
 
@@ -330,8 +352,9 @@ Configuration files are YAML-based and specify:
   - rollout sampling: `n_rollouts`
   - IC rollout curriculum: `p_IC_rollout_init`, `IC_rollout_update_freq`, `IC_dp_per_update`, `max_p_IC_rollout`
   - loss weights / types:
-    - weights: `loss_weights` (e.g. `recon`, `LD`, `rollout`, `IC_rollout`, `stab`, `coef`, plus higher-order losses)
-    - types: `loss_types` (`"MSE"` or `"MAE"`)
+    - weights: `loss_weights` for trainer-owned losses (e.g. `recon`, `rollout`, `IC_rollout`, plus `chain_rule` and `consistency` for second-order trainers)
+    - types: `loss_types` (`"MSE"` or `"MAE"`) for those same trainer-owned losses
+    - latent-dynamics loss weights live separately in `latent_dynamics.loss_weights`
 
 ### Sampler Settings (`sampler`)
 - `sampler.type` selects a sampler implementation (e.g., `FOM_Variance` or `FOM_Rollout`).
@@ -360,9 +383,10 @@ Configuration files are YAML-based and specify:
 - Number of decoder stages: `n_Decoders`
 
 ### Latent Dynamics (`latent_dynamics`)
-- Type: `sindy`, `spring`, `switch`, `sindy_w`, `spring_w`, or `switch_w`.
+- Type: `sindy`, `spring`, `switch`, `sindy_w`, `spring_w`, `switch_w`, or `cable`.
 - `interpolator_type`: optional; currently only `"GP"` is implemented and is used by default.
-- Stability regularization (stability penalty)
+- `loss_weights`: LD-owned losses. Interpolatable affine models use `LD`, `coef`, and `stab`; CABLE uses `LD`, `coef`, `diversity`, and `tail`.
+- CABLE-specific settings include `n_experts`, `n_active`, `hidden_widths`, and `activations`.
 
 ### Physics (`physics`)
 - Physics type (must match a key in `physics_dict`)
@@ -790,9 +814,11 @@ New applications can be implemented by deriving from the appropriate base classe
      coefficients for one or more training parameters, then store them with
      `set_train_coefs(..., device)`. This method should
      return `None`.
-   - `compute_losses(self, Latent_States, loss_type, t_Grid, params)`: Look up native coefficients
-     from `self.train_coefs` using `params`, then return latent-dynamics, coefficient, and stability
-     loss lists. It should not accept flattened `input_coefs`.
+   - `compute_losses(self, Latent_States, t_Grid, params)`: Look up native coefficients
+     from `self.train_coefs` using `params`, then return a dictionary whose keys match
+     `self.loss_weights`. Values should be scalar tensors for global losses or length-`n_param`
+     lists of scalar tensors for per-parameter losses. It should not accept `loss_type` or
+     flattened `input_coefs`.
    - `RHS(self, Z, t_Grid, params, sample=False)`: Evaluate the pointwise latent ODE right-hand
      side using exact training coefficients or interpolated mean/sample coefficients. Strong and
      weak forms of the same ODE should normally delegate to the same RHS implementation.
@@ -940,7 +966,7 @@ Each row has the structure:
 - `value` is a Python float produced from a detached scalar tensor.
 
 Common `loss_name` keys include:
-- `recon`, `LD`, `stab`, `rollout_ROM`, `rollout_FOM`, `IC_rollout_ROM`, `IC_rollout_FOM`, and `total`
+- `recon`, latent-dynamics keys such as `LD`, `coef`, `stab`/`diversity`/`tail`, `rollout_ROM`, `rollout_FOM`, `IC_rollout_ROM`, `IC_rollout_FOM`, and `total`
 - For paired autoencoders, additional keys such as `recon_D`, `recon_V`, `consistency_Z`, `consistency_U`, `chain_rule_U`, `chain_rule_Z`, `rollout_*_D/V`, and `IC_rollout_*` are also logged.
 
 Reading the file:

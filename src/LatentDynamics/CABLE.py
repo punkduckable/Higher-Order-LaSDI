@@ -41,9 +41,9 @@ class CABLE(LatentDynamics):
 
             w : \mathbb{R}^{1 + n_p} \to \mathbb{R}^{N}
 
-        whose components below epsilon are set to zero. Further, we train the network such that 
-        for any individual step, almost all of the mass is concentrated in <= n_active experts, 
-        giving loosely sparse weights.
+        We do not hard-threshold the gate during RHS evaluation. Instead, `n_active` is a soft
+        target used by the tail-mass loss: training can encourage most softmax mass to live on a
+        small number of experts without introducing a discontinuous top-k cutoff.
 
         The trainable latent-dynamics state consists of the expert matrices, expert biases, and
         gate-network parameters. Unlike interpolatable SINDy-type models, CABLE owns one global set
@@ -112,7 +112,6 @@ class CABLE(LatentDynamics):
         self.MSE = torch.nn.MSELoss(reduction = 'mean');
         self.MAE = torch.nn.L1Loss(reduction = 'mean');
 
-        # Diagnostic-only until the Trainer supports arbitrary named LD losses.
         self.last_tail_mass_loss : torch.Tensor | None = None;
         self.last_tail_mass_loss_list : list[torch.Tensor] | None = None;
         return;
@@ -228,10 +227,9 @@ class CABLE(LatentDynamics):
     def compute_losses(  
         self,  
         Latent_States   : list[list[torch.Tensor]], 
-        loss_type       : str,
         t_Grid          : list[torch.Tensor], 
         params          : numpy.ndarray | None = None
-    ) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
+    ) -> dict[str, list[torch.Tensor] | torch.Tensor]:
         r"""
         Compute CABLE latent-dynamics, coefficient, and gate-diversity losses.
 
@@ -248,7 +246,7 @@ class CABLE(LatentDynamics):
 
         This method also computes a per-parameter tail-mass penalty,
 
-            mean_t (1 - sum_{m in top_k(t,theta_i)} q_m(t,theta_i))^2,
+            mean_t (1 - sum_{m in top-n_active(t,theta_i)} q_m(t,theta_i))^2,
 
         where q is the dense softmax over all experts, and k = self.n_active. This quantifies how 
         much probability mass is outside of the top n_active experts. 
@@ -261,9 +259,6 @@ class CABLE(LatentDynamics):
         Latent_States : list[list[torch.Tensor]], len = n_param
             Encoded latent trajectories. The i'th entry contains one tensor of shape (n_t(i), n_z).
 
-        loss_type : str
-            The latent-dynamics residual loss. Must be either "MSE" or "MAE".
-
         t_Grid : list[torch.Tensor], len = n_param
             Time grids corresponding to the latent trajectories.
 
@@ -275,17 +270,13 @@ class CABLE(LatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------
 
-        loss_LD_list : list[torch.Tensor], len = n_param
-            Per-parameter residual losses between finite-difference derivatives and CABLE RHS
-            values.
+        loss_dict : dict[str, list[torch.Tensor] | torch.Tensor]
+            A loss dictionary with keys matching `self.loss_weights`:
 
-        loss_coef_list : list[torch.Tensor], len = n_param
-            Per-parameter copies of the scaled global expert-size penalty. The scaling prevents the
-            Trainer from multiplying this global penalty by n_param when it sums the list.
-
-        loss_stab_list : list[torch.Tensor], len = n_param
-            Per-parameter copies of the scaled squared coefficient of variation of aggregate
-            expert loads. The scaling has the same purpose as for `loss_coef_list`.
+            - `LD`: length-`n_param` list of finite-difference residual losses.
+            - `coef`: scalar global expert-size penalty.
+            - `diversity`: scalar global squared-CV expert-load penalty.
+            - `tail`: length-`n_param` list of soft top-`n_active` tail-mass penalties.
         """
 
         # Checks.
@@ -296,7 +287,6 @@ class CABLE(LatentDynamics):
         assert isinstance(Latent_States, list);
         assert len(Latent_States) == len(t_Grid) == params.shape[0];
         assert len(t_Grid) > 0;
-        assert loss_type in ["MSE", "MAE"];
 
         # Prepare lists for per-parameter losses. The Trainer is responsible for applying weights
         # and summing these scalar losses into the total objective.
@@ -328,10 +318,7 @@ class CABLE(LatentDynamics):
             ith_RHS           : torch.Tensor = self._evaluate_torch_rhs_from_weights(ith_Z, ith_weights);
 
             # Compute the LD loss.
-            if(loss_type == "MSE"):
-                loss_LD = self.MSE(dZdt, ith_RHS);
-            else:
-                loss_LD = self.MAE(dZdt, ith_RHS);
+            loss_LD = self.MSE(dZdt, ith_RHS);
             loss_LD_list.append(loss_LD);
 
             # Accumulate expert loads across all parameter values and times. This is a 
@@ -352,28 +339,27 @@ class CABLE(LatentDynamics):
             tail_mass_loss_list.append(torch.mean(torch.pow(ith_tail_mass.to(device = self.A.device, dtype = self.A.dtype), 2)));
 
         # Coefficient loss is the sum of the Frobenius norms of the matrix portions of each expert,
-        # plus the L2 norm of each bias. The loss is global, so we divide each list entry by n_param.
+        # plus the L2 norm of each bias. This is a scalar global loss, so the Trainer will not
+        # multiply it by n_param.
         A_norms         : torch.Tensor          = torch.linalg.vector_norm(self.A.reshape(self.n_experts, -1), dim = 1).sum();
         b_norms         : torch.Tensor          = torch.linalg.vector_norm(self.b.reshape(self.n_experts, -1), dim = 1).sum();
-        loss_coef       : torch.Tensor          = (A_norms + b_norms) / float(n_param);
-        loss_coef_list  : list[torch.Tensor]    = [loss_coef]*n_param;
+        loss_coef       : torch.Tensor          = A_norms + b_norms;
 
-        # Stability/diversity loss is the squared coefficient of variation of expert loads. Use 
+        # diversity loss is the squared coefficient of variation of expert loads. Use 
         # the population standard deviation so n_experts = 1 produces zero instead of NaN.
         eps             : float                 = torch.finfo(summed_weights.dtype).eps;
         mean_load       : torch.Tensor          = torch.mean(summed_weights);
         std_load        : torch.Tensor          = torch.std(summed_weights, unbiased = False);
-        loss_stab       : torch.Tensor          = torch.pow(std_load/(mean_load + eps), 2) / float(n_param);
-        loss_stab_list  : list[torch.Tensor]    = [loss_stab]*n_param;
+        loss_diversity  : torch.Tensor          = torch.pow(std_load/(mean_load + eps), 2);
 
-        # Compute and store the tail-mass loss for diagnostics. This is deliberately not
-        # returned yet; the next loss-API change can expose it as its own named loss.
+        # Store the aggregate tail-mass loss for diagnostics/plotting; the per-parameter tail
+        # losses are returned under the `tail` key and can be weighted by self.loss_weights.
         loss_tail : torch.Tensor = torch.mean(torch.stack(tail_mass_loss_list));
         self.last_tail_mass_loss = loss_tail.detach();
         self.last_tail_mass_loss_list = [loss.detach() for loss in tail_mass_loss_list];
 
         # All done :) 
-        return loss_LD_list, loss_coef_list, loss_stab_list;
+        return {'LD' : loss_LD_list, 'coef' : loss_coef, 'diversity' : loss_diversity, 'tail' : tail_mass_loss_list};
 
 
     def RHS(    self,

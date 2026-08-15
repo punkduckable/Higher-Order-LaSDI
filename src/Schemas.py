@@ -395,6 +395,31 @@ class LatentDynamicsBaseConfig(ConfigBase):
     # Should we learn the latent coefficients during training, or keep them fixed?
     trainable: bool
 
+    # Which losses are computed by the latent dynamics and what are their weights? Note that
+    # compute_losses MUST return a dictionary whose keys match the losses you list here.
+    loss_weights: dict[str, NonNegativeFloat]
+
+    @model_validator(mode = "after")
+    def validate_loss_weights(self) -> "LatentDynamicsBaseConfig":
+        expected_keys_by_type : dict[str, set[str]] = {
+            "sindy"    : {"LD", "coef", "stab"},
+            "sindy_w"  : {"LD", "coef", "stab"},
+            "spring"   : {"LD", "coef", "stab"},
+            "spring_w" : {"LD", "coef", "stab"},
+            "switch"   : {"LD", "coef", "stab"},
+            "switch_w" : {"LD", "coef", "stab"},
+            "cable"    : {"LD", "coef", "diversity", "tail"},
+        };
+
+        expected_keys = expected_keys_by_type.get(self.type);
+        if expected_keys is not None and set(self.loss_weights.keys()) != expected_keys:
+            raise ValueError("latent_dynamics.loss_weights for type `%s` must include exactly %s. Got %s." % (
+                self.type,
+                sorted(expected_keys),
+                sorted(self.loss_weights.keys()),
+            ));
+        return self;
+
 
 class InterpolatableLatentDynamicsSettings(ConfigBase):
     """Latent dynamics settings for strong-form least-squares coefficient initialization."""
@@ -403,7 +428,7 @@ class InterpolatableLatentDynamicsSettings(ConfigBase):
     lstsq_reg: NonNegativeFloat
 
 
-class WeakLatentDynamicsSettings(ConfigBase):
+class WeakInterpolatableLatentDynamicsSettings(ConfigBase):
     """Weak-form latent dynamics test-function settings."""
 
     # Should the test functions be polynomials or bumps? If polynomial, the polynomial order 
@@ -437,7 +462,7 @@ class CABLELatentDynamicsSettings(ConfigBase):
     activations: ActivationSpec
 
     @model_validator(mode = "after")
-    def validate_activations_and_active(self) -> "CABLELatentDynamicsSettings":
+    def validate_activations_and_active_count(self) -> "CABLELatentDynamicsSettings":
         # Ensure the number of activations matches the number of hidden layers.
         _check_activation_spec(
             self.activations,
@@ -447,10 +472,10 @@ class CABLELatentDynamicsSettings(ConfigBase):
 
         # Check that n_active <= n_experts
         if self.n_active > self.n_experts:
-            raise ValueError("n_active = %d, but n_experts = %d; the target number of active experts can not exceed the number of experts" % (self.n_experts, self.n_active));
-
+            raise ValueError("n_active = %d, but n_experts = %d; the target number of active experts can not exceed the number of experts" % (self.n_active, self.n_experts));
+    
         # All done :) 
-        return self
+        return self;
 
 
 class SINDyLatentDynamicsConfig(LatentDynamicsBaseConfig):
@@ -460,7 +485,7 @@ class SINDyLatentDynamicsConfig(LatentDynamicsBaseConfig):
 
 class SINDyWeakLatentDynamicsConfig(LatentDynamicsBaseConfig):
     type        : Literal["sindy_w"]
-    sindy_w     : WeakLatentDynamicsSettings
+    sindy_w     : WeakInterpolatableLatentDynamicsSettings
 
 
 class DampedSpringLatentDynamicsConfig(LatentDynamicsBaseConfig):
@@ -470,7 +495,7 @@ class DampedSpringLatentDynamicsConfig(LatentDynamicsBaseConfig):
 
 class DampedSpringWeakLatentDynamicsConfig(LatentDynamicsBaseConfig):
     type        : Literal["spring_w"]
-    spring_w    : WeakLatentDynamicsSettings
+    spring_w    : WeakInterpolatableLatentDynamicsSettings
 
 
 class SwitchSINDyLatentDynamicsConfig(LatentDynamicsBaseConfig):
@@ -480,7 +505,7 @@ class SwitchSINDyLatentDynamicsConfig(LatentDynamicsBaseConfig):
 
 class SwitchSINDyWeakLatentDynamicsConfig(LatentDynamicsBaseConfig):
     type        : Literal["switch_w"]
-    switch_w    : WeakLatentDynamicsSettings
+    switch_w    : WeakInterpolatableLatentDynamicsSettings
 
 class CABLELatentDynamicsConfig(LatentDynamicsBaseConfig):
     type        : Literal["cable"]
@@ -748,20 +773,11 @@ class FirstOrderLossWeights(ConfigBase):
     # Weight applied to the frame-wise reconstruction loss.
     recon: NonNegativeFloat
 
-    # Weight applied to the latent-dynamics residual/loss.
-    LD: NonNegativeFloat
-
     # Weight applied to rollout loss from sampled rollout start frames.
     rollout: NonNegativeFloat
 
     # Weight applied to rollout loss from initial-condition frames.
     IC_rollout: NonNegativeFloat
-
-    # Weight applied to latent-dynamics coefficient regularization/loss terms.
-    coef: NonNegativeFloat
-
-    # Weight applied to optional latent-dynamics stability regularization.
-    stab: NonNegativeFloat
 
 
 class SecondOrderLossWeights(FirstOrderLossWeights):
@@ -775,9 +791,6 @@ class SecondOrderLossWeights(FirstOrderLossWeights):
 class FirstOrderLossTypes(ConfigBase):
     # Reconstruction loss function.
     recon: LossType
-
-    # Latent-dynamics loss function.
-    LD: LossType
 
     # Rollout loss function.
     rollout: LossType

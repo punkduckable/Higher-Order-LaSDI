@@ -27,6 +27,7 @@ def _sindy_config(lstsq_reg=1.0, trainable=True):
         "type": "sindy",
         "interpolator_type": "GP",
         "trainable": trainable,
+        "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "sindy": {"lstsq_reg": lstsq_reg},
     })
 
@@ -36,6 +37,7 @@ def _spring_config(lstsq_reg=1.0, trainable=True):
         "type": "spring",
         "interpolator_type": "GP",
         "trainable": trainable,
+        "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "spring": {"lstsq_reg": lstsq_reg},
     })
 
@@ -45,6 +47,7 @@ def _sindy_w_config(test_func_type="PC-poly", trainable=True):
         "type": "sindy_w",
         "interpolator_type": "GP",
         "trainable": trainable,
+        "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "sindy_w": {
             "test_func_type": test_func_type,
             "test_func_width": 0.5,
@@ -58,6 +61,7 @@ def _spring_w_config(test_func_type="PC-poly", trainable=True):
         "type": "spring_w",
         "interpolator_type": "GP",
         "trainable": trainable,
+        "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "spring_w": {
             "test_func_type": test_func_type,
             "test_func_width": 0.5,
@@ -71,6 +75,7 @@ def _switch_w_config(test_func_type="PC-poly", trainable=True):
         "type": "switch_w",
         "interpolator_type": "GP",
         "trainable": trainable,
+        "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "switch_w": {
             "test_func_type": test_func_type,
             "test_func_width": 0.5,
@@ -80,13 +85,13 @@ def _switch_w_config(test_func_type="PC-poly", trainable=True):
 
 
 def test_missing_train_coefs_raises_keyerror():
-    ld = SINDy(n_z=1, Uniform_t_Grid=True, config=_sindy_config())
+    ld = SINDy(n_z=1, Uniform_t_Grid=True, n_p=1, config=_sindy_config())
     with pytest.raises(KeyError):
         ld.get_train_coefs(numpy.array([0.0]))
 
 
 def test_sindy_initialize_coefficients_stores_native_trainable_dict():
-    ld = SINDy(n_z=1, Uniform_t_Grid=True, config=_sindy_config(lstsq_reg=0.0))
+    ld = SINDy(n_z=1, Uniform_t_Grid=True, n_p=1, config=_sindy_config(lstsq_reg=0.0))
     t = torch.linspace(0.0, 1.0, 9)
     z = torch.exp(-t).reshape(-1, 1)
     params = numpy.array([[0.25]])
@@ -106,11 +111,11 @@ def test_sindy_initialize_coefficients_stores_native_trainable_dict():
 
 
 def test_latent_dynamics_export_load_restores_trainable_coefs():
-    ld = SINDy(n_z=1, Uniform_t_Grid=True, config=_sindy_config())
+    ld = SINDy(n_z=1, Uniform_t_Grid=True, n_p=1, config=_sindy_config())
     ld.set_train_coefs(numpy.array([1.0]), {"A": torch.ones(1, 1), "b": torch.zeros(1)}, torch.device("cpu"))
     exported = ld.export()
 
-    ld2 = SINDy(n_z=1, Uniform_t_Grid=True, config=_sindy_config())
+    ld2 = SINDy(n_z=1, Uniform_t_Grid=True, n_p=1, config=_sindy_config())
     ld2.load(exported)
     coefs = ld2.get_train_coefs(numpy.array([1.0]))
 
@@ -124,10 +129,11 @@ def test_base_latent_dynamics_device_move_hook_is_noop_without_train_coefs():
     ld = LatentDynamics(
         n_z=1,
         n_IC=1,
+        n_p=1,
         Uniform_t_Grid=True,
         trainable=True,
         stochastic=False,
-        config={},
+        config=_sindy_config(),
     )
 
     ld.move_trainable_tensors_to_device(torch.device("cpu"))
@@ -136,7 +142,7 @@ def test_base_latent_dynamics_device_move_hook_is_noop_without_train_coefs():
 
 
 def test_interpolatable_device_move_hook_updates_train_coefs_in_place():
-    ld = SINDy(n_z=1, Uniform_t_Grid=True, config=_sindy_config())
+    ld = SINDy(n_z=1, Uniform_t_Grid=True, n_p=1, config=_sindy_config())
     ld.set_train_coefs(numpy.array([1.0]), {"A": torch.ones(1, 1), "b": torch.zeros(1)}, torch.device("cpu"))
     old_coefs = ld.get_train_coefs(numpy.array([1.0]))
     old_A = old_coefs["A"]
@@ -229,7 +235,7 @@ from Utilities.FiniteDifference import Derivative1_Order4
 
 
 def test_damped_spring_initialize_coefficients_uses_K_C_b_names():
-    ld = DampedSpring(n_z=1, Uniform_t_Grid=True, config=_spring_config())
+    ld = DampedSpring(n_z=1, Uniform_t_Grid=True, n_p=1, config=_spring_config())
     t = torch.linspace(0.0, 1.0, 9)
     z = torch.sin(t).reshape(-1, 1)
     dz = torch.cos(t).reshape(-1, 1)
@@ -247,7 +253,7 @@ def test_damped_spring_initialize_coefficients_uses_K_C_b_names():
 
 
 def test_damped_spring_compute_losses_uses_native_K_C_b_rhs():
-    ld = DampedSpring(n_z=1, Uniform_t_Grid=True, config=_spring_config())
+    ld = DampedSpring(n_z=1, Uniform_t_Grid=True, n_p=1, config=_spring_config())
     t = torch.linspace(0.0, 1.0, 9)
     z = torch.sin(t).reshape(-1, 1)
     dz = torch.cos(t).reshape(-1, 1)
@@ -257,18 +263,18 @@ def test_damped_spring_compute_losses_uses_native_K_C_b_rhs():
     b = torch.tensor([0.1])
     ld.set_train_coefs(params[0], {"K": K, "C": C, "b": b}, torch.device("cpu"))
 
-    loss_LD_list, loss_coef_list, loss_stab_list = ld.compute_losses([[z, dz]], "MSE", [t], params)
+    losses = ld.compute_losses([[z, dz]], [t], params)
 
     d2z = Derivative1_Order4(dz, float((t[1] - t[0]).item()))
     rhs = z @ K.T + dz @ C.T + b.reshape(1, -1)
     expected_loss = torch.mean((d2z - rhs) ** 2)
-    assert torch.allclose(loss_LD_list[0], expected_loss)
-    assert len(loss_coef_list) == 1
-    assert len(loss_stab_list) == 1
+    assert torch.allclose(losses["LD"][0], expected_loss)
+    assert len(losses["coef"]) == 1
+    assert len(losses["stab"]) == 1
 
 
 def test_damped_spring_weak_simulate_uses_native_K_C_b_names():
-    ld = DampedSpring_weak(n_z=1, Uniform_t_Grid=True, config=_spring_w_config(test_func_type="bump"))
+    ld = DampedSpring_weak(n_z=1, Uniform_t_Grid=True, n_p=1, config=_spring_w_config(test_func_type="bump"))
     coefs = {"K": torch.zeros(1, 1), "C": torch.zeros(1, 1), "b": torch.ones(1)}
     D0 = torch.zeros(1, 1)
     V0 = torch.zeros(1, 1)
@@ -283,7 +289,7 @@ def test_damped_spring_weak_simulate_uses_native_K_C_b_names():
 
 
 def test_sindy_simulate_handles_multiple_parameters_without_recursion():
-    ld = SINDy(n_z=1, Uniform_t_Grid=True, config=_sindy_config())
+    ld = SINDy(n_z=1, Uniform_t_Grid=True, n_p=1, config=_sindy_config())
     coefs = [
         {"A": torch.zeros(1, 1), "b": torch.ones(1)},
         {"A": torch.zeros(1, 1), "b": 2.0 * torch.ones(1)},
@@ -318,7 +324,7 @@ def test_interpolatable_simulate_uses_train_coefs_before_interpolator():
             self.sample_calls += 1
             return {"A": torch.zeros(1, 1), "b": 11.0 * torch.ones(1)}
 
-    ld = SINDy(n_z=1, Uniform_t_Grid=True, config=_sindy_config())
+    ld = SINDy(n_z=1, Uniform_t_Grid=True, n_p=1, config=_sindy_config())
     dummy = DummyInterpolator()
     ld.interpolator = dummy
     train_params = numpy.array([[0.25]])
@@ -342,6 +348,7 @@ def _weak_base_config(test_func_type="PC-poly"):
         "type": "sindy_w",
         "interpolator_type": "GP",
         "trainable": True,
+        "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "sindy_w": {
             "test_func_type": test_func_type,
             "test_func_width": 0.5,
@@ -355,6 +362,7 @@ def test_weak_latent_dynamics_requires_weak_config_keys():
         "type": "sindy_w",
         "interpolator_type": "GP",
         "trainable": True,
+        "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "sindy_w": {"test_func_width": 0.5, "overlap": 0.5},
     }
     with pytest.raises(ValidationError, match="test_func_type"):
@@ -362,7 +370,7 @@ def test_weak_latent_dynamics_requires_weak_config_keys():
 
 
 def test_add_and_get_weight_functions_store_arbitrary_derivatives():
-    ld = WeakLatentDynamics(n_z=1, n_IC=2, Uniform_t_Grid=True, trainable=True, config=_weak_base_config())
+    ld = WeakLatentDynamics(n_z=1, n_IC=2, n_p=1, Uniform_t_Grid=True, trainable=True, config=_weak_base_config())
     params = numpy.array([0.25])
     t = torch.linspace(0.0, 1.0, 11)
 
@@ -377,13 +385,13 @@ def test_add_and_get_weight_functions_store_arbitrary_derivatives():
 
 
 def test_get_test_functions_missing_param_raises_keyerror():
-    ld = WeakLatentDynamics(n_z=1, n_IC=2, Uniform_t_Grid=True, trainable=True, config=_weak_base_config())
+    ld = WeakLatentDynamics(n_z=1, n_IC=2, n_p=1, Uniform_t_Grid=True, trainable=True, config=_weak_base_config())
     with pytest.raises(KeyError):
         ld.get_test_functions(numpy.array([0.25]))
 
 
 def test_damped_spring_weak_fit_zero_initializes_and_compute_losses_requires_weights():
-    ld = DampedSpring_weak(n_z=1, Uniform_t_Grid=True, config=_spring_w_config())
+    ld = DampedSpring_weak(n_z=1, Uniform_t_Grid=True, n_p=1, config=_spring_w_config())
     t = torch.linspace(0.0, 1.0, 9)
     z = torch.sin(t).reshape(-1, 1)
     dz = torch.cos(t).reshape(-1, 1)
@@ -399,11 +407,11 @@ def test_damped_spring_weak_fit_zero_initializes_and_compute_losses_requires_wei
     assert all(tensor.requires_grad and tensor.is_leaf for tensor in coefs.values())
 
     with pytest.raises(KeyError):
-        ld.compute_losses([[z, dz]], "MSE", [t], params)
+        ld.compute_losses([[z, dz]], [t], params)
 
 
 def test_sindy_weak_fit_zero_initializes_and_compute_losses_requires_weights():
-    ld = SINDy_weak(n_z=1, Uniform_t_Grid=True, config=_sindy_w_config())
+    ld = SINDy_weak(n_z=1, Uniform_t_Grid=True, n_p=1, config=_sindy_w_config())
     t = torch.linspace(0.0, 1.0, 9)
     z = torch.sin(t).reshape(-1, 1)
     params = numpy.array([[0.25]])
@@ -419,27 +427,27 @@ def test_sindy_weak_fit_zero_initializes_and_compute_losses_requires_weights():
     assert ld.trainable_tensors() == [coefs["A"], coefs["b"]]
 
     with pytest.raises(KeyError):
-        ld.compute_losses([[z]], "MSE", [t], params)
+        ld.compute_losses([[z]], [t], params)
 
 
 def test_sindy_weak_compute_losses_with_weight_functions_returns_losses():
-    ld = SINDy_weak(n_z=1, Uniform_t_Grid=True, config=_sindy_w_config())
+    ld = SINDy_weak(n_z=1, Uniform_t_Grid=True, n_p=1, config=_sindy_w_config())
     t = torch.linspace(0.0, 1.0, 9)
     z = torch.sin(t).reshape(-1, 1)
     params = numpy.array([[0.25]])
 
     ld.add_weight_functions(params[0], t)
     ld.initialize_coefficients([[z]], [t], torch.device("cpu"), params)
-    loss_LD_list, loss_coef_list, loss_stab_list = ld.compute_losses([[z]], "MSE", [t], params)
+    losses = ld.compute_losses([[z]], [t], params)
 
-    assert len(loss_LD_list) == 1
-    assert len(loss_coef_list) == 1
-    assert len(loss_stab_list) == 1
-    assert all(loss.ndim == 0 for loss in loss_LD_list + loss_coef_list + loss_stab_list)
+    assert len(losses["LD"]) == 1
+    assert len(losses["coef"]) == 1
+    assert len(losses["stab"]) == 1
+    assert all(loss.ndim == 0 for loss in losses["LD"] + losses["coef"] + losses["stab"])
 
 
 def test_switch_sindy_weak_fit_zero_initializes_native_names():
-    ld = SwitchSINDy_weak(n_z=1, Uniform_t_Grid=True, switch_time=lambda p: 0.5, config=_switch_w_config())
+    ld = SwitchSINDy_weak(n_z=1, Uniform_t_Grid=True, n_p=1, switch_time=lambda p: 0.5, config=_switch_w_config())
     t = torch.linspace(0.0, 1.0, 9)
     z = torch.sin(t).reshape(-1, 1)
     params = numpy.array([[0.25]])
@@ -457,7 +465,7 @@ def test_switch_sindy_weak_fit_zero_initializes_native_names():
 
 
 def test_switch_sindy_weak_simulate_returns_first_order_trajectory_shape():
-    ld = SwitchSINDy_weak(n_z=1, Uniform_t_Grid=True, switch_time=lambda p: 0.5, config=_switch_w_config())
+    ld = SwitchSINDy_weak(n_z=1, Uniform_t_Grid=True, n_p=1, switch_time=lambda p: 0.5, config=_switch_w_config())
     coefs = {
         "A_before": torch.zeros(1, 1),
         "b_before": torch.ones(1),
@@ -475,7 +483,7 @@ def test_switch_sindy_weak_simulate_returns_first_order_trajectory_shape():
 
 
 def test_get_uniform_grid_no_p_argument():
-    ld = WeakLatentDynamics(n_z=1, n_IC=1, Uniform_t_Grid=True, trainable=True, config=_weak_base_config())
+    ld = WeakLatentDynamics(n_z=1, n_IC=1, n_p=1, Uniform_t_Grid=True, trainable=True, config=_weak_base_config())
     a_s, b_s = ld._get_support_intervals(T=1.0, L=0.5, s=0.25)
 
     assert numpy.allclose(a_s, numpy.array([0.0, 0.25, 0.5]))

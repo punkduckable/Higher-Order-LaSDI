@@ -24,6 +24,7 @@ def _sindy_config(trainable=True):
         "type": "sindy",
         "interpolator_type": "GP",
         "trainable": trainable,
+        "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "sindy": {"lstsq_reg": 0.0},
     })
 
@@ -33,6 +34,7 @@ def _sindy_w_config(trainable=True):
         "type": "sindy_w",
         "interpolator_type": "GP",
         "trainable": trainable,
+        "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "sindy_w": {"test_func_type": "PC-poly", "test_func_width": 0.5, "overlap": 0.5},
     })
 
@@ -42,6 +44,7 @@ def _spring_config(trainable=True):
         "type": "spring",
         "interpolator_type": "GP",
         "trainable": trainable,
+        "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "spring": {"lstsq_reg": 0.0},
     })
 
@@ -51,6 +54,7 @@ def _spring_w_config(trainable=True):
         "type": "spring_w",
         "interpolator_type": "GP",
         "trainable": trainable,
+        "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "spring_w": {"test_func_type": "PC-poly", "test_func_width": 0.5, "overlap": 0.5},
     })
 
@@ -60,6 +64,7 @@ def _switch_config(trainable=True):
         "type": "switch",
         "interpolator_type": "GP",
         "trainable": trainable,
+        "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "switch": {"lstsq_reg": 0.0},
     })
 
@@ -69,16 +74,18 @@ def _switch_w_config(trainable=True):
         "type": "switch_w",
         "interpolator_type": "GP",
         "trainable": trainable,
+        "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "switch_w": {"test_func_type": "PC-poly", "test_func_width": 0.5, "overlap": 0.5},
     })
 
 
-def _cable_config(trainable=True, top_k=2):
+def _cable_config(trainable=True, n_active=2):
     return CABLELatentDynamicsConfig.model_validate({
         "type": "cable",
         "interpolator_type": "GP",
         "trainable": trainable,
-        "cable": {"n_experts": 2, "top_k": top_k, "hidden_widths": [2], "activations": ["tanh"]},
+        "loss_weights": {"LD": 1.0, "coef": 1.0, "diversity": 1.0, "tail": 1.0},
+        "cable": {"n_experts": 2, "n_active": n_active, "hidden_widths": [2], "activations": ["tanh"]},
     })
 
 
@@ -208,26 +215,46 @@ def test_cable_compute_losses_uses_dense_pre_topk_weights_for_diversity_and_tail
     t = torch.linspace(0.0, 1.0, 5)
     z = torch.zeros((5, 1))
 
-    ld = CABLE(n_z=1, Uniform_t_Grid=True, n_p=1, config=_cable_config(top_k=1))
+    ld = CABLE(n_z=1, Uniform_t_Grid=True, n_p=1, config=_cable_config(n_active=1))
     _zero_cable_gate(ld)
     ld.A = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
     ld.b = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
 
-    loss_ld, loss_coef, loss_stab = ld.compute_losses(
+    losses = ld.compute_losses(
         Latent_States=[[z]],
-        loss_type="MSE",
         t_Grid=[t],
         params=params,
     )
 
-    assert torch.allclose(loss_ld[0], torch.tensor(0.0))
-    assert torch.allclose(loss_coef[0], torch.tensor(0.0))
-    # The dense pre-top-k weights are [0.5, 0.5] at every time, so the global CV diversity loss is
-    # zero even though the top-k RHS uses only one expert.
-    assert torch.allclose(loss_stab[0], torch.tensor(0.0))
-    # With two uniform dense weights and top_k = 1, the mass outside top-k is 0.5 at every sample.
-    # The diagnostic tail-mass penalty is therefore mean(0.5**2) = 0.25. It is intentionally not
-    # returned yet because the Trainer loss API still expects the legacy three-loss tuple.
+    assert set(losses.keys()) == {"LD", "coef", "diversity", "tail"}
+    assert torch.allclose(losses["LD"][0], torch.tensor(0.0))
+    assert torch.allclose(losses["coef"], torch.tensor(0.0))
+    # The dense weights are [0.5, 0.5] at every time, so the global CV diversity loss is zero.
+    assert torch.allclose(losses["diversity"], torch.tensor(0.0))
+    # With two uniform dense weights and n_active = 1, the mass outside the largest active-weight
+    # set is 0.5 at every sample.
+    # The tail-mass penalty is therefore mean(0.5**2) = 0.25.
+    assert torch.allclose(losses["tail"][0], torch.tensor(0.25))
     assert torch.allclose(ld.last_tail_mass_loss, torch.tensor(0.25))
     assert len(ld.last_tail_mass_loss_list) == 1
     assert torch.allclose(ld.last_tail_mass_loss_list[0], torch.tensor(0.25))
+
+
+def test_cable_global_losses_are_not_divided_by_number_of_parameters():
+    params = numpy.array([[0.25], [0.75]])
+    t = torch.linspace(0.0, 1.0, 5)
+    z = torch.zeros((5, 1))
+
+    ld = CABLE(n_z=1, Uniform_t_Grid=True, n_p=1, config=_cable_config(n_active=2))
+    _zero_cable_gate(ld)
+    ld.A = torch.tensor([[[1.0]], [[3.0]]], dtype=torch.float32, requires_grad=True)
+    ld.b = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+
+    losses = ld.compute_losses(
+        Latent_States=[[z], [z]],
+        t_Grid=[t, t],
+        params=params,
+    )
+
+    assert torch.allclose(losses["coef"], torch.tensor(4.0))
+    assert torch.allclose(losses["diversity"], torch.tensor(0.0))

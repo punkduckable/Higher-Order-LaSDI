@@ -7,6 +7,8 @@ import  logging;
 import  numpy;
 import  torch;
 
+from    Schemas     import  LatentDynamicsBaseConfig
+
 
 # Logger setup.
 LOGGER : logging.Logger = logging.getLogger(__name__);
@@ -77,8 +79,13 @@ class LatentDynamics:
         Sub-classes should configure `trainable_tensors` to return an empty list if 
         `trainable = False`. 
 
-    config : dict
-        The `latent_dynamics` configuration dictionary used to construct the concrete model.
+    loss_weights : dict[str, NonNegativeFloat]
+        A dictionary housing the weights of the losses computed by `compute_losses`. Its keys are
+        the latent-dynamics loss API for this subclass: `compute_losses` must return exactly these
+        names, and trainers use the values here when forming the total objective.
+        
+    config : LatentDynamicsBaseConfig
+        The validated `latent_dynamics` configuration object used to construct the concrete model.
 
 
     -----------------------------------------------------------------------------------------------
@@ -93,14 +100,11 @@ class LatentDynamics:
     - `trainable_tensors()`: return the actual trainable tensors (if training is enabled) 
       stored in `train_coefs` so the `Trainer` can optimize them jointly with the encoder/decoder.
     
-    - `compute_losses(Latent_States, loss_type, t_Grid, params=None)`: compute latent-dynamics residual
-      losses and coefficient/stability regularization for the current coefficients. This should 
-      return three losses: The LD loss, coefficient loss, and stability loss. The user has some 
-      leeway in terms of what these losses actually do, though the LD loss should roughly indicate
-      how well the latent states satisfy the corresponding latent dynamics, the coefficient loss 
-      should be some norm of some portion of the coefficients, and the stability loss should 
-      somehow indicate how stable the latent dynamics are for a particular training parameter. The 
-      user has some leeway here, so feel free to use these losses as appropriate for your sub-class.
+    - `compute_losses(Latent_States, t_Grid, params=None)`: compute latent-dynamics losses for the
+      current coefficients and return a dictionary whose keys match `self.loss_weights`. Values may
+      be scalar tensors for global losses or length-`n_param` lists of scalar tensors for
+      per-parameter losses. The loss metric (e.g., MSE vs MAE) is a subclass implementation detail;
+      there is no trainer-level `loss_type` argument for latent dynamics.
     
     - `simulate(IC, t_Grid, params, sample=False)`: integrate the latent ODE from one or more latent
       initial conditions and return latent trajectories in the expected `n_IC`-component format.
@@ -119,7 +123,8 @@ class LatentDynamics:
     Uniform_t_Grid  : bool;         # Is there an h such that the i'th frame is at t0 + i*h? Or is the spacing between frames arbitrary?
     trainable       : bool          # Should the trainer train the latent dynamics parameters?
     stochastic      : bool          # Are the latent dynamics outside of the train set stochastic or deterministic?
-    config          : dict          # The "latent_dynamics" sub-dictionary of the configuration file, used to define the LatentDynamics object
+    loss_weights    : dict          # Dictionary housing loss weights; also specifies loss names.
+    config          : LatentDynamicsBaseConfig  # The validated latent_dynamics configuration object used to define the LatentDynamics object
 
 
     def __init__(   self, 
@@ -129,7 +134,7 @@ class LatentDynamics:
                     Uniform_t_Grid  : bool, 
                     trainable       : bool,
                     stochastic      : bool,
-                    config          : dict) -> None:
+                    config          : LatentDynamicsBaseConfig) -> None:
         r"""
         Initializes a LatentDynamics object. Each LatentDynamics object needs to have a 
         dimensionality (n_z), a number of time steps, a model for the latent space dynamics, and 
@@ -166,7 +171,7 @@ class LatentDynamics:
             Indicates if the trainer should train the latent dynamics parameters. If false, 
             `trainable_tensors` should return an empty list.
 
-        config : dict
+        config : LatentDynamicsBaseConfig
             The "latent_dynamics" sub-dictionary of the config file. If `type == "weak"`, the
             model-specific sub-dictionary `config[config["type"]]` must contain `overlap`,
             `test_func_width`, and `test_func_type`.
@@ -179,6 +184,8 @@ class LatentDynamics:
         Nothing!
         """
 
+        assert isinstance(config, LatentDynamicsBaseConfig), "Config must be a LatentDynamicsBaseConfig, not %s" % str(type(config));
+
         # Set class variables.
         self.n_z             = n_z;
         self.n_IC            = n_IC;
@@ -186,6 +193,7 @@ class LatentDynamics:
         self.Uniform_t_Grid  = Uniform_t_Grid;
         self.trainable       = trainable;
         self.stochastic      = stochastic;
+        self.loss_weights    = config.loss_weights;
         self.config          = config;
 
         # There must be at least one latent dimension and there must be at least 1 time step.
@@ -380,22 +388,21 @@ class LatentDynamics:
     def compute_losses(  
         self, 
         Latent_States   : list[list[torch.Tensor]], 
-        loss_type       : str,
         t_Grid          : list[torch.Tensor], 
         params          : numpy.ndarray | None  = None
-    ) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
+    ) -> dict[str, list[torch.Tensor] | torch.Tensor]:
         """
         The user must implement this class on any latent dynamics sub-class. Each latent dynamics 
         object should implement a parameterized model for the dynamics in the latent space. A 
         Latent_Dynamics object should pair each combination of parameter values with a set of 
-        coefficients in the latent space. Using those parameters, we compute loss functions (one 
-        characterizing how well the left and right hand side of the latent dynamics match, another
-        specifies the norm of the coefficient matrix). 
+        coefficients in the latent space. Using those parameters, we compute the losses for this 
+        latent dynamics model. The losses are packaged into a dictionary and returned. 
 
-        This function computes the optimal coefficients and the losses, which it returns.
-
-        Specifically, this function should take in a sequence (or sequences) of latent states and a
-        set of time grids, t_Grid, which specify the time associated with each Latent State Frame.
+        Note that the keys in this dictionary will match those in `self.loss_weights`. In general, 
+        each value can be a single element torch.Tensor or a list (of length n_param) of single 
+        element tensors. The former is reserved for when a loss is parameter-independent, and the 
+        latter is for when a loss is a function of the parameter; trainers should sum the latter
+        before incorporating them.
 
 
         -------------------------------------------------------------------------------------------
@@ -408,9 +415,6 @@ class LatentDynamics:
             derivative of the latent state during the p'th time step (whose time value corresponds 
             to the p'th element of t_Grid) when we use the i'th combination of parameter values. 
         
-        loss_type : str
-            The type of loss function to use. Must be either "MSE" or "MAE".
-
         t_Grid : list[troch.Tensor], len = n_param
             The i'th element should be a 1d tensor of shape (n_t(i)) whose j'th element holds the 
             time value corresponding to the j'th frame when we use the i'th combination of 
@@ -426,47 +430,11 @@ class LatentDynamics:
         Returns
         -------------------------------------------------------------------------------------------
 
-        loss_LD, loss_coef, loss_stab. 
-
-        loss_LD : list[torch.Tensor], len = n_param
-            The i'th element of this list is a 0-dimensional tensor whose lone element holds the 
-            sum of the latent dynamics losses from the i'th combination of parameter values. 
-
-        loss_coef : list[torch.Tensor], len = n_para
-            The i'th element of this list is a 0-dimensional tensor whose lone element holds the
-            coefficient loss (some norm) of some subset of the coefficients for the i'th 
-            combination of parameter values.      
-            
-        loss_stab : list[torch.Tensor], len = n_param
-            The i'th element of this list is a 0-dimensional tensor whose lone element holds the
-            coefficient regularization term for the i'th combination of parameter values. This is
-            generally the largest eigenvalue of the symmetric part of some matrix (see 
-            LatentDynamics.stability_penalty).
-        
-            
-        -------------------------------------------------------------------------------------------
-        What should the losses actually represent? 
-        -------------------------------------------------------------------------------------------
-        
-        The user actually has some leeway here. 
-        
-        Roughly speaking, the LD loss should quantify how well the time series of latent states 
-        satisfy the  corresponding latent dynamics (often the mean difference between the left and 
-        right hand side of the dynamical system evaluated at each time step in the time series).
-        
-        The coefficient loss should be some norm of some subset of the coefficients for a particular 
-        training parameter.
-        
-        The stability loss should somehow quantify if the dynamics for a particular training 
-        parameter are stable or not. For instance, in the SINDy LD class, the stability loss is 
-        the largest eigenvalue of the symmetric part of the system matrix, since this eigenvalue 
-        determines the rate of change of the magnitude of the latent state. 
-        
-        However, the authors of HLaSDI are aware that everyone's needs are different, and some sub 
-        classes may have different uses for each loss. Just be aware that trainers generally expect 
-        the three losses to fit into the descriptions above (though this is not prescriptive; no 
-        trainer will actually check that the LD loss is the difference between the LHS and RHS of 
-        some LD model, for instance).
+        loss_dict : dict[str, list[torch.Tensor] | torch.Tensor]:
+            A dictionary (whose keys match self.loss_weights) housing the weights computed by 
+            this LD model. The values will either be single-element tensors (a loss that is 
+            global/doesn't dependent on the parameter value) or a n_param element list of 
+            single-element tensors (the i'th one of which corresponds to the i'th parameter).
         """
 
         raise RuntimeError('Abstract function LatentDynamics.compute_losses!');

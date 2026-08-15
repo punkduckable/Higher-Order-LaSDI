@@ -185,10 +185,9 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
     def compute_losses(
         self,
         Latent_States : list[list[torch.Tensor]],
-        loss_type     : str,
         t_Grid        : list[torch.Tensor],
         params        : numpy.ndarray | None = None
-    ) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
+    ) -> dict[str, list[torch.Tensor] | torch.Tensor]:
         r"""
         For each combination of parameter values, this function computes the weak-form
         latent-dynamics loss using the K, C, and b coefficients stored in `self.train_coefs`.
@@ -216,9 +215,6 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
             of the latent state during the p'th time step (whose time value corresponds to the p'th
             element of t_Grid) when we use the i'th combination of parameter values.
 
-        loss_type : str
-            The type of loss function to use. Must be either "MSE" or "MAE".
-
         t_Grid : list[torch.Tensor], len = n_param
             i'th element should be a 1d tensor of shape (n_t(i)) whose j'th element holds the time
             value corresponding to the j'th frame when we use the i'th combination of parameter
@@ -233,27 +229,27 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
         Returns
         -------------------------------------------------------------------------------------------
 
-        loss_LD, loss_coef, loss_stab.
+        loss_dict : dict[str, list[torch.Tensor] | torch.Tensor]:
+            A loss dictionary with three keys: LD, coef, and stab.
 
-        loss_LD : list[torch.Tensor], len = n_param
-            The i'th element of this list is a 0-dimensional tensor whose lone element holds the
-            weak-form latent-dynamics loss from the i'th combination of parameter values.
+            loss_dict['LD'] : list[torch.Tensor], len = n_param
+                The i'th element of this list is a 0-dimensional tensor whose lone element holds the
+                weak-form latent-dynamics loss from the i'th combination of parameter values.
 
-        loss_coef : list[torch.Tensor], len = n_param
-            The i'th element of this list is a 0-dimensional tensor whose lone element holds the
-            coefficient loss (Frobenius norm) of the coefficients for the i'th combination
-            of parameter values.
+            loss_dict['coef'] : list[torch.Tensor], len = n_param
+                The i'th element of this list is a 0-dimensional tensor whose lone element holds the
+                coefficient loss (Frobenius norm) of the coefficients for the i'th combination
+                of parameter values.
 
-        loss_stab : list[torch.Tensor], len = n_param
-            The i'th element of this list is a 0-dimensional tensor whose lone element holds the
-            stability penalty for the i'th combination of parameter values (see
-            LatentDynamics.stability_penalty).
+            loss_dict['stab'] : list[torch.Tensor], len = n_param
+                The i'th element of this list is a 0-dimensional tensor whose lone element holds the
+                stability penalty for the i'th combination of parameter values (see
+                LatentDynamics.stability_penalty).
         """
 
         # Run checks.
         assert(isinstance(t_Grid, list));
         assert(isinstance(Latent_States, list));
-        assert(loss_type in ["MSE", "MAE"]);
         assert params is not None, "DampedSpring_weak.compute_losses requires `params` so it can look up weight functions by parameter tuple.";
         assert len(Latent_States) == len(t_Grid) == params.shape[0];
 
@@ -316,14 +312,11 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
             scale_D = torch.linalg.norm(d2Phis, dim=1, keepdim=True).clamp(min = 1.0e-10);
             scale_V = torch.linalg.norm(dPhis,  dim=1, keepdim=True).clamp(min = 1.0e-10);
 
-            if loss_type == "MSE":
-                loss_D = self.MSE(lhs_D / scale_D, weak_RHS / scale_D)
-                loss_V = self.MSE(lhs_V / scale_V, weak_RHS / scale_V)
-            elif loss_type == "MAE":
-                loss_D = self.MAE(lhs_D / scale_D, weak_RHS / scale_D)
-                loss_V = self.MAE(lhs_V / scale_V, weak_RHS / scale_V)
+            loss_D = self.MSE(lhs_D / scale_D, weak_RHS / scale_D);
+            loss_V = self.MSE(lhs_V / scale_V, weak_RHS / scale_V);
+            
 
-            Loss_LD_i = 0.5 * loss_D + 0.5 * loss_V
+            Loss_LD_i = 0.5 * loss_D + 0.5 * loss_V;
 
             # Stability penalty on the equivalent first-order system y' = A y (+ f).
             # For z'' = K z + C z' + b, define y = [z, z'] so A = [[0, I], [K, C]].
@@ -342,5 +335,5 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
             loss_stab_list.append(Loss_Stab_i);
             loss_coef_list.append(Loss_coef_i);
 
-        return loss_LD_list, loss_coef_list, loss_stab_list;
+        return {'LD' : loss_LD_list, 'coef' : loss_coef_list, 'stab' : loss_stab_list};
 

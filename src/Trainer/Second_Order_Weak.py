@@ -10,7 +10,7 @@ import  numpy;
 from    EncoderDecoder                  import  EncoderDecoder;
 from    ParameterSpace                  import  ParameterSpace;
 from    Physics                         import  Physics;
-from    LatentDynamics                  import  LatentDynamics, WeakLatentDynamics;
+from    LatentDynamics                  import  LatentDynamics, WeakLatentDynamics, InterpolatableLatentDynamics;
 from    Utilities.Optimizer             import  Reset_Optimizer;
 from    Trainer.Second_Order_Rollout    import  Second_Order_Rollout;
 from    Schemas                         import  ExperimentConfig;
@@ -305,9 +305,6 @@ class Second_Order_Weak(Second_Order_Rollout):
             # Main epoch loop + setup
 
             # Initialize losses. 
-            loss_LD                 : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
-            loss_stab               : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
-            loss_coef              : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
             loss_recon_D            : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
             loss_recon_V            : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
             loss_consistency_Z      : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
@@ -504,38 +501,23 @@ class Second_Order_Weak(Second_Order_Rollout):
 
 
             # --------------------------------------------------------------------------------
-            # Latent Dynamics, Stability losses
+            # Latent Dynamics losses
 
-            self.timer.start("LD/Stability/Coefficient Losses");
-            LOGGER.debug("Latent Dynamics compute_losses - start");
+            self.timer.start("LD/Coefficient/Stability Losses");
 
-            # Compute the latent dynamics, coefficient, and stability losses.
-            loss_LD_list, loss_coef_list, loss_stab_list = self.latent_dynamics.compute_losses(
-                                                                        Latent_States    = Latent_States,
-                                                                        t_Grid           = t_Train_device,
-                                                                        loss_type        = self.loss_types['LD'],
-                                                                        params           = self.param_space.train_space);
+            # Compute the latent dynamics losses; this is a dictionary with the same keys as 
+            # self.latent_dynamics.loss_weights.
+            raw_LD_loss_dict = self.latent_dynamics.compute_losses( 
+                                                        Latent_States    = Latent_States, 
+                                                        t_Grid           = t_Train_device,
+                                                        params           = self.param_space.train_space);
 
-            # Cache the LD and stability losses by training parameter.
-            for i in range(n_train):
-                param_tuple = tuple(self.param_space.train_space[i, :]);
-                self._cache_loss('LD', loss_LD_list[i].detach(), param_tuple);
-                self._cache_loss('stab', loss_stab_list[i].detach(), param_tuple);
-                self._cache_loss('coef', loss_coef_list[i].detach(), param_tuple);
+            LD_loss_dict, loss_LD_weighted_sum = self._process_latent_dynamics_losses(
+                                                        raw_loss_dict  = raw_LD_loss_dict,
+                                                        params         = self.param_space.train_space,
+                                                        device         = device);
 
-
-            # Compute the total loss.
-            loss_LD     = torch.sum(torch.stack(loss_LD_list));
-            loss_stab   = torch.sum(torch.stack(loss_stab_list));
-            loss_coef   = torch.sum(torch.stack(loss_coef_list));
-
-            # Cache the total loss for this epoch.
-            self._cache_loss('LD', loss_LD.detach());
-            self._cache_loss('stab', loss_stab.detach());
-            self._cache_loss('coef', loss_coef.detach());
-
-            LOGGER.debug("Latent Dynamics compute_losses - complete");
-            self.timer.end("LD/Stability/Coefficient Losses");
+            self.timer.end("LD/Coefficient/Stability Losses");
 
 
             # ---------------------------------------------------------------------------------
@@ -813,16 +795,14 @@ class Second_Order_Weak(Second_Order_Rollout):
                     self.loss_weights['chain_rule']     * loss_chain_rule + 
                     self.loss_weights['rollout']        * loss_rollout +
                     self.loss_weights['IC_rollout']     * loss_IC_rollout +
-                    self.loss_weights['LD']             * loss_LD + 
-                    self.loss_weights['stab']           * loss_stab + 
-                    self.loss_weights['coef']           * loss_coef);
+                    loss_LD_weighted_sum);
             self._cache_loss('total', loss.detach());
             LOGGER.debug("Total loss (Autoencoder_Pair) computed");
 
 
 
             # Record coefficient scale and the most recent epoch index for fallback checkpointing.
-            if self.latent_dynamics.trainable:
+            if isinstance(self.latent_dynamics, InterpolatableLatentDynamics):
                 with torch.no_grad():
                     coef_tensors_report = self.latent_dynamics.trainable_tensors();
                     train_coefs_flat_report = torch.cat([c.reshape(-1) for c in coef_tensors_report]);
@@ -895,10 +875,10 @@ class Second_Order_Weak(Second_Order_Rollout):
             if(self.loss_weights['chain_rule'] > 0):    info_str += ", CR U: %3.6f, CR Z: %3.6f"                                                    % (flushed_losses[('chain_rule_U', 'total')],  flushed_losses[('chain_rule_Z', 'total')]);
             if(self.loss_weights['rollout'] > 0):       info_str += ", Roll FOM D: %3.6f, Roll FOM V: %3.6f, Roll ROM D: %3.6f, Roll ROM V: %3.6f"  % (flushed_losses.get(('rollout_FOM_D', 'total'), 0.0), flushed_losses.get(('rollout_FOM_V', 'total'), 0.0),  flushed_losses.get(('rollout_ROM_D', 'total'), 0.0),  flushed_losses.get(('rollout_ROM_V', 'total'), 0.0));
             if(self.loss_weights['IC_rollout'] > 0):    info_str += ", IC Roll D: %3.6f, IC Roll V: %3.6f, IC Roll ZD: %3.6f, IC Roll ZV: %3.6f"    % (flushed_losses.get(('IC_rollout_D', 'total'), 0.0),  flushed_losses.get(('IC_rollout_V', 'total'), 0.0),   flushed_losses.get(('IC_rollout_Z_D', 'total'), 0.0), flushed_losses.get(('IC_rollout_Z_V', 'total'), 0.0));
-            if(self.loss_weights['LD'] > 0):            info_str += ", LD: %3.6f"                                                                   % flushed_losses[('LD', 'total')];
-            if(self.loss_weights['stab'] > 0):          info_str += ", Stab: %3.6f"                                                                 % flushed_losses[('stab', 'total')];
-            if(self.loss_weights['coef'] > 0):          info_str += ", Coef: %3.6f"                                                                 % flushed_losses[('coef', 'total')];
-            if self.latent_dynamics.trainable:
+            for key, value in LD_loss_dict.items():
+                if self.latent_dynamics.loss_weights[key] > 0:
+                    info_str += ", %s: %3.6f"   % flushed_losses[(key, 'total')];
+            if isinstance(self.latent_dynamics, InterpolatableLatentDynamics): 
                 info_str += ", max|c|: %.3f" % max_train_coef;
             LOGGER.info(info_str);
 

@@ -212,10 +212,9 @@ class SwitchSINDy(InterpolatableLatentDynamics):
     def compute_losses(
         self,
         Latent_States   : list[list[torch.Tensor]],
-        loss_type       : str,
         t_Grid          : list[torch.Tensor],
         params          : numpy.ndarray | None = None
-    ) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
+    ) -> dict[str, list[torch.Tensor] | torch.Tensor]:
         r"""
         Compute switching-SINDy latent-dynamics, coefficient, and stability losses.
 
@@ -231,9 +230,6 @@ class SwitchSINDy(InterpolatableLatentDynamics):
         Latent_States : list[list[torch.Tensor]], len = n_param
             The i'th list element contains one latent trajectory tensor of shape (n_t(i), n_z).
 
-        loss_type : str
-            The type of loss function to use. Must be either "MSE" or "MAE".
-
         t_Grid : list[torch.Tensor], len = n_param
             Time grids corresponding to the latent trajectories.
 
@@ -245,21 +241,28 @@ class SwitchSINDy(InterpolatableLatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------
 
-        loss_LD_list : list[torch.Tensor], len = n_param
-            Per-parameter switching-SINDy residual losses.
+        loss_dict : dict[str, list[torch.Tensor] | torch.Tensor]:
+            A loss dictionary with three keys: LD, coef, and stab.
 
-        loss_coef_list : list[torch.Tensor], len = n_param
-            Per-parameter coefficient regularization values.
+            loss_dict['LD'] : list[torch.Tensor], len = n_param
+                The i'th element of this list is a 0-dimensional tensor whose lone element holds the
+                SINDy latent-dynamics loss from the i'th combination of parameter values.
 
-        loss_stab_list : list[torch.Tensor], len = n_param
-            Per-parameter stability penalties from the before and after systems.
+            loss_dict['coef'] : list[torch.Tensor], len = n_param
+                The i'th element of this list is a 0-dimensional tensor whose lone element holds the
+                coefficient loss (Frobenius norm) of the coefficients for the i'th combination
+                of parameter values.
+
+            loss_dict['stab'] : list[torch.Tensor], len = n_param
+                The i'th element of this list is a 0-dimensional tensor whose lone element holds the
+                stability penalty for the i'th combination of parameter values (see
+                LatentDynamics.stability_penalty).
         """
 
         # Checks.
         assert params is not None, "SwitchSINDy.compute_losses requires params";
         assert isinstance(t_Grid, list) and isinstance(Latent_States, list);
         assert len(Latent_States) == len(t_Grid) == params.shape[0];
-        assert loss_type in ["MSE", "MAE"];
 
         # Prepare containers for the three loss components returned to the Trainer. The Trainer
         # applies the user-specified weights and sums these values into the total objective.
@@ -313,18 +316,12 @@ class SwitchSINDy(InterpolatableLatentDynamics):
             if mask_before.sum() > 0:
                 RHS_b = Z[mask_before] @ A_before.T + b_before.reshape(1, -1);
                 residual_b = dZdt[mask_before] - RHS_b;
-                if(loss_type == "MSE"):
-                    loss_terms.append(torch.sum(residual_b**2));
-                else:
-                    loss_terms.append(torch.sum(torch.abs(residual_b)));
+                loss_terms.append(torch.sum(residual_b**2));
 
             if mask_after.sum() > 0:
                 RHS_a = Z[mask_after] @ A_after.T + b_after.reshape(1, -1);
                 residual_a = dZdt[mask_after] - RHS_a;
-                if(loss_type == "MSE"):
-                    loss_terms.append(torch.sum(residual_a**2));
-                else:
-                    loss_terms.append(torch.sum(torch.abs(residual_a)));
+                loss_terms.append(torch.sum(residual_a**2));
 
             # Normalize by the total number of time samples so trajectories with more frames do not
             # automatically dominate the objective.
@@ -346,7 +343,7 @@ class SwitchSINDy(InterpolatableLatentDynamics):
             loss_coef_list.append(loss_coef);
             loss_stab_list.append(loss_stab);
 
-        return loss_LD_list, loss_coef_list, loss_stab_list;
+        return {'LD' : loss_LD_list, 'coef' : loss_coef_list, 'stab' : loss_stab_list};
 
 
 

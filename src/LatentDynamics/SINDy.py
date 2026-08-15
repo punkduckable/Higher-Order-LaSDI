@@ -215,10 +215,9 @@ class SINDy(InterpolatableLatentDynamics):
     def compute_losses(  
         self,  
         Latent_States   : list[list[torch.Tensor]], 
-        loss_type       : str,
         t_Grid          : list[torch.Tensor], 
         params          : numpy.ndarray | None = None
-    ) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
+    ) -> dict[str, list[torch.Tensor] | torch.Tensor]:
         r"""
         Evaluate the SINDy latent-dynamics loss using LD-owned native coefficients.
 
@@ -236,9 +235,6 @@ class SINDy(InterpolatableLatentDynamics):
         Latent_States : list[list[torch.Tensor]], len = n_param
             Encoded latent trajectories. The i'th entry contains one tensor of shape (n_t(i), n_z).
 
-        loss_type : str
-            Either "MSE" or "MAE".
-
         t_Grid : list[torch.Tensor], len = n_param
             Time grids corresponding to the latent trajectories.
 
@@ -250,8 +246,22 @@ class SINDy(InterpolatableLatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------
 
-        loss_LD_list, loss_coef_list, loss_stab_list
-            Three lists of scalar tensors, one scalar per parameter.
+        loss_dict : dict[str, list[torch.Tensor] | torch.Tensor]:
+            A loss dictionary with three keys: LD, coef, and stab.
+
+            loss_dict['LD'] : list[torch.Tensor], len = n_param
+                The i'th element of this list is a 0-dimensional tensor whose lone element holds the
+                SINDy loss from the i'th combination of parameter values.
+
+            loss_dict['coef'] : list[torch.Tensor], len = n_param
+                The i'th element of this list is a 0-dimensional tensor whose lone element holds the
+                coefficient loss (Frobenius norm) of the coefficients for the i'th combination
+                of parameter values.
+
+            loss_dict['stab'] : list[torch.Tensor], len = n_param
+                The i'th element of this list is a 0-dimensional tensor whose lone element holds the
+                stability penalty for the i'th combination of parameter values (see
+                LatentDynamics.stability_penalty).
         """
 
         # Checks.
@@ -259,7 +269,6 @@ class SINDy(InterpolatableLatentDynamics):
         assert isinstance(t_Grid, list);
         assert isinstance(Latent_States, list);
         assert len(Latent_States) == len(t_Grid) == params.shape[0];
-        assert loss_type in ["MSE", "MAE"];
 
         # Prepare lists for per-parameter losses. The Trainer is responsible for applying weights
         # and summing these scalar losses into the total objective.
@@ -292,10 +301,7 @@ class SINDy(InterpolatableLatentDynamics):
             RHS = Z @ A.T + b.reshape(1, -1);
 
             # Compute the data-fit part of the latent-dynamics loss.
-            if(loss_type == "MSE"):
-                loss_LD = self.MSE(dZdt, RHS);
-            else:
-                loss_LD = self.MAE(dZdt, RHS);
+            loss_LD = self.MSE(dZdt, RHS);
 
             # Compute regularization terms. The stability penalty depends only on A, while the
             # coefficient penalty includes both A and the affine shift b.
@@ -307,7 +313,7 @@ class SINDy(InterpolatableLatentDynamics):
             loss_coef_list.append(loss_coef);
             loss_stab_list.append(loss_stab);
 
-        return loss_LD_list, loss_coef_list, loss_stab_list;
+        return {'LD' : loss_LD_list, 'coef' : loss_coef_list, 'stab' : loss_stab_list};
 
 
     def RHS(    self,

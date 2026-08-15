@@ -217,10 +217,9 @@ class DampedSpring(InterpolatableLatentDynamics):
     def compute_losses(
         self, 
         Latent_States : list[list[torch.Tensor]],
-        loss_type     : str,
         t_Grid        : list[torch.Tensor],
         params        : numpy.ndarray | None = None,
-    ) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
+    ) -> dict[str, list[torch.Tensor] | torch.Tensor]:
         r"""
         Compute latent-dynamics, coefficient, and stability losses for training parameters.
 
@@ -242,9 +241,6 @@ class DampedSpring(InterpolatableLatentDynamics):
             The i'th list element is a two-element list whose entries are latent displacement and
             velocity tensors with shape (n_t(i), n_z).
 
-        loss_type : str
-            The type of loss function to use. Must be either "MSE" or "MAE".
-
         t_Grid : list[torch.Tensor], len = n_param
             The i'th element is a 1D tensor of shape (n_t(i)) holding the time grid for the i'th
             parameter combination.
@@ -258,17 +254,22 @@ class DampedSpring(InterpolatableLatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------
 
-        loss_LD_list : list[torch.Tensor], len = n_param
-            The i'th element is a scalar tensor containing the latent-dynamics residual loss for
-            the i'th parameter combination.
+        loss_dict : dict[str, list[torch.Tensor] | torch.Tensor]:
+            A loss dictionary with three keys: LD, coef, and stab.
 
-        loss_coef_list : list[torch.Tensor], len = n_param
-            The i'th element is a scalar tensor containing the coefficient regularization value for
-            the i'th parameter combination.
+            loss_dict['LD'] : list[torch.Tensor], len = n_param
+                The i'th element of this list is a 0-dimensional tensor whose lone element holds the
+                SINDy latent-dynamics loss from the i'th combination of parameter values.
 
-        loss_stab_list : list[torch.Tensor], len = n_param
-            The i'th element is a scalar tensor containing the stability penalty for the i'th
-            parameter combination.
+            loss_dict['coef'] : list[torch.Tensor], len = n_param
+                The i'th element of this list is a 0-dimensional tensor whose lone element holds the
+                coefficient loss (Frobenius norm) of the coefficients for the i'th combination
+                of parameter values.
+
+            loss_dict['stab'] : list[torch.Tensor], len = n_param
+                The i'th element of this list is a 0-dimensional tensor whose lone element holds the
+                stability penalty for the i'th combination of parameter values (see
+                LatentDynamics.stability_penalty).
         """
 
         # Checks.
@@ -276,7 +277,6 @@ class DampedSpring(InterpolatableLatentDynamics):
         assert isinstance(t_Grid, list);
         assert isinstance(Latent_States, list);
         assert len(Latent_States) == len(t_Grid) == params.shape[0];
-        assert loss_type in ["MSE", "MAE"];
 
         loss_LD_list : list[torch.Tensor] = [];
         loss_coef_list : list[torch.Tensor] = [];
@@ -317,10 +317,7 @@ class DampedSpring(InterpolatableLatentDynamics):
             # unpacking a flattened coefficient vector).
             LD_RHS = torch.matmul(Z_D, K.T) + torch.matmul(Z_V, C.T) + b;
 
-            if(loss_type == "MSE"):
-                Loss_LD = self.MSE(d2Z_dt2, LD_RHS);
-            else:
-                Loss_LD = self.MAE(d2Z_dt2, LD_RHS);
+            Loss_LD = self.MSE(d2Z_dt2, LD_RHS);
 
 
             # -------------------------------------------------------------------------------------
@@ -345,7 +342,7 @@ class DampedSpring(InterpolatableLatentDynamics):
             loss_coef_list.append(Loss_coef);
             loss_stab_list.append(Loss_Stab);
 
-        return loss_LD_list, loss_coef_list, loss_stab_list;
+        return {'LD' : loss_LD_list, 'coef' : loss_coef_list, 'stab' : loss_stab_list};
 
 
     def RHS(    self,

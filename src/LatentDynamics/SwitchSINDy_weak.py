@@ -197,10 +197,9 @@ class SwitchSINDy_weak(WeakLatentDynamics, SwitchSINDy):
     def compute_losses(  
         self,
         Latent_States   : list[list[torch.Tensor]],
-        loss_type       : str,
         t_Grid          : list[torch.Tensor],
         params          : numpy.ndarray | None = None
-    ) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
+    ) -> dict[str, list[torch.Tensor] | torch.Tensor]:
         r"""
         Compute weak-form switching-SINDy latent-dynamics, coefficient, and stability losses.
 
@@ -216,9 +215,6 @@ class SwitchSINDy_weak(WeakLatentDynamics, SwitchSINDy):
         Latent_States : list[list[torch.Tensor]], len = n_param
             The i'th list element contains one latent trajectory tensor of shape (n_t(i), n_z).
 
-        loss_type : str
-            The type of loss function to use. Must be either "MSE" or "MAE".
-
         t_Grid : list[torch.Tensor], len = n_param
             Time grids corresponding to the latent trajectories.
 
@@ -230,14 +226,22 @@ class SwitchSINDy_weak(WeakLatentDynamics, SwitchSINDy):
         Returns
         -------------------------------------------------------------------------------------------
 
-        loss_LD_list : list[torch.Tensor], len = n_param
-            Per-parameter weak-form switching-SINDy residual losses.
+        loss_dict : dict[str, list[torch.Tensor] | torch.Tensor]:
+            A loss dictionary with three keys: LD, coef, and stab.
 
-        loss_coef_list : list[torch.Tensor], len = n_param
-            Per-parameter coefficient regularization values.
+            loss_dict['LD'] : list[torch.Tensor], len = n_param
+                The i'th element of this list is a 0-dimensional tensor whose lone element holds the
+                weak-form latent-dynamics loss from the i'th combination of parameter values.
 
-        loss_stab_list : list[torch.Tensor], len = n_param
-            Per-parameter stability penalties from the before and after systems.
+            loss_dict['coef'] : list[torch.Tensor], len = n_param
+                The i'th element of this list is a 0-dimensional tensor whose lone element holds the
+                coefficient loss (Frobenius norm) of the coefficients for the i'th combination
+                of parameter values.
+
+            loss_dict['stab'] : list[torch.Tensor], len = n_param
+                The i'th element of this list is a 0-dimensional tensor whose lone element holds the
+                stability penalty for the i'th combination of parameter values (see
+                LatentDynamics.stability_penalty).
         """
 
         # Checks.
@@ -245,7 +249,6 @@ class SwitchSINDy_weak(WeakLatentDynamics, SwitchSINDy):
         assert isinstance(t_Grid, list);
         assert isinstance(Latent_States, list);
         assert len(Latent_States) == len(t_Grid) == params.shape[0];
-        assert loss_type in ["MSE", "MAE"];
 
         loss_LD_list   : list[torch.Tensor] = [];
         loss_coef_list : list[torch.Tensor] = [];
@@ -296,10 +299,7 @@ class SwitchSINDy_weak(WeakLatentDynamics, SwitchSINDy):
             # Normalize each test-function residual by the norm of phi' to keep losses comparable
             # across support locations and widths.
             scale : torch.Tensor = torch.linalg.norm(dPhis, dim = 1, keepdim = True).clamp(min = 1.0e-10);
-            if(loss_type == "MSE"):
-                loss_LD = self.MSE(weak_LHS / scale, weak_RHS / scale);
-            else:
-                loss_LD = self.MAE(weak_LHS / scale, weak_RHS / scale);
+            loss_LD = self.MSE(weak_LHS / scale, weak_RHS / scale);
 
             # Compute regularization terms.
             loss_coef = torch.norm(A_before, 'fro') + torch.norm(b_before) + torch.norm(A_after, 'fro') + torch.norm(b_after);
@@ -309,4 +309,4 @@ class SwitchSINDy_weak(WeakLatentDynamics, SwitchSINDy):
             loss_coef_list.append(loss_coef);
             loss_stab_list.append(loss_stab);
 
-        return loss_LD_list, loss_coef_list, loss_stab_list;
+        return {'LD' : loss_LD_list, 'coef' : loss_coef_list, 'stab' : loss_stab_list};
