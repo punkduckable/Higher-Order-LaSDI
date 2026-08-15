@@ -56,12 +56,18 @@ class InterpolatableLatentDynamics(LatentDynamics):
         SINDy latent dynamics model (z' = Az + b). This should only be used to store the TRAINING
         coefficients; test values are determined by the `interpolator` (see below). 
 
+    n_coefs : int
+        An integer housing the number of coefficients in the latent dynamics model; typically 
+        (# of matrices in the LD model)*n_z^2 + (# of vectors in the LD model)*n_z
+
+
     interpolator : Interpolate
         An interpolator object used to sample the coefficients at testing parameter values. See
         the Interpolate class definition for details.
     """
 
     train_coefs     : dict[tuple[float, ...], dict[str, torch.Tensor]];
+    n_coefs         : int;
     interpolator    : Interpolate 
 
 
@@ -131,13 +137,14 @@ class InterpolatableLatentDynamics(LatentDynamics):
         # cooperative MRO here.
         LatentDynamics.__init__(self,
                                 n_z                = n_z,
-                                n_coefs            = n_coefs,
                                 n_IC               = n_IC,
                                 n_p                = n_p,
                                 Uniform_t_Grid     = Uniform_t_Grid,
                                 trainable          = trainable,
                                 stochastic         = True,
                                 config             = config)
+
+        self.n_coefs = n_coefs;
 
         # Set up the Interpolate object. GP is the only implemented interpolator at the moment.
         assert isinstance(config, LatentDynamicsBaseConfig), "config must be a LatentDynamicsBaseConfig, got %s" % str(type(config));

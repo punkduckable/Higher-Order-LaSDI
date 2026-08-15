@@ -182,7 +182,7 @@ class FOM_Rollout(Sampler):
                 t_Candidates.append(trainer.t_Test[i]);
                 U_Candidates.append(trainer.U_Test[i]);
         
-        # Concatenate the candidates to form an array of shape (n_candidates, n_coefs).
+        # Concatenate the candidates to form an array of shape (n_candidates, n_param).
         n_candidates : int = len(candidate_parameters);
         LOGGER.info("There are %d candidate testing parameters (%d in the testing space, %d in the training set)" % (n_candidates, n_test, n_train));
         assert n_candidates >= 1, "n_candidates = %d" % n_candidates;

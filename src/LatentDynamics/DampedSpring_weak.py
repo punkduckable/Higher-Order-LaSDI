@@ -89,7 +89,6 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
         WeakLatentDynamics.__init__(
             self,
             n_z             = n_z,
-            n_coefs         = n_z*(2*n_z + 1),
             n_IC            = 2,
             n_p             = n_p,
             Uniform_t_Grid  = Uniform_t_Grid,

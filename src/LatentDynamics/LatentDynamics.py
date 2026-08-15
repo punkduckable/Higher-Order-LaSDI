@@ -56,10 +56,6 @@ class LatentDynamics:
     n_z : int
         Latent-space dimension.  Each latent state component has length `n_z`.
     
-    n_coefs : int
-        Number of scalar coefficients in the concrete latent-dynamics model, mainly used for
-        compatibility with flattened coefficient outputs.
-    
     n_IC : int
         Number of latent initial-condition components required to start the dynamics.  For example,
         first-order dynamics typically use `n_IC = 1`, while second-order dynamics use position and
@@ -118,7 +114,6 @@ class LatentDynamics:
     """
     # Instance variables
     n_z             : int;          # Dimensionality of the latent space
-    n_coefs         : int;          # Number of coefficients in the latent space dynamics
     n_IC            : int;          # Number of initial conditions to define the initial latent state.
     n_p             : int;          # The number of parameters in the parameter space.
     Uniform_t_Grid  : bool;         # Is there an h such that the i'th frame is at t0 + i*h? Or is the spacing between frames arbitrary?
@@ -129,7 +124,6 @@ class LatentDynamics:
 
     def __init__(   self, 
                     n_z             : int,
-                    n_coefs         : int,
                     n_IC            : int, 
                     n_p             : int,
                     Uniform_t_Grid  : bool, 
@@ -151,10 +145,6 @@ class LatentDynamics:
 
         n_z : int
             The number of dimensions in the latent space, where the latent dynamics takes place.
-
-        n_coefs : int
-            An integer housing the number of coefficients in the latent dynamics model; typically 
-            (# of matrices in the LD model)*n_z^2 + (# of vectors in the LD model)*n_z
 
         n_IC : int
             Number of latent initial-condition components required to start the dynamics. For 
@@ -191,7 +181,6 @@ class LatentDynamics:
 
         # Set class variables.
         self.n_z             = n_z;
-        self.n_coefs         = n_coefs;
         self.n_IC            = n_IC;
         self.n_p             = n_p;
         self.Uniform_t_Grid  = Uniform_t_Grid;
@@ -217,14 +206,12 @@ class LatentDynamics:
             Latent_States   : list[list[torch.Tensor]],
             t_Grid          : list[torch.Tensor],
             device          : torch.device,
-            params          : numpy.ndarray) -> torch.Tensor:
+            params          : numpy.ndarray) -> None:
         r"""
         Fit (initialize) latent dynamics coefficients from latent state data.
 
         This method is intended for **coefficient initialization** (e.g., when greedy sampling
         adds a new training parameter and we need a reasonable starting value for its coefficients).
-        It should return, for each parameter combination, a 1D coefficient vector of length
-        `self.n_coefs`.
 
         Design rule:
         - `compute_losses(...)` computes the LD loss (and other regularizers) **given 
@@ -258,7 +245,7 @@ class LatentDynamics:
         Returns
         -------------------------------------------------------------------------------------------
 
-        None. Subclasses store native coefficient dictionaries in `self.train_coefs`.
+        None. 
         """
 
         raise RuntimeError("Abstract function LatentDynamics.initialize_coefficients!");

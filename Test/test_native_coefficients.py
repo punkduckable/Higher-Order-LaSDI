@@ -123,7 +123,6 @@ def test_latent_dynamics_export_load_restores_trainable_coefs():
 def test_base_latent_dynamics_device_move_hook_is_noop_without_train_coefs():
     ld = LatentDynamics(
         n_z=1,
-        n_coefs=0,
         n_IC=1,
         Uniform_t_Grid=True,
         trainable=True,
@@ -363,7 +362,7 @@ def test_weak_latent_dynamics_requires_weak_config_keys():
 
 
 def test_add_and_get_weight_functions_store_arbitrary_derivatives():
-    ld = WeakLatentDynamics(n_z=1, n_coefs=1, n_IC=2, Uniform_t_Grid=True, trainable=True, config=_weak_base_config())
+    ld = WeakLatentDynamics(n_z=1, n_IC=2, Uniform_t_Grid=True, trainable=True, config=_weak_base_config())
     params = numpy.array([0.25])
     t = torch.linspace(0.0, 1.0, 11)
 
@@ -378,7 +377,7 @@ def test_add_and_get_weight_functions_store_arbitrary_derivatives():
 
 
 def test_get_test_functions_missing_param_raises_keyerror():
-    ld = WeakLatentDynamics(n_z=1, n_coefs=1, n_IC=2, Uniform_t_Grid=True, trainable=True, config=_weak_base_config())
+    ld = WeakLatentDynamics(n_z=1, n_IC=2, Uniform_t_Grid=True, trainable=True, config=_weak_base_config())
     with pytest.raises(KeyError):
         ld.get_test_functions(numpy.array([0.25]))
 
@@ -476,7 +475,7 @@ def test_switch_sindy_weak_simulate_returns_first_order_trajectory_shape():
 
 
 def test_get_uniform_grid_no_p_argument():
-    ld = WeakLatentDynamics(n_z=1, n_coefs=1, n_IC=1, Uniform_t_Grid=True, trainable=True, config=_weak_base_config())
+    ld = WeakLatentDynamics(n_z=1, n_IC=1, Uniform_t_Grid=True, trainable=True, config=_weak_base_config())
     a_s, b_s = ld._get_support_intervals(T=1.0, L=0.5, s=0.25)
 
     assert numpy.allclose(a_s, numpy.array([0.0, 0.25, 0.5]))

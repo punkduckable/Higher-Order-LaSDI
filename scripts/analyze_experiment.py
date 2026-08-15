@@ -22,6 +22,7 @@ from    Plotting.Plot               import  Plot_Heatmap, Plot_Latent_Trajectori
 from    Plotting.Plot               import  trainSpace_RelativeErrors_Heatmap;
 from    Plotting.Animate            import  make_solution_movies;
 from    Rollouts                    import  Mean_Rollout; 
+from    LatentDynamics              import  InterpolatableLatentDynamics;
 from    Utilities.Logging           import  Initialize_Logger;
 from    Initialize                  import  Initialize_Trainer;
 from    Schemas                     import  validate_experiment_config;
@@ -473,7 +474,7 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
 
         # Plot the mean and std of each coefficient (assuming the LD is interpolatable) at each 
         # testing parameter.
-        if coef_means is not None and coef_stds is not None:
+        if isinstance(latent_dynamics, InterpolatableLatentDynamics):
             for d in range(latent_dynamics.n_coefs):
                 title           : str   = "Coefficient %d mean" % d;
                 save_file_name  : str   = physics_type + "Coefficient_%d_mean.png" % d;
