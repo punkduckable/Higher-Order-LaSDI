@@ -41,9 +41,9 @@ class CABLE(LatentDynamics):
 
             w : \mathbb{R}^{1 + n_p} \to \mathbb{R}^{N}
 
-        whose logits are optionally restricted to their top-k entries before applying a softmax.
-        Thus, the active expert weights are nonnegative and sum to one for every time/parameter
-        pair. Setting top_k >= n_experts leaves all experts active.
+        whose components below epsilon are set to zero. Further, we train the network such that 
+        for any individual step, almost all of the mass is concentrated in <= n_active experts, 
+        giving loosely sparse weights.
 
         The trainable latent-dynamics state consists of the expert matrices, expert biases, and
         gate-network parameters. Unlike interpolatable SINDy-type models, CABLE owns one global set
@@ -66,7 +66,8 @@ class CABLE(LatentDynamics):
 
         config : CABLELatentDynamicsConfig
             CABLE latent-dynamics configuration. The `cable` settings specify the number of
-            experts, the number of active experts, and the gate-network architecture.
+            experts, the target number of active experts, epsilon, and the gate-network 
+            architecture.
 
 
         -------------------------------------------------------------------------------------------
@@ -92,7 +93,7 @@ class CABLE(LatentDynamics):
         # Extract sub-class specific attributes.
         sub : CABLELatentDynamicsSettings = config.cable;
         self.n_experts      : int       = sub.n_experts;
-        self.top_k          : int       = min(sub.top_k, self.n_experts);
+        self.n_active       : int       = sub.n_active;
         self.hidden_widths  : list[int] = sub.hidden_widths;
         self.activations    : list[str] = sub.activations;
 
@@ -236,23 +237,21 @@ class CABLE(LatentDynamics):
 
         For each parameter value, this method computes a finite-difference approximation to
         dZ/dt, evaluates the deterministic mixture-of-experts right-hand side at each time sample,
-        and compares the two. The right-hand side still uses the top-k-masked softmax weights.
+        and compares the two. 
 
         The coefficient loss penalizes the size of the affine experts. The stability loss is a
-        deterministic load-balancing/diversity surrogate computed from the dense pre-top-k softmax
+        deterministic load-balancing/diversity surrogate computed from the softmax
         weights: it accumulates each expert's total dense gate weight across all training
         parameters and times, then returns the squared coefficient of variation of those totals.
         This is zero when all experts receive the same total dense load and positive when the dense
         gate collapses onto a subset of experts.
 
-        This method also computes a per-parameter dense pre-top-k tail-mass penalty,
+        This method also computes a per-parameter tail-mass penalty,
 
             mean_t (1 - sum_{m in top_k(t,theta_i)} q_m(t,theta_i))^2,
 
-        where q is the dense softmax over all experts. This quantifies how much probability mass
-        would be discarded by the hard top-k operation for each parameter value. The per-parameter
-        diagnostics are stored in `self.last_tail_mass_loss_list`, and their unweighted mean is
-        stored in `self.last_tail_mass_loss`, but neither is intentionally returned yet.
+        where q is the dense softmax over all experts, and k = self.n_active. This quantifies how 
+        much probability mass is outside of the top n_active experts. 
 
 
         -------------------------------------------------------------------------------------------
@@ -285,8 +284,8 @@ class CABLE(LatentDynamics):
             Trainer from multiplying this global penalty by n_param when it sums the list.
 
         loss_stab_list : list[torch.Tensor], len = n_param
-            Per-parameter copies of the scaled squared coefficient of variation of aggregate dense
-            pre-top-k expert loads. The scaling has the same purpose as for `loss_coef_list`.
+            Per-parameter copies of the scaled squared coefficient of variation of aggregate
+            expert loads. The scaling has the same purpose as for `loss_coef_list`.
         """
 
         # Checks.
@@ -302,7 +301,7 @@ class CABLE(LatentDynamics):
         # Prepare lists for per-parameter losses. The Trainer is responsible for applying weights
         # and summing these scalar losses into the total objective.
         loss_LD_list          : list[torch.Tensor] = [];
-        summed_dense_weights  : torch.Tensor       = torch.zeros((self.n_experts), dtype = self.A.dtype, device = self.A.device);
+        summed_weights        : torch.Tensor       = torch.zeros((self.n_experts), dtype = self.A.dtype, device = self.A.device);
         tail_mass_loss_list   : list[torch.Tensor] = [];
 
         n_param : int = len(t_Grid);
@@ -324,11 +323,8 @@ class CABLE(LatentDynamics):
             else:
                 dZdt                    = Derivative1_Order2_NonUniform(ith_Z, t_Grid = ith_t_Grid);
 
-            # Evaluate CABLE on the encoded trajectory. The RHS uses top-k weights, but the
-            # diversity and tail-mass diagnostics use the dense pre-top-k softmax probabilities.
-            ith_logits        : torch.Tensor = self._logits_for_t_grid(ith_t_Grid, params[i, :]);
-            ith_dense_weights : torch.Tensor = torch.softmax(ith_logits, dim = 1);
-            ith_weights       : torch.Tensor = self._topk_softmax(ith_logits);
+            # Evaluate expert weights.
+            ith_weights       : torch.Tensor = self._weights_for_t_grid(ith_t_Grid, params[i, :]);
             ith_RHS           : torch.Tensor = self._evaluate_torch_rhs_from_weights(ith_Z, ith_weights);
 
             # Compute the LD loss.
@@ -338,40 +334,39 @@ class CABLE(LatentDynamics):
                 loss_LD = self.MAE(dZdt, ith_RHS);
             loss_LD_list.append(loss_LD);
 
-            # Accumulate dense pre-top-k expert loads across all parameter values and times. This
-            # is the deterministic analogue of MoE importance/load diversity: it encourages all
-            # experts to be useful somewhere without forcing all experts to be active at every step.
-            summed_dense_weights = summed_dense_weights + torch.sum(ith_dense_weights.to(device = self.A.device, dtype = self.A.dtype), dim = 0);
+            # Accumulate expert loads across all parameter values and times. This is a 
+            # deterministic analogue of MoE importance/load diversity: it encourages all
+            # experts to be useful somewhere without forcing all experts to be active at 
+            # every step.
+            summed_weights = summed_weights + torch.sum(ith_weights.to(device = self.A.device, dtype = self.A.dtype), dim = 0);
 
-            # Tail-mass penalty: compute how much dense softmax mass lies outside the top-k logits.
-            # If this is small, hard top-k removes little probability mass and should be less
-            # abrupt. We compute it now but do not return it until the Trainer loss API is updated.
-            if self.top_k >= self.n_experts:
-                ith_tail_mass : torch.Tensor = torch.zeros((n_t_i), dtype = ith_dense_weights.dtype, device = ith_dense_weights.device);
+            # Tail-mass penalty: compute how much softmax mass lies outside the top-n_active 
+            # logits. If this is small, most of the probability mass is in the top n_active 
+            # experts, as intended. 
+            if self.n_active >= self.n_experts:
+                ith_tail_mass : torch.Tensor = torch.zeros((n_t_i), dtype = ith_weights.dtype, device = ith_weights.device);
             else:
-                ith_topk_idx             : torch.Tensor = torch.topk(ith_logits, self.top_k, dim = 1, sorted = False).indices;
-                ith_topk_dense_mass      : torch.Tensor = torch.sum(ith_dense_weights.gather(1, ith_topk_idx), dim = 1);
+                ith_topk_idx             : torch.Tensor = torch.topk(ith_weights, self.n_active, dim = 1, sorted = False).indices;
+                ith_topk_dense_mass      : torch.Tensor = torch.sum(ith_weights.gather(1, ith_topk_idx), dim = 1);
                 ith_tail_mass            : torch.Tensor = 1.0 - ith_topk_dense_mass;
-            ith_tail_loss : torch.Tensor = torch.mean(torch.pow(ith_tail_mass.to(device = self.A.device, dtype = self.A.dtype), 2));
-            tail_mass_loss_list.append(ith_tail_loss);
+            tail_mass_loss_list.append(torch.mean(torch.pow(ith_tail_mass.to(device = self.A.device, dtype = self.A.dtype), 2)));
 
         # Coefficient loss is the sum of the Frobenius norms of the matrix portions of each expert,
         # plus the L2 norm of each bias. The loss is global, so we divide each list entry by n_param.
-        A_norms   : torch.Tensor = torch.linalg.vector_norm(self.A.reshape(self.n_experts, -1), dim = 1).sum();
-        b_norms   : torch.Tensor = torch.linalg.vector_norm(self.b.reshape(self.n_experts, -1), dim = 1).sum();
-        loss_coef : torch.Tensor = (A_norms + b_norms) / float(n_param);
-        loss_coef_list : list[torch.Tensor] = [loss_coef]*n_param;
+        A_norms         : torch.Tensor          = torch.linalg.vector_norm(self.A.reshape(self.n_experts, -1), dim = 1).sum();
+        b_norms         : torch.Tensor          = torch.linalg.vector_norm(self.b.reshape(self.n_experts, -1), dim = 1).sum();
+        loss_coef       : torch.Tensor          = (A_norms + b_norms) / float(n_param);
+        loss_coef_list  : list[torch.Tensor]    = [loss_coef]*n_param;
 
-        # Stability/diversity loss is the squared coefficient of variation of aggregate dense
-        # pre-top-k expert loads. Use the population standard deviation so n_experts = 1 produces
-        # zero instead of NaN.
-        eps       : float        = torch.finfo(summed_dense_weights.dtype).eps;
-        mean_load : torch.Tensor = torch.mean(summed_dense_weights);
-        std_load  : torch.Tensor = torch.std(summed_dense_weights, unbiased = False);
-        loss_stab : torch.Tensor = torch.pow(std_load/(mean_load + eps), 2) / float(n_param);
-        loss_stab_list : list[torch.Tensor] = [loss_stab]*n_param;
+        # Stability/diversity loss is the squared coefficient of variation of expert loads. Use 
+        # the population standard deviation so n_experts = 1 produces zero instead of NaN.
+        eps             : float                 = torch.finfo(summed_weights.dtype).eps;
+        mean_load       : torch.Tensor          = torch.mean(summed_weights);
+        std_load        : torch.Tensor          = torch.std(summed_weights, unbiased = False);
+        loss_stab       : torch.Tensor          = torch.pow(std_load/(mean_load + eps), 2) / float(n_param);
+        loss_stab_list  : list[torch.Tensor]    = [loss_stab]*n_param;
 
-        # Compute and store the pre-top-k tail-mass loss for diagnostics. This is deliberately not
+        # Compute and store the tail-mass loss for diagnostics. This is deliberately not
         # returned yet; the next loss-API change can expose it as its own named loss.
         loss_tail : torch.Tensor = torch.mean(torch.stack(tail_mass_loss_list));
         self.last_tail_mass_loss = loss_tail.detach();
@@ -614,52 +609,15 @@ class CABLE(LatentDynamics):
     # Helpers
     # ---------------------------------------------------------------------------------------------
 
-
-    def _topk_softmax(self, logits : torch.Tensor) -> torch.Tensor:
-        r"""
-        Apply top-k masking to gate logits and return normalized expert weights.
-
-
-        -------------------------------------------------------------------------------------------
-        Arguments
-        -------------------------------------------------------------------------------------------
-
-        logits : torch.Tensor, shape = (n_t, n_experts)
-            Raw gate-network outputs for one parameter value and n_t time samples. The tensor can
-            have any floating dtype/device supported by torch.softmax, and the returned weights use
-            the same dtype/device.
-
-
-        -------------------------------------------------------------------------------------------
-        Returns
-        -------------------------------------------------------------------------------------------
-
-        weights : torch.Tensor, shape = (n_t, n_experts)
-            Nonnegative gate weights whose rows sum to one. If `self.top_k < self.n_experts`, only
-            the top-k logits in each row receive nonzero weight; otherwise all experts are active.
-            The dtype and device match `logits`.
-        """
-
-        assert logits.ndim == 2 and logits.shape[1] == self.n_experts;
-        if self.top_k >= self.n_experts:
-            return torch.softmax(logits, dim = 1);
-
-        topk_vals, topk_idx = torch.topk(logits, self.top_k, dim = 1, sorted = False);
-        masked_logits : torch.Tensor = torch.full_like(logits, float('-inf'));
-        masked_logits.scatter_(1, topk_idx, topk_vals);
-        return torch.softmax(masked_logits, dim = 1);
-
-
     def _weights_for_t_grid(
             self,
             t_Grid  : numpy.ndarray | torch.Tensor,
             params  : numpy.ndarray) -> torch.Tensor:
         r"""
-        Evaluate top-k deterministic gate weights on one time grid and one parameter value.
+        Evaluate gate weights on one time grid and one parameter value.
 
         The returned tensor has shape (n_t, n_experts) and lives on the same device/dtype as the
         gate network. Callers can cast it to the latent-state backend before evaluating experts.
-        Use `_logits_for_t_grid` directly when dense pre-top-k probabilities are needed.
 
 
         -------------------------------------------------------------------------------------------
@@ -681,59 +639,44 @@ class CABLE(LatentDynamics):
         -------------------------------------------------------------------------------------------
 
         weights : torch.Tensor, shape = (n_t, n_experts)
-            Top-k-masked deterministic expert weights evaluated at all (t, params) pairs. The
-            dtype and device match the gate-network parameters. Each row sums to one after the
-            optional top-k mask.
+           expert weights evaluated at all (t, params) pairs. The dtype and device match the 
+           gate-network parameters. Each row sums to one.
         """
 
-        logits : torch.Tensor = self._logits_for_t_grid(t_Grid, params);
-        return self._topk_softmax(logits);
-
-
-    def _logits_for_t_grid(
-            self,
-            t_Grid  : numpy.ndarray | torch.Tensor,
-            params  : numpy.ndarray) -> torch.Tensor:
-        r"""
-        Evaluate raw gate logits on one time grid and one parameter value.
-
-
-        -------------------------------------------------------------------------------------------
-        Arguments
-        -------------------------------------------------------------------------------------------
-
-        t_Grid : numpy.ndarray or torch.Tensor, shape = (n_t)
-            One-dimensional time grid for a single parameter value. NumPy inputs may have any
-            floating dtype. Torch inputs may live on any device. The values are cast to the gate
-            network's dtype/device before forming gate inputs.
-
-        params : numpy.ndarray, shape = (n_p)
-            Parameter vector for the same trajectory. The values are cast to the gate network's
-            dtype/device and broadcast to shape (n_t, n_p).
-
-
-        -------------------------------------------------------------------------------------------
-        Returns
-        -------------------------------------------------------------------------------------------
-
-        logits : torch.Tensor, shape = (n_t, n_experts)
-            Raw gate-network outputs before softmax and before any top-k masking. The dtype and
-            device match the gate-network parameters.
-        """
-
+        # Setup 
         param : torch.Tensor = next(self.w.parameters());
         gate_device = param.device
         gate_dtype  = param.dtype;
+
+        # -----------------------------------------------------------------------------------------
+        # Build gate network inputs
+
+        # Map t_Grid to a tensor.
+        # The gate is a torch.nn.Module; its inputs must be tensors.
         if isinstance(t_Grid, numpy.ndarray):
             t_tensor : torch.Tensor = torch.tensor(t_Grid, dtype = gate_dtype, device = gate_device);
         else:
             t_tensor = t_Grid.to(device = gate_device, dtype = gate_dtype);
         assert len(t_tensor.shape) == 1;
 
+        # Broadcast n_t copies of param_tensor to build inputs for the gate network.
         param_tensor : torch.Tensor = torch.tensor(params, dtype = gate_dtype, device = gate_device).reshape(1, self.n_p);
         param_tensor = param_tensor.expand(t_tensor.shape[0], self.n_p);
+
+        # Build the gate network inputs
         w_inputs : torch.Tensor = torch.cat([t_tensor.reshape(-1, 1), param_tensor], dim = 1);
-        return self.w(w_inputs);
+
+        # -----------------------------------------------------------------------------------------
+        # Evaluate weights
+
+        # Compute logits
+        logits : torch.Tensor = self.w(w_inputs);
+
+        # Compute weights by applying a soft max to the logits.
+        weights : torch.Tensor = torch.softmax(logits, dim = 1);
+
+        # All done :) 
+        return weights;
 
 
     def _effective_coefficients(

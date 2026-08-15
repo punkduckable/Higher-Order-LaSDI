@@ -424,9 +424,10 @@ class CABLELatentDynamicsSettings(ConfigBase):
     # How many experts should we use?
     n_experts: PositiveInt 
 
-    # How many experts do we want to be active each step? Setting it >= n_experts effectively 
-    # disables this feature.
-    top_k : PositiveInt 
+    # Roughly how many experts do we want to be active each step? CABLE imposes a series of soft
+    # penalties to concentrate all weight in <= n_active experts at each time/parameter. Must 
+    # also be <= n_experts
+    n_active : PositiveInt 
 
     # Hidden widths of the gate network (input dim is 1 + n_param and the output is n_experts).
     hidden_widths: list[PositiveInt] = Field(min_length = 1)
@@ -436,13 +437,19 @@ class CABLELatentDynamicsSettings(ConfigBase):
     activations: ActivationSpec
 
     @model_validator(mode = "after")
-    def validate_activations(self) -> "CABLELatentDynamicsSettings":
+    def validate_activations_and_active(self) -> "CABLELatentDynamicsSettings":
         # Ensure the number of activations matches the number of hidden layers.
         _check_activation_spec(
             self.activations,
             n_layers    = len(self.hidden_widths),
             field_name  = "activations",
         )
+
+        # Check that n_active <= n_experts
+        if self.n_active > self.n_experts:
+            raise ValueError("n_active = %d, but n_experts = %d; the target number of active experts can not exceed the number of experts" % (self.n_experts, self.n_active));
+
+        # All done :) 
         return self
 
 
