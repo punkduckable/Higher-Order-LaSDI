@@ -24,6 +24,7 @@ class SINDy(InterpolatableLatentDynamics):
     def __init__(   self, 
                     n_z             : int,
                     Uniform_t_Grid  : bool,
+                    n_p             : int,
                     config          : SINDyLatentDynamicsConfig) -> None:
         r"""
         Initializes a SINDy latent-dynamics object.
@@ -51,6 +52,9 @@ class SINDy(InterpolatableLatentDynamics):
             If True, each trajectory has uniform time spacing and we can use the higher-order
             finite-difference stencil. Otherwise, nonuniform-grid finite differences are used.
 
+        n_p : int 
+            The number of (scalar) parameters in the parameter space.
+
         config : dict
             The latent-dynamics configuration dictionary. It must three keys: `type`, `trainable`,
             and `sindy`. It must have `config["type"] == "sindy"` and `config["sindy"]` should be a 
@@ -74,6 +78,7 @@ class SINDy(InterpolatableLatentDynamics):
             n_z            = n_z, 
             n_coefs        = n_z*(n_z + 1), 
             n_IC           = 1, 
+            n_p            = n_p,
             Uniform_t_Grid = Uniform_t_Grid,
             trainable      = config.trainable,
             config         = config);

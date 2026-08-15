@@ -26,6 +26,7 @@ class DampedSpring(InterpolatableLatentDynamics):
     def __init__(   self, 
                     n_z             :   int, 
                     Uniform_t_Grid  :   bool,
+                    n_p             :   int, 
                     config          :   dict) -> None:
         r"""
         Initializes a DampedSpring latent-dynamics object.
@@ -54,6 +55,9 @@ class DampedSpring(InterpolatableLatentDynamics):
             Selects uniform-grid or nonuniform-grid finite differences when estimating
             accelerations from latent trajectories.
 
+        n_p : int 
+            The number of (scalar) parameters in the parameter space.
+
         config : dict
             The latent-dynamics configuration dictionary. It must three keys: `type`, `trainable`,
             and `spring`. It must have `config["type"] == "spring"` and `config["spring"]` should 
@@ -77,6 +81,7 @@ class DampedSpring(InterpolatableLatentDynamics):
             n_z             = n_z, 
             n_coefs         = n_z*(2*n_z + 1),
             n_IC            = 2,
+            n_p             = n_p,
             Uniform_t_Grid  = Uniform_t_Grid, 
             trainable       = config.trainable,
             config          = config);

@@ -26,6 +26,7 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
     def __init__(   self,
                     n_z             :   int,
                     Uniform_t_Grid  :   bool,
+                    n_p             :   int,
                     config          :   dict) -> None:
         r"""
         Initializes a DampedSpring_weak object. This is a subclass of the LatentDynamics class which
@@ -52,6 +53,9 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
             specific parameter value). The value of this setting determines which finite difference
             method we use to compute time derivatives.
 
+        n_p : int 
+            The number of (scalar) parameters in the parameter space.
+
         config : dict
             The latent-dynamics configuration dictionary. It must three keys: `type`, `trainable`,
             and `spring_w`. It must have `config["type"] == "spring_w"` and `config["spring_w"]`
@@ -77,6 +81,7 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
             n_z             = n_z,
             n_coefs         = n_z*(2*n_z + 1),
             n_IC            = 2,
+            n_p             = n_p,
             Uniform_t_Grid  = Uniform_t_Grid,
             trainable       = config.trainable,
             config          = config);
@@ -86,6 +91,7 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
             n_z             = n_z,
             n_coefs         = n_z*(2*n_z + 1),
             n_IC            = 2,
+            n_p             = n_p,
             Uniform_t_Grid  = Uniform_t_Grid,
             trainable       = config.trainable,
             config          = config);

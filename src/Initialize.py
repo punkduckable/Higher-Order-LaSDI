@@ -187,12 +187,14 @@ def Initialize_Trainer(
         latent_dynamics : LatentDynamics = ld_dict[ld_type]( 
                                                 n_z             = encoder_decoder.n_z, 
                                                 Uniform_t_Grid  = physics.Uniform_t_Grid,
+                                                n_p             = param_space.n_p
                                                 switch_time     = physics.switch_time,
                                                 config          = config.latent_dynamics);
     else:
         latent_dynamics : LatentDynamics = ld_dict[ld_type]( 
                                             n_z             = encoder_decoder.n_z, 
                                             Uniform_t_Grid  = physics.Uniform_t_Grid,
+                                            n_p             = param_space.n_p
                                             config          = config.latent_dynamics);
     
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.

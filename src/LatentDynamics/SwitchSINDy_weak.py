@@ -24,6 +24,7 @@ class SwitchSINDy_weak(WeakLatentDynamics, SwitchSINDy):
     def __init__(   self,
                     n_z             : int,
                     Uniform_t_Grid  : bool,
+                    n_p             : int,
                     switch_time     : callable,
                     config          : SwitchSINDyWeakLatentDynamicsConfig) -> None:
         r"""
@@ -52,6 +53,9 @@ class SwitchSINDy_weak(WeakLatentDynamics, SwitchSINDy):
             Whether each trajectory has uniform time spacing. This argument is kept for API
             consistency with other latent-dynamics classes; weak compute_losses uses stored test
             functions rather than finite differences.
+
+        n_p : int 
+            The number of (scalar) parameters in the parameter space.
 
         switch_time : callable
             A function that takes a numpy.ndarray of parameter values and returns the switch time
@@ -82,6 +86,7 @@ class SwitchSINDy_weak(WeakLatentDynamics, SwitchSINDy):
             n_z             = n_z,
             n_coefs         = n_z*(n_z + 1)*2,
             n_IC            = 1,
+            n_p            = n_p,
             Uniform_t_Grid  = Uniform_t_Grid,
             trainable       = config.trainable,
             config          = config);
@@ -91,6 +96,7 @@ class SwitchSINDy_weak(WeakLatentDynamics, SwitchSINDy):
             n_z             = n_z,
             n_coefs         = n_z*(n_z + 1)*2,
             n_IC            = 1,
+            n_p             = n_p,
             Uniform_t_Grid  = Uniform_t_Grid,
             trainable       = config.trainable,
             config          = config);

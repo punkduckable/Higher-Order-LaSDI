@@ -65,6 +65,9 @@ class LatentDynamics:
         first-order dynamics typically use `n_IC = 1`, while second-order dynamics use position and
         velocity components with `n_IC = 2`.
     
+    n_p : int 
+        The number of (scalar) parameters in the parameter space.
+
     Uniform_t_Grid : bool
         Whether each trajectory's time grid is uniformly spaced; subclasses use this to choose
         appropriate finite-difference or weak-form derivative approximations.
@@ -73,7 +76,6 @@ class LatentDynamics:
         Indicates if the latent dynamics outside of the train set stochastic or deterministic.
         Determines which sampling routines we can use, among other things.
 
-            
     trainable : bool 
         Indicates if the trainer should train the parameters in this LatentDynamics object. 
         Sub-classes should configure `trainable_tensors` to return an empty list if 
@@ -118,6 +120,7 @@ class LatentDynamics:
     n_z             : int;          # Dimensionality of the latent space
     n_coefs         : int;          # Number of coefficients in the latent space dynamics
     n_IC            : int;          # Number of initial conditions to define the initial latent state.
+    n_p             : int;          # The number of parameters in the parameter space.
     Uniform_t_Grid  : bool;         # Is there an h such that the i'th frame is at t0 + i*h? Or is the spacing between frames arbitrary?
     trainable       : bool          # Should the trainer train the latent dynamics parameters?
     stochastic      : bool          # Are the latent dynamics outside of the train set stochastic or deterministic?
@@ -128,6 +131,7 @@ class LatentDynamics:
                     n_z             : int,
                     n_coefs         : int,
                     n_IC            : int, 
+                    n_p             : int,
                     Uniform_t_Grid  : bool, 
                     trainable       : bool,
                     stochastic      : bool,
@@ -157,6 +161,9 @@ class LatentDynamics:
             example, first-order dynamics typically use `n_IC = 1`, while second-order dynamics use 
             position and velocity components with `n_IC = 2`.
     
+        n_p : int 
+            The number of (scalar) parameters in the parameter space.
+
         Uniform_t_Grid : bool 
             If True, then for each parameter value, the times corresponding to the frames of the 
             solution for that parameter value will be uniformly spaced. In other words, the first 
@@ -186,6 +193,7 @@ class LatentDynamics:
         self.n_z             = n_z;
         self.n_coefs         = n_coefs;
         self.n_IC            = n_IC;
+        self.n_p             = n_p;
         self.Uniform_t_Grid  = Uniform_t_Grid;
         self.trainable       = trainable;
         self.stochastic      = stochastic;

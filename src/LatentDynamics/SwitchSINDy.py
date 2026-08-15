@@ -24,6 +24,7 @@ class SwitchSINDy(InterpolatableLatentDynamics):
     def __init__(   self,
                     n_z             : int,
                     Uniform_t_Grid  : bool,
+                    n_p             : int,
                     switch_time     : callable,
                     config          : SwitchSINDyLatentDynamicsConfig) -> None:
         r"""
@@ -50,6 +51,9 @@ class SwitchSINDy(InterpolatableLatentDynamics):
             If True, each trajectory has uniform time spacing and an O(h^4) derivative stencil can
             be used. Otherwise, nonuniform-grid finite differences are used.
 
+        n_p : int 
+            The number of (scalar) parameters in the parameter space.
+            
         switch_time : callable
             A function that takes a numpy.ndarray of parameter values and returns the switch time
             for those parameter values.
@@ -76,6 +80,7 @@ class SwitchSINDy(InterpolatableLatentDynamics):
             n_z             = n_z,
             n_coefs         = n_z*(n_z + 1)*2,
             n_IC            = 1,
+            n_p             = n_p,
             Uniform_t_Grid  = Uniform_t_Grid,
             trainable       = config.trainable,
             config          = config);

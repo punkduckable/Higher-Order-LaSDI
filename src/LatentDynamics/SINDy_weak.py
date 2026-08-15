@@ -24,6 +24,7 @@ class SINDy_weak(WeakLatentDynamics, SINDy):
     def __init__(   self,
                     n_z             : int,
                     Uniform_t_Grid  : bool,
+                    n_p             : int,
                     config          : SINDyWeakLatentDynamicsConfig) -> None:
         r"""
         Initializes a SINDy_weak latent-dynamics object.
@@ -59,6 +60,9 @@ class SINDy_weak(WeakLatentDynamics, SINDy):
             consistency with other latent-dynamics classes; weak compute_losses uses stored test
             functions rather than finite differences.
 
+        n_p : int 
+            The number of (scalar) parameters in the parameter space.
+            
         config : dict
             The latent-dynamics configuration dictionary. It must three keys: `type`, `trainable`,
             and `sindy_w`. It must have `config["type"] == "sindy_w"` and `config["sindy_w"]` 
@@ -84,6 +88,7 @@ class SINDy_weak(WeakLatentDynamics, SINDy):
             n_z            = n_z,
             n_coefs        = n_z*(n_z + 1),
             n_IC           = 1,
+            n_p            = n_p,
             Uniform_t_Grid = Uniform_t_Grid,
             trainable      = config.trainable,
             config         = config);
@@ -93,6 +98,7 @@ class SINDy_weak(WeakLatentDynamics, SINDy):
             n_z            = n_z,
             n_coefs        = n_z*(n_z + 1),
             n_IC           = 1,
+            n_p            = n_p,
             Uniform_t_Grid = Uniform_t_Grid,
             trainable      = config.trainable,
             config         = config);

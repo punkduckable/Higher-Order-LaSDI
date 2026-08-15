@@ -69,6 +69,7 @@ class InterpolatableLatentDynamics(LatentDynamics):
                     n_z             : int,
                     n_coefs         : int,
                     n_IC            : int, 
+                    n_p             : int,
                     Uniform_t_Grid  : bool, 
                     trainable       : bool,
                     config          : dict) -> None:
@@ -97,6 +98,9 @@ class InterpolatableLatentDynamics(LatentDynamics):
             example, first-order dynamics typically use `n_IC = 1`, while second-order dynamics use 
             position and velocity components with `n_IC = 2`.
     
+        n_p : int 
+            The number of (scalar) parameters in the parameter space.
+
         Uniform_t_Grid : bool 
             If True, then for each parameter value, the times corresponding to the frames of the 
             solution for that parameter value will be uniformly spaced. In other words, the first 
@@ -129,6 +133,7 @@ class InterpolatableLatentDynamics(LatentDynamics):
                                 n_z                = n_z,
                                 n_coefs            = n_coefs,
                                 n_IC               = n_IC,
+                                n_p                = n_p,
                                 Uniform_t_Grid     = Uniform_t_Grid,
                                 trainable          = trainable,
                                 stochastic         = True,
