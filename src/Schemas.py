@@ -681,22 +681,6 @@ class FOMRolloutSettings(ConfigBase):
         return self
 
 
-class ROMDiscrepancySettings(ConfigBase):
-    # Should we draw samples of the latent dynamics, or use the mean? Note that if our LD model 
-    # is not stochastic, may not be supported (at the very best, it will do nothing).
-    sample_test_LD: bool
-
-    # How many samples should we draw for each testing parameter combination? Only required 
-    # if `sample_test_LD = True`. Ignored when `sample_test_LD = False`.
-    n_samples: PositiveInt | None = None
-
-    @model_validator(mode = "after")
-    def validate_sampling(self) -> "ROMDiscrepancySettings":
-        if self.sample_test_LD and self.n_samples is None:
-            raise ValueError("n_samples must be set if sample_test_LD = True.");
-        return self
-
-
 class FOMVarianceSamplerConfig(BaseSamplerConfig):
     type            : Literal["FOM_Variance"]
     FOM_Variance    : FOMVarianceSettings
@@ -709,7 +693,6 @@ class FOMRolloutSamplerConfig(BaseSamplerConfig):
 
 class ROMDiscrepancySamplerConfig(BaseSamplerConfig):
     type            : Literal["ROM_Discrepancy"]
-    ROM_Discrepancy : ROMDiscrepancySettings
 
 
 SamplerConfig = Annotated[

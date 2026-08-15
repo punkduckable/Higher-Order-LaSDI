@@ -28,7 +28,7 @@ from    Physics                 import  Explicit, ExplicitSecondOrder;
 # from  Physics.KleinGordon             import  KleinGordon;           # mfem dependency.
 # from  Physics.Telegraphers            import  Telegraphers;          # mfem dependency.
 
-from    Sample                  import  Sampler, FOM_Rollout, FOM_Variance;
+from    Sample                  import  Sampler, FOM_Rollout, FOM_Variance, ROM_Discrepancy;
 from    Schemas                 import  ExperimentConfig, validate_experiment_config;
 
 # Set up logger.
@@ -65,7 +65,8 @@ trainer_dict = {                'First_Order_Rollout'       : First_Order_Rollou
                                 'Second_Order_Weak'         : Second_Order_Weak};
 
 sampler_dict = {                'FOM_Rollout'               : FOM_Rollout,
-                                'FOM_Variance'              : FOM_Variance};
+                                'FOM_Variance'              : FOM_Variance,
+                                'ROM_Discrepancy'           : ROM_Discrepancy};
 
 physics_dict = {                'Burgers'                   : Burgers.Burgers,
                                 'BurgersSecondOrder'        : BurgersSecondOrder.Burgers,
