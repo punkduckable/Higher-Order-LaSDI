@@ -7,10 +7,10 @@ import pytest
 SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.append(SRC)
 
-import Plotting.Plot as Plot
-from ParameterSpace import ParameterSpace
-from Plotting.Plot import Plot_Heatmap
-from Schemas import ParameterSpaceConfig
+import HLaSDI.Plotting.Plot as Plot
+from HLaSDI.ParameterSpace import ParameterSpace
+from HLaSDI.Plotting.Plot import Plot_Heatmap
+from HLaSDI.Schemas import ParameterSpaceConfig
 
 
 def _parameter_space(sample_sizes):

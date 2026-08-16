@@ -9,11 +9,11 @@ from pydantic import ValidationError
 SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.append(SRC)
 
-from LatentDynamics import LatentDynamics, SINDy
-from Interpolate import GPInterpolate
-import Interpolate.GaussianProcess as GPModule
-from Plotting.Metrics import flatten_coefficients
-from Schemas import (
+from HLaSDI.LatentDynamics import LatentDynamics, SINDy
+from HLaSDI.Interpolate import GPInterpolate
+import HLaSDI.Interpolate.GaussianProcess as GPModule
+from HLaSDI.Plotting.Metrics import flatten_coefficients
+from HLaSDI.Schemas import (
     DampedSpringLatentDynamicsConfig,
     DampedSpringWeakLatentDynamicsConfig,
     SINDyLatentDynamicsConfig,
@@ -230,8 +230,8 @@ def test_interpolate_rejects_non_tensor_values():
         interp = GPInterpolate()
         interp.update_train_coefs({(0.0,): {"A": numpy.zeros((1, 1))}})
 
-from LatentDynamics import DampedSpring, DampedSpring_weak, SINDy_weak, SwitchSINDy_weak
-from Utilities.FiniteDifference import Derivative1_Order4
+from HLaSDI.LatentDynamics import DampedSpring, DampedSpring_weak, SINDy_weak, SwitchSINDy_weak
+from HLaSDI.Utilities.FiniteDifference import Derivative1_Order4
 
 
 def test_damped_spring_initialize_coefficients_uses_K_C_b_names():
@@ -340,7 +340,7 @@ def test_interpolatable_simulate_uses_train_coefs_before_interpolator():
     assert dummy.mean_calls == 1
 
 
-from LatentDynamics import LatentDynamics, WeakLatentDynamics
+from HLaSDI.LatentDynamics import LatentDynamics, WeakLatentDynamics
 
 
 def _weak_base_config(test_func_type="PC-poly"):
@@ -489,7 +489,7 @@ def test_get_uniform_grid_no_p_argument():
     assert numpy.allclose(a_s, numpy.array([0.0, 0.25, 0.5]))
     assert numpy.allclose(b_s, numpy.array([0.5, 0.75, 1.0]))
 
-from Trainer import Trainer
+from HLaSDI.Trainer import Trainer
 
 
 def test_base_trainer_noise_uses_clean_backup_and_preserves_initial_frame():

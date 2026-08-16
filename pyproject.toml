@@ -27,3 +27,4 @@ pymfem = [
 
 [tool.uv]
 package = false
+

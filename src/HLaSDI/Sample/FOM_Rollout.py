@@ -1,0 +1,361 @@
+# -------------------------------------------------------------------------------------------------
+# Imports and Setup
+# -------------------------------------------------------------------------------------------------
+
+import  logging;
+
+import  torch;
+import  numpy;
+
+from    HLaSDI.Enums                       import  NextStep;  
+from    HLaSDI.Trainer                     import  Trainer;
+from    HLaSDI.Rollouts                    import  Sample_Rollouts, Mean_Rollout;
+from    HLaSDI.EncoderDecoder              import  EncoderDecoder;
+from    HLaSDI.Schemas                     import  FOMRolloutSamplerConfig
+from    HLaSDI.Sample.Sampler              import  Sampler;
+
+
+# Setup logger.
+LOGGER : logging.Logger = logging.getLogger(__name__);
+
+
+
+
+# -------------------------------------------------------------------------------------------------
+# FOM_Rollout class
+# -------------------------------------------------------------------------------------------------
+
+class FOM_Rollout(Sampler):
+    def __init__(self, config : FOMRolloutSamplerConfig):
+        """
+        Initializes a "FOM_Rollout" Sampler object. This class defines the "worst" parameter 
+        as the testing parameter combination (outside of the training set) that produces the 
+        largest rollout error. The rollout error is either averaged empirically over samples of
+        the coefficient posterior distribution, or computed from the posterior mean latent
+        dynamics when sampling is disabled. This works by first computing the absolute rollout
+        error, then optionally normalizing it to get a relative error.
+
+        This is an intrusive sampler in that it assumes we have access to the true solution for 
+        every parameter combination in the testing set.
+        
+        A FOM_Rollout object has a few settings: `sample_test_LD`, `n_samples`,
+        `normalized_FOM`, and `error_normalization`.
+
+        `sample_test_LD` specifies whether we draw samples from the latent-dynamics coefficient
+        posterior. If this is False, we use the posterior mean latent dynamics instead.
+        It defaults to True for compatibility with the historical sampled-rollout behavior.
+
+        `n_samples` is an integer specifying the number of samples we draw from the coefficient
+        posterior distribution when `sample_test_LD` is True. It is not required when
+        `sample_test_LD` is False.
+
+        `normalized_FOM` is a boolean specifying if we should use normalized or denormalized 
+        FOM values to compute the absolute error.
+
+        `error_normalization` specifies how we should normalize the absolute error. This can 
+        be `none` (use absolute error; best when using normalized absolute error), `global_std` 
+        (uses the standard deviation of U_Train for the p'th IC as the normalizing factor for 
+        the p'th component of the absolute error) or `trajectory_std` (which divides the absolute
+        error for the p'th IC of the current parameter combination by the std of the p'th component
+        of the true solution).
+
+        
+
+        -------------------------------------------------------------------------------------------
+        Arguments:
+        -------------------------------------------------------------------------------------------
+
+        config: FOMRolloutSamplerConfig
+            The 'sampler' portion of the .yml configuration file. Should contain a 'type' 
+            attribute whose value is "FOM_Rollout", as well as a "FOM_Rollout" key whose value 
+            is a dictionary with `sample_test_LD`, `normalized_FOM`, and
+            `error_normalization`, plus `n_samples` when `sample_test_LD` is True. See above.
+        """
+        
+        # Schema validation happens at configuration load time, so this check is only a boundary
+        # assertion that Initialize passed the right sampler schema object.
+        assert isinstance(config, FOMRolloutSamplerConfig), "config object SamplerConfig, got %s" % str(type(config))
+
+        sub = config.FOM_Rollout;
+        super().__init__(requires_stochastic_LD = sub.sample_test_LD, config = config);
+
+        self.sample_test_LD : bool = sub.sample_test_LD;
+        if self.sample_test_LD == True:
+            self.n_samples : int = int(sub.n_samples);
+        else:
+            self.n_samples : int | None = None;
+
+        # Config key: normalized_FOM (bool). If True, compute errors in normalized units;
+        # if False, compute errors in physical units (requires trainer normalization stats).
+        self.normalized_FOM : bool = bool(sub.normalized_FOM);
+
+        # Config key: error_normalization
+        self.error_normalization : str = str(sub.error_normalization).lower();
+
+        # Optional epsilon used for std-based normalizations
+        self.eps : float = float(sub.eps);
+
+
+    def Sample(self, trainer : Trainer) -> NextStep:
+        """
+        This function identifies the combination of testing parameters (which are not in the training 
+        set) that has the largest rollout error with the corresponding true solution. If
+        `sample_test_LD` is True, this error is averaged across `n_samples` sampled rollouts. If it
+        is False, the error is computed from the posterior mean latent dynamics. We add this
+        combination of parameters to the training set, then hand it off ready to generate the new
+        training solution (and add it to the trainer).
+
+        How this works is fairly simple: We begin by finding every testing parameter which is not 
+        in the training set. For each parameter combination, we encode its IC and either draw
+        `n_samples` samples of the posterior distribution for the coefficients evaluated at the
+        current combination of parameters, or use the posterior mean coefficients. This gives us
+        one or more IVPs in the latent space, which we solve forward in time to predict the future
+        latent states. We decode these trajectories and compare each one to the ground truth for
+        this combination of parameter values.
+        
+        Next, we compute the sum (across samples, time derivatives/number of ICs, and time steps) of 
+        the relative errors between the samples and the corresponding ground truth. We do this for 
+        each parameter combination, then select the one which gives the largest value. This is the 
+        parameter combination that we add to the training set. 
+
+
+        
+        -----------------------------------------------------------------------------------------------
+        Arguments
+        -----------------------------------------------------------------------------------------------
+
+        Trainer : Trainer
+            The trainer object we use throughout this process.
+
+
+
+        -----------------------------------------------------------------------------------------------
+        Returns
+        -----------------------------------------------------------------------------------------------
+
+        A NextStep.RunSample object indicating we are ready to add the solution for the new training 
+        parameter to the trainer's U_Train attribute.
+        """
+
+        # ---------------------------------------------------------------------------------------------
+        # Setup
+
+        trainer.timer.start("new_sample");
+        assert len(trainer.U_Test)             >  0,                                    "len(trainer.U_Test) = %d" % len(trainer.U_Test);
+        assert len(trainer.U_Test)             == trainer.param_space.n_test(),         "len(trainer.U_Test) = %d, trainer.param_space.n_test() = %d" % (len(trainer.U_Test), trainer.param_space.n_test());
+        trainer._check_train_coefficients();
+        if self.requires_stochastic_LD:
+            assert trainer.latent_dynamics.stochastic,                                  "This sampler requires a stochastic LD model, but got one that is not.";
+        LOGGER.info('\n~~~~~~~ Finding New Point ~~~~~~~');
+
+
+        # Move the encoder_decoder to the cpu (this is where all the GP stuff happens). Remember 
+        # that train_coefs should specify the coefficients from that iteration. 
+        encoder_decoder_device : torch.device= next(trainer.encoder_decoder.parameters()).device;
+        encoder_decoder : EncoderDecoder    = trainer.encoder_decoder.cpu();
+        n_test          : int               = trainer.param_space.n_test();
+        n_train         : int               = trainer.param_space.n_train();
+
+
+
+        # ---------------------------------------------------------------------------------------------
+        # Find the candidate parameters ({test set} - {train set}).
+
+        # Find the candidate parameters (the elements of the testing set not in the training set).
+        candidate_parameters    : list[numpy.ndarray]       = [];
+        t_Candidates            : list[torch.Tensor]        = [];
+        U_Candidates            : list[list[torch.Tensor]]  = [];
+        for i in range(n_test):
+            ith_Test_param = trainer.param_space.test_space[i, :];
+            
+            # Check if the i'th testing parameter is in the training set (all close returns True if
+            # the two arrays are equal to within a tolerance)
+            in_train : bool = False;
+            for j in range(n_train):
+                if numpy.allclose(trainer.param_space.train_space[j, :], ith_Test_param, rtol = 1e-12, atol = 1e-14):
+                    in_train = True;
+                    break;
+            
+            # If not, add it to the set of candidates
+            if(in_train == False):
+                candidate_parameters.append(ith_Test_param);
+                t_Candidates.append(trainer.t_Test[i]);
+                U_Candidates.append(trainer.U_Test[i]);
+        
+        # Concatenate the candidates to form an array of shape (n_candidates, n_param).
+        n_candidates : int = len(candidate_parameters);
+        LOGGER.info("There are %d candidate testing parameters (%d in the testing space, %d in the training set)" % (n_candidates, n_test, n_train));
+        assert n_candidates >= 1, "n_candidates = %d" % n_candidates;
+        candidate_parameters    = numpy.array(candidate_parameters);
+
+
+        # ---------------------------------------------------------------------------------------------
+        # Generate the latent trajectories.
+
+        if self.sample_test_LD:
+            LOGGER.debug("Sampling roms with %d rollouts per candidate" % self.n_samples);
+            Zis_Samples : list[list[numpy.ndarray]] = Sample_Rollouts(
+                                                        encoder_decoder     = encoder_decoder, 
+                                                        physics             = trainer.physics,
+                                                        latent_dynamics     = trainer.latent_dynamics, 
+                                                        param_grid          = candidate_parameters, 
+                                                        t_Grid              = t_Candidates, 
+                                                        n_samples           = self.n_samples, 
+                                                        trainer             = trainer);
+        else:
+            LOGGER.debug("Using mean latent dynamics rollout for each candidate (no sampling)");
+            Zis_Raw : list[list[numpy.ndarray]] = Mean_Rollout(
+                                                        encoder_decoder     = encoder_decoder, 
+                                                        physics             = trainer.physics,
+                                                        latent_dynamics     = trainer.latent_dynamics, 
+                                                        param_grid          = candidate_parameters, 
+                                                        t_Grid              = t_Candidates, 
+                                                        trainer             = trainer);  
+
+            # Reshape each component of Zi to have shape [n_t_i, 1, n_z]. This matches the
+            # Sample_Rollouts output contract, using a single pseudo-sample for the mean rollout.
+            Zis_Samples : list[list[numpy.ndarray]] = [];
+            for Zi_raw in Zis_Raw:
+                ith_Zs : list[numpy.ndarray] = [];
+                for Zij_raw in Zi_raw:
+                    ith_Zs.append(numpy.expand_dims(Zij_raw, axis = 1));
+                Zis_Samples.append(ith_Zs);
+                    
+
+        # ---------------------------------------------------------------------------------------------
+        # Decode the samples and compute relative errors
+
+        LOGGER.debug("Setting up arrays to hold relative errors");
+        n_samples   : int   = self.n_samples if self.n_samples is not None else 1;
+        n_IC        : int   = trainer.n_IC;
+
+        # i'th element is an n_IC element list whose j'th element is an array of shape
+        # n_samples x n_t_i shape array whose [p, q] element holds the relative error between 
+        # the p'th sample's prediction of the j'th time derivative of the FOM solution corresponding 
+        # to the i'th combination of candidate parameters at the q'th time step.
+        Rel_Error   : list[list[numpy.ndarray]] = [];                   # (n_candidates)
+
+        for i in range(n_candidates):
+            # Initialize lists for the i'th combination of parameter values
+            Rel_Error_i : list[numpy.ndarray]   = [];                   # (n_IC)
+
+            # Fetch n_t_i.
+            n_t_i : int = t_Candidates[i].shape[0];
+
+            # Build an array for each derivative of the FOM solution.
+            for j in range(n_IC):
+                Rel_Error_i.append(numpy.zeros((n_samples, n_t_i), dtype = numpy.float32));
+
+            # Append the lists for the i'th combination to the overall lists.
+            Rel_Error.append(Rel_Error_i);
+        
+
+
+        # ---------------------------------------------------------------------------------------------
+        # Precompute global denominators per IC if requested.
+
+        global_denoms = None
+        if self.error_normalization == 'global_std':
+            if self.normalized_FOM == True:
+                # Use the current (possibly normalized) stored test set directly.
+                _, stds = trainer._compute_mean_std_from_U(trainer.U_Train);
+                global_denoms = [max(float(s), self.eps) for s in stds];
+            else:  # denormalized
+                if hasattr(trainer, 'has_normalization') and trainer.has_normalization():
+                    # If normalization is affine: std_phys = std_norm * data_std. For test-normalized data, std_norm ~ 1.
+                    global_denoms = [max(float(trainer.data_std[j].item()), self.eps) for j in range(trainer.n_IC)];
+                else:
+                    _, stds = trainer._compute_mean_std_from_U(trainer.U_Train);
+                    global_denoms = [max(float(s), self.eps) for s in stds];
+
+
+        # ---------------------------------------------------------------------------------------------
+        # Compute relative errors.
+
+        max_Total_Rel_Error : float = -1.0;
+        m_index             : int   = 0;
+
+        # Candidate_parameters is a list[ndarray]; make it an ndarray for indexing/logging.
+        candidate_parameters = numpy.asarray(candidate_parameters);
+
+        for i in range(n_candidates):
+            n_t_i       : int                   = t_Candidates[i].shape[0]
+            U_Cand_i    : list[torch.Tensor]    = U_Candidates[i]  # (n_IC)
+
+            # Prepare true trajectory arrays in requested units.
+            U_true_np : list[numpy.ndarray] = []
+            for p in range(n_IC):
+                arr = U_Cand_i[p].detach().numpy()
+                if (self.normalized_FOM == False) and hasattr(trainer, 'has_normalization') and trainer.has_normalization():
+                    arr = trainer.denormalize_np(arr, p)
+                U_true_np.append(arr)
+
+            # Compute trajectory-specific denominators if requested.
+            traj_denoms = None;
+            if self.error_normalization == 'trajectory_std':
+                traj_denoms = [max(float(numpy.std(U_true_np[p])), self.eps) for p in range(n_IC)]
+
+            # Accumulate a score: avg over samples at each time -> max over time -> sum over ICs.
+            Total_i = 0.0
+            for p in range(n_IC):
+                # Compute denominator
+                if self.error_normalization == 'none':
+                    denom_p = 1.0;
+                elif self.error_normalization == 'global_std':
+                    denom_p = float(global_denoms[p]);
+                else:  # trajectory_std
+                    denom_p = float(traj_denoms[p]);
+
+                # Build per-sample per-time errors for this derivative.
+                err_samples = numpy.zeros((n_samples, n_t_i), dtype = numpy.float32)
+                for j in range(n_samples):
+                    # Decode the j'th set of samples for the i'th combination of parameters.
+                    Zis_sample_ij : list[torch.Tensor] = [];
+                    for k in range(n_IC):
+                        Zis_sample_ij.append(torch.Tensor(Zis_Samples[i][k][:, j, :]));
+                    U_Pred_ij : tuple[torch.Tensor] = encoder_decoder.Decode(*Zis_sample_ij);
+
+                    # Convert to numpy and denormalize.
+                    U_pred_np = U_Pred_ij[p].detach().numpy();
+                    if self.normalized_FOM == False and hasattr(trainer, 'has_normalization') and trainer.has_normalization():
+                        U_pred_np = trainer.denormalize_np(U_pred_np, p);
+
+                    # For each frame, compute the mean absolute error across the spatial dimensions 
+                    # (vectorized over spatial dims; loop only over time) between the true and 
+                    # predicted FOM solutions, then divide by denom_p (which may be candidate 
+                    # specific).
+                    for t_idx in range(n_t_i):
+                        err_samples[j, t_idx] = numpy.mean(numpy.abs(U_pred_np[t_idx, ...] - U_true_np[p][t_idx, ...])) / denom_p;
+
+                # Average across the samples.
+                mean_over_samples = numpy.mean(err_samples, axis = 0);
+
+                # Add the contribution for the p'th IC to the total for the i'th candidate.
+                Total_i += float(numpy.max(mean_over_samples));
+
+            # Check if we have a new "worst" parameter combination.
+            if Total_i > max_Total_Rel_Error:
+                LOGGER.info("Found new largest sampling score (%f) with parameter combination %s" % (Total_i, str(candidate_parameters[i])));
+                max_Total_Rel_Error = Total_i;
+                m_index             = i;
+
+
+
+        # ---------------------------------------------------------------------------------------------
+        # Wrap up.
+
+        # Move the model back to its original device now that decoding is finished.
+        trainer.encoder_decoder.to(encoder_decoder_device);
+
+        # We have found the testing parameter we want to add to the training set. Fetch it, then
+        # stop the timer and return the parameter. 
+        new_sample : numpy.ndarray = candidate_parameters[m_index, :].reshape(1, -1);
+        LOGGER.info('New param: ' + str(numpy.round(new_sample, 4)) + '\n');
+        trainer.timer.end("new_sample");
+
+        # Now, append the new sample to the training set
+        trainer.param_space.appendTrainSpace(new_sample);
+
+        # Now that we know the new points we need to generate simulations for, we need to get ready to
+        # actually run those simulations.
+        return NextStep.RunSample;

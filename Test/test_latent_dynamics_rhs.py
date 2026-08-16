@@ -7,8 +7,8 @@ import torch
 SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.append(SRC)
 
-from LatentDynamics import CABLE, DampedSpring, DampedSpring_weak, SINDy, SINDy_weak, SwitchSINDy, SwitchSINDy_weak
-from Schemas import (
+from HLaSDI.LatentDynamics import CABLE, DampedSpring, DampedSpring_weak, SINDy, SINDy_weak, SwitchSINDy, SwitchSINDy_weak
+from HLaSDI.Schemas import (
     CABLELatentDynamicsConfig,
     DampedSpringLatentDynamicsConfig,
     DampedSpringWeakLatentDynamicsConfig,

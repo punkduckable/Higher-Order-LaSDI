@@ -9,7 +9,7 @@ import torch
 SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.append(SRC)
 
-from Trainer.Trainer import Trainer
+from HLaSDI.Trainer.Trainer import Trainer
 
 
 class _LossCacheDummy:

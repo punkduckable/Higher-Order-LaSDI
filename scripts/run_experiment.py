@@ -6,10 +6,12 @@ import  sys;
 import  os;
 from    pathlib                     import  Path;
 
-# Expose `src/` as the import root for the repository sub-libraries.
+# Expose `src/` as the import root for the HLaSDI package.
 PROJECT_DIR         : Path  = Path(__file__).resolve().parent.parent;
 SRC_Path            : str   = str(PROJECT_DIR / "src");
-sys.path.append(SRC_Path);
+
+if(SRC_Path not in sys.path):
+    sys.path.insert(0, SRC_Path);
 
 import  yaml;
 import  argparse;
@@ -18,16 +20,16 @@ import  time;
 
 import  numpy;
 
-from    EncoderDecoder              import  EncoderDecoder;
-from    ParameterSpace              import  ParameterSpace;
-from    Physics                     import  Physics;
-from    Enums                       import  NextStep;
-from    LatentDynamics              import  LatentDynamics;
-from    Trainer                     import  Trainer;
-from    Initialize                  import  Initialize_Trainer;
-from    Sample                      import  Sampler;
-from    Schemas                     import  validate_experiment_config;
-from    Utilities.Logging           import  Initialize_Logger, Log_Dictionary;
+from    HLaSDI.EncoderDecoder              import  EncoderDecoder;
+from    HLaSDI.ParameterSpace       import  ParameterSpace;
+from    HLaSDI.Physics                     import  Physics;
+from    HLaSDI.Enums                import  NextStep;
+from    HLaSDI.LatentDynamics              import  LatentDynamics;
+from    HLaSDI.Trainer                     import  Trainer;
+from    HLaSDI.Initialize           import  Initialize_Trainer;
+from    HLaSDI.Sample                      import  Sampler;
+from    HLaSDI.Schemas              import  validate_experiment_config;
+from    HLaSDI.Utilities.Logging    import  Initialize_Logger, Log_Dictionary;
 
 
 # Set up the logger.

@@ -12,20 +12,22 @@ import  numpy;
 import  torch;
 import  matplotlib.pyplot           as      plt;
 
-# Expose `src/` as the import root for the repository sub-libraries.
+# Expose `src/` as the import root for the HLaSDI package.
 PROJECT_DIR         : Path  = Path(__file__).resolve().parent.parent;
 SRC_Path            : str   = str(PROJECT_DIR / "src");
-sys.path.append(SRC_Path);
 
-from    Plotting.Metrics            import  Generate_Heatmap_Data;
-from    Plotting.Plot               import  Plot_Heatmap, Plot_Latent_Trajectories;
-from    Plotting.Plot               import  trainSpace_RelativeErrors_Heatmap;
-from    Plotting.Animate            import  make_solution_movies;
-from    Rollouts                    import  Mean_Rollout; 
-from    LatentDynamics              import  InterpolatableLatentDynamics;
-from    Utilities.Logging           import  Initialize_Logger;
-from    Initialize                  import  Initialize_Trainer;
-from    Schemas                     import  validate_experiment_config;
+if(SRC_Path not in sys.path):
+    sys.path.insert(0, SRC_Path);
+
+from    HLaSDI.Plotting.Metrics            import  Generate_Heatmap_Data;
+from    HLaSDI.Plotting.Plot               import  Plot_Heatmap, Plot_Latent_Trajectories;
+from    HLaSDI.Plotting.Plot               import  trainSpace_RelativeErrors_Heatmap;
+from    HLaSDI.Plotting.Animate            import  make_solution_movies;
+from    HLaSDI.Rollouts                    import  Mean_Rollout; 
+from    HLaSDI.LatentDynamics              import  InterpolatableLatentDynamics;
+from    HLaSDI.Utilities.Logging           import  Initialize_Logger;
+from    HLaSDI.Initialize                  import  Initialize_Trainer;
+from    HLaSDI.Schemas                     import  validate_experiment_config;
 
 # Set up the command line arguments
 parser = argparse.ArgumentParser(description        = "",

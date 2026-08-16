@@ -9,7 +9,7 @@ Higher-Order LaSDI is designed to be flexible and modular. The main workflow pie
 4. A training strategy that optimizes the encoder/decoder and latent-dynamics coefficients from data (`Trainer`).
 5. A greedy sampling strategy that selects new training parameters (`Sampler`).
 
-Each piece has a base class that defines the interface used by the rest of the code. To customize the workflow, define a subclass of the appropriate base class, implement the required methods described below, and register it in `src/Initialize.py`.
+Each piece has a base class that defines the interface used by the rest of the code. To customize the workflow, define a subclass of the appropriate base class, implement the required methods described below, and register it in `src/HLaSDI/Initialize.py`.
 
 ## Key Features
 
@@ -112,26 +112,26 @@ In general, every `Physics`, `EncoderDecoder`, `Trainer`, and `LatentDynamics` o
 ### Core Components
 
 - **`scripts/run_experiment.py`** – Main command-line driver that loads configuration files, initializes components, and runs the training pipeline
-- **`src/Trainer/`** - Training algorithms and shared training state for optimizing the encoder/decoder and latent dynamics from FOM data
+- **`src/HLaSDI/Trainer/`** - Training algorithms and shared training state for optimizing the encoder/decoder and latent dynamics from FOM data
     - `Trainer.py` – Base `Trainer` class: normalization helpers, optional native noise injection, checkpointing, loss logging, timing, and round-based training orchestration
     - `First_Order_Rollout.py` – `Trainer` subclass for first-order systems (`n_IC = 1`)
     - `First_Order_Weak.py` – first-order rollout trainer for weak-form latent dynamics
     - `Second_Order_Rollout.py` – `Trainer` subclass for second-order systems (`n_IC = 2`)
     - `Second_Order_Weak.py` – second-order rollout trainer for weak-form latent dynamics
-- **`src/Initialize.py`** – Factory functions for initializing trainers, EncoderDecoders, physics solvers, and latent dynamics from config files. You must register all new sub-classes in this file.
-- **`src/EncoderDecoder`** – Neural network architectures:
+- **`src/HLaSDI/Initialize.py`** – Factory functions for initializing trainers, EncoderDecoders, physics solvers, and latent dynamics from config files. You must register all new sub-classes in this file.
+- **`src/HLaSDI/EncoderDecoder`** – Neural network architectures:
   - `EncoderDecoder.py`: Base `EncoderDecoder` class.
   - `MLP.py`: Flexible MLP with customizable activations
   - `Autoencoder.py`: Standard autoencoder for first-order systems
   - `Autoencoder_Pair.py`: Paired autoencoder for higher-order systems (encodes multiple derivatives)
   - `CNN_3D_Autoencoder.py`: 3D convolutional autoencoder variant
-- **`src/ParameterSpace.py`** – Parameter space management, grid generation, and train/test split utilities
-- **`src/Sample/`** – Greedy sampling logic:
+- **`src/HLaSDI/ParameterSpace.py`** – Parameter space management, grid generation, and train/test split utilities
+- **`src/HLaSDI/Sample/`** – Greedy sampling logic:
   - `Sampler.py`: Base `Sampler` class (selects the next training parameter during greedy sampling)
   - `FOM_Variance.py`: Selects next point by maximizing predictive variance in decoded (FOM) space
   - `FOM_Rollout.py`: Selects next point by maximizing rollout error against the true FOM (intrusive)
-- **`src/Enums.py`** – Enumerations for workflow states (`NextStep`, `Result`)
-- **`src/Interpolate/`** - GP-backed interpolation utilities for native `LatentDynamics` coefficient dictionaries at testing parameter combinations.
+- **`src/HLaSDI/Enums.py`** – Enumerations for workflow states (`NextStep`, `Result`)
+- **`src/HLaSDI/Interpolate/`** - GP-backed interpolation utilities for native `LatentDynamics` coefficient dictionaries at testing parameter combinations.
     - `Interpolate.py` - Sample coefficients in their native form for testing combinations
         - Takes `dict[tuple[float, ...], dict[str, torch.Tensor]]` training coefficients
         - Validates that every parameter has the same string coefficient names and tensor shapes
@@ -153,14 +153,14 @@ In general, every `Physics`, `EncoderDecoder`, `Trainer`, and `LatentDynamics` o
 
 ### Physics Solvers
 
-- **`src/Physics/Physics.py`** – Base `Physics` class defining the interface
+- **`src/HLaSDI/Physics/Physics.py`** – Base `Physics` class defining the interface
 - **Built-in Python Solvers**:
   - `Burgers.py` – 1D Burgers equation
   - `Burgers2D.py` – 2D Burgers equation
   - `BurgersSecondOrder.py` – Second-order Burgers formulation
   - `Explicit.py` / `ExplicitSecondOrder.py` – Custom explicit solvers
   - `Thermal.py` – Thermal diffusion (loads from HDF5 files)
-- **PyMFEM-based Solvers** (in `src/Physics/PyMFEM/`):
+- **PyMFEM-based Solvers** (in `src/HLaSDI/Physics/PyMFEM/`):
   - `advection.py` – Advection equation
   - `wave_equation.py` – Wave equation (2nd order)
   - `klein_gordon.py` – Klein-Gordon equation (2nd order)
@@ -170,21 +170,21 @@ In general, every `Physics`, `EncoderDecoder`, `Trainer`, and `LatentDynamics` o
 
 ### Latent Dynamics
 
-- **`src/LatentDynamics/LatentDynamics.py`** – Base `LatentDynamics` class
-- **`src/LatentDynamics/SINDy.py`** – Sparse Identification of Nonlinear Dynamics
+- **`src/HLaSDI/LatentDynamics/LatentDynamics.py`** – Base `LatentDynamics` class
+- **`src/HLaSDI/LatentDynamics/SINDy.py`** – Sparse Identification of Nonlinear Dynamics
   - Uses polynomial library (currently order ≤ 1)
   - Stores native coefficient dictionaries of the form `{"A": A, "b": b}`
-- **`src/LatentDynamics/SINDy_weak.py`** – Weak-form affine SINDy dynamics
+- **`src/HLaSDI/LatentDynamics/SINDy_weak.py`** – Weak-form affine SINDy dynamics
   - Select with the config key `latent_dynamics.type: sindy_w`
   - Stores native coefficient dictionaries of the form `{"A": A, "b": b}`
-- **`src/LatentDynamics/DampedSpring.py`** – Physics-informed damped spring dynamics
+- **`src/HLaSDI/LatentDynamics/DampedSpring.py`** – Physics-informed damped spring dynamics
   - Stores native coefficient dictionaries of the form `{"K": K, "C": C, "b": b}`
-- **`src/LatentDynamics/DampedSpring_weak.py`** – Weak-form damped-spring dynamics with the same native `K`, `C`, and `b` coefficient names
-- **`src/LatentDynamics/SwitchSINDy.py`** – Switching affine SINDy dynamics with native `A_before`, `b_before`, `A_after`, and `b_after` coefficients
-- **`src/LatentDynamics/SwitchSINDy_weak.py`** – Weak-form switching affine SINDy dynamics
+- **`src/HLaSDI/LatentDynamics/DampedSpring_weak.py`** – Weak-form damped-spring dynamics with the same native `K`, `C`, and `b` coefficient names
+- **`src/HLaSDI/LatentDynamics/SwitchSINDy.py`** – Switching affine SINDy dynamics with native `A_before`, `b_before`, `A_after`, and `b_after` coefficients
+- **`src/HLaSDI/LatentDynamics/SwitchSINDy_weak.py`** – Weak-form switching affine SINDy dynamics
   - Select with the config key `latent_dynamics.type: switch_w`
   - Stores native coefficient dictionaries of the form `{"A_before": A_before, "b_before": b_before, "A_after": A_after, "b_after": b_after}`
-- **`src/LatentDynamics/CABLE.py`** – Deterministic mixture-of-affine-experts latent dynamics
+- **`src/HLaSDI/LatentDynamics/CABLE.py`** – Deterministic mixture-of-affine-experts latent dynamics
   - Select with the config key `latent_dynamics.type: cable`
   - Owns one global set of expert matrices/biases plus a trainable gate network
   - Uses `n_active` as a soft target in the tail-mass loss rather than hard top-k thresholding the RHS
@@ -299,25 +299,25 @@ class; n_IC and type need to match for this to work.
 
 ### Utilities
 
-- **`src/Utilities/FiniteDifference.py`** – Derivative approximations:
+- **`src/HLaSDI/Utilities/FiniteDifference.py`** – Derivative approximations:
   - Order 2 and Order 4 schemes for uniform grids
   - Order 2 non-uniform grid schemes
   - First and second derivatives
-- **`src/Utilities/FirstOrderSolvers.py`** – ODE solvers for first-order systems:
+- **`src/HLaSDI/Utilities/FirstOrderSolvers.py`** – ODE solvers for first-order systems:
   - RK1 (Euler), RK2, RK4 methods
-- **`src/Utilities/SecondOrderSolvers.py`** – ODE solvers for second-order systems:
+- **`src/HLaSDI/Utilities/SecondOrderSolvers.py`** – ODE solvers for second-order systems:
   - RK1, RK2, RK4 methods for second-order ODEs
-- **`src/Utilities/Logging.py`** – Logging utilities and dictionary logging
-- **`src/Utilities/Timing.py`** – `Timer` class for performance profiling
-- **`src/Utilities/MoveOptimizer.py`** – Utilities for moving optimizers between devices (CPU/GPU)
+- **`src/HLaSDI/Utilities/Logging.py`** – Logging utilities and dictionary logging
+- **`src/HLaSDI/Utilities/Timing.py`** – `Timer` class for performance profiling
+- **`src/HLaSDI/Utilities/Optimizer.py`** – Utilities for moving optimizers between devices (CPU/GPU)
 
 ### Visualization
 
-- **`src/Plot.py`** – Plotting functions:
+- **`src/HLaSDI/Plotting/Plot.py`** – Plotting functions:
   - `Plot_Latent_Trajectories()`: Visualize latent space dynamics with interpolated coefficient uncertainty
   - `Plot_Heatmap()`: parameter-space heatmaps for 2D grids, or 2D slices through 3D parameter grids
   - `trainSpace_RelativeErrors_Heatmap()`: Error visualization for training parameters
-- **`src/Animate.py`** – Animation generation:
+- **`src/HLaSDI/Plotting/Animate.py`** – Animation generation:
   - `make_solution_movies()`: Create MP4 animations of solutions
   - `_scalar_anim()`: Animations for scalar fields on 2D/3D point clouds
   - `_vector_anim()`: Animations for vector fields
@@ -393,16 +393,16 @@ Configuration files are YAML-based and specify:
 - Physics-specific parameters (grid sizes, time steps, domain bounds, etc.)
 
 See **Extending the Code** below for details on adding new Physics / LatentDynamics / Sampler /
-EncoderDecoder implementations and registering them in `src/Initialize.py`.
+EncoderDecoder implementations and registering them in `src/HLaSDI/Initialize.py`.
 
 ## Extending: Adding a new Trainer subclass
 
-The training loop is split into a base class (`src/Trainer/Trainer.py`) and concrete subclasses
+The training loop is split into a base class (`src/HLaSDI/Trainer/Trainer.py`) and concrete subclasses
 that implement one training strategy per greedy-sampling round.
 
 ### 1) Create a new subclass
 
-Create a new file under `src/Trainer/`, for example `src/Trainer/MyTrainer.py`, and implement:
+Create a new file under `src/HLaSDI/Trainer/`, for example `src/HLaSDI/Trainer/MyTrainer.py`, and implement:
 
 - `__init__(...)`, which calls `super().__init__(...)` and parses any subclass-specific config
 - `Iterate(start_iter, end_iter)` (the actual per-epoch training logic)
@@ -417,12 +417,12 @@ Follow the existing trainers (`First_Order_Rollout`, `First_Order_Weak`, `Second
 
 ### 2) Register the trainer in `Initialize.py`
 
-In `src/Initialize.py`:
+In `src/HLaSDI/Initialize.py`:
 
 1. Import your class:
 
 ```python
-from MyTrainer import MyTrainer
+from HLaSDI.Trainer.MyTrainer import MyTrainer
 ```
 
 2. Add it to `trainer_dict`:
@@ -491,6 +491,12 @@ mkdir -p "$UV_CACHE_DIR"
 uv lock
 uv sync
 ```
+
+The importable Python package namespace is `HLaSDI`, and its source lives under `src/HLaSDI/`.
+The repository scripts add `src/` to `sys.path` automatically. For interactive imports from a
+fresh shell, either run from the repository with `PYTHONPATH=src` or add `src/` to your environment,
+then use package-qualified imports such as `from HLaSDI.Initialize import Initialize_Trainer`
+rather than importing modules directly from `src`.
 
 If you want to install optional testing, notebook, and/or visualization dependencies:
 ```bash
@@ -773,7 +779,7 @@ Physics objects expose a `Uniform_t_Grid` attribute which determines derivative 
 - When `True`: Uses higher-order finite difference schemes (Order 4 when available)
 - When `False`: Uses non-uniform grid schemes (currently Order 2)
 
-The `Trainer` class automatically selects the appropriate finite difference method based on this flag. See `Derivative1_Order2_NonUniform` in `src/Utilities/FiniteDifference.py` for non-uniform grid implementation.
+The `Trainer` class automatically selects the appropriate finite difference method based on this flag. See `Derivative1_Order2_NonUniform` in `src/HLaSDI/Utilities/FiniteDifference.py` for non-uniform grid implementation.
 
 ## Extending the Code
 
@@ -781,7 +787,7 @@ New applications can be implemented by deriving from the appropriate base classe
 
 ### Adding a New Physics Solver
 
-1. **Create a subclass** of `Physics` in `src/Physics/YourSolver.py`
+1. **Create a subclass** of `Physics` in `src/HLaSDI/Physics/YourSolver.py`
 2. **Implement required methods**:
    - `__init__(...)`: Initialize solver parameters and call `super().__init__(...)` with the
      spatial metadata, `Frame_Shape`, `X_Positions`, config, parameter names, `Uniform_t_Grid`,
@@ -804,7 +810,7 @@ New applications can be implemented by deriving from the appropriate base classe
 
 ### Adding a New Latent Dynamics Model
 
-1. **Create a subclass** of `InterpolatableLatentDynamics` in `src/LatentDynamics/YourModel.py`
+1. **Create a subclass** of `InterpolatableLatentDynamics` in `src/HLaSDI/LatentDynamics/YourModel.py`
    (and `WeakLatentDynamics` as well if the model uses weak-form residuals).
 2. **Implement required methods**:
    - `__init__(...)`: Initialize model metadata, loss functions, `n_IC`, and `n_coefs`; call
@@ -842,12 +848,12 @@ damped-spring models use `{"K", "C", "b"}`.
 
 ### Adding a New Sampler (Greedy Sampling Strategy)
 
-Greedy sampling is implemented via `Sampler` classes in `src/Sample/`. A sampler selects the next
+Greedy sampling is implemented via `Sampler` classes in `src/HLaSDI/Sample/`. A sampler selects the next
 parameter point to add to the training set after each training round. Concrete samplers may be
 intrusive (using held-out FOM solutions) or non-intrusive (using ROM uncertainty such as
 interpolated coefficient variance).
 
-1. **Create a subclass** of `Sampler` in `src/Sample/YourSampler.py`.
+1. **Create a subclass** of `Sampler` in `src/HLaSDI/Sample/YourSampler.py`.
 2. **Implement required methods**:
    - `__init__(self, config)`: Call `super().__init__(config)` and parse your sampler-specific
      settings.
@@ -876,7 +882,7 @@ interpolated coefficient variance).
 
 ### Adding a New EncoderDecoder Architecture
 
-1. **Create a subclass** of `EncoderDecoder` in `src/EncoderDecoder/YourEncoderDecoder.py`.
+1. **Create a subclass** of `EncoderDecoder` in `src/HLaSDI/EncoderDecoder/YourEncoderDecoder.py`.
 2. **Implement the required interface** (minimal set):
    - `__init__(self, Frame_Shape: list[int], config: dict)`:
      - Parse `config['type']` and your type-specific sub-config.
@@ -917,16 +923,17 @@ interpolated coefficient variance).
    ```
 6. **Define how to train your architecture**:
    - If your model follows the standard `Encode` / `Decode` contract (and your losses don’t rely on architecture-specific internals), you may be able to reuse an existing trainer (e.g., `First_Order_Rollout` or `Second_Order_Rollout`).
-   - If you need architecture-specific losses or training logic, implement a new `Trainer` subclass and register it in `trainer_dict` in `src/Initialize.py`.
+   - If you need architecture-specific losses or training logic, implement a new `Trainer` subclass and register it in `trainer_dict` in `src/HLaSDI/Initialize.py`.
 
 
 ## Testing and Development
 
-The `Test/` directory contains Jupyter notebooks for testing and validating components:
-- `FiniteDifference.ipynb` – Finite difference scheme validation
-- `FirstOrderSolvers.ipynb` – First-order ODE solver tests
-- `SecondOrderSolvers.ipynb` – Second-order ODE solver tests
-- `DeriveFiniteDifference.ipynb` – Derivation of finite difference formulas
+The `Test/` directory contains pytest-based regression/unit tests for schemas, latent dynamics,
+plotting helpers, samplers, cleanup utilities, and loss logging. Run them with:
+
+```bash
+PYTHONPATH=src uv run --extra dev python -m pytest -q Test
+```
 
 ## Output and Results
 
@@ -944,7 +951,7 @@ To prevent exploding gradients during training, Trainer subclasses apply global 
 
 ### Per-parameter loss logging (`*_loss_by_param.jsonl`)
 
-During training, the trainer appends one JSON object per epoch to a JSON Lines file (see `src/Trainer/Trainer.py`):
+During training, the trainer appends one JSON object per epoch to a JSON Lines file (see `src/HLaSDI/Trainer/Trainer.py`):
 
 - Path: `results/<physics_type>_loss_by_param.jsonl` (where `<physics_type>` is `config['physics']['type']`)
 - Type: UTF-8 JSON Lines (`.jsonl`), one row per epoch

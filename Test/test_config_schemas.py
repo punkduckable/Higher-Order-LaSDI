@@ -10,7 +10,7 @@ from pydantic import ValidationError
 SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.append(SRC)
 
-from Schemas import validate_experiment_config
+from HLaSDI.Schemas import validate_experiment_config
 
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"

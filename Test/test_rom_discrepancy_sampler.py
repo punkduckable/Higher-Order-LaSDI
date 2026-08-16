@@ -8,9 +8,9 @@ import torch
 SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.append(SRC)
 
-from Enums import NextStep
-from Sample import ROM_Discrepancy
-from Schemas import ROMDiscrepancySamplerConfig
+from HLaSDI.Enums import NextStep
+from HLaSDI.Sample import ROM_Discrepancy
+from HLaSDI.Schemas import ROMDiscrepancySamplerConfig
 
 
 class _Timer:
@@ -86,7 +86,7 @@ class _Trainer:
 
 
 def test_rom_discrepancy_samples_candidate_with_largest_minimum_rhs_discrepancy(monkeypatch):
-    rom_module = importlib.import_module("Sample.ROM_Discrepancy")
+    rom_module = importlib.import_module("HLaSDI.Sample.ROM_Discrepancy")
     rollout_calls = []
 
     def mean_rollout(encoder_decoder, physics, latent_dynamics, param_grid, t_Grid, trainer):
@@ -122,6 +122,6 @@ def test_rom_discrepancy_samples_candidate_with_largest_minimum_rhs_discrepancy(
 
 
 def test_rom_discrepancy_sampler_is_exported_and_registered():
-    from Initialize import sampler_dict
+    from HLaSDI.Initialize import sampler_dict
 
     assert sampler_dict["ROM_Discrepancy"] is ROM_Discrepancy
