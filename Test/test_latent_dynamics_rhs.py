@@ -223,8 +223,9 @@ def test_cable_compute_losses_uses_dense_pre_topk_weights_for_diversity_and_tail
     losses = ld.compute_losses(
         Latent_States=[[z]],
         t_Grid=[t],
+        step=0,
         params=params,
-    )
+    ).losses
 
     assert set(losses.keys()) == {"LD", "coef", "diversity", "tail"}
     assert torch.allclose(losses["LD"][0], torch.tensor(0.0))
@@ -253,8 +254,9 @@ def test_cable_global_losses_are_not_divided_by_number_of_parameters():
     losses = ld.compute_losses(
         Latent_States=[[z], [z]],
         t_Grid=[t, t],
+        step=0,
         params=params,
-    )
+    ).losses
 
     assert torch.allclose(losses["coef"], torch.tensor(4.0))
     assert torch.allclose(losses["diversity"], torch.tensor(0.0))

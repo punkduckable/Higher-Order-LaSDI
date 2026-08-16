@@ -7,7 +7,7 @@ defines a deterministic mixture-of-affine-experts latent ODE. `DampedSpring` def
 latent dynamics, and the `_weak` variants use weak-form residual losses.
 """
 
-from    .LatentDynamics         import  LatentDynamics;
+from    .LatentDynamics         import  LatentDynamics, LD_Loss_Container;
 from    .DampedSpring           import  DampedSpring;
 from    .DampedSpring_weak      import  DampedSpring_weak;
 from    .Interpolatable         import  InterpolatableLatentDynamics;
@@ -19,6 +19,7 @@ from    .CABLE                  import  CABLE;
 from    .Weak                   import  WeakLatentDynamics;
 
 __all__ = [    "LatentDynamics",
+               "LD_Loss_Container",
                "SINDy",
                "SINDy_weak",
                "SwitchSINDy",

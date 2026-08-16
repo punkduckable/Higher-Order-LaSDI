@@ -8,6 +8,7 @@ import  numpy;
 import  torch;
 
 from    HLaSDI.LatentDynamics.Interpolatable   import  InterpolatableLatentDynamics;
+from    HLaSDI.LatentDynamics.LatentDynamics   import  LD_Loss_Container;
 from    HLaSDI.Schemas                         import  DampedSpringLatentDynamicsConfig;
 from    HLaSDI.Utilities.FiniteDifference      import  Derivative1_Order4, Derivative1_Order2_NonUniform;
 from    HLaSDI.Utilities.SecondOrderSolvers    import  RK4;
@@ -218,8 +219,9 @@ class DampedSpring(InterpolatableLatentDynamics):
         self, 
         Latent_States : list[list[torch.Tensor]],
         t_Grid        : list[torch.Tensor],
+        step          : int,
         params        : numpy.ndarray | None = None,
-    ) -> dict[str, list[torch.Tensor] | torch.Tensor]:
+    ) -> LD_Loss_Container:
         r"""
         Compute latent-dynamics, coefficient, and stability losses for training parameters.
 
@@ -342,7 +344,9 @@ class DampedSpring(InterpolatableLatentDynamics):
             loss_coef_list.append(Loss_coef);
             loss_stab_list.append(Loss_Stab);
 
-        return {'LD' : loss_LD_list, 'coef' : loss_coef_list, 'stab' : loss_stab_list};
+        losses_dict = {'LD' : loss_LD_list, 'coef' : loss_coef_list, 'stab' : loss_stab_list};
+
+        return LD_Loss_Container(losses = losses_dict, weights = self.loss_weights, params = params);
 
 
     def RHS(    self,

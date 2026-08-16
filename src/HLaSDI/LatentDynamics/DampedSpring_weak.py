@@ -9,6 +9,7 @@ import  torch;
 
 from    HLaSDI.LatentDynamics.Weak             import  WeakLatentDynamics;
 from    HLaSDI.LatentDynamics.Interpolatable   import  InterpolatableLatentDynamics;
+from    HLaSDI.LatentDynamics.LatentDynamics   import  LD_Loss_Container;
 from    HLaSDI.LatentDynamics.DampedSpring     import  DampedSpring;
 from    HLaSDI.Schemas                         import  DampedSpringWeakLatentDynamicsConfig;
 
@@ -186,8 +187,9 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
         self,
         Latent_States : list[list[torch.Tensor]],
         t_Grid        : list[torch.Tensor],
+        step          : int,
         params        : numpy.ndarray | None = None
-    ) -> dict[str, list[torch.Tensor] | torch.Tensor]:
+    ) -> LD_Loss_Container:
         r"""
         For each combination of parameter values, this function computes the weak-form
         latent-dynamics loss using the K, C, and b coefficients stored in `self.train_coefs`.
@@ -220,6 +222,9 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
             value corresponding to the j'th frame when we use the i'th combination of parameter
             values.
 
+        step : int
+            The optimizer step number.
+
         params: numpy.ndarray, shape = (n_param, n_p)
             The i'th row holds the i'th combination of parameter values. These rows are used to
             fetch weak-form test functions and the corresponding native coefficient dictionaries.
@@ -228,6 +233,8 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
+
+        loss_dict, loss_weights
 
         loss_dict : dict[str, list[torch.Tensor] | torch.Tensor]:
             A loss dictionary with three keys: LD, coef, and stab.
@@ -245,6 +252,9 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
                 The i'th element of this list is a 0-dimensional tensor whose lone element holds the
                 stability penalty for the i'th combination of parameter values (see
                 LatentDynamics.stability_penalty).
+            
+        loss_weights : dict[str, float]:
+            A dictionary (with the same keys as loss_dict) holding the weight of each loss.
         """
 
         # Run checks.
@@ -335,5 +345,6 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
             loss_stab_list.append(Loss_Stab_i);
             loss_coef_list.append(Loss_coef_i);
 
-        return {'LD' : loss_LD_list, 'coef' : loss_coef_list, 'stab' : loss_stab_list};
+        losses_dict = {'LD' : loss_LD_list, 'coef' : loss_coef_list, 'stab' : loss_stab_list};
 
+        return LD_Loss_Container(losses = losses_dict, weights = self.loss_weights, params = params);

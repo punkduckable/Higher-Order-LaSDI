@@ -19,9 +19,11 @@ from    pydantic    import  BaseModel, ConfigDict, Field, TypeAdapter, model_val
 
 
 class ConfigBase(BaseModel):
-    """Base class for all config sections."""
+    """Base class for all validated config schemas."""
 
-    model_config = ConfigDict(extra = "forbid", populate_by_name = True)
+    model_config = ConfigDict(extra = "forbid");
+
+
 
 # Some commonly used constrained datatypes
 PositiveInt         = Annotated[int,   Field(ge = 1)]

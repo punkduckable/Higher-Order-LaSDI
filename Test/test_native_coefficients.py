@@ -263,7 +263,7 @@ def test_damped_spring_compute_losses_uses_native_K_C_b_rhs():
     b = torch.tensor([0.1])
     ld.set_train_coefs(params[0], {"K": K, "C": C, "b": b}, torch.device("cpu"))
 
-    losses = ld.compute_losses([[z, dz]], [t], params)
+    losses = ld.compute_losses([[z, dz]], [t], step=0, params=params).losses
 
     d2z = Derivative1_Order4(dz, float((t[1] - t[0]).item()))
     rhs = z @ K.T + dz @ C.T + b.reshape(1, -1)
@@ -407,7 +407,7 @@ def test_damped_spring_weak_fit_zero_initializes_and_compute_losses_requires_wei
     assert all(tensor.requires_grad and tensor.is_leaf for tensor in coefs.values())
 
     with pytest.raises(KeyError):
-        ld.compute_losses([[z, dz]], [t], params)
+        ld.compute_losses([[z, dz]], [t], step=0, params=params)
 
 
 def test_sindy_weak_fit_zero_initializes_and_compute_losses_requires_weights():
@@ -427,7 +427,7 @@ def test_sindy_weak_fit_zero_initializes_and_compute_losses_requires_weights():
     assert ld.trainable_tensors() == [coefs["A"], coefs["b"]]
 
     with pytest.raises(KeyError):
-        ld.compute_losses([[z]], [t], params)
+        ld.compute_losses([[z]], [t], step=0, params=params)
 
 
 def test_sindy_weak_compute_losses_with_weight_functions_returns_losses():
@@ -438,7 +438,7 @@ def test_sindy_weak_compute_losses_with_weight_functions_returns_losses():
 
     ld.add_weight_functions(params[0], t)
     ld.initialize_coefficients([[z]], [t], torch.device("cpu"), params)
-    losses = ld.compute_losses([[z]], [t], params)
+    losses = ld.compute_losses([[z]], [t], step=0, params=params).losses
 
     assert len(losses["LD"]) == 1
     assert len(losses["coef"]) == 1

@@ -6,7 +6,7 @@ import  os;
 from    pathlib                                 import  Path;
 
 # Resolve paths relative to the project root (Higher-Order-LaSDI/), independent of CWD.
-Figures_Path        : str   = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "Figures"));
+Figures_Path        : str   = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "Figures"));
 
 import  logging;
 

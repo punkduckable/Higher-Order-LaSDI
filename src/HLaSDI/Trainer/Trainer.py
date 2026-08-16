@@ -15,7 +15,7 @@ from    HLaSDI.EncoderDecoder              import  EncoderDecoder;
 from    HLaSDI.Utilities.Timing            import  Timer;
 from    HLaSDI.ParameterSpace              import  ParameterSpace;
 from    HLaSDI.Physics                     import  Physics;
-from    HLaSDI.LatentDynamics              import  LatentDynamics, InterpolatableLatentDynamics;
+from    HLaSDI.LatentDynamics              import  LatentDynamics, LD_Loss_Container;
 from    HLaSDI.Schemas                     import  BaseTrainerConfig;
 
 # Setup Logger
@@ -309,8 +309,8 @@ class Trainer:
             self.device = 'cpu';
 
         # Set paths for checkpointing/results.
-        src_dir     = os.path.dirname(os.path.abspath(__file__));                       # .../Higher-Order-LaSDI/src/Trainer
-        project_dir = os.path.abspath(os.path.join(src_dir, os.pardir, os.pardir));     # .../Higher-Order-LaSDI
+        src_dir     = os.path.dirname(os.path.abspath(__file__));                       # .../Higher-Order-LaSDI/src/HLaSDI/Trainer
+        project_dir = os.path.abspath(os.path.join(src_dir, os.pardir, os.pardir, os.pardir));  # .../Higher-Order-LaSDI
         self.path_checkpoint    : str = os.path.join(project_dir, "checkpoint");
         self.path_results       : str = os.path.join(project_dir, "results");
 
@@ -627,33 +627,25 @@ class Trainer:
 
     def _process_latent_dynamics_losses(
             self,
-            raw_loss_dict  : dict[str, list[torch.Tensor] | torch.Tensor],
-            params         : numpy.ndarray,
+            raw_LD_Losses  : LD_Loss_Container,
             device         : torch.device | str,
     ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
         r"""
         Cache, aggregate, and weight an LD-owned loss dictionary.
 
-        `LatentDynamics.compute_losses(...)` returns a dictionary whose keys must match
-        `latent_dynamics.loss_weights`. Each value is either a length-n_train list of scalar tensors
-        for parameter-specific losses or one scalar tensor for a global loss. This helper validates
-        that contract, caches per-parameter entries when they exist, caches one total for every
-        latent-dynamics loss key, and forms the weighted latent-dynamics contribution to the
-        trainer objective.
+        `LatentDynamics.compute_losses(...)` returns an `LD_Loss_Container` whose loss keys must
+        match its weight keys. Each loss value is either a length-n_train list of scalar tensors for
+        parameter-specific losses or one scalar tensor for a global loss. This helper caches
+        per-parameter entries when they exist, caches one total for every latent-dynamics loss key,
+        and forms the weighted latent-dynamics contribution to the trainer objective.
 
 
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
 
-        raw_loss_dict : dict[str, list[torch.Tensor] | torch.Tensor]
-            The loss dictionary returned by `self.latent_dynamics.compute_losses(...)`. Its keys
-            must exactly match `self.latent_dynamics.loss_weights`.
-
-        params : numpy.ndarray, shape = (n_train, n_p)
-            Training parameter values corresponding to any per-parameter loss lists in
-            `raw_loss_dict`. The i'th row is used as the logging key for the i'th entry of each
-            per-parameter loss list.
+        raw_LD_Losses : LD_Loss_Container
+            A LD_Loss_Container object housing the losses and their weights. 
 
         device : torch.device or str
             Device on which to create the initial zero tensor for the weighted latent-dynamics loss.
@@ -664,41 +656,36 @@ class Trainer:
         -------------------------------------------------------------------------------------------
 
         loss_dict : dict[str, torch.Tensor]
-            Unweighted scalar total for each latent-dynamics loss key. Per-parameter loss lists are
-            summed across parameters; global scalar losses are passed through unchanged.
+            Unweighted scalar total for each latent-dynamics loss with a non-zero weight. 
+            Per-parameter loss lists are summed across parameters; global scalar losses are 
+            passed through unchanged.
 
         weighted_loss_sum : torch.Tensor
             Scalar tensor equal to `sum(self.latent_dynamics.loss_weights[key] * loss_dict[key])`.
         """
 
-        # Ensure the keys in the loss dict match those in the LD loss weights dict.
-        expected_keys : set[str] = set(self.latent_dynamics.loss_weights.keys());
-        actual_keys   : set[str] = set(raw_loss_dict.keys());
-        if actual_keys != expected_keys:
-            raise ValueError("LatentDynamics.compute_losses returned keys %s, but loss_weights has keys %s" % (
-                sorted(actual_keys),
-                sorted(expected_keys),
-            ));
-
         loss_dict          : dict[str, torch.Tensor] = {};
         weighted_loss_sum  : torch.Tensor           = torch.zeros((), dtype = torch.float32, device = device);
 
-        # Process the weights item-by-item; summing per-parameter losses.
-        for key, value in raw_loss_dict.items():
+        # Process the losses item-by-item; summing per-parameter losses.
+        params              : numpy.ndarray         = raw_LD_Losses.params;
+        for key, value in raw_LD_Losses.losses.items():
             if isinstance(value, list):
-                assert len(value) == params.shape[0], "Loss `%s` has %d per-parameter entries, expected %d" % (key, len(value), params.shape[0]);
                 for i, param_loss in enumerate(value):
-                    assert isinstance(param_loss, torch.Tensor), "Loss `%s` entry %d is not a torch.Tensor" % (key, i);
                     param_tuple = tuple(params[i, :]);
                     self._cache_loss(key, param_loss.detach(), param_tuple);
                 total_loss = torch.sum(torch.stack(value));
             else:
-                assert isinstance(value, torch.Tensor), "Loss `%s` must be a torch.Tensor or list[torch.Tensor]" % key;
                 total_loss = value;
 
             self._cache_loss(key, total_loss.detach());
-            loss_dict[key] = total_loss;
-            weighted_loss_sum = weighted_loss_sum + self.latent_dynamics.loss_weights[key] * total_loss;
+
+            # Append to the loss dict if the weight is non-zero
+            if raw_LD_Losses.weights[key] > 0:
+                loss_dict[key] = total_loss;
+
+            # Update the weighted sum.
+            weighted_loss_sum = weighted_loss_sum + raw_LD_Losses.weights[key] * total_loss;
 
         # All done :)
         return loss_dict, weighted_loss_sum;

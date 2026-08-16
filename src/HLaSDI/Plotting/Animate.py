@@ -620,7 +620,7 @@ def make_solution_movies(   U_True          : numpy.ndarray,
     
     # Default save directory: <Higher-Order-LaSDI>/Figures (independent of CWD).
     if save_dir is None:
-        project_dir = Path(__file__).resolve().parent.parent.parent;
+        project_dir = Path(__file__).resolve().parents[3];
         save_dir = project_dir / "Figures";
     save_dir = Path(save_dir).expanduser().resolve();
     save_dir.mkdir(parents = True, exist_ok = True);

@@ -10,7 +10,7 @@ import  numpy;
 from    HLaSDI.EncoderDecoder              import  EncoderDecoder;
 from    HLaSDI.ParameterSpace              import  ParameterSpace;
 from    HLaSDI.Physics                     import  Physics;
-from    HLaSDI.LatentDynamics              import  LatentDynamics, InterpolatableLatentDynamics;
+from    HLaSDI.LatentDynamics              import  LatentDynamics, InterpolatableLatentDynamics, LD_Loss_Container;
 from    HLaSDI.Utilities.FiniteDifference  import  Derivative1_Order4, Derivative1_Order2_NonUniform;
 from    HLaSDI.Utilities.Optimizer         import  Reset_Optimizer;
 from    HLaSDI.Trainer.Trainer             import  Trainer;
@@ -670,16 +670,16 @@ class Second_Order_Rollout(Trainer):
 
             self.timer.start("LD/Coefficient/Stability Losses");
 
-            # Compute the latent dynamics losses; this is a dictionary with the same keys as 
-            # self.latent_dynamics.loss_weights.
-            raw_LD_loss_dict = self.latent_dynamics.compute_losses( 
+            # Compute the latent dynamics losses.
+            raw_LD_losses : LD_Loss_Container = self.latent_dynamics.compute_losses( 
                                                         Latent_States    = Latent_States, 
                                                         t_Grid           = t_Train_device,
+                                                        step             = iter,
                                                         params           = self.param_space.train_space);
 
-            LD_loss_dict, loss_LD_weighted_sum = self._process_latent_dynamics_losses(
-                                                        raw_loss_dict  = raw_LD_loss_dict,
-                                                        params         = self.param_space.train_space,
+            # Cache losses and compute the weighted LD loss sum.
+            LD_loss_dict,  loss_LD_weighted_sum = self._process_latent_dynamics_losses(
+                                                        raw_LD_Losses  = raw_LD_losses,
                                                         device         = device);
 
             self.timer.end("LD/Coefficient/Stability Losses");
@@ -1041,8 +1041,7 @@ class Second_Order_Rollout(Trainer):
             if(self.loss_weights['rollout'] > 0):       info_str += ", Roll FOM D: %3.6f, Roll FOM V: %3.6f, Roll ROM D: %3.6f, Roll ROM V: %3.6f"  % (flushed_losses.get(('rollout_FOM_D', 'total'), 0.0), flushed_losses.get(('rollout_FOM_V', 'total'), 0.0),  flushed_losses.get(('rollout_ROM_D', 'total'), 0.0),  flushed_losses.get(('rollout_ROM_V', 'total'), 0.0));
             if(self.loss_weights['IC_rollout'] > 0):    info_str += ", IC Roll D: %3.6f, IC Roll V: %3.6f, IC Roll ZD: %3.6f, IC Roll ZV: %3.6f"    % (flushed_losses.get(('IC_rollout_D', 'total'), 0.0),  flushed_losses.get(('IC_rollout_V', 'total'), 0.0),   flushed_losses.get(('IC_rollout_Z_D', 'total'), 0.0), flushed_losses.get(('IC_rollout_Z_V', 'total'), 0.0));
             for key, value in LD_loss_dict.items():
-                if self.latent_dynamics.loss_weights[key] > 0:
-                    info_str += ", %s: %3.6f"   % flushed_losses[(key, 'total')];
+                info_str += ", %s: %3.6f"   % flushed_losses[(key, 'total')];
             if isinstance(self.latent_dynamics, InterpolatableLatentDynamics): 
                 info_str += ", max|c|: %.3f" % max_train_coef;
             LOGGER.info(info_str);

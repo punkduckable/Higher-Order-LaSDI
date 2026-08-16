@@ -7,7 +7,7 @@ import  logging;
 import  numpy;
 import  torch;
 
-from    HLaSDI.LatentDynamics.LatentDynamics   import  LatentDynamics;
+from    HLaSDI.LatentDynamics.LatentDynamics   import  LatentDynamics, LD_Loss_Container;
 from    HLaSDI.Schemas                         import  CABLELatentDynamicsConfig, CABLELatentDynamicsSettings;
 from    HLaSDI.EncoderDecoder                  import  MultiLayerPerceptron;
 from    HLaSDI.Utilities.FiniteDifference      import  Derivative1_Order4, Derivative1_Order2_NonUniform;
@@ -228,8 +228,9 @@ class CABLE(LatentDynamics):
         self,  
         Latent_States   : list[list[torch.Tensor]], 
         t_Grid          : list[torch.Tensor], 
+        step            : int,
         params          : numpy.ndarray | None = None
-    ) -> dict[str, list[torch.Tensor] | torch.Tensor]:
+    ) -> LD_Loss_Container:
         r"""
         Compute CABLE latent-dynamics, coefficient, and gate-diversity losses.
 
@@ -261,6 +262,9 @@ class CABLE(LatentDynamics):
 
         t_Grid : list[torch.Tensor], len = n_param
             Time grids corresponding to the latent trajectories.
+        
+        step : int
+            The optimizer step number.
 
         params : numpy.ndarray, shape = (n_param, n_p)
             Parameter rows used as inputs to the gate network.
@@ -270,8 +274,9 @@ class CABLE(LatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------
 
-        loss_dict : dict[str, list[torch.Tensor] | torch.Tensor]
-            A loss dictionary with keys matching `self.loss_weights`:
+        losses : LD_Loss_Container
+            A LD_Loss_Container object housing the losses and their weights. It houses the 
+            following losses:
 
             - `LD`: length-`n_param` list of finite-difference residual losses.
             - `coef`: scalar global expert-size penalty.
@@ -358,8 +363,10 @@ class CABLE(LatentDynamics):
         self.last_tail_mass_loss = loss_tail.detach();
         self.last_tail_mass_loss_list = [loss.detach() for loss in tail_mass_loss_list];
 
-        # All done :) 
-        return {'LD' : loss_LD_list, 'coef' : loss_coef, 'diversity' : loss_diversity, 'tail' : tail_mass_loss_list};
+        # All done :) l
+        losses_dict = {'LD' : loss_LD_list, 'coef' : loss_coef, 'diversity' : loss_diversity, 'tail' : tail_mass_loss_list};
+
+        return LD_Loss_Container(losses = losses_dict, weights = self.loss_weights, params = params);
 
 
     def RHS(    self,

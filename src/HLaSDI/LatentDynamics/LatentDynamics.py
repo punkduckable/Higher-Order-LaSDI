@@ -6,14 +6,63 @@ import  logging;
 
 import  numpy;
 import  torch;
+from    pydantic            import  BaseModel, ConfigDict, model_validator;
 
-from    HLaSDI.Schemas     import  LatentDynamicsBaseConfig
+from    HLaSDI.Schemas     import   LatentDynamicsBaseConfig
 
 
 # Logger setup.
 LOGGER : logging.Logger = logging.getLogger(__name__);
 
 
+
+# -------------------------------------------------------------------------------------------------
+# Schemas
+# -------------------------------------------------------------------------------------------------
+
+class LD_Loss_Container(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed = True);
+
+    # A dictionary (with the same keys as weights) housing the losses. Each value is either a 
+    # list (of length n_param, this is used for parameter-dependant losses) of single element 
+    # tensors or a single element tensor holding the losses.
+    losses: dict[str, torch.Tensor | list[torch.Tensor]];
+
+    # A dictionary (same keys as losses) holding the loss weights
+    weights: dict[str, float];
+
+    # The parameters used to compute the losses stored in this object. [n_param, n_p]
+    params : numpy.ndarray;      
+
+    @model_validator(mode = "after")
+    def validate_activations_and_active_count(self) -> "LD_Loss_Container":
+        # Ensure both dicts have the same keys.
+        if set(self.losses.keys()) != set(self.weights.keys()):
+            raise ValueError("Losses and weights must have the same keys! losses.keys() = %s, weights.keys() = %s" % (str(self.losses.keys()), str(self.weights.keys()) ));
+
+        # Ensure params is a 2d numpy array
+        assert len(self.params.shape) == 2, "params must be a 2d numpy.ndarray, got shape %s" % str(self.params.shape);
+        n_param : int = self.params.shape[0];
+
+        # Make sure each loss is a tensor or n_param list of tensors.
+        for key, value in self.losses.items():
+            assert isinstance(key, str), "all losses keys must be strings, but one key (%s) has type %s!" % (str(key), str(type(key)));
+            assert isinstance(value, torch.Tensor) or isinstance(value, list), "each loss must be a tensor or list of tensors, losses[%s] has type %s" % (key, str(type(value)));
+            if isinstance(value, torch.Tensor):
+                assert value.numel() == 1, "each loss must have a single element, losses[%s] has shape %s" % (key, str(value.shape));
+            else: 
+                assert len(value) == n_param, "Each list item of a LD_Loss_Container object must have length %d, but losses[%s] has length %d" % (n_param, key, len(value));
+                for idx, item in enumerate(value):
+                    assert isinstance(item, torch.Tensor), "Each loss must be a tensor, but losses[%s][%d] has type %s" % (key, idx, type(item));
+                    assert item.numel() == 1, "each loss must have a single element, losses[%s][%d] has shape %s" % (key, idx, str(item.shape));
+
+        # Make sure all loss weights are floats
+        for key, value in self.weights.items():
+            assert isinstance(key, str), "all weights keys must be strings, but one key (%s) has type %s!" % (str(key), str(type(key)));
+            assert isinstance(value, float), "all weights values must be floats, but losses[%s] has type %s!" % (key, str(type(value)));
+
+        # All done :) 
+        return self;
 
 # -------------------------------------------------------------------------------------------------
 # LatentDynamics base class
@@ -100,11 +149,11 @@ class LatentDynamics:
     - `trainable_tensors()`: return the actual trainable tensors (if training is enabled) 
       stored in `train_coefs` so the `Trainer` can optimize them jointly with the encoder/decoder.
     
-    - `compute_losses(Latent_States, t_Grid, params=None)`: compute latent-dynamics losses for the
-      current coefficients and return a dictionary whose keys match `self.loss_weights`. Values may
-      be scalar tensors for global losses or length-`n_param` lists of scalar tensors for
-      per-parameter losses. The loss metric (e.g., MSE vs MAE) is a subclass implementation detail;
-      there is no trainer-level `loss_type` argument for latent dynamics.
+    - `compute_losses(Latent_States, t_Grid, step, params=None)`: compute latent-dynamics losses for
+      the current coefficients and return an `LD_Loss_Container` whose loss keys match
+      `self.loss_weights`. Values may be scalar tensors for global losses or length-`n_param` lists
+      of scalar tensors for per-parameter losses. The loss metric (e.g., MSE vs MAE) is a subclass
+      implementation detail; there is no trainer-level `loss_type` argument for latent dynamics.
     
     - `simulate(IC, t_Grid, params, sample=False)`: integrate the latent ODE from one or more latent
       initial conditions and return latent trajectories in the expected `n_IC`-component format.
@@ -389,8 +438,9 @@ class LatentDynamics:
         self, 
         Latent_States   : list[list[torch.Tensor]], 
         t_Grid          : list[torch.Tensor], 
+        step            : int,
         params          : numpy.ndarray | None  = None
-    ) -> dict[str, list[torch.Tensor] | torch.Tensor]:
+    ) -> LD_Loss_Container:
         """
         The user must implement this class on any latent dynamics sub-class. Each latent dynamics 
         object should implement a parameterized model for the dynamics in the latent space. A 
@@ -415,10 +465,13 @@ class LatentDynamics:
             derivative of the latent state during the p'th time step (whose time value corresponds 
             to the p'th element of t_Grid) when we use the i'th combination of parameter values. 
         
-        t_Grid : list[troch.Tensor], len = n_param
+        t_Grid : list[torch.Tensor], len = n_param
             The i'th element should be a 1d tensor of shape (n_t(i)) whose j'th element holds the 
             time value corresponding to the j'th frame when we use the i'th combination of 
             parameter values.
+
+        step : int
+            Optimizer step number. 
 
         params : numpy.ndarray, shape = (n_param, n_p), optional
             The i'th row holds the i'th combination of parameter values. This can be used by latent 
@@ -430,11 +483,8 @@ class LatentDynamics:
         Returns
         -------------------------------------------------------------------------------------------
 
-        loss_dict : dict[str, list[torch.Tensor] | torch.Tensor]:
-            A dictionary (whose keys match self.loss_weights) housing the weights computed by 
-            this LD model. The values will either be single-element tensors (a loss that is 
-            global/doesn't dependent on the parameter value) or a n_param element list of 
-            single-element tensors (the i'th one of which corresponds to the i'th parameter).
+        losses : LD_Loss_Container
+            A LD_Loss_Container object housing the losses and their weights. 
         """
 
         raise RuntimeError('Abstract function LatentDynamics.compute_losses!');
@@ -483,7 +533,7 @@ class LatentDynamics:
         
         params : numpy.ndarray, shape = (n_param, n_p)
             Parameters at corresponding to the latent solutions stored in Z.
-            
+        
         sample : bool
             If True, we draw a sample of the latent dynamics at each parameter value to compute 
             the right hand sides. Otherwise, we use the mean.

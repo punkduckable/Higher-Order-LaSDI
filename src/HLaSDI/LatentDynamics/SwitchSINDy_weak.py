@@ -9,6 +9,7 @@ import  torch;
 
 from    HLaSDI.LatentDynamics.Weak             import  WeakLatentDynamics;
 from    HLaSDI.LatentDynamics.Interpolatable   import  InterpolatableLatentDynamics;
+from    HLaSDI.LatentDynamics.LatentDynamics   import  LD_Loss_Container;
 from    HLaSDI.LatentDynamics.SwitchSINDy      import  SwitchSINDy;
 from    HLaSDI.Schemas                         import  SwitchSINDyWeakLatentDynamicsConfig;
 
@@ -198,8 +199,9 @@ class SwitchSINDy_weak(WeakLatentDynamics, SwitchSINDy):
         self,
         Latent_States   : list[list[torch.Tensor]],
         t_Grid          : list[torch.Tensor],
+        step            : int,
         params          : numpy.ndarray | None = None
-    ) -> dict[str, list[torch.Tensor] | torch.Tensor]:
+    ) -> LD_Loss_Container:
         r"""
         Compute weak-form switching-SINDy latent-dynamics, coefficient, and stability losses.
 
@@ -309,4 +311,6 @@ class SwitchSINDy_weak(WeakLatentDynamics, SwitchSINDy):
             loss_coef_list.append(loss_coef);
             loss_stab_list.append(loss_stab);
 
-        return {'LD' : loss_LD_list, 'coef' : loss_coef_list, 'stab' : loss_stab_list};
+        losses_dict = {'LD' : loss_LD_list, 'coef' : loss_coef_list, 'stab' : loss_stab_list};
+
+        return LD_Loss_Container(losses = losses_dict, weights = self.loss_weights, params = params);
