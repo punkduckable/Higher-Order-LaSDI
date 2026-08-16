@@ -463,6 +463,26 @@ class CABLELatentDynamicsSettings(ConfigBase):
     # we use a soft-max on the final layer.
     activations: ActivationSpec
 
+    # Should each expert include a bias?
+    use_biases : bool
+
+    # Which (vector) norm should we use for the coefficient loss? This is applied to the flattened
+    # expert coefficients for each expert.
+    coef_norm : Literal['l1', 'l2']
+
+    # Should we periodically mask out coefficients that get too small? If so, once a coefficient
+    # is masked, it will never be unmasked.
+    use_mask : bool
+
+    # If masking is enabled, below what threshold should we mask out a value?
+    mask_threshold : PositiveFloat | None = None
+
+    # If masking is enabled, when should we start computing the mask?
+    first_mask_step : PositiveInt | None = None
+
+    # If masking is enabled, how frequently should we apply it after enabling it?
+    mask_update_freq : PositiveInt | None = None  
+
     @model_validator(mode = "after")
     def validate_activations_and_active_count(self) -> "CABLELatentDynamicsSettings":
         # Ensure the number of activations matches the number of hidden layers.
@@ -475,7 +495,17 @@ class CABLELatentDynamicsSettings(ConfigBase):
         # Check that n_active <= n_experts
         if self.n_active > self.n_experts:
             raise ValueError("n_active = %d, but n_experts = %d; the target number of active experts can not exceed the number of experts" % (self.n_active, self.n_experts));
-    
+
+        # If masking is enabled, make sure `mask_threshold`, `first_mask_step`, and 
+        # `mask_update_freq` are enabled
+        if self.use_mask:
+            if self.mask_threshold is None:
+                raise ValueError("self.mask_threshold is None, even though masking is enabled.");
+            if self.first_mask_step is None:
+                raise ValueError("self.first_mask_step is None, even though masking is enabled.");
+            if self.mask_update_freq is None:
+                raise ValueError("self.mask_update_freq is None, even though masking is enabled.");
+
         # All done :) 
         return self;
 

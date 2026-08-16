@@ -85,7 +85,35 @@ def _cable_config(trainable=True, n_active=2):
         "interpolator_type": "GP",
         "trainable": trainable,
         "loss_weights": {"LD": 1.0, "coef": 1.0, "diversity": 1.0, "tail": 1.0},
-        "cable": {"n_experts": 2, "n_active": n_active, "hidden_widths": [2], "activations": ["tanh"]},
+        "cable": {
+            "n_experts": 2,
+            "n_active": n_active,
+            "hidden_widths": [2],
+            "activations": ["tanh"],
+            "use_biases": True,
+            "coef_norm": "l2",
+            "use_mask": False,
+        },
+    })
+
+
+def _cable_config_with_settings(trainable=True, n_active=2, **settings):
+    cable_settings = {
+        "n_experts": 2,
+        "n_active": n_active,
+        "hidden_widths": [2],
+        "activations": ["tanh"],
+        "use_biases": True,
+        "coef_norm": "l2",
+        "use_mask": False,
+    }
+    cable_settings.update(settings)
+    return CABLELatentDynamicsConfig.model_validate({
+        "type": "cable",
+        "interpolator_type": "GP",
+        "trainable": trainable,
+        "loss_weights": {"LD": 1.0, "coef": 1.0, "diversity": 1.0, "tail": 1.0},
+        "cable": cable_settings,
     })
 
 
@@ -180,12 +208,31 @@ def test_cable_rhs_matches_uniform_mixture_of_affine_experts():
 
     ld = CABLE(n_z=1, Uniform_t_Grid=True, n_p=1, config=_cable_config())
     _zero_cable_gate(ld)
-    ld.A = torch.tensor([[[1.0]], [[3.0]]], dtype=torch.float32, requires_grad=True)
-    ld.b = torch.tensor([[[10.0]], [[20.0]]], dtype=torch.float32, requires_grad=True)
+    ld.unmasked_A = torch.tensor([[[1.0]], [[3.0]]], dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.tensor([[[10.0]], [[20.0]]], dtype=torch.float32, requires_grad=True)
 
     rhs = ld.RHS(Z=[[z]], t_Grid=[t], params=params)[0]
 
     expected = 2.0*z + 15.0
+    assert isinstance(rhs, torch.Tensor)
+    assert rhs.dtype == z.dtype
+    assert rhs.shape == z.shape
+    assert torch.allclose(rhs, expected)
+
+
+def test_cable_rhs_omits_bias_when_biases_are_disabled():
+    params = numpy.array([[0.25]])
+    t = torch.tensor([0.0, 0.5, 1.0], dtype=torch.float64)
+    z = torch.tensor([[0.0], [1.0], [2.0]], dtype=torch.float64)
+
+    ld = CABLE(n_z=1, Uniform_t_Grid=True, n_p=1, config=_cable_config_with_settings(use_biases=False))
+    _zero_cable_gate(ld)
+    ld.unmasked_A = torch.tensor([[[1.0]], [[3.0]]], dtype=torch.float32, requires_grad=True)
+
+    rhs = ld.RHS(Z=[[z]], t_Grid=[t], params=params)[0]
+
+    expected = 2.0*z
+    assert ld.b is None
     assert isinstance(rhs, torch.Tensor)
     assert rhs.dtype == z.dtype
     assert rhs.shape == z.shape
@@ -199,8 +246,8 @@ def test_cable_simulate_integrates_constant_uniform_expert_mixture_numpy_inputs(
 
     ld = CABLE(n_z=1, Uniform_t_Grid=True, n_p=1, config=_cable_config())
     _zero_cable_gate(ld)
-    ld.A = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
-    ld.b = torch.tensor([[[1.0]], [[3.0]]], dtype=torch.float32, requires_grad=True)
+    ld.unmasked_A = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.tensor([[[1.0]], [[3.0]]], dtype=torch.float32, requires_grad=True)
 
     z = ld.simulate(IC=[[z0]], t_Grid=[t], params=params)[0][0]
 
@@ -210,6 +257,81 @@ def test_cable_simulate_integrates_constant_uniform_expert_mixture_numpy_inputs(
     assert numpy.allclose(z, expected)
 
 
+def test_cable_compute_losses_updates_and_applies_hard_coefficient_masks():
+    params = numpy.array([[0.25]])
+    t = torch.linspace(0.0, 1.0, 5)
+    z = torch.zeros((5, 1))
+
+    ld = CABLE(
+        n_z=1,
+        Uniform_t_Grid=True,
+        n_p=1,
+        config=_cable_config_with_settings(
+            use_mask=True,
+            mask_threshold=0.5,
+            first_mask_step=2,
+            mask_update_freq=3,
+        ),
+    )
+    _zero_cable_gate(ld)
+    ld.unmasked_A = torch.tensor([[[0.25]], [[2.0]]], dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.tensor([[[0.25]], [[3.0]]], dtype=torch.float32, requires_grad=True)
+
+    ld.compute_losses(Latent_States=[[z]], t_Grid=[t], step=1, params=params)
+
+    assert torch.allclose(ld.A_mask, torch.ones_like(ld.A_mask))
+    assert torch.allclose(ld.b_mask, torch.ones_like(ld.b_mask))
+
+    ld.compute_losses(Latent_States=[[z]], t_Grid=[t], step=2, params=params)
+
+    assert torch.allclose(ld.A_mask, torch.tensor([[[0.0]], [[1.0]]]))
+    assert torch.allclose(ld.b_mask, torch.tensor([[[0.0]], [[1.0]]]))
+    assert torch.allclose(ld.A.detach(), torch.tensor([[[0.0]], [[2.0]]]))
+    assert torch.allclose(ld.b.detach(), torch.tensor([[[0.0]], [[3.0]]]))
+
+
+def test_cable_export_load_restores_unmasked_coefficients_and_masks():
+    ld = CABLE(
+        n_z=1,
+        Uniform_t_Grid=True,
+        n_p=1,
+        config=_cable_config_with_settings(
+            use_mask=True,
+            mask_threshold=0.5,
+            first_mask_step=1,
+            mask_update_freq=1,
+        ),
+    )
+    ld.unmasked_A = torch.tensor([[[0.0]], [[2.0]]], dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.tensor([[[0.0]], [[3.0]]], dtype=torch.float32, requires_grad=True)
+    ld.A_mask = torch.tensor([[[0.0]], [[1.0]]], dtype=torch.float32)
+    ld.b_mask = torch.tensor([[[0.0]], [[1.0]]], dtype=torch.float32)
+
+    exported = ld.export()
+
+    ld2 = CABLE(
+        n_z=1,
+        Uniform_t_Grid=True,
+        n_p=1,
+        config=_cable_config_with_settings(
+            use_mask=True,
+            mask_threshold=0.5,
+            first_mask_step=1,
+            mask_update_freq=1,
+        ),
+    )
+    ld2.load(exported)
+
+    assert torch.allclose(ld2.unmasked_A, ld.unmasked_A)
+    assert torch.allclose(ld2.unmasked_b, ld.unmasked_b)
+    assert torch.allclose(ld2.A_mask, ld.A_mask)
+    assert torch.allclose(ld2.b_mask, ld.b_mask)
+    assert torch.allclose(ld2.A, torch.tensor([[[0.0]], [[2.0]]]))
+    assert torch.allclose(ld2.b, torch.tensor([[[0.0]], [[3.0]]]))
+    assert ld2.unmasked_A.requires_grad and ld2.unmasked_A.is_leaf
+    assert ld2.unmasked_b.requires_grad and ld2.unmasked_b.is_leaf
+
+
 def test_cable_compute_losses_uses_dense_pre_topk_weights_for_diversity_and_tail_diagnostic():
     params = numpy.array([[0.25]])
     t = torch.linspace(0.0, 1.0, 5)
@@ -217,8 +339,8 @@ def test_cable_compute_losses_uses_dense_pre_topk_weights_for_diversity_and_tail
 
     ld = CABLE(n_z=1, Uniform_t_Grid=True, n_p=1, config=_cable_config(n_active=1))
     _zero_cable_gate(ld)
-    ld.A = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
-    ld.b = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_A = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
 
     losses = ld.compute_losses(
         Latent_States=[[z]],
@@ -248,8 +370,8 @@ def test_cable_global_losses_are_not_divided_by_number_of_parameters():
 
     ld = CABLE(n_z=1, Uniform_t_Grid=True, n_p=1, config=_cable_config(n_active=2))
     _zero_cable_gate(ld)
-    ld.A = torch.tensor([[[1.0]], [[3.0]]], dtype=torch.float32, requires_grad=True)
-    ld.b = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_A = torch.tensor([[[1.0]], [[3.0]]], dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
 
     losses = ld.compute_losses(
         Latent_States=[[z], [z]],

@@ -30,13 +30,17 @@ class CABLE(LatentDynamics):
         r"""
         Initialize a CABLE latent-dynamics model.
 
-        CABLE is a deterministic mixture-of-affine-experts latent ODE. For a parameter value
+        CABLE is a deterministic mixture-of-linear/affine-experts latent ODE. For a parameter value
         \theta and time t, it evolves the latent state according to
 
             z'(t) = \sum_{m = 1}^{N} w_m(t, \theta) [ A_m z(t) + b_m ],
 
-        where N is the number of experts, each A_m is an n_z x n_z matrix, each b_m is an
-        n_z-vector, and w_m(t, \theta) is the gate weight assigned to the m'th expert. The gate is
+        when biases are enabled, and according to
+
+            z'(t) = \sum_{m = 1}^{N} w_m(t, \theta) A_m z(t),
+
+        otherwise. Here N is the number of experts, each A_m is an n_z x n_z matrix, each enabled
+        b_m is an n_z-vector, and w_m(t, \theta) is the gate weight assigned to the m'th expert. The gate is
         a neural network
 
             w : \mathbb{R}^{1 + n_p} \to \mathbb{R}^{N}
@@ -45,9 +49,11 @@ class CABLE(LatentDynamics):
         target used by the tail-mass loss: training can encourage most softmax mass to live on a
         small number of experts without introducing a discontinuous top-k cutoff.
 
-        The trainable latent-dynamics state consists of the expert matrices, expert biases, and
-        gate-network parameters. Unlike interpolatable SINDy-type models, CABLE owns one global set
-        of parameters rather than one coefficient dictionary per training parameter.
+        The trainable latent-dynamics state consists of the expert matrices, optional expert
+        biases, and gate-network parameters. If coefficient masking is enabled, matrix and bias
+        entries whose absolute values fall below the mask threshold are permanently removed from
+        the effective latent dynamics. Unlike interpolatable SINDy-type models, CABLE owns one
+        global set of parameters rather than one coefficient dictionary per training parameter.
 
 
         -------------------------------------------------------------------------------------------
@@ -91,20 +97,40 @@ class CABLE(LatentDynamics):
             config         = config);
 
         # Extract sub-class specific attributes.
-        sub : CABLELatentDynamicsSettings = config.cable;
-        self.n_experts      : int       = sub.n_experts;
-        self.n_active       : int       = sub.n_active;
-        self.hidden_widths  : list[int] = sub.hidden_widths;
-        self.activations    : list[str] = sub.activations;
+        sub : CABLELatentDynamicsSettings       = config.cable;
+        self.n_experts          : int           = sub.n_experts;
+        self.n_active           : int           = sub.n_active;
+        self.hidden_widths      : list[int]     = sub.hidden_widths;
+        self.activations        : list[str]     = sub.activations;
+        self.coef_norm          : str           = sub.coef_norm
+        self.use_biases         : bool          = sub.use_biases;
+        self.use_mask           : bool          = sub.use_mask;
+        self.mask_threshold     : float | None  = sub.mask_threshold;
+        self.first_mask_step    : int   | None  = sub.first_mask_step;
+        self.mask_update_freq   : int   | None  = sub.mask_update_freq;
 
         # Initialize the gate network.
         widths      : list[int] = [n_p + 1] + self.hidden_widths + [self.n_experts];
-        self.w                  = MultiLayerPerceptron(widths = widths, activations = self.activations);
+        self.w                  = MultiLayerPerceptron(widths = widths, activations = self.activations) * 0.01;
 
         # Randomly initialize the experts. These are leaf tensors because the Trainer passes them
         # directly to the optimizer through trainable_tensors().
-        self.A : torch.Tensor = torch.rand((self.n_experts, self.n_z, self.n_z), dtype = torch.float32).requires_grad_(self.trainable);
-        self.b : torch.Tensor = torch.zeros((self.n_experts, 1, self.n_z), dtype = torch.float32).requires_grad_(self.trainable);
+        self.unmasked_A : torch.Tensor = torch.rand((self.n_experts, self.n_z, self.n_z), dtype = torch.float32).requires_grad_(self.trainable);
+        self.unmasked_b : torch.Tensor | None;
+        if self.use_biases:
+            self.unmasked_b = torch.zeros((self.n_experts, 1, self.n_z), dtype = torch.float32).requires_grad_(self.trainable);
+        else:
+            self.unmasked_b = None;
+
+        # Hard coefficient masks. A value of one means active and zero means permanently removed
+        # from the effective latent dynamics.
+        self.A_mask : torch.Tensor = torch.ones_like(self.unmasked_A);
+        self.b_mask : torch.Tensor | None;
+        if self.use_biases:
+            assert self.unmasked_b is not None;
+            self.b_mask = torch.ones_like(self.unmasked_b);
+        else:
+            self.b_mask = None;
         for param in self.w.parameters():
             param.requires_grad_(self.trainable);
 
@@ -126,14 +152,19 @@ class CABLE(LatentDynamics):
         r"""
         Return CABLE-owned tensors that should be passed to torch optimizers.
 
-        These are the expert matrices, expert biases, and gate-network parameters. The list is
+        These are the expert matrices, optional expert biases, and gate-network parameters. The list is
         empty when the latent dynamics are frozen.
         """
 
         if self.trainable == False:
             return [];
 
-        tensors : list[torch.Tensor] = [self.A, self.b];
+        # Append un-masked A, b
+        tensors : list[torch.Tensor] = [self.unmasked_A];
+        if self.unmasked_b is not None:
+            tensors.append(self.unmasked_b);
+
+        # Append gate network parameters.
         for param in self.w.parameters():
             tensors.append(param);
         return tensors;
@@ -160,11 +191,20 @@ class CABLE(LatentDynamics):
         """
 
         # Keep A and b as leaf tensors because the Trainer optimizes them directly.
-        self.A = self.A.detach().to(device = device).requires_grad_(self.trainable);
-        self.b = self.b.detach().to(device = device).requires_grad_(self.trainable);
+        self.unmasked_A = self.unmasked_A.detach().to(device = device).requires_grad_(self.trainable);
+        self.A_mask     = self.A_mask.to(device = device, dtype = self.unmasked_A.dtype);
+        if self.unmasked_b is not None:
+            self.unmasked_b = self.unmasked_b.detach().to(device = device).requires_grad_(self.trainable);
+        if self.b_mask is not None:
+            assert self.unmasked_b is not None;
+            self.b_mask = self.b_mask.to(device = device, dtype = self.unmasked_b.dtype);
+
+        # Now move the gate matrix.
         self.w = self.w.to(device = device);
         for param in self.w.parameters():
             param.requires_grad_(self.trainable);
+
+        # All done :)
         return;
 
 
@@ -215,7 +255,7 @@ class CABLE(LatentDynamics):
         assert isinstance(Latent_States, list);
         assert len(Latent_States) == len(t_Grid) == params.shape[0];
 
-        # Move A, b, and w to specified device.
+        # Move A, optional b, masks, and w to specified device.
         self.move_trainable_tensors_to_device(device);
         return None;
     
@@ -293,10 +333,18 @@ class CABLE(LatentDynamics):
         assert len(Latent_States) == len(t_Grid) == params.shape[0];
         assert len(t_Grid) > 0;
 
+        # Periodically update the hard coefficient masks. Masked entries are multiplied out in all
+        # RHS, simulation, and coefficient-loss evaluations.
+        if self.use_mask:
+            assert self.first_mask_step is not None;
+            assert self.mask_update_freq is not None;
+            if step >= self.first_mask_step and (step - self.first_mask_step) % self.mask_update_freq == 0:
+                self._update_mask();
+
         # Prepare lists for per-parameter losses. The Trainer is responsible for applying weights
         # and summing these scalar losses into the total objective.
         loss_LD_list          : list[torch.Tensor] = [];
-        summed_weights        : torch.Tensor       = torch.zeros((self.n_experts), dtype = self.A.dtype, device = self.A.device);
+        summed_weights        : torch.Tensor       = torch.zeros((self.n_experts), dtype = self.unmasked_A.dtype, device = self.unmasked_A.device);
         tail_mass_loss_list   : list[torch.Tensor] = [];
 
         n_param : int = len(t_Grid);
@@ -330,7 +378,7 @@ class CABLE(LatentDynamics):
             # deterministic analogue of MoE importance/load diversity: it encourages all
             # experts to be useful somewhere without forcing all experts to be active at 
             # every step.
-            summed_weights = summed_weights + torch.sum(ith_weights.to(device = self.A.device, dtype = self.A.dtype), dim = 0);
+            summed_weights = summed_weights + torch.sum(ith_weights.to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype), dim = 0);
 
             # Tail-mass penalty: compute how much softmax mass lies outside the top-n_active 
             # logits. If this is small, most of the probability mass is in the top n_active 
@@ -341,13 +389,19 @@ class CABLE(LatentDynamics):
                 ith_topk_idx             : torch.Tensor = torch.topk(ith_weights, self.n_active, dim = 1, sorted = False).indices;
                 ith_topk_dense_mass      : torch.Tensor = torch.sum(ith_weights.gather(1, ith_topk_idx), dim = 1);
                 ith_tail_mass            : torch.Tensor = 1.0 - ith_topk_dense_mass;
-            tail_mass_loss_list.append(torch.mean(torch.pow(ith_tail_mass.to(device = self.A.device, dtype = self.A.dtype), 2)));
+            tail_mass_loss_list.append(torch.mean(torch.pow(ith_tail_mass.to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype), 2)));
 
-        # Coefficient loss is the sum of the Frobenius norms of the matrix portions of each expert,
-        # plus the L2 norm of each bias. This is a scalar global loss, so the Trainer will not
-        # multiply it by n_param.
-        A_norms         : torch.Tensor          = torch.linalg.vector_norm(self.A.reshape(self.n_experts, -1), dim = 1).sum();
-        b_norms         : torch.Tensor          = torch.linalg.vector_norm(self.b.reshape(self.n_experts, -1), dim = 1).sum();
+        # Coefficient loss is the sum of the selected norms of the matrix portions of each expert,
+        # plus the selected norm of each enabled bias. This is a scalar global loss, so the
+        # Trainer will not multiply it by n_param.
+        A_coef : torch.Tensor = self.A;
+        b_coef : torch.Tensor | None = self.b;
+        ord : int = 1 if self.coef_norm == 'l1' else 2;
+        A_norms         : torch.Tensor          = torch.linalg.vector_norm(A_coef.reshape(self.n_experts, -1), ord = ord, dim = 1).sum();
+        if b_coef is None:
+            b_norms     : torch.Tensor          = torch.zeros((), dtype = A_coef.dtype, device = A_coef.device);
+        else:
+            b_norms     : torch.Tensor          = torch.linalg.vector_norm(b_coef.reshape(self.n_experts, -1), ord = ord, dim = 1).sum();
         loss_coef       : torch.Tensor          = A_norms + b_norms;
 
         # diversity loss is the squared coefficient of variation of expert loads. Use 
@@ -572,8 +626,10 @@ class CABLE(LatentDynamics):
                       'n_p'             : self.n_p,
                       'config'          : self.config.model_dump(mode = "python", by_alias = True),
                       'Uniform_t_Grid'  : self.Uniform_t_Grid,
-                      'A'               : self.A.detach().cpu().clone(),
-                      'b'               : self.b.detach().cpu().clone(),
+                      'unmasked_A'      : self.unmasked_A.detach().cpu().clone(),
+                      'unmasked_b'      : None if self.unmasked_b is None else self.unmasked_b.detach().cpu().clone(),
+                      'A_mask'          : self.A_mask.detach().cpu().clone(),
+                      'b_mask'          : None if self.b_mask is None else self.b_mask.detach().cpu().clone(),
                       'w_state_dict'    : {key: value.detach().cpu().clone() for key, value in self.w.state_dict().items()}};
         return param_dict;
 
@@ -586,15 +642,39 @@ class CABLE(LatentDynamics):
         assert(self.n_p             == dict_['n_p']);
         assert(self.Uniform_t_Grid  == dict_['Uniform_t_Grid']);
 
-        A = dict_['A'];
-        b = dict_['b'];
-        assert isinstance(A, torch.Tensor) and A.shape == (self.n_experts, self.n_z, self.n_z);
-        assert isinstance(b, torch.Tensor) and b.shape == (self.n_experts, 1, self.n_z);
-        self.A = A.detach().clone().requires_grad_(self.trainable);
-        self.b = b.detach().clone().requires_grad_(self.trainable);
+        # Fetch the unmasked A tensor.
+        unmasked_A : torch.Tensor = dict_['unmasked_A'];
+        assert isinstance(unmasked_A, torch.Tensor) and unmasked_A.shape == (self.n_experts, self.n_z, self.n_z);
+        self.unmasked_A = unmasked_A.detach().clone().requires_grad_(self.trainable);
+
+        # Do the same for unmasked b.
+        if self.use_biases:
+            unmasked_b = dict_['unmasked_b'];
+            assert isinstance(unmasked_b, torch.Tensor) and unmasked_b.shape == (self.n_experts, 1, self.n_z);
+            self.unmasked_b = unmasked_b.detach().clone().requires_grad_(self.trainable);
+        else:
+            self.unmasked_b = None;
+
+        # Now fetch the A mask
+        A_mask = dict_.get('A_mask', torch.ones_like(self.unmasked_A));
+        assert isinstance(A_mask, torch.Tensor) and A_mask.shape == (self.n_experts, self.n_z, self.n_z);
+        self.A_mask = A_mask.detach().clone().to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype);
+
+        # and the b mask
+        if self.use_biases:
+            assert self.unmasked_b is not None;
+            b_mask = dict_.get('b_mask', torch.ones_like(self.unmasked_b));
+            assert isinstance(b_mask, torch.Tensor) and b_mask.shape == (self.n_experts, 1, self.n_z);
+            self.b_mask = b_mask.detach().clone().to(device = self.unmasked_b.device, dtype = self.unmasked_b.dtype);
+        else:
+            self.b_mask = None;
+
+        # Finally, load the gate network
         self.w.load_state_dict(dict_['w_state_dict']);
         for param in self.w.parameters():
             param.requires_grad_(self.trainable);
+
+        # All done :) 
         return;
 
 
@@ -713,13 +793,112 @@ class CABLE(LatentDynamics):
         """
 
         weights = weights.to(device = device, dtype = dtype);
-        A       = self.A.to(device = device, dtype = dtype);
-        b       = self.b.to(device = device, dtype = dtype).reshape(self.n_experts, self.n_z);
+        A   : torch.Tensor        = self.A.to(device = device, dtype = dtype);
+        b   : torch.Tensor | None = self.b;
+        if b is None:
+            b   = torch.zeros((self.n_experts, self.n_z), dtype = dtype, device = device);
+        else:
+            b   = b.to(device = device, dtype = dtype).reshape(self.n_experts, self.n_z);
 
         A_flat  : torch.Tensor = A.reshape(self.n_experts, self.n_z*self.n_z);
         A_bar   : torch.Tensor = (weights @ A_flat).reshape(weights.shape[0], self.n_z, self.n_z);
         b_bar   : torch.Tensor = weights @ b;
         return A_bar, b_bar;
+
+
+    @property
+    def A(self) -> torch.Tensor:
+        r"""
+        Return the effective expert matrices after applying the hard mask.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        A : torch.Tensor, shape = (n_experts, n_z, n_z)
+            Expert matrices with masked entries set to zero.
+        """
+
+        if self.use_mask:
+            return self.unmasked_A * self.A_mask.to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype);
+        return self.unmasked_A;
+
+
+    @property
+    def b(self) -> torch.Tensor | None:
+        r"""
+        Return the effective expert biases after applying the hard mask.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        b : torch.Tensor or None, shape = (n_experts, 1, n_z)
+            Expert biases with masked entries set to zero. Returns None when biases are disabled.
+        """
+
+        if self.unmasked_b is None:
+            return None;
+        if self.use_mask:
+            assert self.b_mask is not None;
+            return self.unmasked_b * self.b_mask.to(device = self.unmasked_b.device, dtype = self.unmasked_b.dtype);
+        return self.unmasked_b;
+
+
+    @torch.no_grad()
+    def _update_mask(self) -> tuple[int, int]:
+        r"""
+        Permanently mask small expert coefficients.
+
+        Any active matrix or bias entry whose current effective absolute value is below
+        `self.mask_threshold` is set to zero in the hard mask. Previously masked entries remain
+        masked because the update multiplies the old mask by the new keep-mask.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        n_active : int
+            Number of active matrix/bias coefficients after the update.
+
+        n_total : int
+            Total number of maskable matrix/bias coefficients.
+        """
+
+        assert self.mask_threshold is not None;
+
+        # Fetch the current mask.
+        self.A_mask = self.A_mask.to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype);
+
+        # Determine which components of A are bigger than the threshold.
+        A_keep      : torch.Tensor = (self.A.abs() >= self.mask_threshold).to(dtype = self.unmasked_A.dtype);
+
+        # Update the mask; note that any previously masked components remain masked.
+        self.A_mask = (self.A_mask * A_keep).contiguous();
+
+        # Update A.
+        self.unmasked_A.data.mul_(self.A_mask);
+        n_active : int = int(self.A_mask.sum().item());
+        n_total  : int = int(self.A_mask.numel());
+
+        # Update b, if it exists
+        if self.unmasked_b is not None:
+            assert self.b_mask is not None;
+            self.b_mask = self.b_mask.to(device = self.unmasked_b.device, dtype = self.unmasked_b.dtype);
+            b           : torch.Tensor = self.b;
+            assert b is not None;
+            b_keep      : torch.Tensor = (b.abs() >= self.mask_threshold).to(dtype = self.unmasked_b.dtype);
+            self.b_mask = (self.b_mask * b_keep).contiguous();
+            self.unmasked_b.data.mul_(self.b_mask);
+            n_active   += int(self.b_mask.sum().item());
+            n_total    += int(self.b_mask.numel());
+
+        # Report masking information 
+        LOGGER.info("%d/%d coefficients are still active across %d experts" % (n_active, n_total, self.n_experts));
+        return n_active, n_total;
 
 
     def _evaluate_torch_rhs(
