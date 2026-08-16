@@ -248,19 +248,20 @@ class SINDy(InterpolatableLatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------
 
-        loss_dict : dict[str, list[torch.Tensor] | torch.Tensor]:
-            A loss dictionary with three keys: LD, coef, and stab.
+        losses : LD_Loss_Container
+            Container housing the loss values, matching loss weights, and parameter rows used to
+            compute the losses. Its `losses` dictionary has three keys: LD, coef, and stab.
 
-            loss_dict['LD'] : list[torch.Tensor], len = n_param
+            losses.losses['LD'] : list[torch.Tensor], len = n_param
                 The i'th element of this list is a 0-dimensional tensor whose lone element holds the
                 SINDy loss from the i'th combination of parameter values.
 
-            loss_dict['coef'] : list[torch.Tensor], len = n_param
+            losses.losses['coef'] : list[torch.Tensor], len = n_param
                 The i'th element of this list is a 0-dimensional tensor whose lone element holds the
                 coefficient loss (Frobenius norm) of the coefficients for the i'th combination
                 of parameter values.
 
-            loss_dict['stab'] : list[torch.Tensor], len = n_param
+            losses.losses['stab'] : list[torch.Tensor], len = n_param
                 The i'th element of this list is a 0-dimensional tensor whose lone element holds the
                 stability penalty for the i'th combination of parameter values (see
                 LatentDynamics.stability_penalty).
