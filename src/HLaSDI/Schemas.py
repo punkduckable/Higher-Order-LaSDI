@@ -391,9 +391,6 @@ class LatentDynamicsBaseConfig(ConfigBase):
 
     type: str
 
-    # How should we determine the latent dynamics at testing parameter combinations?
-    interpolator_type: Literal["GP"]
-
     # Should we learn the latent coefficients during training, or keep them fixed?
     trainable: bool
 
@@ -422,8 +419,14 @@ class LatentDynamicsBaseConfig(ConfigBase):
             ));
         return self;
 
+class InterpolatableLatentDynamicsConfig(LatentDynamicsBaseConfig):
+    """Base config for latent dynamics that interpolate coefficients at test parameters."""
 
-class InterpolatableLatentDynamicsSettings(ConfigBase):
+    # How should we determine the latent dynamics at testing parameter combinations?
+    interpolator_type: Literal["GP"]
+
+
+class StrongInterpolatableLatentDynamicsSettings(ConfigBase):
     """Latent dynamics settings for strong-form least-squares coefficient initialization."""
 
     # What L2 regularization penalty should we apply when solving for initial coefficients?
@@ -509,32 +512,32 @@ class CABLELatentDynamicsSettings(ConfigBase):
         # All done :) 
         return self;
 
-class SINDyLatentDynamicsConfig(LatentDynamicsBaseConfig):
+class SINDyLatentDynamicsConfig(InterpolatableLatentDynamicsConfig):
     type        : Literal["sindy"]
-    sindy       : InterpolatableLatentDynamicsSettings
+    sindy       : StrongInterpolatableLatentDynamicsSettings
 
 
-class SINDyWeakLatentDynamicsConfig(LatentDynamicsBaseConfig):
+class SINDyWeakLatentDynamicsConfig(InterpolatableLatentDynamicsConfig):
     type        : Literal["sindy_w"]
     sindy_w     : WeakLatentDynamicsSettings
 
 
-class DampedSpringLatentDynamicsConfig(LatentDynamicsBaseConfig):
+class DampedSpringLatentDynamicsConfig(InterpolatableLatentDynamicsConfig):
     type        : Literal["spring"]
-    spring      : InterpolatableLatentDynamicsSettings
+    spring      : StrongInterpolatableLatentDynamicsSettings
 
 
-class DampedSpringWeakLatentDynamicsConfig(LatentDynamicsBaseConfig):
+class DampedSpringWeakLatentDynamicsConfig(InterpolatableLatentDynamicsConfig):
     type        : Literal["spring_w"]
     spring_w    : WeakLatentDynamicsSettings
 
 
-class SwitchSINDyLatentDynamicsConfig(LatentDynamicsBaseConfig):
+class SwitchSINDyLatentDynamicsConfig(InterpolatableLatentDynamicsConfig):
     type        : Literal["switch"]
-    switch      : InterpolatableLatentDynamicsSettings
+    switch      : StrongInterpolatableLatentDynamicsSettings
 
 
-class SwitchSINDyWeakLatentDynamicsConfig(LatentDynamicsBaseConfig):
+class SwitchSINDyWeakLatentDynamicsConfig(InterpolatableLatentDynamicsConfig):
     type        : Literal["switch_w"]
     switch_w    : WeakLatentDynamicsSettings
 

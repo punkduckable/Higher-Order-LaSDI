@@ -144,7 +144,6 @@ class FOM_Rollout(Sampler):
         new_sample_timer : float = time.perf_counter();
         assert len(trainer.U_Test)             >  0,                                    "len(trainer.U_Test) = %d" % len(trainer.U_Test);
         assert len(trainer.U_Test)             == trainer.param_space.n_test(),         "len(trainer.U_Test) = %d, trainer.param_space.n_test() = %d" % (len(trainer.U_Test), trainer.param_space.n_test());
-        trainer._check_train_coefficients();
         if self.requires_stochastic_LD:
             assert trainer.latent_dynamics.stochastic,                                  "This sampler requires a stochastic LD model, but got one that is not.";
         LOGGER.info('\n~~~~~~~ Finding New Point ~~~~~~~');

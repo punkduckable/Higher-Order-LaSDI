@@ -231,7 +231,6 @@ The `InterpolatableLatentDynamics` layer provides:
 
 Missing coefficient entries intentionally raise errors. The sampler/data-generation path should
 initialize coefficients for every training parameter by calling `latent_dynamics.initialize_coefficients(..., device, params)`.
-The Trainer checks this with `_check_train_coefficients()` before optimization and builds optimizers
 from encoder/decoder parameters plus `latent_dynamics.parameters()`. Checkpoints serialize
 the full `LatentDynamics` export, including `train_coefs`, then restore those coefficient tensors as
 trainable leaves when loading.

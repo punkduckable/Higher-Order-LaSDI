@@ -72,9 +72,6 @@ class _Trainer:
         self.cached_metrics = []
         self.flushed_epochs = []
 
-    def _check_train_coefficients(self):
-        self.checked_train_coefficients = True
-
     def _cache_metric(self, key, value):
         self.cached_metrics.append((key, value))
 

@@ -377,7 +377,6 @@ class Sampler:
                         LOGGER.warning("  WARNING: Normalized data std is far from 1.0! This suggests normalization stats may not be appropriate for this data!");
 
         # Initialize latent-dynamics coefficients for all newly added training points.
-        # Missing coefficients are considered a hard error later in Trainer._check_train_coefficients.
         if len(new_U_Train) > 0:
             LOGGER.info("Initializing coefficients for %d newly added training points using latent-dynamics initialize_coefficients" % len(new_U_Train));
             

@@ -22,11 +22,11 @@ from    HLaSDI.EncoderDecoder          import  CNN_3D_Autoencoder, load_CNN_3D_A
 
 from    HLaSDI.Physics                 import  Physics, Burgers2D, Thermal, Burgers, BurgersSecondOrder;
 from    HLaSDI.Physics                 import  Explicit, ExplicitSecondOrder;
-# from  Physics.Advection               import  Advection;             # mfem dependency.
-# from  Physics.NonlinearElasticity     import  NonlinearElasticity;   # mfem dependency.
-# from  Physics.WaveEquation            import  WaveEquation;          # mfem dependency.
-# from  Physics.KleinGordon             import  KleinGordon;           # mfem dependency.
-# from  Physics.Telegraphers            import  Telegraphers;          # mfem dependency.
+# from    HLaSDI.Physics.Advection        import  Advection;             # mfem dependency.
+# from  HLaSDI.Physics.NonlinearElasticity    import  NonlinearElasticity;   # mfem dependency.
+# from  HLaSDI.Physics.WaveEquation       import  WaveEquation;          # mfem dependency.
+# from  HLaSDI.Physics.KleinGordon        import  KleinGordon;           # mfem dependency.
+# from  HLaSDI.Physics.Telegraphers       import  Telegraphers;          # mfem dependency.
 
 from    HLaSDI.Sample                  import  Sampler, FOM_Rollout, FOM_Variance, ROM_Discrepancy;
 from    HLaSDI.Schemas                 import  ExperimentConfig, validate_experiment_config;
@@ -76,7 +76,7 @@ physics_dict = {                'Burgers'                   : Burgers.Burgers,
                                 'Explicit'                  : Explicit.Explicit,
                                 'ExplicitSecondOrder'       : ExplicitSecondOrder.Explicit,
                                 'Thermal'                   : Thermal.Thermal,
-                                # 'Advection'                 : Advection.Advection,                           # mfem dependency
+                                'Advection'                 : Advection.Advection,                           # mfem dependency
                                 # 'NonlinearElasticity'       : NonlinearElasticity.NonlinearElasticity,       # mfem dependency
                                 # 'WaveEquation'              : WaveEquation.WaveEquation,                      # mfem dependency
                                 # 'KleinGordon'               : KleinGordon.KleinGordon,                        # mfem dependency

@@ -113,7 +113,6 @@ class FOM_Variance(Sampler):
         assert len(trainer.U_Test)             >  0,                                    "len(trainer.U_Test) = %d" % len(trainer.U_Test);
         assert len(trainer.U_Test)             == trainer.param_space.n_test(),         "len(trainer.U_Test) = %d, trainer.param_space.n_test() = %d" % (len(trainer.U_Test), trainer.param_space.n_test());
         assert trainer.latent_dynamics.stochastic,                                      "This sampler requires a stochastic LD model, but got one that is not.";
-        trainer._check_train_coefficients();
         LOGGER.info('\n~~~~~~~ Finding New Point ~~~~~~~');
 
         # Move the encoder_decoder to the cpu (this is where all the GP stuff happens). Remember 

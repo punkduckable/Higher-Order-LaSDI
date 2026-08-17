@@ -121,7 +121,6 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
 
     # Set up coefficient interpolator. 
     encoder_decoder.cpu();
-    trainer._check_train_coefficients();
 
     # Number of coefficient/ROM samples used for plotting + uncertainty metrics.
     # Most samplers expose this as an attribute; fall back to 20 for custom samplers.

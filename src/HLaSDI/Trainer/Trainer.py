@@ -709,32 +709,6 @@ class Trainer:
     # Latent dynamics coefficient helpers
     # ---------------------------------------------------------------------------------------------
 
-    def _check_train_coefficients(self) -> None:
-        """
-        Verify every training parameter has LD-owned native coefficients.
-
-        This is intentionally a check, not synchronization; missing coefficients indicate a sampler
-        or initialization bug and should stop execution.
-
-
-        -------------------------------------------------------------------------------------------
-        Returns
-        -------------------------------------------------------------------------------------------
-
-        Nothing!
-        """
-        for i in range(self.param_space.n_train()):
-            params_i = self.param_space.train_space[i, :];
-            coef_dict = self.latent_dynamics.get_train_coefs(params_i);
-            assert isinstance(coef_dict, dict), "train_coefs[%s] must be a dict" % str(tuple(params_i));
-            assert len(coef_dict) > 0, "train_coefs[%s] is empty" % str(tuple(params_i));
-            for name, tensor in coef_dict.items():
-                assert isinstance(name, str), "coefficient names must be strings";
-                assert isinstance(tensor, torch.Tensor), "coefficient %s must be a torch.Tensor" % name;
-        return;
-
-
-
     def _optimizer_parameters(self) -> list[torch.Tensor]:
         """
         Collect EncoderDecoder parameters and LD-owned coefficient tensors for optimization.
@@ -755,7 +729,6 @@ class Trainer:
         if self.encoder_decoder.trainable == True:
             trainable_params.extend(list(self.encoder_decoder.parameters()));
         if self.latent_dynamics.trainable == True:
-            self._check_train_coefficients();
             trainable_params.extend(self.latent_dynamics.parameters());
 
         return trainable_params;
@@ -796,10 +769,6 @@ class Trainer:
         checkpoint_path : str
             A string housing the path to the file housing the saved checkpoint.
         """
-
-        # Run checks. This is intentionally strict: every training parameter should already have a
-        # corresponding native coefficient dictionary in the LatentDynamics object.
-        self._check_train_coefficients();
 
         # Set up the checkpoint path.
         checkpoint_path : str = self.path_checkpoint + '/' + 'checkpoint.pt';

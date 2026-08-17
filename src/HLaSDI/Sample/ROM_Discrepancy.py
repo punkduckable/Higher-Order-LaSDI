@@ -115,7 +115,6 @@ class ROM_Discrepancy(Sampler):
         n_test          : int               = trainer.param_space.n_test();
         n_train         : int               = trainer.param_space.n_train();
         assert n_test > 0, "trainer.param_space.n_test() = %d" % n_test;
-        trainer._check_train_coefficients();
         LOGGER.info('\n~~~~~~~ Finding New Point ~~~~~~~');
 
         # Move the encoder_decoder to the cpu (this is where all the GP stuff happens). Remember 
