@@ -47,7 +47,7 @@ class SINDy_weak(WeakLatentDynamics, SINDy):
         where phi is one of the compactly supported test functions owned by the base class.
 
         
-        Note: This class inherits `trainable_tensors`, `RHS`, and `simulate` from SINDy.
+        Note: This class inherits `parameters`, `RHS`, and `simulate` from SINDy.
 
         -------------------------------------------------------------------------------------------
         Arguments

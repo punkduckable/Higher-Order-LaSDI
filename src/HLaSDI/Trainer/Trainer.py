@@ -179,7 +179,7 @@ class Trainer:
 
         The trainer essentially defines how everything gets trained. It should do this by 
         initializing an optimizer on the EncoderDecoder parameters and trainable coefficients 
-        in the LatentDynamics object (fetched via LatentDynamics.trainable_tensors). It 
+        in the LatentDynamics object (fetched via LatentDynamics.parameters). It 
         should train these parameters via a sequence of epochs. During each epoch, the Trainer 
         should evaluate a number of loss functions, add them together, then back-prop through the 
         loss to get the derivative of the loss with respect to each EncoderDecoder parameter and 
@@ -824,8 +824,7 @@ class Trainer:
         Collect EncoderDecoder parameters and LD-owned coefficient tensors for optimization.
 
         The latent-dynamics coefficients live the latent dynamics object but can be fetched using 
-        the `trainable_tensors` method (which should return all trainable tensors in the 
-        LD object).
+        the `parameters` method (which should return all parameters in the LD object).
 
 
         -------------------------------------------------------------------------------------------
@@ -841,7 +840,7 @@ class Trainer:
             trainable_params.extend(list(self.encoder_decoder.parameters()));
         if self.latent_dynamics.trainable == True:
             self._check_train_coefficients();
-            trainable_params.extend(self.latent_dynamics.trainable_tensors());
+            trainable_params.extend(self.latent_dynamics.parameters());
 
         return trainable_params;
 

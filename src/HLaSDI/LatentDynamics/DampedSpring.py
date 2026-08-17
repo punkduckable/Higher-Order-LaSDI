@@ -115,7 +115,7 @@ class DampedSpring(InterpolatableLatentDynamics):
 
 
 
-    def trainable_tensors(self) -> list[torch.Tensor]:
+    def parameters(self) -> list[torch.Tensor]:
         r"""Return the trainable coefficient tensors stored in `self.train_coefs`."""
 
         if self.trainable == False:

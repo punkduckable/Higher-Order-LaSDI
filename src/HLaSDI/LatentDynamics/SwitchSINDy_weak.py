@@ -40,7 +40,7 @@ class SwitchSINDy_weak(WeakLatentDynamics, SwitchSINDy):
         Coefficients are stored natively in `self.train_coefs` using the keys `A_before`,
         `b_before`, `A_after`, and `b_after`.
 
-        Note: This class inherits `simulate`, `trainable_tensors`, and `RHS` from SwitchSINDy.
+        Note: This class inherits `simulate`, `parameters`, and `RHS` from SwitchSINDy.
 
 
         -------------------------------------------------------------------------------------------

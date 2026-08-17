@@ -40,7 +40,7 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
         In this expression, K, C, and b are the model's coefficients. There is a separate set of
         coefficients for each combination of parameter values.
 
-        Note that this class inherits `trainable_tensors`, `simulate`, and `RHS` from DampedSpring.
+        Note that this class inherits `parameters`, `simulate`, and `RHS` from DampedSpring.
 
 
         -------------------------------------------------------------------------------------------

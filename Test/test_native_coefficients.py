@@ -107,7 +107,7 @@ def test_sindy_initialize_coefficients_stores_native_trainable_dict():
     assert coefs["b"].requires_grad
     assert coefs["A"].is_leaf
     assert coefs["b"].is_leaf
-    assert ld.trainable_tensors() == [coefs["A"], coefs["b"]]
+    assert ld.parameters() == [coefs["A"], coefs["b"]]
 
 
 def test_latent_dynamics_export_load_restores_trainable_coefs():
@@ -136,7 +136,7 @@ def test_base_latent_dynamics_device_move_hook_is_noop_without_train_coefs():
         config=_sindy_config(),
     )
 
-    ld.move_trainable_tensors_to_device(torch.device("cpu"))
+    ld.move_parameters_to_device(torch.device("cpu"))
 
     assert not hasattr(ld, "train_coefs")
 
@@ -148,7 +148,7 @@ def test_interpolatable_device_move_hook_updates_train_coefs_in_place():
     old_A = old_coefs["A"]
     old_b = old_coefs["b"]
 
-    ld.move_trainable_tensors_to_device(torch.device("cpu"))
+    ld.move_parameters_to_device(torch.device("cpu"))
     coefs = ld.get_train_coefs(numpy.array([1.0]))
 
     assert coefs["A"] is not old_A
@@ -424,7 +424,7 @@ def test_sindy_weak_fit_zero_initializes_and_compute_losses_requires_weights():
     assert torch.allclose(coefs["A"], torch.zeros(1, 1))
     assert torch.allclose(coefs["b"], torch.zeros(1))
     assert all(tensor.requires_grad and tensor.is_leaf for tensor in coefs.values())
-    assert ld.trainable_tensors() == [coefs["A"], coefs["b"]]
+    assert ld.parameters() == [coefs["A"], coefs["b"]]
 
     with pytest.raises(KeyError):
         ld.compute_losses([[z]], [t], step=0, params=params)

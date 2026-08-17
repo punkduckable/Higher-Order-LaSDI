@@ -100,7 +100,7 @@ class SwitchSINDy(InterpolatableLatentDynamics):
 
 
     def _native_from_matrices(self, before : torch.Tensor, after : torch.Tensor) -> dict[str, torch.Tensor]:
-        r"""Convert before/after [b; A^T] matrices into native trainable tensors."""
+        r"""Convert before/after [b; A^T] matrices into native parameters."""
 
         return {
             "A_before": before[1:, :].T.detach().clone().requires_grad_(True),
@@ -111,7 +111,7 @@ class SwitchSINDy(InterpolatableLatentDynamics):
 
 
 
-    def trainable_tensors(self) -> list[torch.Tensor]:
+    def parameters(self) -> list[torch.Tensor]:
         r"""Return all trainable switching-SINDy tensors."""
 
         if self.trainable == False:

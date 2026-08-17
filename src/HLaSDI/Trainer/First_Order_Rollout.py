@@ -340,7 +340,7 @@ class First_Order_Rollout(Trainer):
         # checkpoint-restored LD coefficients from staying on CPU during a GPU training round.
         device                  : str                       = self.device;
         encoder_decoder_device  : EncoderDecoder            = self.encoder_decoder.to(device);
-        self.latent_dynamics.move_trainable_tensors_to_device(device);
+        self.latent_dynamics.move_parameters_to_device(device);
 
         # Reset optimizer.
         optimizer_parameters_list   : list[torch.Tensor] = self._optimizer_parameters();
@@ -770,7 +770,7 @@ class First_Order_Rollout(Trainer):
             # Record coefficient scale and the most recent epoch index for fallback checkpointing.
             if isinstance(self.latent_dynamics, InterpolatableLatentDynamics):
                 with torch.no_grad():
-                    coef_tensors_report = self.latent_dynamics.trainable_tensors();
+                    coef_tensors_report = self.latent_dynamics.parameters();
                     train_coefs_flat_report = torch.cat([c.reshape(-1) for c in coef_tensors_report]);
                     max_train_coef = float(torch.abs(train_coefs_flat_report).max().item());
             last_iter_idx = int(iter);

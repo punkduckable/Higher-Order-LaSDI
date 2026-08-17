@@ -75,7 +75,7 @@ class WeakLatentDynamics(LatentDynamics):
 
         trainable : bool
             Indicates if the trainer should train the latent dynamics parameters. If false,
-            `trainable_tensors` should return an empty list.
+            `parameters` should return an empty list.
 
         config : dict
             The "latent_dynamics" sub-dictionary of the config file. If `type == "weak"`, the

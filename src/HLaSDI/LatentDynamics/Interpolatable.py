@@ -117,7 +117,7 @@ class InterpolatableLatentDynamics(LatentDynamics):
         
         trainable : bool
             Indicates if the trainer should train the latent dynamics parameters. If false, 
-            `trainable_tensors` should return an empty list.
+            `parameters` should return an empty list.
 
         config : dict
             The "latent_dynamics" sub-dictionary of the config file. If `type == "weak"`, the
@@ -203,7 +203,7 @@ class InterpolatableLatentDynamics(LatentDynamics):
 
         The values in `coefs` are converted to detached leaf tensors whose `requires_grad` flag
         matches `self.trainable`, unless they are already leaf tensors with the correct gradient
-        setting. This ensures that `trainable_tensors()` can pass these exact tensor objects
+        setting. This ensures that `parameters()` can pass these exact tensor objects
         to a torch optimizer when training is enabled, and frozen latent dynamics do not accumulate
         coefficient gradients.
 
@@ -245,9 +245,9 @@ class InterpolatableLatentDynamics(LatentDynamics):
         return;
 
 
-    def move_trainable_tensors_to_device(self, device : torch.device | str) -> None:
+    def move_parameters_to_device(self, device : torch.device | str) -> None:
         r"""
-        Move LD-owned training coefficient tensors to the requested device as trainable leaves.
+        Move LD-owned parameters to the requested device as trainable leaves.
 
         Interpolatable latent dynamics store their LD-owned trainable tensor state in
         `self.train_coefs`. Moving these tensors requires replacing the values in that dictionary;

@@ -227,12 +227,12 @@ The `InterpolatableLatentDynamics` layer provides:
 - `get_train_coefs(params_row)`: strict lookup of one native coefficient dictionary
 - `set_train_coefs(params_row, coefs, device)`: store native coefficient tensors as trainable leaves
 - `interpolator`: a `GPInterpolate` object fit from the native training-coefficient dictionaries
-- `trainable_tensors()`: subclass implementation returning the actual tensors passed to optimizers
+- `parameters()`: subclass implementation returning the actual tensors passed to optimizers
 
 Missing coefficient entries intentionally raise errors. The sampler/data-generation path should
 initialize coefficients for every training parameter by calling `latent_dynamics.initialize_coefficients(..., device, params)`.
 The Trainer checks this with `_check_train_coefficients()` before optimization and builds optimizers
-from encoder/decoder parameters plus `latent_dynamics.trainable_tensors()`. Checkpoints serialize
+from encoder/decoder parameters plus `latent_dynamics.parameters()`. Checkpoints serialize
 the full `LatentDynamics` export, including `train_coefs`, then restore those coefficient tensors as
 trainable leaves when loading.
 
@@ -347,7 +347,7 @@ Configuration files are YAML-based and specify:
   - Before each training round, it checks that every training parameter has native coefficients in
     `latent_dynamics.train_coefs`.
   - Optimizers are built from `encoder_decoder.parameters()` plus
-    `latent_dynamics.trainable_tensors()`, so newly added coefficient tensors are included after greedy sampling.
+    `latent_dynamics.parameters()`, so newly added coefficient tensors are included after greedy sampling.
   - Checkpoints save and restore the `LatentDynamics` export dictionary, including `latent_dynamics.train_coefs`.
 - Subclass-specific settings live under `trainer.<TypeName>`. Example (`Second_Order_Rollout`):
   - learning rate + stability: `lr`, `gradient_clip`, `warmup_epochs`
@@ -415,7 +415,7 @@ Follow the existing trainers (`First_Order_Rollout`, `First_Order_Weak`, `Second
 
 - Cache scalar loss tensors via `_cache_loss(...)`, then write one JSONL row per epoch via `_flush_loss_cache(epoch)`.
 - Use `_optimizer_parameters()` when you want the optimizer to include both
-  `encoder_decoder.parameters()` and the trainable tensors in `latent_dynamics.train_coefs`
+  `encoder_decoder.parameters()` and the parameters in `latent_dynamics.train_coefs`
 - Call `_Save_Checkpoint(...)` when a new best model is found (so `train()` can restore it)
 
 ### 2) Register the trainer in `Initialize.py`
@@ -836,7 +836,7 @@ New applications can be implemented by deriving from the appropriate base classe
      `self.interpolator.sample(...)` for non-training parameters. Each `t_Grid[i]` is 1D, each
      `IC[i][j]` has shape `(n_z,)`, and each returned trajectory component has shape
      `(n_t(i), n_z)`.
-   - `trainable_tensors(self)`: Return the actual coefficient tensors stored in
+   - `parameters(self)`: Return the actual coefficient tensors stored in
      `self.train_coefs` so they can be passed to a torch optimizer.
 3. **Register in `Initialize.py`**:
    ```python

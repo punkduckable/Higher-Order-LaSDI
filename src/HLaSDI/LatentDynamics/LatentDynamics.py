@@ -125,7 +125,7 @@ class LatentDynamics:
 
     trainable : bool 
         Indicates if the trainer should train the parameters in this LatentDynamics object. 
-        Sub-classes should configure `trainable_tensors` to return an empty list if 
+        Sub-classes should configure `parameters` to return an empty list if 
         `trainable = False`. 
 
     loss_weights : dict[str, NonNegativeFloat]
@@ -146,8 +146,8 @@ class LatentDynamics:
     - `initialize_coefficients(Latent_States, t_Grid, params=None)`: estimate/initialize native
       coefficient dictionaries from encoded trajectories.
 
-    - `trainable_tensors()`: return the actual trainable tensors (if training is enabled) 
-      stored in `train_coefs` so the `Trainer` can optimize them jointly with the encoder/decoder.
+    - `parameters()`: return the actual parameters (if training is enabled) stored in 
+    `train_coefs` so the `Trainer` can optimize them jointly with the encoder/decoder.
     
     - `compute_losses(Latent_States, t_Grid, step, params=None)`: compute latent-dynamics losses for
       the current coefficients and return an `LD_Loss_Container` whose loss keys match
@@ -219,7 +219,7 @@ class LatentDynamics:
         
         trainable : bool
             Indicates if the trainer should train the latent dynamics parameters. If false, 
-            `trainable_tensors` should return an empty list.
+            `parameters` should return an empty list.
 
         config : LatentDynamicsBaseConfig
             The "latent_dynamics" sub-dictionary of the config file. If `type == "weak"`, the
@@ -341,7 +341,7 @@ class LatentDynamics:
         return tuple(float(x) for x in params_row);
 
 
-    def trainable_tensors(self) -> list[torch.Tensor]:
+    def parameters(self) -> list[torch.Tensor]:
         r"""
         Return the trainable coefficient tensors owned by this LatentDynamics object.
 
@@ -366,16 +366,16 @@ class LatentDynamics:
             A list containing all trainable coefficient tensors stored in `self.train_coefs`.
         """
 
-        raise RuntimeError("Abstract function LatentDynamics.trainable_tensors!");
+        raise RuntimeError("Abstract function LatentDynamics.parameters!");
 
 
-    def move_trainable_tensors_to_device(self, device : torch.device | str) -> None:
+    def move_parameters_to_device(self, device : torch.device | str) -> None:
         r"""
-        Move LD-owned trainable tensor state to a device.
+        Move LD-owned parameters to a device.
 
         This hook exists so trainers do not need to know how a concrete LatentDynamics subclass
-        stores its trainable tensors. Subclasses that own trainable tensors should override this
-        method and update their internal tensor references in-place before optimizer construction.
+        stores its parameters. Subclasses that own parameters should override this method and 
+        update their internal tensor references in-place before optimizer construction.
 
         The base implementation is a no-op for latent-dynamics classes with no LD-owned trainable
         tensor state.

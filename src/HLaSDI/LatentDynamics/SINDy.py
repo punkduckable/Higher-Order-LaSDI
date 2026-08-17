@@ -97,7 +97,7 @@ class SINDy(InterpolatableLatentDynamics):
 
     def _native_from_matrix(self, coefs : torch.Tensor) -> dict[str, torch.Tensor]:
         r"""
-        Convert the least-squares coefficient matrix into native trainable tensors.
+        Convert the least-squares coefficient matrix into native parameters.
 
         The least-squares solve naturally returns the legacy matrix with shape (n_z + 1, n_z),
         where the first row is the constant forcing and the remaining rows are A^T. We immediately
@@ -113,7 +113,7 @@ class SINDy(InterpolatableLatentDynamics):
 
 
 
-    def trainable_tensors(self) -> list[torch.Tensor]:
+    def parameters(self) -> list[torch.Tensor]:
         r"""
         Return the actual coefficient tensors that should be passed to torch optimizers.
 

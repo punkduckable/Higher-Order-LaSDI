@@ -117,7 +117,7 @@ class CABLE(LatentDynamics):
                 param.mul_(0.01);
 
         # Randomly initialize the experts. These are leaf tensors because the Trainer passes them
-        # directly to the optimizer through trainable_tensors().
+        # directly to the optimizer through parameters().
         self.unmasked_A : torch.Tensor = (0.01*torch.rand((self.n_experts, self.n_z, self.n_z), dtype = torch.float32)).requires_grad_(self.trainable);
         self.unmasked_b : torch.Tensor | None;
         if self.use_biases:
@@ -147,11 +147,11 @@ class CABLE(LatentDynamics):
 
 
     # ---------------------------------------------------------------------------------------------
-    # trainable_tensors, move_trainable_tensors_to_device, and initialize_coefficients
+    # parameters, move_parameters_to_device, and initialize_coefficients
     # ---------------------------------------------------------------------------------------------
 
 
-    def trainable_tensors(self) -> list[torch.Tensor]:
+    def parameters(self) -> list[torch.Tensor]:
         r"""
         Return CABLE-owned tensors that should be passed to torch optimizers.
 
@@ -173,9 +173,9 @@ class CABLE(LatentDynamics):
         return tensors;
 
 
-    def move_trainable_tensors_to_device(self, device : torch.device | str) -> None:
+    def move_parameters_to_device(self, device : torch.device | str) -> None:
         r"""
-        Move CABLE-owned trainable tensor state to a device.
+        Move CABLE-owned parameters to a device.
 
 
         -------------------------------------------------------------------------------------------
@@ -259,8 +259,9 @@ class CABLE(LatentDynamics):
         assert len(Latent_States) == len(t_Grid) == params.shape[0];
 
         # Move A, optional b, masks, and w to specified device.
-        self.move_trainable_tensors_to_device(device);
+        self.move_parameters_to_device(device);
         return None;
+
     
     # ---------------------------------------------------------------------------------------------
     # Compute Losses, RHS, and Simulate
