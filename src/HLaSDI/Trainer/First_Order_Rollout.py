@@ -3,6 +3,7 @@
 # -------------------------------------------------------------------------------------------------
 
 import  logging;
+import  time;
 
 import  torch;
 import  numpy;
@@ -378,16 +379,16 @@ class First_Order_Rollout(Trainer):
 
         # IC rollout setup
         if(self.loss_weights['IC_rollout'] > 0 and p_IC_rollout > 0):
-            self.timer.start("IC Rollout Setup");
+            timer : float = time.perf_counter();
 
             t_Grid_IC_rollout, n_IC_rollout_frames, U_IC_Rollout_Targets = self._IC_rollout_setup(  t            = t_Train_device, 
                                                                                                     p_IC_rollout = p_IC_rollout);
-            self.timer.end("IC Rollout Setup"); 
+            self._cache_metric("time/IC_Rollout/Setup", time.perf_counter() - timer);
 
         # -----------------------------------------------------------------------------------------
         # Run the iterations!
         for iter in range(start_iter, end_iter):
-            self.timer.start("train_step");
+            step_timer : float = time.perf_counter();
             LOGGER.debug("=" * 80);
             LOGGER.debug("Starting training iteration %d/%d" % (iter + 1, end_iter));
 
@@ -423,7 +424,7 @@ class First_Order_Rollout(Trainer):
             # NOTE: Use epochs_in_round (not iter) to reset IC rollout progression each training round
 
             if(self.loss_weights['IC_rollout'] > 0 and epochs_in_round > 0 and ((epochs_in_round % self.IC_rollout_update_freq) == 0)):
-                self.timer.start("IC Rollout Setup");
+                timer : float = time.perf_counter();
 
                 # Recalculate p_IC_rollout based on progress within current round
                 p_IC_rollout   = min(self.max_p_IC_rollout, self.p_IC_rollout_init + self.IC_dp_per_update*(epochs_in_round//self.IC_rollout_update_freq));
@@ -435,7 +436,7 @@ class First_Order_Rollout(Trainer):
                     t_Grid_IC_rollout, n_IC_rollout_frames, U_IC_Rollout_Targets = self._IC_rollout_setup(  t            = t_Train_device, 
                                                                                                             p_IC_rollout = p_IC_rollout);
                 
-                self.timer.end("IC Rollout Setup"); 
+                self._cache_metric("time/IC_Rollout/Setup", time.perf_counter() - timer);
 
 
             # -------------------------------------------------------------------------------------
@@ -469,7 +470,7 @@ class First_Order_Rollout(Trainer):
                 # -----------------------------------------------------------------------------
                 # Forward pass
 
-                self.timer.start("Forward Pass");
+                timer : float = time.perf_counter();
                 LOGGER.debug("Forward Pass (Autoencoder) - start for parameter combination %d" % i);
 
                 # Run the forward pass. This results in an n_train element list whose i'th 
@@ -484,14 +485,14 @@ class First_Order_Rollout(Trainer):
                 U_Pred_i    : torch.Tensor  = encoder_decoder_device.Decode(Z_i)[0];
 
                 LOGGER.debug("Forward Pass (Autoencoder) - complete for parameter combination %d" % i);
-                self.timer.end("Forward Pass");
+                self._cache_metric("time/Forward_Pass", time.perf_counter() - timer);
 
 
                 # ----------------------------------------------------------------------------
                 # Reconstruction loss
 
                 if(self.loss_weights['recon'] > 0):
-                    self.timer.start("Reconstruction Loss");
+                    timer : float = time.perf_counter();
                     LOGGER.debug("Reconstruction Loss (Autoencoder) - start for parameter combination %d" % i);
 
                     # Reconstruction residual (data is either physical units or normalized).
@@ -512,7 +513,7 @@ class First_Order_Rollout(Trainer):
                     self._cache_metric(f'loss/recon/{str(ith_param_tuple)}', recon_loss_ith_param.detach());
                     
                     LOGGER.debug("Reconstruction Loss (Autoencoder) - complete for parameter combination %d" % i);
-                    self.timer.end("Reconstruction Loss");
+                    self._cache_metric("time/Recon_Loss", time.perf_counter() - timer);
 
             # Store total recon loss.
             self._cache_metric('loss/recon/total', loss_recon.detach());
@@ -521,7 +522,7 @@ class First_Order_Rollout(Trainer):
             # --------------------------------------------------------------------------------
             # Latent Dynamics losses
 
-            self.timer.start("LD/Coefficient/Stability Losses");
+            timer : float = time.perf_counter();
 
             # Compute the latent dynamics losses.
             LD_losses : LD_Loss_Container = self.latent_dynamics.compute_losses( 
@@ -539,7 +540,7 @@ class First_Order_Rollout(Trainer):
             for key, value in LD_losses.losses.items():
                 loss_LD_weighted_sum = loss_LD_weighted_sum + LD_losses.weights[key] * value;
 
-            self.timer.end("LD/Coefficient/Stability Losses");
+            self._cache_metric("time/LD_Losses", time.perf_counter() - timer);
 
 
             # ---------------------------------------------------------------------------------
@@ -547,7 +548,7 @@ class First_Order_Rollout(Trainer):
             
             
             if(self.loss_weights['rollout'] > 0 and p_rollout > 0):
-                self.timer.start("Rollout Loss");
+                timer : float = time.perf_counter();
                 LOGGER.debug("Rollout Loss (Autoencoder) - start");
 
                 # For each training parameter combination, randomly select a small number of
@@ -681,7 +682,7 @@ class First_Order_Rollout(Trainer):
                 self._cache_metric('loss/rollout/FOM/total', loss_rollout_FOM.detach());
 
                 LOGGER.debug("Rollout Loss (Autoencoder) - complete");
-                self.timer.end("Rollout Loss");
+                self._cache_metric("time/Rollout", time.perf_counter() - timer);
 
 
             # --------------------------------------------------------------------------------
@@ -689,7 +690,7 @@ class First_Order_Rollout(Trainer):
 
             # Cycle through the training examples for IC rollout
             if(self.loss_weights['IC_rollout'] > 0 and p_IC_rollout > 0):
-                self.timer.start("IC Rollout Loss");
+                timer : float = time.perf_counter();
                 LOGGER.debug("IC Rollout Loss (Autoencoder) - start");
 
                 for i in range(n_train):
@@ -750,7 +751,7 @@ class First_Order_Rollout(Trainer):
                 self._cache_metric('loss/IC_rollout/FOM/total', loss_IC_rollout_FOM.detach());
 
                 LOGGER.debug("IC Rollout Loss (Autoencoder) - complete");
-                self.timer.end("IC Rollout Loss");
+                self._cache_metric("time/IC_Rollout", time.perf_counter() - timer);
 
 
             # --------------------------------------------------------------------------------
@@ -783,7 +784,7 @@ class First_Order_Rollout(Trainer):
             # -------------------------------------------------------------------------------------
             # Backward Pass
 
-            self.timer.start("Backwards Pass");
+            timer : float = time.perf_counter();
             LOGGER.debug("Backward Pass - start (iteration %d)" % (iter + 1));
 
             #  Run back propagation and update the encoder_decoder parameters. 
@@ -807,9 +808,11 @@ class First_Order_Rollout(Trainer):
             LOGGER.debug("Backward Pass - backward() complete, calling optimizer.step()");
             self.optimizer.step();
             LOGGER.debug("Backward Pass - complete (iteration %d)" % (iter + 1));
+            self._cache_metric("time/backwards", time.perf_counter() - timer);
+            self._cache_metric("time/step", time.perf_counter() - step_timer);
 
-            # Flush all cached loss tensors after the optimizer update. This performs one batched
-            # device-to-CPU scalar transfer for loss tracking, checkpoint decisions, and reporting.
+            # Flush cached tensors after the optimizer update. This performs one batched
+            # device-to-CPU scalar transfer for loss tracking, checkpoint decisions, and reporting,
             flushed_metrics = self._flush_metrics_cache(iter + 1);
             loss_value = flushed_metrics["loss/total"];
 
@@ -834,15 +837,8 @@ class First_Order_Rollout(Trainer):
                     LOGGER.debug("Skipping checkpoint during warmup period (epoch %d/%d in round, warmup ends at %d)" % 
                                (epochs_in_round, end_iter - start_iter, self.warmup_epochs));
 
-            self.timer.end("Backwards Pass");
-        
-            
-
-
             # -------------------------------------------------------------------------------------
             # Report Results from this iteration 
-
-            self.timer.start("Report");
 
             # Report the current iteration number and losses
             info_str : str = "Iter: %05d/%d, Total: %3.10f" % (iter + 1, self.max_iter, loss_value);
@@ -855,10 +851,7 @@ class First_Order_Rollout(Trainer):
                 info_str += ", max|c|: %.3f" % max_train_coef;
             LOGGER.info(info_str);
 
-            self.timer.end("Report");
-            
             LOGGER.debug("Completed training iteration %d/%d" % (iter + 1, end_iter));
-            self.timer.end("train_step");
 
             # Step the profiler.
             if profiler is not None:

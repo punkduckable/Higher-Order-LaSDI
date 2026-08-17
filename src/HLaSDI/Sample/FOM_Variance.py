@@ -3,6 +3,7 @@
 # -------------------------------------------------------------------------------------------------
 
 import  logging;
+import  time;
 
 import  torch;
 import  numpy;
@@ -108,7 +109,7 @@ class FOM_Variance(Sampler):
         # This only works if the latent dynamics is stochastic.
         assert trainer.latent_dynamics.stochastic == True, "Latent Dynamics must be stochastic to use FOM Variance sampling."
 
-        trainer.timer.start("new_sample");
+        new_sample_timer : float = time.perf_counter();
         assert len(trainer.U_Test)             >  0,                                    "len(trainer.U_Test) = %d" % len(trainer.U_Test);
         assert len(trainer.U_Test)             == trainer.param_space.n_test(),         "len(trainer.U_Test) = %d, trainer.param_space.n_test() = %d" % (len(trainer.U_Test), trainer.param_space.n_test());
         assert trainer.latent_dynamics.stochastic,                                      "This sampler requires a stochastic LD model, but got one that is not.";
@@ -210,7 +211,8 @@ class FOM_Variance(Sampler):
         # stop the timer and return the parameter. 
         new_sample : numpy.ndarray = candidate_parameters[m_index, :].reshape(1, -1);
         LOGGER.info('New param: ' + str(numpy.round(new_sample, 4)) + '\n');
-        trainer.timer.end("new_sample");
+        trainer._cache_metric("time/new_sample", time.perf_counter() - new_sample_timer);
+        trainer._flush_metrics_cache(trainer.restart_iter);
 
         # Now, append the new sample to the training set
         trainer.param_space.appendTrainSpace(new_sample);

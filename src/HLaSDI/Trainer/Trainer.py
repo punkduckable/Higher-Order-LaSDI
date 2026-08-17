@@ -12,7 +12,6 @@ import  torch;
 import  numpy;
 
 from    HLaSDI.EncoderDecoder              import  EncoderDecoder;
-from    HLaSDI.Utilities.Timing            import  Timer;
 from    HLaSDI.ParameterSpace              import  ParameterSpace;
 from    HLaSDI.Physics                     import  Physics;
 from    HLaSDI.LatentDynamics              import  LatentDynamics, LD_Loss_Container;
@@ -77,8 +76,8 @@ class Trainer:
         Whether generated FOM trajectories are normalized before training.
     config : dict
         The `trainer` configuration dictionary.
-    timer : Timer
-        Timing utility used by subclasses to record loss and backpropagation costs.
+    _metrics_cache : list[tuple[str, torch.Tensor | float]]
+        Deferred scalar metrics, including losses and timings, waiting to be written to JSONL.
     device : str
         Device used for training (`"cpu"`, `"cuda:..."`, or `"mps"`).
     physics : Physics
@@ -151,9 +150,6 @@ class Trainer:
     # The trainer configuration file.
     config : dict;
 
-    # A timer object that Iterate should use to track how long each loss takes to compute.
-    timer : Timer;
-
     # The trainer's device
     device : str;
 
@@ -201,8 +197,8 @@ class Trainer:
         particular, with normalization, EncoderDecoder object natively predict normalized values
         which need to be de-normalized before their predictions can be evaluated.
 
-        Finally, Trainer objects generally track timing data (time spent computing each loss; this
-        is managed by the timer attribute) and track losses (by training parameter!).
+        Finally, Trainer objects generally track timing data (time spent computing each loss) and
+        losses (by training parameter!) through the JSONL metrics cache.
 
         In addition to defining how training works, a `Trainer` instance owns the state of a
         Higher-Order-LaSDI run:
@@ -273,9 +269,6 @@ class Trainer:
         self.t_Train                        = [];
         self.U_Test                         = [];
         self.t_Test                         = [];
-
-        # Initialize a timer object. We will use this while training.
-        self.timer                          = Timer();
 
         assert isinstance(trainer_config, BaseTrainerConfig), "trainer_config must be a BaseTrainerConfig, got %s" % str(type(trainer_config));
 
@@ -578,19 +571,18 @@ class Trainer:
 
     def _cache_metric(  self,
                         key         : str,
-                        value       : torch.Tensor,) -> None:
+                        value       : torch.Tensor | float | int,) -> None:
         """
         Cache a scalar metric for deferred scalar logging.
 
         `Iterate(...)` implementations should call this method at the point where a metric
-        is computed, but they should pass a detached tensor rather than calling `.item()`. At the
-        end of a step, they should use `_flush_metrics_cache(epoch)` to write all metric from that
-        epoch to file. That method batches the device-to-CPU scalar transfer once per optimization
-        step instead of synchronizing the GPU repeatedly throughout the forward/loss code.
+        is computed.  Loss-like metrics should be passed as detached tensors rather than calling
+        `.item()`, so `_flush_metrics_cache(epoch)` can batch the device-to-CPU scalar transfer once
+        per optimization step.  CPU-only timings may be passed as Python floats.
 
-        Do not pass Python floats and do not call `.item()` before caching.  The tensor must contain
-        exactly one scalar value and must already be detached from the autograd graph.  The matching
-        `_flush_metrics_cache(...)` call should run once per training step after `optimizer.step()`.
+        Tensor metrics must contain exactly one scalar value and must already be detached from the
+        autograd graph.  The matching `_flush_metrics_cache(...)` call should run once per training
+        step after `optimizer.step()`.
 
 
         -------------------------------------------------------------------------------------------
@@ -599,14 +591,19 @@ class Trainer:
 
         key : str
             Name of the metric (e.g., 'loss/recon', 'grad/raw')
-        value : torch.Tensor
-            Detached scalar tensor containing the metric to cache.
+        value : torch.Tensor | float | int
+            Detached scalar tensor, or a CPU scalar timing value, containing the metric to cache.
         """
 
-        assert isinstance(key, str),            "key must be a string";
-        assert isinstance(value, torch.Tensor), "value must be a torch.Tensor; pass loss.detach(), not loss.item()";
-        assert value.numel() == 1,              "value must contain exactly one scalar value";
-        assert value.requires_grad == False,    "value must be detached before caching; pass loss.detach()";
+        assert isinstance(key, str), "key must be a string";
+        if isinstance(value, torch.Tensor):
+            assert value.numel() == 1,              "value must contain exactly one scalar value";
+            assert value.requires_grad == False,    "value must be detached before caching; pass loss.detach()";
+        elif isinstance(value, (int, float, numpy.integer, numpy.floating)):
+            value = float(value);
+            assert numpy.isfinite(value), "scalar metric values must be finite";
+        else:
+            raise TypeError("value must be a detached scalar torch.Tensor or a Python scalar, got %s" % str(type(value)));
 
         self._metrics_cache.append((key, value));
         return;
@@ -630,17 +627,16 @@ class Trainer:
 
     def _flush_metrics_cache(self, epoch: int) -> dict[str, float]:
         """
-        Flush cached metrics tensors gathered during one epoch to a row in the jsonl file
+        Flush cached scalar metrics gathered during one epoch to a row in the jsonl file
         self.metrics_path.
 
-        This method converts all cached detached scalar tensors into Python floats with a single
-        batched CPU transfer, then appends one JSON object to `self.metrics_path`. Trainer
-        subclasses should call this exactly once per training step, after `optimizer.step()` and
-        before checkpoint/report logic that needs scalar loss values.
+        This method converts any remaining cached detached scalar tensors into Python floats with
+        batched CPU transfers, then appends one JSON object to `self.metrics_path`. Trainer
+        subclasses should call this exactly once per training step, after all step metrics and
+        timings have been cached.
 
         The returned dictionary maps metric keys to the flushed float for the current cache
-        contents.  This lets trainers reuse the synchronized values for reporting and best-loss
-        checkpoint decisions without calling `.item()` again.
+        contents.
 
 
         -------------------------------------------------------------------------------------------
@@ -666,19 +662,32 @@ class Trainer:
         if len(self._metrics_cache) == 0:
             return {};
 
-        # Stack first, then transfer once. Metrics for a trainer step should all live on one device.
-        first_device = self._metrics_cache[0][1].device;
-        for _, metric_value in self._metrics_cache:
-            assert metric_value.device == first_device, "cached metrics tensors must live on the same device for batched flushing";
+        # Convert cached tensors/floats to Python floats. Tensor metrics are batched per device so
+        # we avoid one device-to-CPU synchronization per loss scalar. Timing metrics are already CPU
+        # scalars and are copied directly.
+        scalar_values : list[float | None] = [None for _ in self._metrics_cache];
+        tensor_groups : dict[torch.device, list[tuple[int, torch.Tensor]]] = {};
 
-        # Fetch metrics values, then convert to cpu/list.
-        values_tensor : torch.Tensor = torch.stack([entry[1].reshape(()) for entry in self._metrics_cache], dim = 0);
-        assert bool(torch.isfinite(values_tensor).all()), "cached metrics tensors must be finite for JSONL logging";
-        values_list   : list[float]  = [float(x) for x in values_tensor.cpu().tolist()];
+        for idx, (_, metric_value) in enumerate(self._metrics_cache):
+            if isinstance(metric_value, torch.Tensor):
+                tensor_groups.setdefault(metric_value.device, []).append((idx, metric_value));
+            else:
+                value_float = float(metric_value);
+                assert numpy.isfinite(value_float), "cached scalar metrics must be finite for JSONL logging";
+                scalar_values[idx] = value_float;
+
+        for _, entries in tensor_groups.items():
+            values_tensor : torch.Tensor = torch.stack([entry[1].reshape(()) for entry in entries], dim = 0);
+            assert bool(torch.isfinite(values_tensor).all()), "cached tensor metrics must be finite for JSONL logging";
+            values_list : list[float] = [float(x) for x in values_tensor.cpu().tolist()];
+            for (idx, _), value_float in zip(entries, values_list):
+                scalar_values[idx] = value_float;
 
         flushed_values : dict[str, float] = {};
-        metric_records   : list[dict[str, Any]] = [];
-        for (key, _), value_float in zip(self._metrics_cache, values_list):
+        metric_records : list[dict[str, Any]] = [];
+        for idx, (key, _) in enumerate(self._metrics_cache):
+            value_float = scalar_values[idx];
+            assert value_float is not None;
             flushed_values[key] = value_float;
             metric_records.append({key : value_float});
 
@@ -882,8 +891,7 @@ class Trainer:
 
         Finally, this function should record how long each part of the training process takes.
         Specifically, it should track how long each loss function takes to compute, as well as how
-        long the back propagation step takes. It should record all of this using the self.timer
-        attribute (see Utilities/Timing for details).
+        long the back propagation step takes. 
 
         Note that if normalization is enabled, the entires in U_Train and U_Test will already be
         normalized when they are stored in the Trainer object. This also means that the
@@ -1035,9 +1043,6 @@ class Trainer:
         # -------------------------------------------------------------------------------------
         # Load model/params from checkpoint.
 
-        # We are ready to wrap up the training procedure.
-        self.timer.start("finalize");
-
         self.encoder_decoder, iter = self.Load_Checkpoint();
         LOGGER.info("We attained our best performance on epoch %d. Replacing encoder_decoder, latent dynamics coefficients with the checkpoint from that epoch" % iter);
 
@@ -1047,10 +1052,6 @@ class Trainer:
 
         # Now that we have completed another round of training, update the restart iteration.
         self.restart_iter = end_iter;
-
-        # Report timing information.
-        self.timer.end("finalize");
-        self.timer.log();
 
         # All done!
         return;
@@ -1082,7 +1083,6 @@ class Trainer:
                  't_Train'                  : self.t_Train,
                  't_Test'                   : self.t_Test,
                  'restart_iter'             : self.restart_iter,
-                 'timer'                    : self.timer.export(),
                  'config'                   : config,
                  'normalize'                : self.normalize,
                  'data_mean'                : None if self.data_mean is None else [float(m.detach().cpu().item()) for m in self.data_mean],
@@ -1140,8 +1140,7 @@ class Trainer:
         # Next, compute n_IC.
         self.n_IC = len(self.U_Test[0]);
 
-        # Load the timer / optimizer.
-        self.timer.load(dict_['timer']);
+        # Reset transient metrics state.
         self._metrics_cache = [];
 
 

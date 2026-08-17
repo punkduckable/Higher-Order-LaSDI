@@ -310,7 +310,6 @@ class; n_IC and type need to match for this to work.
 - **`src/HLaSDI/Utilities/SecondOrderSolvers.py`** – ODE solvers for second-order systems:
   - RK1, RK2, RK4 methods for second-order ODEs
 - **`src/HLaSDI/Utilities/Logging.py`** – Logging utilities and dictionary logging
-- **`src/HLaSDI/Utilities/Timing.py`** – `Timer` class for performance profiling
 - **`src/HLaSDI/Utilities/Optimizer.py`** – Utilities for moving optimizers between devices (CPU/GPU)
 
 ### Visualization
@@ -1037,7 +1036,7 @@ metrics, pass `--totals-only`, which keeps keys ending in `/total`.
 - Real-time logging to console and `output.txt`
 - Loss tracking per parameter combination
 - GP fitting statistics
-- Timing information for performance profiling
+- Timing metrics in the JSONL metrics log
 
 ## GPU Support
 

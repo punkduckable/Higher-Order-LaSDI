@@ -13,17 +13,6 @@ from HLaSDI.Sample import ROM_Discrepancy
 from HLaSDI.Schemas import ROMDiscrepancySamplerConfig
 
 
-class _Timer:
-    def __init__(self):
-        self.events = []
-
-    def start(self, name):
-        self.events.append(("start", name))
-
-    def end(self, name):
-        self.events.append(("end", name))
-
-
 class _ParamSpace:
     def __init__(self):
         self.train_space = numpy.array([[0.0], [10.0]])
@@ -68,7 +57,6 @@ class _LatentDynamics:
 
 class _Trainer:
     def __init__(self):
-        self.timer = _Timer()
         self.param_space = _ParamSpace()
         self.encoder_decoder = _EncoderDecoder()
         self.latent_dynamics = _LatentDynamics()
@@ -80,9 +68,19 @@ class _Trainer:
         self.t_Test = []
         self.U_Test = []
         self.checked_train_coefficients = False
+        self.restart_iter = 12
+        self.cached_metrics = []
+        self.flushed_epochs = []
 
     def _check_train_coefficients(self):
         self.checked_train_coefficients = True
+
+    def _cache_metric(self, key, value):
+        self.cached_metrics.append((key, value))
+
+    def _flush_metrics_cache(self, epoch):
+        self.flushed_epochs.append(epoch)
+        return {}
 
 
 def test_rom_discrepancy_samples_candidate_with_largest_minimum_rhs_discrepancy(monkeypatch):
@@ -107,7 +105,9 @@ def test_rom_discrepancy_samples_candidate_with_largest_minimum_rhs_discrepancy(
 
     assert next_step == NextStep.RunSample
     assert trainer.checked_train_coefficients
-    assert trainer.timer.events == [("start", "new_sample"), ("end", "new_sample")]
+    assert trainer.cached_metrics[0][0] == "time/new_sample"
+    assert trainer.cached_metrics[0][1] >= 0.0
+    assert trainer.flushed_epochs == [trainer.restart_iter]
     assert numpy.allclose(trainer.param_space.appended, numpy.array([[20.0]]))
     assert numpy.allclose(trainer.param_space.train_space[-1, :], numpy.array([20.0]))
 
