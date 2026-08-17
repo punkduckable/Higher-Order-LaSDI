@@ -184,11 +184,41 @@ if [[ -n "$ARTIFACT_FILE" && -f "$ARTIFACT_FILE" ]]; then
     cleanup_args+=(--artifact "$ARTIFACT_FILE" --min-figure-mtime "$RUN_START_EPOCH")
 fi
 
-uv run --no-sync python scripts/cleanup_run.py "${cleanup_args[@]}"
+cleanup_output="$(uv run --no-sync python scripts/cleanup_run.py "${cleanup_args[@]}" 2>&1)"
 cleanup_status=$?
+printf '%s\n' "$cleanup_output"
 
 if [[ "$cleanup_status" -ne 0 ]]; then
     echo "WARNING: cleanup_run.py exited with code ${cleanup_status}" >&2
+else
+    ARCHIVE_DIR="$(printf '%s\n' "$cleanup_output" | sed -n 's/^Archive directory: //p' | tail -n 1)"
+    if [[ -n "$ARCHIVE_DIR" && -d "$ARCHIVE_DIR" ]]; then
+        METRICS_FILE="$(
+            uv run --no-sync python -c 'from pathlib import Path; import sys
+run_dir = Path(sys.argv[1])
+metrics_files = sorted(
+    run_dir.glob("*_metrics.jsonl"),
+    key=lambda path: path.stat().st_mtime,
+)
+print(metrics_files[-1].resolve() if metrics_files else "")' "$ARCHIVE_DIR"
+        )"
+
+        if [[ -n "$METRICS_FILE" && -f "$METRICS_FILE" ]]; then
+            TB_LOGDIR="${ARCHIVE_DIR}/tb_runs"
+            echo "Building TensorBoard files at $(date)"
+            echo "Metrics: ${METRICS_FILE}"
+            echo "Logdir:  ${TB_LOGDIR}"
+            uv run --no-sync python scripts/jsonl_to_tensorboard.py "$METRICS_FILE" --logdir "$TB_LOGDIR"
+            tensorboard_status=$?
+            if [[ "$tensorboard_status" -ne 0 ]]; then
+                echo "WARNING: jsonl_to_tensorboard.py exited with code ${tensorboard_status}" >&2
+            fi
+        else
+            echo "WARNING: no archived *_metrics.jsonl file found for TensorBoard conversion." >&2
+        fi
+    else
+        echo "WARNING: could not determine archive directory for TensorBoard conversion." >&2
+    fi
 fi
 
 if [[ "$workflow_status" -ne 0 ]]; then
