@@ -613,17 +613,17 @@ class First_Order_Rollout(Trainer):
                         Z_tgt_windows.append(Z_0[k_int:(j_int + 1), :]);
                         U_tgt_windows.append(U_0[k_int:(j_int + 1), ...]);
 
-                        # Simulate latent dynamics using the absolute-time grid slice. 
-                        # Z_pred_list_all[0][0] has shape (n_t_win, 1, n_z)
+                        # Simulate latent dynamics using the absolute-time grid slice.
+                        # Z_pred_list_all[0][0] has shape (n_t_win, n_z)
                         Z_pred_list_all : list[list[torch.Tensor]] = self.latent_dynamics.simulate(
-                            IC     = [[Z_0[k_int:(k_int + 1), :]]],      # one param -> list[list[tensor]] of len n_IC
+                            IC     = [[Z_0[k_int, :]]],
                             t_Grid = [t_win_np],
                             params = param_i);
 
                         # Prepare trajectory for decoding
                         Z_pred_i = Z_pred_list_all[0][0];
-                        assert Z_pred_i.ndim == 3 and Z_pred_i.shape[1] == 1, f"Expected (n_t, 1, n_z), got {tuple(Z_pred_i.shape)}";
-                        Z_pred_windows.append(Z_pred_i.squeeze(1)); # (n_t_win, n_z)
+                        assert Z_pred_i.ndim == 2, f"Expected (n_t, n_z), got {tuple(Z_pred_i.shape)}";
+                        Z_pred_windows.append(Z_pred_i);
                         lengths.append(Z_pred_i.shape[0]);
 
                     # Now, concatenate the predicted Z solutions and decode!
@@ -699,15 +699,15 @@ class First_Order_Rollout(Trainer):
                         U_IC_i = self.normalize_tensor(U_IC_i, 0);
                     
                     # Encode the FOM initial conditions
-                    Z_IC_i : torch.Tensor = encoder_decoder_device.Encode(U_IC_i)[0];
+                    Z_IC_i : torch.Tensor = encoder_decoder_device.Encode(U_IC_i)[0].reshape(-1);
                     
                     # Simulate the latent dynamics forward in time
                     Z_IC_Rollout_i    : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(  IC      = [[Z_IC_i]], 
                                                                                                     t_Grid  = [t_Grid_IC_rollout[i]], 
                                                                                                     params  = param_i.reshape(1, -1));
                     
-                    # Extract the predicted trajectory, remove the singleton dimension
-                    Z_IC_Predict_i      : torch.Tensor              = Z_IC_Rollout_i[0][0].squeeze(1);    # shape = (n_t_IC_rollout[i], n_z)
+                    # Extract the predicted trajectory.
+                    Z_IC_Predict_i      : torch.Tensor              = Z_IC_Rollout_i[0][0];    # shape = (n_t_IC_rollout[i], n_z)
 
                     # Decode the predicted trajectory to get FOM predictions
                     U_IC_Predict_i      : torch.Tensor              = encoder_decoder_device.Decode(Z_IC_Predict_i)[0];

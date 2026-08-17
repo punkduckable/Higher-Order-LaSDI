@@ -472,8 +472,8 @@ class DampedSpring(InterpolatableLatentDynamics):
                     params  : numpy.ndarray,
                     sample  : bool = False) -> list[list[numpy.ndarray | torch.Tensor]]:
         r"""
-        Time integrates the latent dynamics from multiple initial conditions for each combination
-        of parameter values.
+        Time integrates the latent dynamics from one initial condition for each combination of
+        parameter values.
 
 
         -------------------------------------------------------------------------------------------
@@ -481,25 +481,12 @@ class DampedSpring(InterpolatableLatentDynamics):
         -------------------------------------------------------------------------------------------
 
         IC : list[list[numpy.ndarray]] or list[list[torch.Tensor]], len = n_param
-            i'th element is an n_IC element list whose j'th element is a 2d numpy.ndarray or
-            torch.Tensor object of shape (n(i), n_z). Here, n(i) is the number of initial
-            conditions (for a fixed set of coefficients) we want to simulate forward using the i'th
-            set of coefficients. Further, n_z is the latent dimension. If you want to simulate a
-            single IC, for the i'th set of coefficients, then n(i) == 1. IC[i][j][k, :] should hold
-            the k'th initial condition for the j'th derivative of the latent state when we use the
-            i'th combination of parameter values.
+            i'th element is a two-element list `[D0, V0]`. Both `D0` and `V0` must be
+            one-dimensional arrays/tensors of shape (n_z), holding the initial displacement and
+            velocity for the i'th parameter value.
 
         t_Grid : list[numpy.ndarray] or list[torch.Tensor], len = n_param
-            i'th entry is a 2d numpy.ndarray or torch.Tensor whose shape is either (n(i), n_t(i))
-            or shape (n_t(i)). The shape should be 2d if we want to use different times for each
-            initial condition and 1d if we want to use the same times for all initial conditions.
-
-            In the former case, the j,k array entry specifies k'th time value at which we solve for
-            the latent state when we use the j'th initial condition and the i'th set of
-            coefficients. Each row should be in ascending order.
-
-            In the latter case, the j'th entry should specify the j'th time value at which we solve
-            for each latent state when we use the i'th combination of parameter values.
+            i'th entry is a one-dimensional time grid of shape (n_t(i)).
 
         params: numpy.ndarray, shape = (n_param, n_p)
             The i'th row holds the i'th combination of parameter values.
@@ -515,10 +502,7 @@ class DampedSpring(InterpolatableLatentDynamics):
         -------------------------------------------------------------------------------------------
 
         Z : list[list[numpy.ndarray]] or list[list[torch.Tensor]], len = n_parm
-            i'th element is a list of length n_IC whose j'th entry is a 3d array of shape
-            (n_t(i), n(i), n_z). The p, q, r entry of this array should hold the r'th component of
-            the p'th frame of the j'th tine derivative of the solution to the latent dynamics when
-            we use the q'th initial condition for the i'th combination of parameter values.
+            i'th element is `[D, V]`. Both `D` and `V` have shape (n_t(i), n_z).
         """
 
         # Checks.
@@ -551,36 +535,28 @@ class DampedSpring(InterpolatableLatentDynamics):
             # Set up the i'th single-parameter solve.
             assert isinstance(ith_coefs, dict) and set(ith_coefs.keys()) == {"K", "C", "b"};
             assert isinstance(ith_IC, list) and len(ith_IC) == 2;
-            assert len(ith_t_Grid.shape) == 1 or len(ith_t_Grid.shape) == 2;
             if(isinstance(ith_t_Grid, torch.Tensor)):
                 ith_t_Grid = ith_t_Grid.detach().cpu().numpy();
-            Same_t_Grid : bool = (len(ith_t_Grid.shape) == 1);
+            assert len(ith_t_Grid.shape) == 1;
             ith_D0 : numpy.ndarray | torch.Tensor = ith_IC[0];
             ith_V0 : numpy.ndarray | torch.Tensor = ith_IC[1];
-            n_i    : int                          = ith_D0.shape[0];
-            assert len(ith_D0.shape) == 2 and ith_D0.shape[1] == self.n_z;
-            assert len(ith_V0.shape) == 2 and ith_V0.shape[1] == self.n_z;
+            assert len(ith_D0.shape) == 1 and ith_D0.shape[0] == self.n_z;
+            assert len(ith_V0.shape) == 1 and ith_V0.shape[0] == self.n_z;
             assert ith_D0.shape == ith_V0.shape;
-            if(Same_t_Grid == False):
-                assert ith_t_Grid.shape[0] == n_i;
 
             # Fetch native coefficients and match their backend/device/dtype to the initial condition.
             K = ith_coefs["K"];
             C = ith_coefs["C"];
             b = ith_coefs["b"];
 
-            # Set up a lambda function to approximate (d^2/dt^2)z(t) \approx K z(t) + C (d/dt)z(t) + b.
-            # In this case, we expect dz_dt and z to have shape (n(i), n_z). Thus, matmul(z, K.T) will
-            # have shape (n(i), n_z). The i'th row of this should hold the z portion of the rhs of the
-            # latent dynamics for the i'th IC. Similar results hold for dot(dz_dt, C.T). The final
-            # result should have shape (n(i), n_z). The i'th row should hold the rhs of the latent
-            # dynamics for the i'th IC.
+            # Set up a lambda function to approximate
+            # (d^2/dt^2)z(t) ≈ K z(t) + C (d/dt)z(t) + b.
             if(isinstance(ith_D0, numpy.ndarray)):
                 if isinstance(K, torch.Tensor):
                     K = K.detach().cpu().numpy();
                     C = C.detach().cpu().numpy();
                     b = b.detach().cpu().numpy();
-                b = b.reshape(1, -1);
+                b = b.reshape(-1);
                 f   = lambda t, z, dz_dt: numpy.matmul(z, K.T) + numpy.matmul(dz_dt, C.T) + b;
             else:
                 if isinstance(K, numpy.ndarray):
@@ -591,32 +567,11 @@ class DampedSpring(InterpolatableLatentDynamics):
                     K = K.to(device = ith_D0.device, dtype = ith_D0.dtype);
                     C = C.to(device = ith_D0.device, dtype = ith_D0.dtype);
                     b = b.to(device = ith_D0.device, dtype = ith_D0.dtype);
-                b = b.reshape(1, -1);
+                b = b.reshape(-1);
                 f   = lambda t, z, dz_dt: torch.matmul(z, K.T) + torch.matmul(dz_dt, C.T) + b;
 
-            # Solve the ODE forward in time. D and V should have shape (n_t, n(i), n_z). If we use the
-            # same t values for each IC, then we can exploit the fact that the latent dynamics are
-            # autonomous to solve using each IC simultaneously. Otherwise, we need to run the latent
-            # dynamics one IC at a time.
-            if(Same_t_Grid == True):
-                ith_D, ith_V = RK4(f = f, y0 = ith_D0, Dy0 = ith_V0, t_Grid = ith_t_Grid);  # shape = (n_t, n_i, n_z)
-            else:
-                # Cycle through the ICs.
-                ith_D_list : list[torch.Tensor | numpy.ndarray] = [];
-                ith_V_list : list[torch.Tensor | numpy.ndarray] = [];
-
-                for j in range(n_i):
-                    D_ij, V_ij = RK4(f = f, y0 = ith_D0[j, :].reshape(1, -1), Dy0 = ith_V0[j, :].reshape(1, -1), t_Grid = ith_t_Grid[j, :]);
-                    ith_D_list.append(D_ij);
-                    ith_V_list.append(V_ij);
-
-                # Stack the results.
-                if(isinstance(ith_D0, numpy.ndarray)):
-                    ith_D = numpy.concatenate(ith_D_list, axis = 1);    # shape = (n_t, n_i, n_z)
-                    ith_V = numpy.concatenate(ith_V_list, axis = 1);    # shape = (n_t, n_i, n_z)
-                else:
-                    ith_D = torch.cat(ith_D_list, dim = 1);             # shape = (n_t, n_i, n_z)
-                    ith_V = torch.cat(ith_V_list, dim = 1);             # shape = (n_t, n_i, n_z)
+            # Solve the ODE forward in time for this single latent initial state.
+            ith_D, ith_V = RK4(f = f, y0 = ith_D0, Dy0 = ith_V0, t_Grid = ith_t_Grid);
 
             # Add this parameter's trajectory to the output list.
             Z.append([ith_D, ith_V]);

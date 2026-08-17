@@ -155,8 +155,9 @@ class LatentDynamics:
       of scalar tensors for per-parameter losses. The loss metric (e.g., MSE vs MAE) is a subclass
       implementation detail; there is no trainer-level `loss_type` argument for latent dynamics.
     
-    - `simulate(IC, t_Grid, params, sample=False)`: integrate the latent ODE from one or more latent
-      initial conditions and return latent trajectories in the expected `n_IC`-component format.
+    - `simulate(IC, t_Grid, params, sample=False)`: integrate the latent ODE from one latent
+      initial condition per parameter value and return latent trajectories in the expected
+      `n_IC`-component format.
 
     - `RHS(Z, t_Grid, params, sample=False)`: evaluate the pointwise right-hand side of the latent
       ODE at supplied latent states. Strong and weak forms of the same latent ODE should normally
@@ -565,9 +566,8 @@ class LatentDynamics:
                     params  : numpy.ndarray, 
                     sample  : bool = False) -> list[list[numpy.ndarray | torch.Tensor]]:
         """
-        Time integrates the latent dynamics from multiple initial conditions for each combination
-        of coefficients in coefs. Note that if self is not stochastic, we should generally not 
-        allow sampling.
+        Time integrates the latent dynamics from one initial condition for each parameter value.
+        Note that if self is not stochastic, we should generally not allow sampling.
  
 
         -------------------------------------------------------------------------------------------
@@ -575,25 +575,15 @@ class LatentDynamics:
         -------------------------------------------------------------------------------------------
         
         IC : list[list[numpy.ndarray]] or list[list[torch.Tensor]], len = n_param
-            i'th element is an n_IC element list whose j'th element is a 2d numpy.ndarray or 
-            torch.Tensor object of shape (n(i), n_z). Here, n(i) is the number of initial 
-            conditions (for a fixed set of coefficients) we want to simulate forward using the i'th 
-            set of coefficients. Further, n_z is the latent dimension. If you want to simulate a 
-            single IC, for the i'th set of coefficients, then n(i) == 1. IC[i][j][k, :] should hold 
-            the k'th initial condition for the j'th derivative of the latent state when we use the 
+            i'th element is an n_IC element list whose j'th element is a 1d numpy.ndarray or 
+            torch.Tensor object of shape (n_z), where n_z is the latent dimension. IC[i][j] should
+            hold the initial conditions for the j'th derivative of the latent state when we use the 
             i'th combination of parameter values. 
 
         t_Grid : list[numpy.ndarray] or list[torch.Tensor], len = n_param
-            i'th entry is a 2d numpy.ndarray or torch.Tensor whose shape is either (n(i), n_t(i)) 
-            or shape (n_t(i)). The shape should be 2d if we want to use different times for each 
-            initial condition and 1d if we want to use the same times for all initial conditions. 
-        
-            In the former case, the j,k array entry specifies k'th time value at which we solve for 
-            the latent state when we use the j'th initial condition and the i'th set of 
-            coefficients. Each row should be in ascending order. 
-        
-            In the latter case, the j'th entry should specify the j'th time value at which we solve 
-            for each latent state when we use the i'th combination of parameter values.
+            i'th entry is a 1d tensor of shape (n_t(i)). The j'th entry should specify the j'th 
+            time value at which we solve for each latent state when we use the i'th combination of 
+            parameter values.
         
         params : numpy.ndarray, shape = (n_param, n_p)
             The i'th row holds the i'th combination of parameter values. This can be used by latent 
@@ -612,10 +602,9 @@ class LatentDynamics:
         -------------------------------------------------------------------------------------------        
         
         Z : list[list[numpy.ndarray]] or list[list[torch.Tensor]], len = n_parm
-            i'th element is a list of length n_IC whose j'th entry is a 3d array of shape 
-            (n_t(i), n(i), n_z). The p, q, r entry of this array should hold the r'th component of 
-            the p'th frame of the j'th tine derivative of the solution to the latent dynamics when 
-            we use the q'th initial condition for the i'th combination of parameter values.
+            i'th element is a list of length n_IC whose j'th entry is a 2d array/tensor of shape
+            (n_t(i), n_z). The p, q entry of this array should hold the q'th component of the
+            p'th frame of the j'th time derivative of the solution for the i'th parameter value.
         """
 
         raise RuntimeError('Abstract function LatentDynamics.simulate!');

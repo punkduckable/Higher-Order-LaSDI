@@ -371,10 +371,10 @@ class SwitchSINDy(InterpolatableLatentDynamics):
 
         IC : list[list[numpy.ndarray | torch.Tensor]], len = n_param
             Initial latent states for each parameter/coefficient set. SwitchSINDy has one IC
-            component.
+            component, so `IC[i][0]` must have shape (n_z).
 
         t_Grid : list[numpy.ndarray | torch.Tensor], len = n_param
-            Time grids at which to solve the latent dynamics.
+            One-dimensional time grids at which to solve the latent dynamics.
 
         params : numpy.ndarray, shape = (n_param, n_p)
             Parameter rows used to compute the switch time for each simulation.
@@ -390,8 +390,7 @@ class SwitchSINDy(InterpolatableLatentDynamics):
         -------------------------------------------------------------------------------------------
 
         Z : list[list[numpy.ndarray | torch.Tensor]], len = n_param
-            The simulated latent trajectories. Z[i][0] has shape
-            (n_t(i), n_initial_conditions, n_z).
+            The simulated latent trajectories. Z[i][0] has shape (n_t(i), n_z).
         """
 
         # Checks.
@@ -425,16 +424,15 @@ class SwitchSINDy(InterpolatableLatentDynamics):
             # Set up the i'th single-parameter solve.
             assert isinstance(ith_coefs, dict) and set(ith_coefs.keys()) == {"A_before", "b_before", "A_after", "b_after"};
             assert isinstance(ith_IC, list) and len(ith_IC) == 1;
-            assert len(ith_t_Grid.shape) == 1 or len(ith_t_Grid.shape) == 2;
             if isinstance(ith_t_Grid, torch.Tensor):
                 ith_t_Grid = ith_t_Grid.detach().cpu().numpy();
-            Same_t_Grid = (len(ith_t_Grid.shape) == 1);
+            assert len(ith_t_Grid.shape) == 1;
             ith_Z0 = ith_IC[0];
-            n_i = ith_Z0.shape[0];
-            assert len(ith_Z0.shape) == 2 and ith_Z0.shape[1] == self.n_z;
-            if(Same_t_Grid == False):
-                assert ith_t_Grid.shape[0] == n_i;
+            assert len(ith_Z0.shape) == 1 and ith_Z0.shape[0] == self.n_z;
             switch_time_theta = self.switch_time(ith_params);
+            if isinstance(switch_time_theta, torch.Tensor):
+                switch_time_theta = switch_time_theta.detach().cpu().numpy();
+            switch_time_theta = float(numpy.asarray(switch_time_theta).reshape(-1)[0]);
 
             # Fetch native coefficients and match them to the IC backend below.
             A_before, b_before, A_after, b_after = ith_coefs["A_before"], ith_coefs["b_before"], ith_coefs["A_after"], ith_coefs["b_after"];
@@ -447,26 +445,19 @@ class SwitchSINDy(InterpolatableLatentDynamics):
                 for x in [A_before, b_before, A_after, b_after]:
                     vals.append(x.detach().cpu().numpy() if isinstance(x, torch.Tensor) else x);
                 A_before, b_before, A_after, b_after = vals;
-                b_before = b_before.reshape(1, -1); b_after = b_after.reshape(1, -1);
+                b_before = b_before.reshape(-1); b_after = b_after.reshape(-1);
                 def f(t : float, z : numpy.ndarray) -> numpy.ndarray:
                     return b_before + numpy.matmul(z, A_before.T) if t < switch_time_theta else b_after + numpy.matmul(z, A_after.T);
             else:
                 def to_z(x):
                     return torch.tensor(x, dtype = ith_Z0.dtype, device = ith_Z0.device) if isinstance(x, numpy.ndarray) else x.to(device = ith_Z0.device, dtype = ith_Z0.dtype);
                 A_before, b_before, A_after, b_after = to_z(A_before), to_z(b_before), to_z(A_after), to_z(b_after);
-                b_before = b_before.reshape(1, -1); b_after = b_after.reshape(1, -1);
+                b_before = b_before.reshape(-1); b_after = b_after.reshape(-1);
                 def f(t : float, z : torch.Tensor) -> torch.Tensor:
                     return b_before + torch.matmul(z, A_before.T) if t < switch_time_theta else b_after + torch.matmul(z, A_after.T);
 
-            # Integrate all initial conditions together when they share a time grid; otherwise integrate
-            # each row of the IC array with its corresponding row of the time-grid array.
-            if(Same_t_Grid == True):
-                ith_Z = RK4(f = f, y0 = ith_Z0, t_Grid = ith_t_Grid);
-            else:
-                Z_list : list[torch.Tensor | numpy.ndarray] = [];
-                for j in range(n_i):
-                    Z_list.append(RK4(f = f, y0 = ith_Z0[j, :].reshape(1, -1), t_Grid = ith_t_Grid[j, :]));
-                ith_Z = numpy.concatenate(Z_list, axis = 1) if isinstance(ith_Z0, numpy.ndarray) else torch.cat(Z_list, dim = 1);
+            # Solve the ODE for this single latent initial state.
+            ith_Z = RK4(f = f, y0 = ith_Z0, t_Grid = ith_t_Grid);
 
             # Add this parameter's trajectory to the output list.
             Z.append([ith_Z]);

@@ -151,7 +151,7 @@ class FOM_Variance(Sampler):
 
         # Map the initial conditions for the FOM to initial conditions in the latent space.
         # Yields an n_candidates element list whose i'th element is an n_IC element list whose j'th
-        # element is an numpy.ndarray of shape (1, n_z) whose k'th element holds the k'th component
+        # element is an numpy.ndarray of shape (n_z) whose k'th element holds the k'th component
         # of the encoding of the initial condition for the j'th derivative of the latent dynamics 
         # corresponding to the i'th candidate combination of parameter values.
         Z0 : list[list[numpy.ndarray]]  = encoder_decoder.latent_initial_conditions(  
@@ -194,7 +194,7 @@ class FOM_Variance(Sampler):
                                                                     params  = candidate_parameters[i, :].reshape(1, -1),
                                                                     sample  = True);
                 for k in range(trainer.n_IC):
-                    LatentStates[i][k][j, :, :] = LatentState_ij[0][k][:, 0, :];
+                    LatentStates[i][k][j, :, :] = LatentState_ij[0][k];
 
         # Find the index of the parameter with the largest std.
         m_index : int = get_FOM_max_std(encoder_decoder, LatentStates, candidate_parameters);

@@ -603,15 +603,15 @@ class Second_Order_Weak(Second_Order_Rollout):
                         V_tgt_windows.append(V_tgt);
 
                         # Get the model's prediction (in the latent space)
-                        Z_D0 : torch.Tensor = Z_D_i[k_int:(k_int + 1), :];
-                        Z_V0 : torch.Tensor = Z_V_i[k_int:(k_int + 1), :];
+                        Z_D0 : torch.Tensor = Z_D_i[k_int, :];
+                        Z_V0 : torch.Tensor = Z_V_i[k_int, :];
 
                         Z_pred_all : list[list[torch.Tensor]] = self.latent_dynamics.simulate(
                             IC     = [[Z_D0, Z_V0]],
                             t_Grid = [t_win_np],
                             params = param_i);
-                        Z_D_pred = Z_pred_all[0][0].squeeze(1);
-                        Z_V_pred = Z_pred_all[0][1].squeeze(1);
+                        Z_D_pred = Z_pred_all[0][0];
+                        Z_V_pred = Z_pred_all[0][1];
                         assert Z_D_pred.ndim == 2 and Z_V_pred.ndim == 2;
                         assert Z_D_pred.shape[0] == Z_V_pred.shape[0] == t_win_np.shape[0];
                         Z_D_pred_windows.append(Z_D_pred);
@@ -709,6 +709,8 @@ class Second_Order_Weak(Second_Order_Rollout):
                     
                     # Encode the FOM initial conditions
                     Z_D_IC_i, Z_V_IC_i = encoder_decoder_device.Encode(D_IC_i, V_IC_i);
+                    Z_D_IC_i = Z_D_IC_i.reshape(-1);
+                    Z_V_IC_i = Z_V_IC_i.reshape(-1);
                     
                     # Simulate the latent dynamics forward in time
                     Z_IC_Rollout_i    : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(  IC      = [[Z_D_IC_i, Z_V_IC_i]], 
@@ -716,12 +718,8 @@ class Second_Order_Weak(Second_Order_Rollout):
                                                                                                     params  = param_i.reshape(1, -1));
                     
                     # Extract the predicted trajectory
-                    Z_D_IC_Predict_i  : torch.Tensor              = Z_IC_Rollout_i[0][0];  # shape = (n_t_IC_rollout[i], 1, n_z)
-                    Z_V_IC_Predict_i  : torch.Tensor              = Z_IC_Rollout_i[0][1];  # shape = (n_t_IC_rollout[i], 1, n_z)
-                    
-                    # Remove the singleton dimension
-                    Z_D_IC_Predict_i  : torch.Tensor              = Z_D_IC_Predict_i.squeeze(1);  # shape = (n_t_IC_rollout[i], n_z)
-                    Z_V_IC_Predict_i  : torch.Tensor              = Z_V_IC_Predict_i.squeeze(1);  # shape = (n_t_IC_rollout[i], n_z)
+                    Z_D_IC_Predict_i  : torch.Tensor              = Z_IC_Rollout_i[0][0];  # shape = (n_t_IC_rollout[i], n_z)
+                    Z_V_IC_Predict_i  : torch.Tensor              = Z_IC_Rollout_i[0][1];  # shape = (n_t_IC_rollout[i], n_z)
 
                     # Decode the predicted trajectory to get FOM predictions
                     D_IC_Predict_i, V_IC_Predict_i = encoder_decoder_device.Decode(Z_D_IC_Predict_i, Z_V_IC_Predict_i);

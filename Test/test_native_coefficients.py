@@ -276,16 +276,16 @@ def test_damped_spring_compute_losses_uses_native_K_C_b_rhs():
 def test_damped_spring_weak_simulate_uses_native_K_C_b_names():
     ld = DampedSpring_weak(n_z=1, Uniform_t_Grid=True, n_p=1, config=_spring_w_config(test_func_type="bump"))
     coefs = {"K": torch.zeros(1, 1), "C": torch.zeros(1, 1), "b": torch.ones(1)}
-    D0 = torch.zeros(1, 1)
-    V0 = torch.zeros(1, 1)
+    D0 = torch.zeros(1)
+    V0 = torch.zeros(1)
     t = torch.linspace(0.0, 0.2, 3)
     params = numpy.array([[0.25]])
     ld.set_train_coefs(params[0], coefs, torch.device("cpu"))
 
     D, V = ld.simulate(IC=[[D0, V0]], t_Grid=[t], params=params)[0]
 
-    assert D.shape == (3, 1, 1)
-    assert V.shape == (3, 1, 1)
+    assert D.shape == (3, 1)
+    assert V.shape == (3, 1)
 
 
 def test_sindy_simulate_handles_multiple_parameters_without_recursion():
@@ -294,7 +294,7 @@ def test_sindy_simulate_handles_multiple_parameters_without_recursion():
         {"A": torch.zeros(1, 1), "b": torch.ones(1)},
         {"A": torch.zeros(1, 1), "b": 2.0 * torch.ones(1)},
     ]
-    IC = [[torch.zeros(1, 1)], [torch.zeros(1, 1)]]
+    IC = [[torch.zeros(1)], [torch.zeros(1)]]
     t_Grid = [torch.linspace(0.0, 0.2, 3), torch.linspace(0.0, 0.2, 3)]
     params = numpy.array([[0.25], [0.75]])
     for i in range(params.shape[0]):
@@ -303,8 +303,8 @@ def test_sindy_simulate_handles_multiple_parameters_without_recursion():
     Z = ld.simulate(IC=IC, t_Grid=t_Grid, params=params)
 
     assert len(Z) == 2
-    assert Z[0][0].shape == (3, 1, 1)
-    assert Z[1][0].shape == (3, 1, 1)
+    assert Z[0][0].shape == (3, 1)
+    assert Z[1][0].shape == (3, 1)
 
 
 def test_interpolatable_simulate_uses_train_coefs_before_interpolator():
@@ -330,13 +330,13 @@ def test_interpolatable_simulate_uses_train_coefs_before_interpolator():
     train_params = numpy.array([[0.25]])
     ld.set_train_coefs(train_params[0], {"A": torch.zeros(1, 1), "b": 3.0 * torch.ones(1)}, torch.device("cpu"))
 
-    Z_train = ld.simulate(IC=[[torch.zeros(1, 1)]], t_Grid=[torch.tensor([0.0, 0.1])], params=train_params, sample=True)[0][0]
-    assert torch.allclose(Z_train[-1, 0, 0], torch.tensor(0.3), atol=1.0e-6)
+    Z_train = ld.simulate(IC=[[torch.zeros(1)]], t_Grid=[torch.tensor([0.0, 0.1])], params=train_params, sample=True)[0][0]
+    assert torch.allclose(Z_train[-1, 0], torch.tensor(0.3), atol=1.0e-6)
     assert dummy.sample_calls == 0
 
     test_params = numpy.array([[0.75]])
-    Z_test = ld.simulate(IC=[[torch.zeros(1, 1)]], t_Grid=[torch.tensor([0.0, 0.1])], params=test_params, sample=False)[0][0]
-    assert torch.allclose(Z_test[-1, 0, 0], torch.tensor(0.7), atol=1.0e-6)
+    Z_test = ld.simulate(IC=[[torch.zeros(1)]], t_Grid=[torch.tensor([0.0, 0.1])], params=test_params, sample=False)[0][0]
+    assert torch.allclose(Z_test[-1, 0], torch.tensor(0.7), atol=1.0e-6)
     assert dummy.mean_calls == 1
 
 
@@ -472,14 +472,14 @@ def test_switch_sindy_weak_simulate_returns_first_order_trajectory_shape():
         "A_after": torch.zeros(1, 1),
         "b_after": torch.zeros(1),
     }
-    Z0 = torch.zeros(1, 1)
+    Z0 = torch.zeros(1)
     t = torch.linspace(0.0, 1.0, 5)
     params = numpy.array([[0.25]])
     ld.set_train_coefs(params[0], coefs, torch.device("cpu"))
 
     Z = ld.simulate(IC=[[Z0]], t_Grid=[t], params=params)[0][0]
 
-    assert Z.shape == (5, 1, 1)
+    assert Z.shape == (5, 1)
 
 
 def test_get_uniform_grid_no_p_argument():

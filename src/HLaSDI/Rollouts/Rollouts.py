@@ -57,9 +57,8 @@ def Mean_Rollout(   encoder_decoder : EncoderDecoder,
         of parameter values.
 
     t_Grid : list[torch.Tensor], len = n_param
-        i'th element is a 2d numpy.ndarray or torch.Tensor object of shape (n_t(i)) or (1, n_t(i)) 
-        whose k'th or (0, k)'th entry specifies the k'th time value we want to find the latent 
-        states when we use the j'th initial conditions and the i'th set of coefficients.
+        i'th element is a one-dimensional numpy.ndarray or torch.Tensor object of shape (n_t(i))
+        whose k'th entry specifies the k'th time value.
 
     trainer : Trainer
         The trainer object. We use this to get normalization stats if they are enabled.
@@ -99,15 +98,14 @@ def Mean_Rollout(   encoder_decoder : EncoderDecoder,
     LOGGER.debug("Fetching latent space initial conditions for %d combinations of parameters." % n_param);
     Z0      : list[list[numpy.ndarray]] = encoder_decoder.latent_initial_conditions(param_grid, physics, trainer = trainer);
 
-    # Make each element of t_Grid into a numpy.ndarray of shape (1, n_t(i)). This is what 
-    # simulate expects.
+    # Make each element of t_Grid into a one-dimensional numpy.ndarray.
     t_Grid_np : list[numpy.ndarray] = [];
     for i in range(n_param):
         if(isinstance(t_Grid[i], torch.Tensor)):
             t_Grid_np.append(t_Grid[i].detach().cpu().numpy());
         else:
             t_Grid_np.append(t_Grid[i]);
-        t_Grid_np[i] = t_Grid_np[i].reshape(1, -1);
+        t_Grid_np[i] = t_Grid_np[i].reshape(-1);
 
     # Simulate the laten dynamics! For each testing parameter, use the mean value of each posterior 
     # distribution to define the coefficients. 
@@ -117,9 +115,9 @@ def Mean_Rollout(   encoder_decoder : EncoderDecoder,
                                                                 params  = param_grid,
                                                                 sample  = False);
     
-    # At this point, Zis[i][j] has shape (n_t_i, 1, n_z). We remove the extra dimension.
+    # At this point, Zis[i][j] has shape (n_t_i, n_z).
     for i in range(n_param):
-        n_t_i   : int   = t_Grid_np[i].shape[1];
+        n_t_i   : int   = t_Grid_np[i].shape[0];
         for j in range(n_IC):
             Zis[i][j] = Zis[i][j].reshape(n_t_i, n_z);
     
@@ -174,9 +172,8 @@ def Sample_Rollouts(encoder_decoder : EncoderDecoder,
         evaluated at each combination of parameter values.
 
     t_Grid : list[numpy.ndarray] or list[torch.Tensor], len = n_param
-        i'th entry is an numpy.ndarray or torch.Tensor of shape (n_t(i)) or (1, n_t(i)) whose k'th 
-        element specifies the k'th time value we want to find the latent states when we use the 
-        j'th initial conditions and the i'th set of coefficients.    
+        i'th entry is a one-dimensional numpy.ndarray or torch.Tensor of shape (n_t(i)) whose
+        k'th element specifies the k'th time value.
 
     
     -----------------------------------------------------------------------------------------------
@@ -211,9 +208,8 @@ def Sample_Rollouts(encoder_decoder : EncoderDecoder,
     assert encoder_decoder.n_IC     == n_IC, "encoder_decoder.n_IC = %d, n_IC %d" % (encoder_decoder.n_IC, n_IC);
 
 
-    # Reshape t_Grid so that the i'th element is a numpy.ndarray of shape (1, n_t(i)). This is what 
-    # simulate expects.
-    LOGGER.debug("reshaping t_Grid so that the i'th element has shape (1, n_t(i)).");
+    # Reshape t_Grid so that each element is a one-dimensional numpy.ndarray.
+    LOGGER.debug("reshaping t_Grid so that the i'th element has shape (n_t(i),).");
     t_Grid_np : list[numpy.ndarray] = [];
     for i in range(n_param):
         if(isinstance(t_Grid[i], torch.Tensor)):
@@ -221,11 +217,11 @@ def Sample_Rollouts(encoder_decoder : EncoderDecoder,
         else:
             t_Grid_np.append(t_Grid[i]);
         
-        t_Grid_np[i] = t_Grid_np[i].reshape(1, -1);
+        t_Grid_np[i] = t_Grid_np[i].reshape(-1);
     
     # For each combination of parameter values in param_grid, fetch the corresponding initial 
     # condition and then encode it. This gives us a list whose i'th element is an n_IC element
-    # list whose j'th element is an array of shape (1, n_z) holding the IC for the j'th derivative
+    # list whose j'th element is an array of shape (n_z) holding the IC for the j'th derivative
     # of the latent state when we use the i'th combination of parameter values. 
     LOGGER.debug("Fetching latent space initial conditions for %d combinations of parameters." % n_param);
     Z0      : list[list[numpy.ndarray]] = encoder_decoder.latent_initial_conditions(param_grid, physics, trainer = trainer);
@@ -239,7 +235,7 @@ def Sample_Rollouts(encoder_decoder : EncoderDecoder,
     LatentStates : list[list[numpy.ndarray]] = [];
     for i in range(n_param):
         LatentStates_i  : list[numpy.ndarray]   = [];
-        n_t_i           : int                   = t_Grid_np[i].shape[1];
+        n_t_i           : int                   = t_Grid_np[i].shape[0];
 
         for j in range(n_IC):
             LatentStates_i.append(numpy.empty((n_t_i, n_samples, n_z), dtype = numpy.float32));
@@ -296,7 +292,7 @@ def Sample_Rollouts(encoder_decoder : EncoderDecoder,
             for sample_idx in range(n_needed):
                 total_resample_attempts += 1;
                                 
-                # Get IC for this parameter (list of n_IC arrays, each shape (1, n_z))
+                # Get IC for this parameter (list of n_IC arrays, each shape (n_z))
                 Z0_i = [Z0[i][j] for j in range(n_IC)];
                 
                 # Simulate: returns list[list[array]], outer list has 1 element (1 param), 
@@ -327,8 +323,8 @@ def Sample_Rollouts(encoder_decoder : EncoderDecoder,
         # Now store all valid samples for this parameter in LatentStates
         for sample_idx in range(n_samples):
             for j in range(n_IC):
-                # sample_trajectories[sample_idx][j] has shape (n_t_i, 1, n_z)
-                LatentStates[i][j][:, sample_idx, :] = sample_trajectories[sample_idx][j][:, 0, :];
+                # sample_trajectories[sample_idx][j] has shape (n_t_i, n_z)
+                LatentStates[i][j][:, sample_idx, :] = sample_trajectories[sample_idx][j];
 
     # All done!
     return LatentStates;

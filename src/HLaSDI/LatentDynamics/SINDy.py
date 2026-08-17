@@ -444,10 +444,11 @@ class SINDy(InterpolatableLatentDynamics):
         -------------------------------------------------------------------------------------------
 
         IC : list[list[numpy.ndarray | torch.Tensor]], len = n_param
-            Initial latent states for each coefficient set. SINDy has one IC component.
+            Initial latent states for each coefficient set. SINDy has one IC component, so
+            `IC[i][0]` must have shape (n_z).
 
         t_Grid : list[numpy.ndarray | torch.Tensor], len = n_param
-            Time grids for simulation.
+            One-dimensional time grids for simulation.
 
         params : numpy.ndarray, shape = (n_param, n_p)
             The i'th row holds the i'th combination of parameter values.
@@ -464,7 +465,7 @@ class SINDy(InterpolatableLatentDynamics):
         -------------------------------------------------------------------------------------------
 
         Z : list[list[numpy.ndarray | torch.Tensor]]
-            Simulated latent trajectories. Z[i][0] has shape (n_t(i), n_initial_conditions, n_z).
+            Simulated latent trajectories. Z[i][0] has shape (n_t(i), n_z).
         """
 
         # Checks.
@@ -497,15 +498,11 @@ class SINDy(InterpolatableLatentDynamics):
             # Set up the i'th single-parameter solve.
             assert isinstance(ith_coefs, dict) and set(ith_coefs.keys()) == {"A", "b"};
             assert isinstance(ith_IC, list) and len(ith_IC) == 1;
-            assert len(ith_t_Grid.shape) == 1 or len(ith_t_Grid.shape) == 2;
             if(isinstance(ith_t_Grid, torch.Tensor)):
                 ith_t_Grid = ith_t_Grid.detach().cpu().numpy();
-            Same_t_Grid : bool = (len(ith_t_Grid.shape) == 1);
+            assert len(ith_t_Grid.shape) == 1;
             ith_Z0 : numpy.ndarray | torch.Tensor = ith_IC[0];
-            n_i    : int                          = ith_Z0.shape[0];
-            assert len(ith_Z0.shape) == 2 and ith_Z0.shape[1] == self.n_z;
-            if(Same_t_Grid == False):
-                assert ith_t_Grid.shape[0] == n_i;
+            assert len(ith_Z0.shape) == 1 and ith_Z0.shape[0] == self.n_z;
 
             # Fetch native coefficients for this parameter.
             A = ith_coefs["A"];
@@ -517,7 +514,7 @@ class SINDy(InterpolatableLatentDynamics):
                 if isinstance(A, torch.Tensor):
                     A = A.detach().cpu().numpy();
                     b = b.detach().cpu().numpy();
-                b = b.reshape(1, -1);
+                b = b.reshape(-1);
                 f = lambda t, z: b + numpy.matmul(z, A.T);
             else:
                 if isinstance(A, numpy.ndarray):
@@ -526,22 +523,11 @@ class SINDy(InterpolatableLatentDynamics):
                 else:
                     A = A.to(device = ith_Z0.device, dtype = ith_Z0.dtype);
                     b = b.to(device = ith_Z0.device, dtype = ith_Z0.dtype);
-                b = b.reshape(1, -1);
+                b = b.reshape(-1);
                 f = lambda t, z: b + torch.matmul(z, A.T);
 
-            # Solve the ODE. If all ICs share the same time grid we integrate them as a batch;
-            # otherwise, integrate each initial condition separately and concatenate the results.
-            if(Same_t_Grid == True):
-                ith_Z = RK4(f = f, y0 = ith_Z0, t_Grid = ith_t_Grid);
-            else:
-                Z_list : list[torch.Tensor | numpy.ndarray] = [];
-                for j in range(n_i):
-                    Z_j = RK4(f = f, y0 = ith_Z0[j, :].reshape(1, -1), t_Grid = ith_t_Grid[j, :]);
-                    Z_list.append(Z_j);
-                if(isinstance(ith_Z0, numpy.ndarray)):
-                    ith_Z = numpy.concatenate(Z_list, axis = 1);
-                else:
-                    ith_Z = torch.cat(Z_list, dim = 1);
+            # Solve the ODE for this single latent initial state.
+            ith_Z = RK4(f = f, y0 = ith_Z0, t_Grid = ith_t_Grid);
 
             # Add this parameter's trajectory to the output list.
             Z.append([ith_Z]);

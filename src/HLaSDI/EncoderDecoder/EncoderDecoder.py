@@ -526,7 +526,8 @@ class EncoderDecoder(torch.nn.Module):
         
         Z0 : list[list[numpy.ndarray]], len = n_param
             An n_param element list whose i'th element is an n_IC element list holding the encoding
-            of the initial conditions for the i'th combination of parameters. 
+            of the initial conditions for the i'th combination of parameters. Each encoded initial
+            condition has shape (n_z).
             
             If we let U0_i denote the FOM IC for the i'th set of parameters, then the i'th element of 
             the returned list is [self.encoder(*U0_i)].
@@ -567,10 +568,10 @@ class EncoderDecoder(torch.nn.Module):
                 assert isinstance(Z0_tuple, tuple), "Encode must return a tuple; got %s" % str(type(Z0_tuple));
                 assert len(Z0_tuple) == self.n_IC,  "Encode returned %d outputs; expected %d (=self.n_IC)" % (len(Z0_tuple), self.n_IC);
 
-                # Detach to numpy arrays.
+                # Detach to one-dimensional numpy arrays for the LatentDynamics.simulate API.
                 Z0_i : list[numpy.ndarray] = [];
                 for k in range(self.n_IC):
-                    Z0_i.append(Z0_tuple[k].detach().cpu().numpy());
+                    Z0_i.append(Z0_tuple[k].detach().cpu().numpy().reshape(-1));
 
                 Z0.append(Z0_i);
 

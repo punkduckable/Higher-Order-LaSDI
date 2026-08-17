@@ -111,11 +111,14 @@ class CABLE(LatentDynamics):
 
         # Initialize the gate network.
         widths      : list[int] = [n_p + 1] + self.hidden_widths + [self.n_experts];
-        self.w                  = MultiLayerPerceptron(widths = widths, activations = self.activations) * 0.01;
+        self.w                  = MultiLayerPerceptron(widths = widths, activations = self.activations);
+        with torch.no_grad():
+            for param in self.w.parameters():
+                param.mul_(0.01);
 
         # Randomly initialize the experts. These are leaf tensors because the Trainer passes them
         # directly to the optimizer through trainable_tensors().
-        self.unmasked_A : torch.Tensor = torch.rand((self.n_experts, self.n_z, self.n_z), dtype = torch.float32).requires_grad_(self.trainable);
+        self.unmasked_A : torch.Tensor = (0.01*torch.rand((self.n_experts, self.n_z, self.n_z), dtype = torch.float32)).requires_grad_(self.trainable);
         self.unmasked_b : torch.Tensor | None;
         if self.use_biases:
             self.unmasked_b = torch.zeros((self.n_experts, 1, self.n_z), dtype = torch.float32).requires_grad_(self.trainable);
@@ -367,7 +370,7 @@ class CABLE(LatentDynamics):
                 dZdt                    = Derivative1_Order2_NonUniform(ith_Z, t_Grid = ith_t_Grid);
 
             # Evaluate expert weights.
-            ith_weights       : torch.Tensor = self._weights_for_t_grid(ith_t_Grid, params[i, :]);
+            ith_weights       : torch.Tensor = self._weights_for_t_grid(ith_t_Grid, params[i, :], t0 = ith_t_Grid[0], t_span = ith_t_Grid[-1] - ith_t_Grid[0]);
             ith_RHS           : torch.Tensor = self._evaluate_torch_rhs_from_weights(ith_Z, ith_weights);
 
             # Compute the LD loss.
@@ -445,8 +448,7 @@ class CABLE(LatentDynamics):
 
         Z : list[list[torch.Tensor | numpy.ndarray]], len = n_param
             The i'th element is a one-element list whose first entry is a tensor/array of shape
-            (n_t(i), n_z). Batched RHS inputs are intentionally not supported here; `simulate`
-            handles batched initial conditions separately.
+            (n_t(i), n_z). 
 
         t_Grid : list[numpy.ndarray | torch.Tensor], len = n_param
             The i'th entry is a one-dimensional time grid with length n_t(i). CABLE is
@@ -517,12 +519,11 @@ class CABLE(LatentDynamics):
         -------------------------------------------------------------------------------------------
 
         IC : list[list[numpy.ndarray | torch.Tensor]], len = n_param
-            Initial latent states for each parameter value. CABLE has one IC component, so each
-            entry is a one-element list whose tensor/array has shape (n_initial_conditions, n_z).
+            Initial latent states for each parameter value. CABLE has one IC component, so
+            `IC[i][0]` must have shape (n_z).
 
         t_Grid : list[numpy.ndarray | torch.Tensor], len = n_param
-            Time grids for simulation. A one-dimensional grid is shared by all initial conditions
-            for that parameter; a two-dimensional grid supplies one row per initial condition.
+            One-dimensional time grids for simulation.
 
         params : numpy.ndarray, shape = (n_param, n_p)
             The i'th row holds the i'th combination of parameter values.
@@ -536,7 +537,7 @@ class CABLE(LatentDynamics):
         -------------------------------------------------------------------------------------------
 
         Z : list[list[numpy.ndarray | torch.Tensor]]
-            Simulated latent trajectories. Z[i][0] has shape (n_t(i), n_initial_conditions, n_z).
+            Simulated latent trajectories. Z[i][0] has shape (n_t(i), n_z).
         """
 
         # Checks.
@@ -556,15 +557,13 @@ class CABLE(LatentDynamics):
             ith_params : numpy.ndarray                       = params[i, :];
 
             assert isinstance(ith_IC, list) and len(ith_IC) == 1;
-            assert len(ith_t_Grid.shape) == 1 or len(ith_t_Grid.shape) == 2;
             if(isinstance(ith_t_Grid, torch.Tensor)):
                 ith_t_Grid = ith_t_Grid.detach().cpu().numpy();
-            Same_t_Grid : bool = (len(ith_t_Grid.shape) == 1);
+            assert len(ith_t_Grid.shape) == 1;
+            t0      : float = ith_t_Grid[0];
+            t_span  : float = ith_t_Grid[-1] - ith_t_Grid[0];
             ith_Z0 : numpy.ndarray | torch.Tensor = ith_IC[0];
-            n_i    : int                          = ith_Z0.shape[0];
-            assert len(ith_Z0.shape) == 2 and ith_Z0.shape[1] == self.n_z;
-            if(Same_t_Grid == False):
-                assert ith_t_Grid.shape[0] == n_i;
+            assert len(ith_Z0.shape) == 1 and ith_Z0.shape[0] == self.n_z;
 
             # Define the right-hand side in either NumPy or PyTorch. The solver backend follows the
             # initial-condition backend; this preserves differentiability for tensor rollouts.
@@ -572,14 +571,14 @@ class CABLE(LatentDynamics):
                 def f(t : float, z : numpy.ndarray) -> numpy.ndarray:
                     t_eval  : numpy.ndarray = numpy.asarray([t], dtype = ith_t_Grid.dtype);
                     with torch.no_grad():
-                        weights         : torch.Tensor = self._weights_for_t_grid(t_eval, ith_params);
+                        weights         : torch.Tensor = self._weights_for_t_grid(t_eval, ith_params, t0 = t0, t_span = t_span);
                         if z.dtype == numpy.dtype(numpy.float64):
                             dtype = torch.float64;
                         else:
                             dtype = torch.float32;
                         A_bar, b_bar                  = self._effective_coefficients(weights, torch.device("cpu"), dtype);
                         A_np : numpy.ndarray          = A_bar[0].detach().cpu().numpy().astype(z.dtype, copy = False);
-                        b_np : numpy.ndarray          = b_bar[0].detach().cpu().numpy().astype(z.dtype, copy = False).reshape(1, -1);
+                        b_np : numpy.ndarray          = b_bar[0].detach().cpu().numpy().astype(z.dtype, copy = False);
                     return b_np + numpy.matmul(z, A_np.T);
             else:
                 def f(t : float, z : torch.Tensor) -> torch.Tensor:
@@ -588,23 +587,12 @@ class CABLE(LatentDynamics):
                     gate_dtype  = param.dtype;
 
                     t_eval  : torch.Tensor = torch.tensor([t], dtype = gate_dtype, device = gate_device);
-                    weights : torch.Tensor = self._weights_for_t_grid(t_eval, ith_params);
+                    weights : torch.Tensor = self._weights_for_t_grid(t_eval, ith_params, t0 = t0, t_span = t_span);
                     A_bar, b_bar           = self._effective_coefficients(weights, z.device, z.dtype);
-                    return b_bar[0].reshape(1, -1) + torch.matmul(z, A_bar[0].T);
+                    return b_bar[0] + torch.matmul(z, A_bar[0].T);
 
-            # Solve the ODE. If all ICs share the same time grid we integrate them as a batch;
-            # otherwise, integrate each initial condition separately and concatenate the results.
-            if(Same_t_Grid == True):
-                ith_Z = RK4(f = f, y0 = ith_Z0, t_Grid = ith_t_Grid);
-            else:
-                Z_list : list[torch.Tensor | numpy.ndarray] = [];
-                for j in range(n_i):
-                    Z_j = RK4(f = f, y0 = ith_Z0[j, :].reshape(1, -1), t_Grid = ith_t_Grid[j, :]);
-                    Z_list.append(Z_j);
-                if(isinstance(ith_Z0, numpy.ndarray)):
-                    ith_Z = numpy.concatenate(Z_list, axis = 1);
-                else:
-                    ith_Z = torch.cat(Z_list, dim = 1);
+            # Solve the ODE for this single latent initial state.
+            ith_Z = RK4(f = f, y0 = ith_Z0, t_Grid = ith_t_Grid);
 
             # Add this parameter's trajectory to the output list.
             Z.append([ith_Z]);
@@ -685,7 +673,10 @@ class CABLE(LatentDynamics):
     def _weights_for_t_grid(
             self,
             t_Grid  : numpy.ndarray | torch.Tensor,
-            params  : numpy.ndarray) -> torch.Tensor:
+            params  : numpy.ndarray,
+            *,
+            t0      : float, 
+            t_span  : float) -> torch.Tensor:
         r"""
         Evaluate gate weights on one time grid and one parameter value.
 
@@ -700,11 +691,18 @@ class CABLE(LatentDynamics):
         t_Grid : numpy.ndarray or torch.Tensor, shape = (n_t)
             One-dimensional time grid for a single parameter value. NumPy inputs may have any
             floating dtype. Torch inputs may live on any device. The values are cast to the gate
-            network's dtype/device before forming gate inputs.
+            network's dtype/device before forming gate inputs. 
 
         params : numpy.ndarray, shape = (n_p)
             Parameter vector for the same trajectory. The values are cast to the gate network's
             dtype/device and broadcast to shape (n_t, n_p).
+
+        t0 : float 
+            The starting time for this parameter value; used to scale time inputs to gate network.
+        
+        t_span : float
+            The difference between the minimum and maximum time for this parameter value; used to 
+            scale time inputs to gate network.
 
 
         -------------------------------------------------------------------------------------------
@@ -716,28 +714,34 @@ class CABLE(LatentDynamics):
            gate-network parameters. Each row sums to one.
         """
 
+        assert t_span > 0, "t_Grid has no range; t_Grid[0] = %f, t_Grid[-1] = %f" % (t_Grid[0], t_Grid[-1]);
+
         # Setup 
-        param : torch.Tensor = next(self.w.parameters());
-        gate_device = param.device
-        gate_dtype  = param.dtype;
+        w_param : torch.Tensor = next(self.w.parameters());
+        gate_device = w_param.device
+        gate_dtype  = w_param.dtype;
 
         # -----------------------------------------------------------------------------------------
         # Build gate network inputs
 
-        # Map t_Grid to a tensor.
+        # Normalize the times. 
+        tau_Grid = (t_Grid - t0)/t_span;
+
+        # Map tau_Grid to a tensor.
         # The gate is a torch.nn.Module; its inputs must be tensors.
-        if isinstance(t_Grid, numpy.ndarray):
-            t_tensor : torch.Tensor = torch.tensor(t_Grid, dtype = gate_dtype, device = gate_device);
+        if isinstance(tau_Grid, numpy.ndarray):
+            tau_tensor : torch.Tensor = torch.tensor(tau_Grid, dtype = gate_dtype, device = gate_device);
         else:
-            t_tensor = t_Grid.to(device = gate_device, dtype = gate_dtype);
-        assert len(t_tensor.shape) == 1;
+            tau_tensor = tau_Grid.to(device = gate_device, dtype = gate_dtype);
+        assert len(tau_tensor.shape) == 1;
+
 
         # Broadcast n_t copies of param_tensor to build inputs for the gate network.
         param_tensor : torch.Tensor = torch.tensor(params, dtype = gate_dtype, device = gate_device).reshape(1, self.n_p);
-        param_tensor = param_tensor.expand(t_tensor.shape[0], self.n_p);
+        param_tensor = param_tensor.expand(tau_tensor.shape[0], self.n_p);
 
         # Build the gate network inputs
-        w_inputs : torch.Tensor = torch.cat([t_tensor.reshape(-1, 1), param_tensor], dim = 1);
+        w_inputs : torch.Tensor = torch.cat([tau_tensor.reshape(-1, 1), param_tensor], dim = 1);
 
         # -----------------------------------------------------------------------------------------
         # Evaluate weights
@@ -934,7 +938,7 @@ class CABLE(LatentDynamics):
             CABLE right-hand-side values, with dtype/device matching `Z`.
         """
 
-        weights         : torch.Tensor = self._weights_for_t_grid(t_Grid, params);
+        weights         : torch.Tensor = self._weights_for_t_grid(t_Grid, params, t0 = t_Grid[0], t_span = t_Grid[-1] - t_Grid[0]);
         return self._evaluate_torch_rhs_from_weights(Z, weights);
 
 
@@ -1015,7 +1019,7 @@ class CABLE(LatentDynamics):
         """
 
         with torch.no_grad():
-            weights         : torch.Tensor = self._weights_for_t_grid(t_Grid, params);
+            weights         : torch.Tensor = self._weights_for_t_grid(t_Grid, params, t0 = t_Grid[0], t_span = t_Grid[-1] - t_Grid[0]);
             if Z.dtype == numpy.dtype(numpy.float64):
                 dtype = torch.float64;
             else:

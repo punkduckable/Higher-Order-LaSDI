@@ -260,6 +260,9 @@ Latent rollouts now use the parameter values directly:
 Z = latent_dynamics.simulate(IC=Z0, t_Grid=t_grid, params=param_grid, sample=False)
 ```
 
+Here `t_grid[i]` is one-dimensional and each latent initial-condition component `Z0[i][j]`
+has shape `(n_z,)`. The returned component `Z[i][j]` has shape `(n_t(i), n_z)`.
+
 If a row of `params` is present in `train_coefs`, the exact training coefficients are used. Otherwise,
 the latent dynamics object queries its interpolator. `sample=False` uses interpolator posterior means,
 while `sample=True` draws one posterior sample per requested non-training parameter.
@@ -830,7 +833,9 @@ New applications can be implemented by deriving from the appropriate base classe
      weak forms of the same ODE should normally delegate to the same RHS implementation.
    - `simulate(self, IC, t_Grid, params, sample=False)`: Simulate forward by using exact
      `train_coefs` for training parameters and `self.interpolator.mean(...)` or
-     `self.interpolator.sample(...)` for non-training parameters.
+     `self.interpolator.sample(...)` for non-training parameters. Each `t_Grid[i]` is 1D, each
+     `IC[i][j]` has shape `(n_z,)`, and each returned trajectory component has shape
+     `(n_t(i), n_z)`.
    - `trainable_tensors(self)`: Return the actual coefficient tensors stored in
      `self.train_coefs` so they can be passed to a torch optimizer.
 3. **Register in `Initialize.py`**:

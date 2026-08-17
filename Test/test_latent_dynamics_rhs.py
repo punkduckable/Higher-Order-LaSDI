@@ -242,7 +242,7 @@ def test_cable_rhs_omits_bias_when_biases_are_disabled():
 def test_cable_simulate_integrates_constant_uniform_expert_mixture_numpy_inputs():
     params = numpy.array([[0.25]])
     t = numpy.array([0.0, 0.25, 0.5])
-    z0 = numpy.array([[1.0], [2.0]])
+    z0 = numpy.array([1.0])
 
     ld = CABLE(n_z=1, Uniform_t_Grid=True, n_p=1, config=_cable_config())
     _zero_cable_gate(ld)
@@ -251,7 +251,7 @@ def test_cable_simulate_integrates_constant_uniform_expert_mixture_numpy_inputs(
 
     z = ld.simulate(IC=[[z0]], t_Grid=[t], params=params)[0][0]
 
-    expected = z0.reshape(1, 2, 1) + 2.0*t.reshape(-1, 1, 1)
+    expected = z0.reshape(1, 1) + 2.0*t.reshape(-1, 1)
     assert isinstance(z, numpy.ndarray)
     assert z.shape == expected.shape
     assert numpy.allclose(z, expected)
