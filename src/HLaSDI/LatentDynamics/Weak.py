@@ -104,7 +104,10 @@ class WeakLatentDynamics(LatentDynamics):
 
         assert isinstance(config, LatentDynamicsBaseConfig), "config must be a LatentDynamicsBaseConfig, got %s" % str(type(config));
         model_type  : str    = config.type;
-        weak_config          = getattr(config, model_type);
+        weak_config          = getattr(config, model_type, None);
+        if weak_config is None and hasattr(config, "weak"):
+            weak_config = config.weak;
+        assert weak_config is not None, "weak latent dynamics config must provide settings under `%s` or `weak`" % model_type;
 
         # Weak form setup.
         self.test_func_type  = weak_config.test_func_type;

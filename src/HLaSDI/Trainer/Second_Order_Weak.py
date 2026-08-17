@@ -158,7 +158,7 @@ class Second_Order_Weak(Second_Order_Rollout):
         **Loss logging**
 
         This method records both per-parameter losses and totals using the base-class helpers
-        `_cache_loss(...)`.
+        `_cache_metric(...)`.
 
 
         -------------------------------------------------------------------------------------------
@@ -393,8 +393,8 @@ class Second_Order_Weak(Second_Order_Rollout):
                     
                     # Store per-parameter-combination loss
                     param_tuple = tuple(self.param_space.train_space[i, :]);
-                    self._cache_loss('recon_D', recon_D_loss_ith_param.detach(), param_tuple);
-                    self._cache_loss('recon_V', recon_V_loss_ith_param.detach(), param_tuple);
+                    self._cache_metric(f'loss/recon/D/{str(param_tuple)}', recon_D_loss_ith_param.detach());
+                    self._cache_metric(f'loss/recon/V/{str(param_tuple)}', recon_V_loss_ith_param.detach());
 
                     LOGGER.debug("Reconstruction Loss (Autoencoder_Pair) - complete for parameter combination %d" % i);
                     self.timer.end("Reconstruction Loss");
@@ -438,8 +438,8 @@ class Second_Order_Weak(Second_Order_Rollout):
                     loss_consistency_U += consistency_U_loss_ith_param;
                     
                     param_tuple = tuple(self.param_space.train_space[i, :]);
-                    self._cache_loss('consistency_Z', consistency_Z_loss_ith_param.detach(), param_tuple);
-                    self._cache_loss('consistency_U', consistency_U_loss_ith_param.detach(), param_tuple);
+                    self._cache_metric(f'loss/consistency_Z/{str(param_tuple)}', consistency_Z_loss_ith_param.detach());
+                    self._cache_metric(f'loss/consistency/U/{str(param_tuple)}', consistency_U_loss_ith_param.detach());
 
                     LOGGER.debug("Consistency Loss (Autoencoder_Pair) - complete for parameter combination %d" % i);
                     self.timer.end("Consistency Loss");
@@ -485,19 +485,19 @@ class Second_Order_Weak(Second_Order_Rollout):
                     loss_chain_rule_Z += chain_rule_Z_loss_ith_param;
                     
                     param_tuple = tuple(self.param_space.train_space[i, :]);
-                    self._cache_loss('chain_rule_U', chain_rule_U_loss_ith_param.detach(), param_tuple);
-                    self._cache_loss('chain_rule_Z', chain_rule_Z_loss_ith_param.detach(), param_tuple);
+                    self._cache_metric(f'loss/chain_rule/U/{str(param_tuple)}', chain_rule_U_loss_ith_param.detach());
+                    self._cache_metric(f'loss/chain_rule/Z/{str(param_tuple)}', chain_rule_Z_loss_ith_param.detach());
 
                     LOGGER.debug("Chain Rule Loss (Autoencoder_Pair) - complete for parameter combination %d" % i);
                     self.timer.end("Chain Rule Loss");
 
             # Store the total recon, consistency, and chain rule losses.
-            self._cache_loss('recon_D', loss_recon_D.detach());
-            self._cache_loss('recon_V', loss_recon_V.detach());
-            self._cache_loss('consistency_Z', loss_consistency_Z.detach());
-            self._cache_loss('consistency_U', loss_consistency_U.detach());
-            self._cache_loss('chain_rule_U', loss_chain_rule_U.detach());
-            self._cache_loss('chain_rule_Z', loss_chain_rule_Z.detach());
+            self._cache_metric('loss/recon/D/total', loss_recon_D.detach());
+            self._cache_metric('loss/recon/V/total', loss_recon_V.detach());
+            self._cache_metric('loss/consistency/Z/total', loss_consistency_Z.detach());
+            self._cache_metric('loss/consistency/U/total', loss_consistency_U.detach());
+            self._cache_metric('loss/chain_rule/U/total', loss_chain_rule_U.detach());
+            self._cache_metric('loss/chain_rule/Z/total', loss_chain_rule_Z.detach());
 
 
             # --------------------------------------------------------------------------------
@@ -506,16 +506,20 @@ class Second_Order_Weak(Second_Order_Rollout):
             self.timer.start("LD/Coefficient/Stability Losses");
 
             # Compute the latent dynamics losses.
-            raw_LD_losses : LD_Loss_Container = self.latent_dynamics.compute_losses( 
+            LD_losses : LD_Loss_Container = self.latent_dynamics.compute_losses( 
                                                         Latent_States    = Latent_States, 
                                                         t_Grid           = t_Train_device,
                                                         step             = iter,
                                                         params           = self.param_space.train_space);
 
-            # Cache losses and compute the weighted LD loss sum.
-            LD_loss_dict,  loss_LD_weighted_sum = self._process_latent_dynamics_losses(
-                                                        raw_LD_Losses  = raw_LD_losses,
-                                                        device         = device);
+            # Cache metrics
+            for key, value in LD_losses.metrics.items():
+                self._cache_metric(key = key, value = value);
+
+            # Compute weighted loss sum.
+            loss_LD_weighted_sum  : torch.Tensor            = torch.zeros((), dtype = torch.float32, device = device);
+            for key, value in LD_losses.losses.items():
+                loss_LD_weighted_sum = loss_LD_weighted_sum + LD_losses.weights[key] * value;
 
             self.timer.end("LD/Coefficient/Stability Losses");
 
@@ -672,16 +676,16 @@ class Second_Order_Weak(Second_Order_Rollout):
 
                     # Store results for this combination of parameters
                     param_tuple = tuple(self.param_space.train_space[i, :]);
-                    self._cache_loss('rollout_ROM_D', rollout_ROM_D_loss_ith_param.detach(), param_tuple);
-                    self._cache_loss('rollout_ROM_V', rollout_ROM_V_loss_ith_param.detach(), param_tuple);
-                    self._cache_loss('rollout_FOM_D', rollout_FOM_D_loss_ith_param.detach(), param_tuple);
-                    self._cache_loss('rollout_FOM_V', rollout_FOM_V_loss_ith_param.detach(), param_tuple);
+                    self._cache_metric(f'loss/rollout/ROM/D/{str(param_tuple)}', rollout_ROM_D_loss_ith_param.detach());
+                    self._cache_metric(f'loss/rollout/ROM/V/{str(param_tuple)}', rollout_ROM_V_loss_ith_param.detach());
+                    self._cache_metric(f'loss/rollout/FOM/D/{str(param_tuple)}', rollout_FOM_D_loss_ith_param.detach());
+                    self._cache_metric(f'loss/rollout/FOM/V/{str(param_tuple)}', rollout_FOM_V_loss_ith_param.detach());
 
                 # Store total rollout loss.
-                self._cache_loss('rollout_ROM_D', loss_rollout_ROM_D.detach());
-                self._cache_loss('rollout_ROM_V', loss_rollout_ROM_V.detach());
-                self._cache_loss('rollout_FOM_D', loss_rollout_FOM_D.detach());
-                self._cache_loss('rollout_FOM_V', loss_rollout_FOM_V.detach());
+                self._cache_metric('loss/rollout/ROM/D/total', loss_rollout_ROM_D.detach());
+                self._cache_metric('loss/rollout/ROM/V/total', loss_rollout_ROM_V.detach());
+                self._cache_metric('loss/rollout/FOM/D/total', loss_rollout_FOM_D.detach());
+                self._cache_metric('loss/rollout/FOM/V/total', loss_rollout_FOM_V.detach());
 
                 LOGGER.debug("Rollout Loss (Autoencoder_Pair) - complete");
                 self.timer.end("Rollout Loss");
@@ -762,16 +766,16 @@ class Second_Order_Weak(Second_Order_Rollout):
                     
                     # Store per-parameter-combination loss
                     param_tuple = tuple(self.param_space.train_space[i, :]);
-                    self._cache_loss('IC_rollout_Z_D', IC_rollout_Z_D_loss_ith_param.detach(), param_tuple);
-                    self._cache_loss('IC_rollout_Z_V', IC_rollout_Z_V_loss_ith_param.detach(), param_tuple);
-                    self._cache_loss('IC_rollout_D', IC_rollout_D_loss_ith_param.detach(), param_tuple);
-                    self._cache_loss('IC_rollout_V', IC_rollout_V_loss_ith_param.detach(), param_tuple);
+                    self._cache_metric(f'loss/IC_rollout/Z_D/{str(param_tuple)}', IC_rollout_Z_D_loss_ith_param.detach());
+                    self._cache_metric(f'loss/IC_rollout/Z_V/{str(param_tuple)}', IC_rollout_Z_V_loss_ith_param.detach());
+                    self._cache_metric(f'loss/IC_rollout/D/{str(param_tuple)}', IC_rollout_D_loss_ith_param.detach());
+                    self._cache_metric(f'loss/IC_rollout/V/{str(param_tuple)}', IC_rollout_V_loss_ith_param.detach());
 
                 # Store total IC rollout loss.
-                self._cache_loss('IC_rollout_Z_D', loss_IC_rollout_Z_D.detach());
-                self._cache_loss('IC_rollout_Z_V', loss_IC_rollout_Z_V.detach());
-                self._cache_loss('IC_rollout_D', loss_IC_rollout_D.detach());
-                self._cache_loss('IC_rollout_V', loss_IC_rollout_V.detach());
+                self._cache_metric('loss/IC_rollout/Z_D/total', loss_IC_rollout_Z_D.detach());
+                self._cache_metric('loss/IC_rollout/Z_V/total', loss_IC_rollout_Z_V.detach());
+                self._cache_metric('loss/IC_rollout/D/total', loss_IC_rollout_D.detach());
+                self._cache_metric('loss/IC_rollout/V/total', loss_IC_rollout_V.detach());
 
                 LOGGER.debug("IC Rollout Loss (Autoencoder_Pair) - complete");
                 self.timer.end("IC Rollout Loss");
@@ -794,7 +798,7 @@ class Second_Order_Weak(Second_Order_Rollout):
                     self.loss_weights['rollout']        * loss_rollout +
                     self.loss_weights['IC_rollout']     * loss_IC_rollout +
                     loss_LD_weighted_sum);
-            self._cache_loss('total', loss.detach());
+            self._cache_metric('loss/total', loss.detach());
             LOGGER.debug("Total loss (Autoencoder_Pair) computed");
 
 
@@ -826,6 +830,9 @@ class Second_Order_Weak(Second_Order_Rollout):
                 max_norm = self.gradient_clip,
                 foreach  = True,
             )
+            detached_grad_norm = grad_norm.detach();
+            self._cache_metric("grad_norm/raw", detached_grad_norm);
+            self._cache_metric("grad_norm/actual", torch.min(detached_grad_norm, detached_grad_norm.new_full((1), self.gradient_clip)));
                         
             # Log if gradient clipping activates (indicates potential instability)
             if grad_norm > self.gradient_clip:
@@ -837,8 +844,8 @@ class Second_Order_Weak(Second_Order_Rollout):
 
             # Flush all cached loss tensors after the optimizer update. This performs one batched
             # device-to-CPU scalar transfer for loss tracking, checkpoint decisions, and reporting.
-            flushed_losses = self._flush_loss_cache(iter + 1);
-            loss_value = flushed_losses[('total', 'total')];
+            flushed_metrics = self._flush_metrics_cache(iter + 1);
+            loss_value = flushed_metrics["loss/total"];
 
             # Check if we hit a new minimum loss. If so, make a checkpoint, record the loss and 
             # the iteration number. 
@@ -868,13 +875,13 @@ class Second_Order_Weak(Second_Order_Rollout):
 
             # Report the current iteration number and losses
             info_str : str = "Iter: %05d/%d, Total: %3.6f" % (iter + 1, self.max_iter, loss_value);
-            if(self.loss_weights['recon'] > 0):         info_str += ", Recon D: %3.6f, Recon V: %3.6f"                                              % (flushed_losses[('recon_D', 'total')],       flushed_losses[('recon_V', 'total')]);
-            if(self.loss_weights['consistency'] > 0):   info_str += ", Consistency Z: %3.6f, Consistency U: %3.6f"                                  % (flushed_losses[('consistency_Z', 'total')], flushed_losses[('consistency_U', 'total')]);
-            if(self.loss_weights['chain_rule'] > 0):    info_str += ", CR U: %3.6f, CR Z: %3.6f"                                                    % (flushed_losses[('chain_rule_U', 'total')],  flushed_losses[('chain_rule_Z', 'total')]);
-            if(self.loss_weights['rollout'] > 0):       info_str += ", Roll FOM D: %3.6f, Roll FOM V: %3.6f, Roll ROM D: %3.6f, Roll ROM V: %3.6f"  % (flushed_losses.get(('rollout_FOM_D', 'total'), 0.0), flushed_losses.get(('rollout_FOM_V', 'total'), 0.0),  flushed_losses.get(('rollout_ROM_D', 'total'), 0.0),  flushed_losses.get(('rollout_ROM_V', 'total'), 0.0));
-            if(self.loss_weights['IC_rollout'] > 0):    info_str += ", IC Roll D: %3.6f, IC Roll V: %3.6f, IC Roll ZD: %3.6f, IC Roll ZV: %3.6f"    % (flushed_losses.get(('IC_rollout_D', 'total'), 0.0),  flushed_losses.get(('IC_rollout_V', 'total'), 0.0),   flushed_losses.get(('IC_rollout_Z_D', 'total'), 0.0), flushed_losses.get(('IC_rollout_Z_V', 'total'), 0.0));
-            for key, value in LD_loss_dict.items():
-                info_str += ", %s: %3.6f"   % flushed_losses[(key, 'total')];
+            if(self.loss_weights['recon'] > 0):         info_str += ", Recon D: %3.6f, Recon V: %3.6f"                                              % (flushed_metrics['loss/recon/D/total'],                   flushed_metrics['loss/recon/V/total']);
+            if(self.loss_weights['consistency'] > 0):   info_str += ", Consistency Z: %3.6f, Consistency U: %3.6f"                                  % (flushed_metrics['loss/consistency/Z/total'],             flushed_metrics['loss/consistency/U/total']);
+            if(self.loss_weights['chain_rule'] > 0):    info_str += ", CR U: %3.6f, CR Z: %3.6f"                                                    % (flushed_metrics['loss/chain_rule/U/total'],              flushed_metrics['loss/chain_rule/Z/total']);
+            if(self.loss_weights['rollout'] > 0):       info_str += ", Roll FOM D: %3.6f, Roll FOM V: %3.6f, Roll ROM D: %3.6f, Roll ROM V: %3.6f"  % (flushed_metrics.get('loss/rollout/FOM/D/total', 0.0),    flushed_metrics.get('loss/rollout/FOM/V/total', 0.0),  flushed_metrics.get('loss/rollout/ROM/D/total', 0.0),  flushed_metrics.get('loss/rollout/ROM/V/total', 0.0));
+            if(self.loss_weights['IC_rollout'] > 0):    info_str += ", IC Roll D: %3.6f, IC Roll V: %3.6f, IC Roll ZD: %3.6f, IC Roll ZV: %3.6f"    % (flushed_metrics.get('loss/IC_rollout/D/total', 0.0),    flushed_metrics.get('loss/IC_rollout/V/total', 0.0),    flushed_metrics.get('loss/IC_rollout/Z_D/total', 0.0), flushed_metrics.get('loss/IC_rollout/Z_V/total', 0.0));
+            for key in LD_losses.losses.keys():
+                info_str += ", %s: %3.6f"   % (key, flushed_metrics.get(f"loss/{key}/total", 0.0));
             if isinstance(self.latent_dynamics, InterpolatableLatentDynamics): 
                 info_str += ", max|c|: %.3f" % max_train_coef;
             LOGGER.info(info_str);

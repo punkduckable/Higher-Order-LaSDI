@@ -20,7 +20,7 @@ Each piece has a base class that defines the interface used by the rest of the c
 - **EncoderDecoder Architectures**: Standard autoencoder, paired autoencoder for higher-order systems
 - **Rich Activation Functions**: Support for 20+ activation functions including sine, ReLU, tanh, GELU, and more
 - **Visualization Tools**: Automated plotting of latent trajectories, error heatmaps, and solution animations
-- **Training stability & diagnostics**: Gradient clipping (typically configured under `trainer.<TrainerType>.gradient_clip`) to prevent exploding gradients, and per-parameter loss logging to `results/*_loss_by_param.jsonl` for post-hoc analysis
+- **Training stability & diagnostics**: Gradient clipping (typically configured under `trainer.<TrainerType>.gradient_clip`) to prevent exploding gradients, and scalar metric logging to `results/*_metrics.jsonl` for post-hoc analysis
 
 ## Getting Started
 
@@ -243,11 +243,10 @@ Latent-dynamics losses are also owned by the `LatentDynamics` object. Configure 
 chooses the residual metric internally, so there is no `loss_types.LD` setting and
 `compute_losses(...)` does not accept a `loss_type` argument.
 
-`compute_losses(Latent_States, t_Grid, params)` returns a dictionary whose keys exactly match
-`latent_dynamics.loss_weights`. Values are either:
-
-- a length-`n_param` list of scalar tensors for parameter-specific losses, or
-- one scalar tensor for a global loss shared across all training parameters.
+`compute_losses(Latent_States, t_Grid, params)` returns an `LD_Loss_Container`. Its `losses`
+dictionary has keys that exactly match `latent_dynamics.loss_weights`, and every loss value is a
+scalar tensor total. Parameter-specific diagnostics belong in `LD_Loss_Container.metrics`, also as
+detached scalar tensors.
 
 Current loss keys:
 
@@ -413,7 +412,7 @@ Create a new file under `src/HLaSDI/Trainer/`, for example `src/HLaSDI/Trainer/M
 Follow the existing trainers (`First_Order_Rollout`, `First_Order_Weak`, `Second_Order_Rollout`, `Second_Order_Weak`) as templates. In particular, your
 `Iterate(...)` method should:
 
-- Cache scalar loss tensors via `_cache_loss(...)`, then write one JSONL row per epoch via `_flush_loss_cache(epoch)`.
+- Cache detached scalar metric tensors via `_cache_metric(...)`, then write one JSONL row per epoch via `_flush_metrics_cache(epoch)`.
 - Use `_optimizer_parameters()` when you want the optimizer to include both
   `encoder_decoder.parameters()` and the parameters in `latent_dynamics.train_coefs`
 - Call `_Save_Checkpoint(...)` when a new best model is found (so `train()` can restore it)
@@ -824,10 +823,10 @@ New applications can be implemented by deriving from the appropriate base classe
      `set_train_coefs(..., device)`. This method should
      return `None`.
    - `compute_losses(self, Latent_States, t_Grid, params)`: Look up native coefficients
-     from `self.train_coefs` using `params`, then return a dictionary whose keys match
-     `self.loss_weights`. Values should be scalar tensors for global losses or length-`n_param`
-     lists of scalar tensors for per-parameter losses. It should not accept `loss_type` or
-     flattened `input_coefs`.
+     from `self.train_coefs` using `params`, then return an `LD_Loss_Container`. Its `losses`
+     dictionary keys must match `self.loss_weights`, and values must be scalar tensor totals.
+     Per-parameter diagnostics should be stored as scalar tensors in `metrics`. It should not
+     accept `loss_type` or flattened `input_coefs`.
    - `RHS(self, Z, t_Grid, params, sample=False)`: Evaluate the pointwise latent ODE right-hand
      side using exact training coefficients or interpolated mean/sample coefficients. Strong and
      weak forms of the same ODE should normally delegate to the same RHS implementation.
@@ -946,7 +945,7 @@ Training produces several outputs:
 
 ### Saved Files
 - **Checkpoint**: `checkpoint/checkpoint.pt` – EncoderDecoder weights plus exported `LatentDynamics` state, including `train_coefs`
-- **Results**: `results/<physics_type>_loss_by_param.jsonl` – One JSON object per epoch containing per-training-parameter losses and totals
+- **Results**: `results/<physics_type>_metrics.jsonl` – One JSON object per epoch containing scalar metrics and total losses
 - **Figures**: `Figures/*.png` – Latent trajectory plots, error heatmaps
 - **Animations**: `Figures/*.mp4` – Solution animations (if generated)
 
@@ -954,11 +953,11 @@ Training produces several outputs:
 
 To prevent exploding gradients during training, Trainer subclasses apply global gradient-norm clipping via `torch.nn.utils.clip_grad_norm_`. The threshold is typically configured under `trainer.<TrainerType>.gradient_clip` (default varies by trainer; see the corresponding trainer subclass). When clipping activates, a warning is logged.
 
-### Per-parameter loss logging (`*_loss_by_param.jsonl`)
+### Scalar metric logging (`*_metrics.jsonl`)
 
 During training, the trainer appends one JSON object per epoch to a JSON Lines file (see `src/HLaSDI/Trainer/Trainer.py`):
 
-- Path: `results/<physics_type>_loss_by_param.jsonl` (where `<physics_type>` is `config['physics']['type']`)
+- Path: `results/<physics_type>_metrics.jsonl` (where `<physics_type>` is `config['physics']['type']`)
 - Type: UTF-8 JSON Lines (`.jsonl`), one row per epoch
 
 Each row has the structure:
@@ -966,20 +965,21 @@ Each row has the structure:
 ```json
 {
   "epoch": 1,
-  "losses": [
-    {"loss_name": "recon", "param": null, "value": 0.123},
-    {"loss_name": "recon", "param": [0.1, 0.2], "value": 0.045}
+  "metrics": [
+    {"loss/recon/total": 0.123},
+    {"loss/recon/[0.1 0.2]": 0.045},
+    {"grad_norm/raw": 1.5}
   ]
 }
 ```
 
-- `param: null` denotes the total loss for that `loss_name`.
-- `param: [...]` denotes a per-training-parameter loss, with values in the same order as the parameter space.
-- `value` is a Python float produced from a detached scalar tensor.
+- Each metric record contains one metric-name / Python-float pair.
+- Total losses conventionally use keys like `loss/<name>/total`.
+- Parameter-specific diagnostics conventionally include the parameter value in the key.
 
-Common `loss_name` keys include:
-- `recon`, latent-dynamics keys such as `LD`, `coef`, `stab`/`diversity`/`tail`, `rollout_ROM`, `rollout_FOM`, `IC_rollout_ROM`, `IC_rollout_FOM`, and `total`
-- For paired autoencoders, additional keys such as `recon_D`, `recon_V`, `consistency_Z`, `consistency_U`, `chain_rule_U`, `chain_rule_Z`, `rollout_*_D/V`, and `IC_rollout_*` are also logged.
+Common metric keys include `loss/recon/total`, latent-dynamics totals such as `loss/LD/total`,
+`loss/coef/total`, `loss/stab/total` or `loss/diversity/total`, rollout/IC-rollout totals, and
+gradient norms.
 
 Reading the file:
 
@@ -987,27 +987,18 @@ Reading the file:
 import json
 
 rows = []
-with open("results/Burgers_loss_by_param.jsonl", "r", encoding="utf-8") as f:
+with open("results/Burgers_metrics.jsonl", "r", encoding="utf-8") as f:
     for line in f:
         rows.append(json.loads(line))
 
 # Total reconstruction loss curve.
 epochs = []
-losses = []
+metrics = []
 for row in rows:
-    for record in row["losses"]:
-        if record["loss_name"] == "recon" and record["param"] is None:
+    for record in row["metrics"]:
+        if "loss/recon/total" in record:
             epochs.append(row["epoch"])
-            losses.append(record["value"])
-
-# Per-parameter reconstruction curve (example parameter list).
-target_param = [0.1, 0.2]
-param_losses = [
-    (row["epoch"], record["value"])
-    for row in rows
-    for record in row["losses"]
-    if record["loss_name"] == "recon" and record["param"] == target_param
-]
+            metrics.append(record["loss/recon/total"])
 ```
 
 #### TensorBoard visualization
@@ -1019,7 +1010,7 @@ JSONL metrics during the run, and TensorBoard event files can be generated after
 uv sync --extra viz
 
 uv run python scripts/jsonl_to_tensorboard.py \
-    results/Thermal_loss_by_param.jsonl \
+    results/Thermal_metrics.jsonl \
     --logdir tb_runs/Thermal
 
 uv run tensorboard --logdir tb_runs --host 0.0.0.0 --port 6006
@@ -1037,21 +1028,10 @@ uv sync --extra viz
 uv pip install 'setuptools>=70,<81'
 ```
 
-The converter writes:
-- `loss/<loss_name>/total` for records with `param: null`
-- `loss/<loss_name>/by_param/...` for per-parameter records
+The converter writes each serialized metric key directly as a TensorBoard scalar tag.
 
 For large parameter spaces, per-parameter curves can be numerous. To visualize only aggregate
-losses, pass `--totals-only`.
-
-Optional parameter names make per-parameter tags easier to read:
-
-```bash
-uv run python scripts/jsonl_to_tensorboard.py \
-    results/Thermal_loss_by_param.jsonl \
-    --logdir tb_runs/Thermal \
-    --param-names laser_power,scan_speed,initial_temp
-```
+metrics, pass `--totals-only`, which keeps keys ending in `/total`.
 
 ### Logging
 - Real-time logging to console and `output.txt`

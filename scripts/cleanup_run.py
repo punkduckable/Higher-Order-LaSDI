@@ -7,8 +7,8 @@ The script creates a dated run directory under ``Figures`` named like
 * moves requested stdout/stderr/log files into that directory if they exist,
 * copies the example YAML config into that directory,
 * copies the requested result save, or the most recent result save from
-  ``results`` that is not a ``*_loss_by_param.jsonl`` file,
-* copies the matching ``*_loss_by_param.jsonl`` file from ``results``, and
+  ``results`` that is not a ``*_metrics.jsonl`` file,
+* copies the matching ``*_metrics.jsonl`` file from ``results``, and
 * moves top-level files in ``Figures`` whose modification time is later than
   the archived result save, or later than ``--min-figure-mtime`` when supplied.
   Coefficient mean/std heatmap files are moved into a
@@ -35,7 +35,7 @@ DEFAULT_LOG_FILES = (
     "ho_lasdi_stderr.txt",
 )
 
-LOSS_BY_PARAM_SUFFIX = "_loss_by_param.jsonl"
+METRICS_SUFFIX = "_metrics.jsonl"
 
 
 def parse_args() -> argparse.Namespace:
@@ -301,67 +301,67 @@ def top_level_figures_after(figures_dir: Path, timestamp: float) -> list[Path]:
     return sorted(figure_files, key=lambda path: path.stat().st_mtime)
 
 
-def is_loss_by_param_file(path: Path) -> bool:
-    """Return True for per-parameter loss JSONL files."""
+def is_metrics_file(path: Path) -> bool:
+    """Return True for metric JSONL files."""
 
-    return path.name.endswith(LOSS_BY_PARAM_SUFFIX)
-
-
-def loss_by_param_prefix(path: Path) -> str:
-    """Return the physics/result prefix for a per-parameter loss file."""
-
-    return path.name[: -len(LOSS_BY_PARAM_SUFFIX)]
+    return path.name.endswith(METRICS_SUFFIX)
 
 
-def loss_by_param_matches_save(loss_file: Path, result_save: Path) -> bool:
-    """Return True when ``loss_file`` appears to belong to ``result_save``.
+def metrics_prefix(path: Path) -> str:
+    """Return the physics/result prefix for a metric file."""
+
+    return path.name[: -len(METRICS_SUFFIX)]
+
+
+def metrics_matches_save(metrics_file: Path, result_save: Path) -> bool:
+    """Return True when ``metrics_file`` appears to belong to ``result_save``.
 
     Result saves include a timestamp (for example ``Thermal_07_30_2026_19_18.npy``),
-    while loss files are overwritten under the physics-type prefix (for example
-    ``Thermal_loss_by_param.jsonl``). Match by that prefix instead of modification
-    time only, because restart/resume workflows can leave the loss JSONL file older
+    while metrics files are overwritten under the physics-type prefix (for example
+    ``Thermal_metrics.jsonl``). Match by that prefix instead of modification
+    time only, because restart/resume workflows can leave the metrics JSONL file older
     than ``--min-result-mtime`` even though it is the companion diagnostics file.
     """
 
-    if not is_loss_by_param_file(loss_file):
+    if not is_metrics_file(metrics_file):
         return False
 
-    loss_prefix = loss_by_param_prefix(loss_file)
+    metrics_file_prefix = metrics_prefix(metrics_file)
     save_stem = result_save.stem
-    return save_stem == loss_prefix or save_stem.startswith(f"{loss_prefix}_")
+    return save_stem == metrics_file_prefix or save_stem.startswith(f"{metrics_file_prefix}_")
 
 
-def select_loss_by_param_file(
+def select_metrics_file(
     all_result_files: list[Path],
     filtered_result_files: list[Path],
     latest_save: Path | None,
 ) -> Path | None:
-    """Select the best per-parameter loss file to archive."""
+    """Select the best metric file to archive."""
 
     if latest_save is None:
         return latest_file(
-            [path for path in filtered_result_files if is_loss_by_param_file(path)]
+            [path for path in filtered_result_files if is_metrics_file(path)]
         )
 
-    matching_loss_files = [
+    matching_metrics_files = [
         path
         for path in all_result_files
-        if loss_by_param_matches_save(path, latest_save)
+        if metrics_matches_save(path, latest_save)
     ]
-    if matching_loss_files:
+    if matching_metrics_files:
         longest_prefix_length = max(
-            len(loss_by_param_prefix(path)) for path in matching_loss_files
+            len(metrics_prefix(path)) for path in matching_metrics_files
         )
         return latest_file(
             [
                 path
-                for path in matching_loss_files
-                if len(loss_by_param_prefix(path)) == longest_prefix_length
+                for path in matching_metrics_files
+                if len(metrics_prefix(path)) == longest_prefix_length
             ]
         )
 
     return latest_file(
-        [path for path in filtered_result_files if is_loss_by_param_file(path)]
+        [path for path in filtered_result_files if is_metrics_file(path)]
     )
 
 
@@ -440,16 +440,16 @@ def main() -> int:
             if path.stat().st_mtime >= args.min_result_mtime
         ]
 
-    # Fetch the save/loss_by_param files. Prefer an explicit serialized artifact when supplied;
-    # otherwise keep the legacy behavior of selecting the most recent non-loss result file.
+    # Fetch the save/metrics files. Prefer an explicit serialized artifact when supplied;
+    # otherwise keep the legacy behavior of selecting the most recent non-metrics result file.
     if args.result_save is None:
         latest_save = latest_file(
-            [path for path in result_files if not is_loss_by_param_file(path)]
+            [path for path in result_files if not is_metrics_file(path)]
         )
     else:
         latest_save = explicit_result_save
 
-    latest_loss_by_param = select_loss_by_param_file(
+    latest_metrics = select_metrics_file(
         all_result_files,
         result_files,
         latest_save,
@@ -457,24 +457,24 @@ def main() -> int:
 
     # Copy the save
     if latest_save is None:
-        print("WARNING: no non-loss result save found in results; skipping figure move.")
+        print("WARNING: no non-metrics result save found in results; skipping figure move.")
     else:
         copy_file(latest_save, run_dir, args.dry_run)
 
-    # Copy loss_by_param
-    if latest_loss_by_param is None:
-        print("WARNING: no *_loss_by_param.jsonl file found in results.")
+    # Copy metrics
+    if latest_metrics is None:
+        print("WARNING: no *_metrics.jsonl file found in results.")
     else:
         if (
             args.min_result_mtime is not None
-            and latest_loss_by_param.stat().st_mtime < args.min_result_mtime
+            and latest_metrics.stat().st_mtime < args.min_result_mtime
         ):
             print(
-                "WARNING: copying matching loss_by_param file older than "
+                "WARNING: copying matching metrics file older than "
                 "--min-result-mtime: "
-                f"{latest_loss_by_param}"
+                f"{latest_metrics}"
             )
-        copy_file(latest_loss_by_param, run_dir, args.dry_run)
+        copy_file(latest_metrics, run_dir, args.dry_run)
 
     # Now move the figures created after the save, or after the explicit figure timestamp if one
     # was provided. This supports the split train/analyze workflow, where analysis may be run as a

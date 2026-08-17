@@ -235,22 +235,10 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
         -------------------------------------------------------------------------------------------
 
         losses : LD_Loss_Container
-            Container housing the loss values, matching loss weights, and parameter rows used to
-            compute the losses. Its `losses` dictionary has three keys: LD, coef, and stab.
-
-            losses.losses['LD'] : list[torch.Tensor], len = n_param
-                The i'th element of this list is a 0-dimensional tensor whose lone element holds the
-                weak-form latent-dynamics loss from the i'th combination of parameter values.
-
-            losses.losses['coef'] : list[torch.Tensor], len = n_param
-                The i'th element of this list is a 0-dimensional tensor whose lone element holds the
-                coefficient loss (Frobenius norm) of the coefficients for the i'th combination
-                of parameter values.
-
-            losses.losses['stab'] : list[torch.Tensor], len = n_param
-                The i'th element of this list is a 0-dimensional tensor whose lone element holds the
-                stability penalty for the i'th combination of parameter values (see
-                LatentDynamics.stability_penalty).
+            Container housing scalar total losses, matching loss weights, parameter rows, and
+            scalar diagnostic metrics. Its `losses` dictionary has keys `LD`, `coef`, and `stab`;
+            each value is a scalar tensor summed over parameter rows. Per-parameter diagnostics are
+            available in `losses.metrics` under metric keys such as `loss/LD/<param>`.
         """
 
         # Run checks.
@@ -260,9 +248,10 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
         assert len(Latent_States) == len(t_Grid) == params.shape[0];
 
         # Setup
-        loss_LD_list   : list[torch.Tensor] = [];
-        loss_coef_list : list[torch.Tensor] = [];
-        loss_stab_list : list[torch.Tensor] = [];
+        loss_LD_list   : list[torch.Tensor]         = [];
+        loss_coef_list : list[torch.Tensor]         = [];
+        loss_stab_list : list[torch.Tensor]         = [];
+        metrics        : dict[str, torch.Tensor]    = {};
 
         # -----------------------------------------------------------------------------------------
         # Loop over parameter combinations.
@@ -340,7 +329,17 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
             loss_LD_list.append(Loss_LD_i);
             loss_stab_list.append(Loss_Stab_i);
             loss_coef_list.append(Loss_coef_i);
+            metrics[f"loss/LD/{str(params[i, :])}"]     = Loss_LD_i.detach();
+            metrics[f"loss/coef/{str(params[i, :])}"]   = Loss_coef_i.detach();
+            metrics[f"loss/stab/{str(params[i, :])}"]   = Loss_Stab_i.detach();
 
-        losses_dict = {'LD' : loss_LD_list, 'coef' : loss_coef_list, 'stab' : loss_stab_list};
+        loss_LD   : torch.Tensor    = torch.sum(torch.stack(loss_LD_list));
+        loss_coef : torch.Tensor    = torch.sum(torch.stack(loss_coef_list));
+        loss_stab : torch.Tensor    = torch.sum(torch.stack(loss_stab_list));
+        metrics["loss/LD/total"]    = loss_LD.detach();
+        metrics["loss/coef/total"]  = loss_coef.detach();
+        metrics["loss/stab/total"]  = loss_stab.detach();
 
-        return LD_Loss_Container(losses = losses_dict, weights = self.loss_weights, params = params);
+        losses_dict = {'LD' : loss_LD, 'coef' : loss_coef, 'stab' : loss_stab};
+
+        return LD_Loss_Container(losses = losses_dict, weights = self.loss_weights, params = params, metrics = metrics);

@@ -398,7 +398,7 @@ class LatentDynamicsBaseConfig(ConfigBase):
     trainable: bool
 
     # Which losses are computed by the latent dynamics and what are their weights? Note that
-    # compute_losses MUST return a dictionary whose keys match the losses you list here.
+    # compute_losses MUST return scalar losses whose keys match the losses you list here.
     loss_weights: dict[str, NonNegativeFloat]
 
     @model_validator(mode = "after")
@@ -430,7 +430,7 @@ class InterpolatableLatentDynamicsSettings(ConfigBase):
     lstsq_reg: NonNegativeFloat
 
 
-class WeakInterpolatableLatentDynamicsSettings(ConfigBase):
+class WeakLatentDynamicsSettings(ConfigBase):
     """Weak-form latent dynamics test-function settings."""
 
     # Should the test functions be polynomials or bumps? If polynomial, the polynomial order 
@@ -509,7 +509,6 @@ class CABLELatentDynamicsSettings(ConfigBase):
         # All done :) 
         return self;
 
-
 class SINDyLatentDynamicsConfig(LatentDynamicsBaseConfig):
     type        : Literal["sindy"]
     sindy       : InterpolatableLatentDynamicsSettings
@@ -517,7 +516,7 @@ class SINDyLatentDynamicsConfig(LatentDynamicsBaseConfig):
 
 class SINDyWeakLatentDynamicsConfig(LatentDynamicsBaseConfig):
     type        : Literal["sindy_w"]
-    sindy_w     : WeakInterpolatableLatentDynamicsSettings
+    sindy_w     : WeakLatentDynamicsSettings
 
 
 class DampedSpringLatentDynamicsConfig(LatentDynamicsBaseConfig):
@@ -527,7 +526,7 @@ class DampedSpringLatentDynamicsConfig(LatentDynamicsBaseConfig):
 
 class DampedSpringWeakLatentDynamicsConfig(LatentDynamicsBaseConfig):
     type        : Literal["spring_w"]
-    spring_w    : WeakInterpolatableLatentDynamicsSettings
+    spring_w    : WeakLatentDynamicsSettings
 
 
 class SwitchSINDyLatentDynamicsConfig(LatentDynamicsBaseConfig):
@@ -537,11 +536,19 @@ class SwitchSINDyLatentDynamicsConfig(LatentDynamicsBaseConfig):
 
 class SwitchSINDyWeakLatentDynamicsConfig(LatentDynamicsBaseConfig):
     type        : Literal["switch_w"]
-    switch_w    : WeakInterpolatableLatentDynamicsSettings
+    switch_w    : WeakLatentDynamicsSettings
+
 
 class CABLELatentDynamicsConfig(LatentDynamicsBaseConfig):
     type        : Literal["cable"]
     cable       : CABLELatentDynamicsSettings
+
+
+class WeakCABLELatentDynamicsConfig(LatentDynamicsBaseConfig):
+    type        : Literal["cable_w"]
+    cable       : CABLELatentDynamicsSettings
+    weak        : WeakLatentDynamicsSettings
+
 
 LatentDynamicsConfig = Annotated[
     SINDyLatentDynamicsConfig
@@ -550,7 +557,8 @@ LatentDynamicsConfig = Annotated[
     | DampedSpringWeakLatentDynamicsConfig
     | SwitchSINDyLatentDynamicsConfig
     | SwitchSINDyWeakLatentDynamicsConfig
-    | CABLELatentDynamicsConfig,
+    | CABLELatentDynamicsConfig
+    | WeakCABLELatentDynamicsConfig,
     Field(discriminator = "type"),
 ]
 

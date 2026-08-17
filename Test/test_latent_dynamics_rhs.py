@@ -7,7 +7,7 @@ import torch
 SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.append(SRC)
 
-from HLaSDI.LatentDynamics import CABLE, DampedSpring, DampedSpring_weak, SINDy, SINDy_weak, SwitchSINDy, SwitchSINDy_weak
+from HLaSDI.LatentDynamics import CABLE, CABLE_weak, DampedSpring, DampedSpring_weak, SINDy, SINDy_weak, SwitchSINDy, SwitchSINDy_weak
 from HLaSDI.Schemas import (
     CABLELatentDynamicsConfig,
     DampedSpringLatentDynamicsConfig,
@@ -16,6 +16,7 @@ from HLaSDI.Schemas import (
     SINDyWeakLatentDynamicsConfig,
     SwitchSINDyLatentDynamicsConfig,
     SwitchSINDyWeakLatentDynamicsConfig,
+    WeakCABLELatentDynamicsConfig,
 )
 
 
@@ -114,6 +115,25 @@ def _cable_config_with_settings(trainable=True, n_active=2, **settings):
         "trainable": trainable,
         "loss_weights": {"LD": 1.0, "coef": 1.0, "diversity": 1.0, "tail": 1.0},
         "cable": cable_settings,
+    })
+
+
+def _cable_w_config(trainable=True, n_active=2):
+    return WeakCABLELatentDynamicsConfig.model_validate({
+        "type": "cable_w",
+        "interpolator_type": "GP",
+        "trainable": trainable,
+        "loss_weights": {"LD": 1.0, "coef": 1.0, "diversity": 1.0, "tail": 1.0},
+        "cable": {
+            "n_experts": 2,
+            "n_active": n_active,
+            "hidden_widths": [2],
+            "activations": ["tanh"],
+            "use_biases": True,
+            "coef_norm": "l2",
+            "use_mask": False,
+        },
+        "weak": {"test_func_type": "PC-poly", "test_func_width": 0.5, "overlap": 0.5},
     })
 
 
@@ -342,22 +362,24 @@ def test_cable_compute_losses_uses_dense_pre_topk_weights_for_diversity_and_tail
     ld.unmasked_A = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
     ld.unmasked_b = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
 
-    losses = ld.compute_losses(
+    result = ld.compute_losses(
         Latent_States=[[z]],
         t_Grid=[t],
         step=0,
         params=params,
-    ).losses
+    )
+    losses = result.losses
 
     assert set(losses.keys()) == {"LD", "coef", "diversity", "tail"}
-    assert torch.allclose(losses["LD"][0], torch.tensor(0.0))
+    assert torch.allclose(losses["LD"], torch.tensor(0.0))
     assert torch.allclose(losses["coef"], torch.tensor(0.0))
     # The dense weights are [0.5, 0.5] at every time, so the global CV diversity loss is zero.
     assert torch.allclose(losses["diversity"], torch.tensor(0.0))
     # With two uniform dense weights and n_active = 1, the mass outside the largest active-weight
     # set is 0.5 at every sample.
     # The tail-mass penalty is therefore mean(0.5**2) = 0.25.
-    assert torch.allclose(losses["tail"][0], torch.tensor(0.25))
+    assert torch.allclose(losses["tail"], torch.tensor(0.25))
+    assert torch.allclose(result.metrics["loss/tail/total"], torch.tensor(0.25))
     assert torch.allclose(ld.last_tail_mass_loss, torch.tensor(0.25))
     assert len(ld.last_tail_mass_loss_list) == 1
     assert torch.allclose(ld.last_tail_mass_loss_list[0], torch.tensor(0.25))
@@ -382,3 +404,27 @@ def test_cable_global_losses_are_not_divided_by_number_of_parameters():
 
     assert torch.allclose(losses["coef"], torch.tensor(4.0))
     assert torch.allclose(losses["diversity"], torch.tensor(0.0))
+
+
+def test_cable_weak_compute_losses_returns_scalar_totals_and_metrics():
+    params = numpy.array([[0.25]])
+    t = torch.linspace(0.0, 1.0, 9)
+    z = torch.zeros((9, 1))
+
+    ld = CABLE_weak(n_z=1, Uniform_t_Grid=True, n_p=1, config=_cable_w_config(n_active=1))
+    _zero_cable_gate(ld)
+    ld.unmasked_A = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.add_weight_functions(params[0], t)
+
+    result = ld.compute_losses(
+        Latent_States=[[z]],
+        t_Grid=[t],
+        step=0,
+        params=params,
+    )
+
+    assert set(result.losses.keys()) == {"LD", "coef", "diversity", "tail"}
+    assert all(loss.ndim == 0 for loss in result.losses.values())
+    assert torch.allclose(result.losses["LD"], torch.tensor(0.0))
+    assert torch.allclose(result.metrics["loss/LD/total"], torch.tensor(0.0))

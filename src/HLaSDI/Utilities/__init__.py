@@ -12,6 +12,7 @@ from    .FiniteDifference       import  Derivative2_Order2, Derivative2_Order4;
 from    .Optimizer              import  Move_Optimizer_To_Device, Reset_Optimizer;
 from    .Timing                 import  Timer;
 from    .Logging                import  Initialize_Logger, Log_Dictionary, Print_Dictionary;
+from    .Statistics             import  tensor_statistics;
 
 __all__ = [    "Derivative1_Order2_NonUniform",
                "Derivative1_Order2",
@@ -24,4 +25,5 @@ __all__ = [    "Derivative1_Order2_NonUniform",
                "Timer",
                "Initialize_Logger",
                "Log_Dictionary",
-               "Print_Dictionary"];
+               "Print_Dictionary",
+               "tensor_statistics"];

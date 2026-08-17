@@ -7,11 +7,12 @@ import  logging;
 import  numpy;
 import  torch;
 
-from    HLaSDI.LatentDynamics.LatentDynamics   import  LatentDynamics, LD_Loss_Container;
-from    HLaSDI.Schemas                         import  CABLELatentDynamicsConfig, CABLELatentDynamicsSettings;
-from    HLaSDI.EncoderDecoder                  import  MultiLayerPerceptron;
-from    HLaSDI.Utilities.FiniteDifference      import  Derivative1_Order4, Derivative1_Order2_NonUniform;
-from    HLaSDI.Utilities.FirstOrderSolvers     import  RK4;
+from    HLaSDI.LatentDynamics.LatentDynamics    import  LatentDynamics, LD_Loss_Container;
+from    HLaSDI.Schemas                          import  CABLELatentDynamicsConfig, CABLELatentDynamicsSettings, WeakCABLELatentDynamicsConfig;
+from    HLaSDI.EncoderDecoder                   import  MultiLayerPerceptron;
+from    HLaSDI.Utilities.FiniteDifference       import  Derivative1_Order4, Derivative1_Order2_NonUniform;
+from    HLaSDI.Utilities.FirstOrderSolvers      import  RK4;
+from    HLaSDI.Utilities.Statistics             import  tensor_statistics;
 
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
@@ -83,7 +84,7 @@ class CABLE(LatentDynamics):
         Nothing!
         """
 
-        assert isinstance(config, CABLELatentDynamicsConfig), "config must be a CABLELatentDynamicsConfig, got %s" % str(type(config));
+        assert isinstance(config, (CABLELatentDynamicsConfig, WeakCABLELatentDynamicsConfig)), "config must be a CABLELatentDynamicsConfig, got %s" % str(type(config));
 
         # Run the base class initializer. 
         LatentDynamics.__init__(
@@ -322,10 +323,10 @@ class CABLE(LatentDynamics):
             A LD_Loss_Container object housing the losses and their weights. It houses the 
             following losses:
 
-            - `LD`: length-`n_param` list of finite-difference residual losses.
+            - `LD`: finite-difference residual losses.
             - `coef`: scalar global expert-size penalty.
             - `diversity`: scalar global squared-CV expert-load penalty.
-            - `tail`: length-`n_param` list of soft top-`n_active` tail-mass penalties.
+            - `tail`: soft top-`n_active` tail-mass penalties.
         """
 
         # Checks.
@@ -337,6 +338,14 @@ class CABLE(LatentDynamics):
         assert len(Latent_States) == len(t_Grid) == params.shape[0];
         assert len(t_Grid) > 0;
 
+        # Setup
+        loss_LD_list        : list[torch.Tensor]        = [];
+        summed_weights      : torch.Tensor              = torch.zeros((self.n_experts), dtype = self.unmasked_A.dtype, device = self.unmasked_A.device);
+        loss_tail_list      : list[torch.Tensor]        = [];
+        weights_list        : list[torch.Tensor]        = [];
+        tail_mass_list      : list[torch.Tensor]        = [];
+        metrics             : dict[str, torch.Tensor]   = {};
+
         # Periodically update the hard coefficient masks. Masked entries are multiplied out in all
         # RHS, simulation, and coefficient-loss evaluations.
         if self.use_mask:
@@ -345,15 +354,15 @@ class CABLE(LatentDynamics):
             if step >= self.first_mask_step and (step - self.first_mask_step) % self.mask_update_freq == 0:
                 self._update_mask();
 
-        # Prepare lists for per-parameter losses. The Trainer is responsible for applying weights
-        # and summing these scalar losses into the total objective.
-        loss_LD_list          : list[torch.Tensor] = [];
-        summed_weights        : torch.Tensor       = torch.zeros((self.n_experts), dtype = self.unmasked_A.dtype, device = self.unmasked_A.device);
-        tail_mass_loss_list   : list[torch.Tensor] = [];
+            # Record metrics
+            metrics["n_active/A"] = self.A_mask.sum().to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype).detach();
+            if self.use_biases:
+                metrics["n_active/b"] = self.b_mask.sum().to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype).detach();
 
-        n_param : int = len(t_Grid);
+        n_param     : int           = len(t_Grid);
         for i in range(n_param):
             # Fetch this parameter's latent trajectory and time grid.
+            ith_params  : numpy.ndarray = params[i, :]
             ith_t_Grid  : torch.Tensor  = t_Grid[i];
             ith_Z       : torch.Tensor  = Latent_States[i][0]; # [n_t_i, n_z]
             n_t_i       : int           = len(ith_t_Grid);
@@ -371,12 +380,14 @@ class CABLE(LatentDynamics):
                 dZdt                    = Derivative1_Order2_NonUniform(ith_Z, t_Grid = ith_t_Grid);
 
             # Evaluate expert weights.
-            ith_weights       : torch.Tensor = self._weights_for_t_grid(ith_t_Grid, params[i, :], t0 = ith_t_Grid[0], t_span = ith_t_Grid[-1] - ith_t_Grid[0]);
+            ith_weights       : torch.Tensor = self._weights_for_t_grid(ith_t_Grid, ith_params, t0 = ith_t_Grid[0], t_span = ith_t_Grid[-1] - ith_t_Grid[0]);
+            weights_list.append(ith_weights.to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype));
             ith_RHS           : torch.Tensor = self._evaluate_torch_rhs_from_weights(ith_Z, ith_weights);
 
-            # Compute the LD loss.
-            loss_LD = self.MSE(dZdt, ith_RHS);
-            loss_LD_list.append(loss_LD);
+            # Compute the LD loss for the i'th combination of parameters.
+            ith_loss_LD = self.MSE(dZdt, ith_RHS);
+            loss_LD_list.append(ith_loss_LD);
+            metrics[f"loss/LD/{str(ith_params)}"] = ith_loss_LD.detach();
 
             # Accumulate expert loads across all parameter values and times. This is a 
             # deterministic analogue of MoE importance/load diversity: it encourages all
@@ -393,14 +404,23 @@ class CABLE(LatentDynamics):
                 ith_topk_idx             : torch.Tensor = torch.topk(ith_weights, self.n_active, dim = 1, sorted = False).indices;
                 ith_topk_dense_mass      : torch.Tensor = torch.sum(ith_weights.gather(1, ith_topk_idx), dim = 1);
                 ith_tail_mass            : torch.Tensor = 1.0 - ith_topk_dense_mass;
-            tail_mass_loss_list.append(torch.mean(torch.pow(ith_tail_mass.to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype), 2)));
+            tail_mass_list.append(ith_tail_mass.to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype));
+            ith_tail_loss : torch.Tensor = torch.mean(torch.pow(ith_tail_mass.to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype), 2))
+            loss_tail_list.append(ith_tail_loss);
+            metrics[f"loss/tail/{str(ith_params)}"] = ith_tail_loss.detach();
+
+        # Evaluate loss statistics (computed across times and parameters).
+        weights     : torch.Tensor = torch.cat(weights_list, dim = 0);
+        tail_masses : torch.Tensor = torch.cat(tail_mass_list, dim = 0);
+        metrics.update(tensor_statistics(prefix = "expert/weights", values = weights));
+        metrics.update(tensor_statistics(prefix = "mass/tail",      values = tail_masses));
 
         # Coefficient loss is the sum of the selected norms of the matrix portions of each expert,
         # plus the selected norm of each enabled bias. This is a scalar global loss, so the
         # Trainer will not multiply it by n_param.
-        A_coef : torch.Tensor = self.A;
-        b_coef : torch.Tensor | None = self.b;
-        ord : int = 1 if self.coef_norm == 'l1' else 2;
+        A_coef  : torch.Tensor          = self.A;
+        b_coef  : torch.Tensor | None   = self.b;
+        ord     : int                   = 1 if self.coef_norm == 'l1' else 2;
         A_norms         : torch.Tensor          = torch.linalg.vector_norm(A_coef.reshape(self.n_experts, -1), ord = ord, dim = 1).sum();
         if b_coef is None:
             b_norms     : torch.Tensor          = torch.zeros((), dtype = A_coef.dtype, device = A_coef.device);
@@ -415,16 +435,24 @@ class CABLE(LatentDynamics):
         std_load        : torch.Tensor          = torch.std(summed_weights, unbiased = False);
         loss_diversity  : torch.Tensor          = torch.pow(std_load/(mean_load + eps), 2);
 
-        # Store the aggregate tail-mass loss for diagnostics/plotting; the per-parameter tail
-        # losses are returned under the `tail` key and can be weighted by self.loss_weights.
-        loss_tail : torch.Tensor = torch.mean(torch.stack(tail_mass_loss_list));
+        # Store the average tail-mass loss for diagnostics/plotting; the weighted objective uses
+        # the summed scalar returned under the `tail` key, while per-parameter values live in
+        # metrics.
+        loss_tail : torch.Tensor = torch.mean(torch.stack(loss_tail_list));
         self.last_tail_mass_loss = loss_tail.detach();
-        self.last_tail_mass_loss_list = [loss.detach() for loss in tail_mass_loss_list];
+        self.last_tail_mass_loss_list = [loss.detach() for loss in loss_tail_list];
 
-        # All done :) l
-        losses_dict = {'LD' : loss_LD_list, 'coef' : loss_coef, 'diversity' : loss_diversity, 'tail' : tail_mass_loss_list};
+        # All done :)
+        metrics["loss/diversity/total"]   = loss_diversity.detach();
+        metrics["loss/coef/total"]        = loss_coef.detach();
+        loss_LD     : torch.Tensor  = torch.sum(torch.stack(loss_LD_list));
+        loss_tail   : torch.Tensor  = torch.sum(torch.stack(loss_tail_list));
+        metrics["loss/LD/total"]    = loss_LD.detach();
+        metrics["loss/tail/total"]  = loss_tail.detach();
 
-        return LD_Loss_Container(losses = losses_dict, weights = self.loss_weights, params = params);
+        losses_dict = {'LD' : loss_LD, 'coef' : loss_coef, 'diversity' : loss_diversity, 'tail' : loss_tail};
+
+        return LD_Loss_Container(losses = losses_dict, weights = self.loss_weights, params = params, metrics = metrics);
 
 
     def RHS(    self,
@@ -853,7 +881,7 @@ class CABLE(LatentDynamics):
 
 
     @torch.no_grad()
-    def _update_mask(self) -> tuple[int, int]:
+    def _update_mask(self) -> None:
         r"""
         Permanently mask small expert coefficients.
 
@@ -866,11 +894,7 @@ class CABLE(LatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------
 
-        n_active : int
-            Number of active matrix/bias coefficients after the update.
-
-        n_total : int
-            Total number of maskable matrix/bias coefficients.
+        Nothing!
         """
 
         assert self.mask_threshold is not None;

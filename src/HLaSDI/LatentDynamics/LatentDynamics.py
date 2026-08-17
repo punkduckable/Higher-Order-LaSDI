@@ -6,7 +6,7 @@ import  logging;
 
 import  numpy;
 import  torch;
-from    pydantic            import  BaseModel, ConfigDict, model_validator;
+from    pydantic            import  BaseModel, ConfigDict, Field, model_validator;
 
 from    HLaSDI.Schemas     import   LatentDynamicsBaseConfig
 
@@ -23,16 +23,18 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 class LD_Loss_Container(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed = True);
 
-    # A dictionary (with the same keys as weights) housing the losses. Each value is either a 
-    # list (of length n_param, this is used for parameter-dependant losses) of single element 
-    # tensors or a single element tensor holding the losses.
-    losses: dict[str, torch.Tensor | list[torch.Tensor]];
+    # A dictionary (with the same keys as weights) housing the losses. Each value is a scalar
+    # tensor.
+    losses: dict[str, torch.Tensor];
 
     # A dictionary (same keys as losses) holding the loss weights
     weights: dict[str, float];
 
     # The parameters used to compute the losses stored in this object. [n_param, n_p]
-    params : numpy.ndarray;      
+    params : numpy.ndarray;    
+
+    # Scalar metrics collected while evaluating losses. Values are single element tensors.
+    metrics : dict[str, torch.Tensor] = Field(default_factory = dict);
 
     @model_validator(mode = "after")
     def validate_activations_and_active_count(self) -> "LD_Loss_Container":
@@ -47,14 +49,15 @@ class LD_Loss_Container(BaseModel):
         # Make sure each loss is a tensor or n_param list of tensors.
         for key, value in self.losses.items():
             assert isinstance(key, str), "all losses keys must be strings, but one key (%s) has type %s!" % (str(key), str(type(key)));
-            assert isinstance(value, torch.Tensor) or isinstance(value, list), "each loss must be a tensor or list of tensors, losses[%s] has type %s" % (key, str(type(value)));
-            if isinstance(value, torch.Tensor):
-                assert value.numel() == 1, "each loss must have a single element, losses[%s] has shape %s" % (key, str(value.shape));
-            else: 
-                assert len(value) == n_param, "Each list item of a LD_Loss_Container object must have length %d, but losses[%s] has length %d" % (n_param, key, len(value));
-                for idx, item in enumerate(value):
-                    assert isinstance(item, torch.Tensor), "Each loss must be a tensor, but losses[%s][%d] has type %s" % (key, idx, type(item));
-                    assert item.numel() == 1, "each loss must have a single element, losses[%s][%d] has shape %s" % (key, idx, str(item.shape));
+            assert isinstance(value, torch.Tensor), "each loss must be a single element tensor; losses[%s] has type %s" % (key, str(type(value)));
+            assert value.numel() == 1, "each loss must have a single element, losses[%s] has shape %s" % (key, str(value.shape));
+
+        # Make sure each metric is a detached scalar tensor.
+        for key, value in self.metrics.items():
+            assert isinstance(key, str), "all metric keys must be strings, but one key (%s) has type %s!" % (str(key), str(type(key)));
+            assert isinstance(value, torch.Tensor), "each metric must be a single element tensor; metrics[%s] has type %s" % (key, str(type(value)));
+            assert value.numel() == 1, "each metric must have a single element, metrics[%s] has shape %s" % (key, str(value.shape));
+            assert value.requires_grad == False, "metrics[%s] must be detached before constructing LD_Loss_Container" % key;
 
         # Make sure all loss weights are floats
         for key, value in self.weights.items():
@@ -63,6 +66,7 @@ class LD_Loss_Container(BaseModel):
 
         # All done :) 
         return self;
+
 
 # -------------------------------------------------------------------------------------------------
 # LatentDynamics base class
@@ -151,9 +155,7 @@ class LatentDynamics:
     
     - `compute_losses(Latent_States, t_Grid, step, params=None)`: compute latent-dynamics losses for
       the current coefficients and return an `LD_Loss_Container` whose loss keys match
-      `self.loss_weights`. Values may be scalar tensors for global losses or length-`n_param` lists
-      of scalar tensors for per-parameter losses. The loss metric (e.g., MSE vs MAE) is a subclass
-      implementation detail; there is no trainer-level `loss_type` argument for latent dynamics.
+      `self.loss_weights`. Values must be be scalar tensors for global losses. 
     
     - `simulate(IC, t_Grid, params, sample=False)`: integrate the latent ODE from one latent
       initial condition per parameter value and return latent trajectories in the expected

@@ -263,14 +263,16 @@ def test_damped_spring_compute_losses_uses_native_K_C_b_rhs():
     b = torch.tensor([0.1])
     ld.set_train_coefs(params[0], {"K": K, "C": C, "b": b}, torch.device("cpu"))
 
-    losses = ld.compute_losses([[z, dz]], [t], step=0, params=params).losses
+    result = ld.compute_losses([[z, dz]], [t], step=0, params=params)
+    losses = result.losses
 
     d2z = Derivative1_Order4(dz, float((t[1] - t[0]).item()))
     rhs = z @ K.T + dz @ C.T + b.reshape(1, -1)
     expected_loss = torch.mean((d2z - rhs) ** 2)
-    assert torch.allclose(losses["LD"][0], expected_loss)
-    assert len(losses["coef"]) == 1
-    assert len(losses["stab"]) == 1
+    assert torch.allclose(losses["LD"], expected_loss)
+    assert losses["coef"].ndim == 0
+    assert losses["stab"].ndim == 0
+    assert torch.allclose(result.metrics["loss/LD/total"], expected_loss)
 
 
 def test_damped_spring_weak_simulate_uses_native_K_C_b_names():
@@ -440,10 +442,9 @@ def test_sindy_weak_compute_losses_with_weight_functions_returns_losses():
     ld.initialize_coefficients([[z]], [t], torch.device("cpu"), params)
     losses = ld.compute_losses([[z]], [t], step=0, params=params).losses
 
-    assert len(losses["LD"]) == 1
-    assert len(losses["coef"]) == 1
-    assert len(losses["stab"]) == 1
-    assert all(loss.ndim == 0 for loss in losses["LD"] + losses["coef"] + losses["stab"])
+    assert losses["LD"].ndim == 0
+    assert losses["coef"].ndim == 0
+    assert losses["stab"].ndim == 0
 
 
 def test_switch_sindy_weak_fit_zero_initializes_native_names():

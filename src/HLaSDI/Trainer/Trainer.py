@@ -23,7 +23,7 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 
 # Should we profile a run of Iterate?
 PROFILE_ITERATE : bool  = False
-PROFILE_WAIT    : int   = 10        # Do nothing for this many epochs   
+PROFILE_WAIT    : int   = 10        # Do nothing for this many epochs
 PROFILE_WARMUP  : int   = 1         # Run machinery, but discard results
 PROFILE_ACTIVE  : int   = 10        # Run/log profiler stuff for this many epochs
 PROFILE_REPEAT  : int   = 1         # Repeat this schedule how many times?
@@ -108,8 +108,8 @@ class Trainer:
     iteration bookkeeping.
     """
     # An n_Train element list. The i'th element is is an n_IC element list whose j'th element is a
-    # numpy ndarray of shape (n_t(i), Frame_Shape) holding a sequence of samples of the j'th 
-    # derivative of the FOM solution when we use the i'th combination of training values. 
+    # numpy ndarray of shape (n_t(i), Frame_Shape) holding a sequence of samples of the j'th
+    # derivative of the FOM solution when we use the i'th combination of training values.
     # NOTE: these are initialized as instance variables in __init__ (do not share across instances).
     U_Train : list[list[torch.Tensor]];
 
@@ -121,15 +121,15 @@ class Trainer:
     noise_ratio : float;
 
     # An n_Train element list whose i'th element is a torch.Tensor of shape (n_t(i)) whose j'th
-    # element holds the time value for the j'th frame when we use the i'th combination of training 
+    # element holds the time value for the j'th frame when we use the i'th combination of training
     # parameters.
     t_Train : list[torch.Tensor];
-    
+
     # Same as U_Test, but used for the test set.
     U_Test  : list[list[torch.Tensor]];
 
     # An n_Test element list whose i'th element is a torch.Tensor of shape (n_t(i)) whose j'th
-    # element holds the time value for the j'th frame when we use the i'th combination of testing 
+    # element holds the time value for the j'th frame when we use the i'th combination of testing
     # parameters.
     t_Test  : list[torch.Tensor];
 
@@ -138,13 +138,13 @@ class Trainer:
 
     # Number of iterations per round of training
     n_iter : int;
-    # We stop training if restart_iter goes above this number. 
+    # We stop training if restart_iter goes above this number.
     max_iter : int;
 
     # We stop performing greedy sampling if restart_iter goes above this number.
     max_greedy_iter : int;
-    
-    # If true, the Sampler will normalize the training data before storing it in this 
+
+    # If true, the Sampler will normalize the training data before storing it in this
     # object. See Sampler/Sampler.py for details.
     normalize : bool;
 
@@ -159,52 +159,52 @@ class Trainer:
 
 
 
-    def __init__(   self, 
-                    n_IC               : int, 
-                    physics            : Physics, 
-                    encoder_decoder    : EncoderDecoder, 
-                    latent_dynamics    : LatentDynamics, 
-                    param_space        : ParameterSpace, 
+    def __init__(   self,
+                    n_IC               : int,
+                    physics            : Physics,
+                    encoder_decoder    : EncoderDecoder,
+                    latent_dynamics    : LatentDynamics,
+                    param_space        : ParameterSpace,
                     trainer_config     : BaseTrainerConfig):
         """
-        Abstract base class that defines how each round of training proceeds (the loss functions, 
+        Abstract base class that defines how each round of training proceeds (the loss functions,
         and optimizer).
 
-        In the HLaSDI framework, a ROM consists of an EncoderDecoder model and a LatentDynamics 
-        object (acting as the Encoder/Decoder and Latent Dynamics portions of the ROM, respectively). 
-        These are jointly trained via a Trainer object using data from a Physics object. The 
-        LatentDynamics object holds the learnedLatentDynamics coefficients for the training set. 
-        A Sampler object determines how the model picks which testing example to add to the 
+        In the HLaSDI framework, a ROM consists of an EncoderDecoder model and a LatentDynamics
+        object (acting as the Encoder/Decoder and Latent Dynamics portions of the ROM, respectively).
+        These are jointly trained via a Trainer object using data from a Physics object. The
+        LatentDynamics object holds the learnedLatentDynamics coefficients for the training set.
+        A Sampler object determines how the model picks which testing example to add to the
         training set after each round of training.
 
-        The trainer essentially defines how everything gets trained. It should do this by 
-        initializing an optimizer on the EncoderDecoder parameters and trainable coefficients 
-        in the LatentDynamics object (fetched via LatentDynamics.parameters). It 
-        should train these parameters via a sequence of epochs. During each epoch, the Trainer 
-        should evaluate a number of loss functions, add them together, then back-prop through the 
-        loss to get the derivative of the loss with respect to each EncoderDecoder parameter and 
-        latent dynamics coefficient, then use these derivatives to update the parameters and 
-        coefficients. All of this is implemented in the sub-class defined "Iterate" method (which 
+        The trainer essentially defines how everything gets trained. It should do this by
+        initializing an optimizer on the EncoderDecoder parameters and trainable coefficients
+        in the LatentDynamics object (fetched via LatentDynamics.parameters). It
+        should train these parameters via a sequence of epochs. During each epoch, the Trainer
+        should evaluate a number of loss functions, add them together, then back-prop through the
+        loss to get the derivative of the loss with respect to each EncoderDecoder parameter and
+        latent dynamics coefficient, then use these derivatives to update the parameters and
+        coefficients. All of this is implemented in the sub-class defined "Iterate" method (which
         is driven via the base class' Train method).
 
-        The trainer also defines model checkpointing (via the _Save_Checkpoint method which 
+        The trainer also defines model checkpointing (via the _Save_Checkpoint method which
         Iterate should call each time it finds a new best model).
-        
-        Trainer also control data normalization normalization; the base class defines several 
-        methods for normalizing and de-normalizign data (set_normalization_stats_from_training, 
-        set_normalization_stats_from_test, normalize_tensor, denormalize_tensor, 
-        denormalize_np, denormalize_np, scale_std_np, and normalize_U_inplace); see 
+
+        Trainer also control data normalization normalization; the base class defines several
+        methods for normalizing and de-normalizign data (set_normalization_stats_from_training,
+        set_normalization_stats_from_test, normalize_tensor, denormalize_tensor,
+        denormalize_np, denormalize_np, scale_std_np, and normalize_U_inplace); see
         each one and their doc strings for details). Normalization generally works by re-centering
-        and re-scaling training data before it is fed into the EncoderDecoder; this dramatically 
-        improves EncoderDecoder performance (mostly because ML models tend to work best when their 
-        data has 0 mean and unit variance), but creates extra book-keeping challenges. In 
-        particular, with normalization, EncoderDecoder object natively predict normalized values 
+        and re-scaling training data before it is fed into the EncoderDecoder; this dramatically
+        improves EncoderDecoder performance (mostly because ML models tend to work best when their
+        data has 0 mean and unit variance), but creates extra book-keeping challenges. In
+        particular, with normalization, EncoderDecoder object natively predict normalized values
         which need to be de-normalized before their predictions can be evaluated.
 
         Finally, Trainer objects generally track timing data (time spent computing each loss; this
         is managed by the timer attribute) and track losses (by training parameter!).
 
-        In addition to defining how training works, a `Trainer` instance owns the state of a 
+        In addition to defining how training works, a `Trainer` instance owns the state of a
         Higher-Order-LaSDI run:
 
         - The training and testing datasets (`U_Train`, `t_Train`, `U_Test`, `t_Test`)
@@ -218,19 +218,19 @@ class Trainer:
         -------------------------------------------------------------------------------------------
 
         physics : Physics
-            Encodes the FOM. It allows us to fetch the FOM solution and/or initial conditions 
-            for a particular combination of parameters. We use this object to generate FOM 
+            Encodes the FOM. It allows us to fetch the FOM solution and/or initial conditions
+            for a particular combination of parameters. We use this object to generate FOM
             solutions which we then use to train the encoder_decoder and latent dynamics.
-         
+
         encoder_decoder : EncoderDecoder
             use to compress the FOM state to a reduced, latent state.
 
         latent_dynamics : LatentDynamics
-            A LatentDynamics object which describes how we specify the dynamics in the 
+            A LatentDynamics object which describes how we specify the dynamics in the
             EncoderDecoder's latent space.
 
         param_space: ParameterSpace
-            holds the set of testing and training parameters. 
+            holds the set of testing and training parameters.
 
         trainer_config : dict
             The `trainer` sub-dictionary of the YAML config. The base class expects:
@@ -245,14 +245,14 @@ class Trainer:
                 - device   (defaults to "cpu")
                 - noise_ratio (defaults to 0.0; Gaussian noise std / signal RMS)
 
-        
+
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
 
         Nothing!
         """
-        
+
         # Checks.
         assert isinstance(n_IC, int) and n_IC > 0, "n_IC must be a positive int";
         assert latent_dynamics.n_IC         ==  n_IC, "latent_dynamics.n_IC = %d, n_IC = %d" % (latent_dynamics.n_IC, n_IC);
@@ -260,7 +260,7 @@ class Trainer:
         assert physics.n_IC                 ==  n_IC, "physics.n_IC = %d, n_IC = %d" % (physics.n_IC, n_IC);
         self.n_IC                           =   n_IC;
 
-        # Serialize stuff. 
+        # Serialize stuff.
         self.config                         = trainer_config;
         self.physics                        = physics;
         self.encoder_decoder                = encoder_decoder;
@@ -273,7 +273,7 @@ class Trainer:
         self.t_Train                        = [];
         self.U_Test                         = [];
         self.t_Test                         = [];
-        
+
         # Initialize a timer object. We will use this while training.
         self.timer                          = Timer();
 
@@ -323,16 +323,16 @@ class Trainer:
 
         # Build a loss cache; this will be a list whose entries are tuples of the form:
         #   (loss_name, param_tuple or "total", loss_value)
-        # The _flush_loss_cache method post-processes/serializes the contents of this list.
-        self._loss_cache                    = [];
+        # The _flush_metrics_cache method post-processes/serializes the contents of this list.
+        self._metrics_cache                    = [];
 
         # Figure out where we will save cached losses.
-        base_filename           : str       = self.physics.config.type;
-        self.loss_by_param_path : str       = os.path.join(self.path_results, base_filename + '_loss_by_param.jsonl');
-        
+        base_filename       : str   = self.physics.config.type;
+        self.metrics_path   : str   = os.path.join(self.path_results, base_filename + '_metrics.jsonl');
+
         # Final setup.
-        self.restart_iter       = 0;                # Global iteration index at the start of the next training round
-        self.best_epoch         = None;             # Optional: subclasses may set this when checkpointing
+        self.restart_iter           = 0;                # Global iteration index at the start of the next training round
+        self.best_epoch             = None;             # Optional: subclasses may set this when checkpointing
 
         # All done!
         return;
@@ -373,7 +373,7 @@ class Trainer:
 
         if noise_ratio <= 0.0:
             return x;
-        
+
         signal_power    : float         = float(torch.sqrt(torch.mean(x**2)).item());
         sigma           : float         = noise_ratio * signal_power;
         noise           : torch.Tensor  = torch.normal(mean = 0.0, std = sigma, size = x.shape).to(dtype = x.dtype, device = x.device);
@@ -410,7 +410,7 @@ class Trainer:
                 noisy_data  : torch.Tensor  = self.addNoise(self.U_Train_Clean[i][j].clone(), self.noise_ratio);
                 noisy_data[0:1, ...]        = clean_IC;                                  # restore perfect IC
                 self.U_Train[i][j]          = noisy_data;
-                
+
                 LOGGER.debug("  Trajectory %d, IC %d: signal_rms = %.6e, noise_std = %.6e" % (
                     i, j,
                     float(torch.sqrt(torch.mean(self.U_Train_Clean[i][j]**2)).item()),
@@ -487,8 +487,8 @@ class Trainer:
             LOGGER.info("  IC %d: mean = %.6e, std = %.6e" % (j, means[j], stds[j]));
         LOGGER.warning("Note: Stats computed from %d training points. Consider using test set for better global statistics." % len(self.U_Train));
         return;
-    
-    
+
+
 
     def set_normalization_stats_from_test(self) -> None:
         """
@@ -576,120 +576,40 @@ class Trainer:
     # Loss Tracking Helpers.
     # ---------------------------------------------------------------------------------------------
 
-    def _cache_loss(self, 
-                    loss_name   : str, 
-                    loss_value  : torch.Tensor,
-                    param_tuple : tuple | None = None) -> None:
+    def _cache_metric(  self,
+                        key         : str,
+                        value       : torch.Tensor,) -> None:
         """
-        Cache a loss tensor for deferred scalar logging. 
+        Cache a scalar metric for deferred scalar logging.
 
-        `Iterate(...)` implementations should call this method at the point where a loss component
-        is computed, but they should pass a detached tensor rather than calling `.item()`. At the 
-        end of a step, they should use `_flush_loss_cache(epoch)` to write all losses from that 
-        epoch to file. That method batches the device-to-CPU scalar transfer once per optimization 
+        `Iterate(...)` implementations should call this method at the point where a metric
+        is computed, but they should pass a detached tensor rather than calling `.item()`. At the
+        end of a step, they should use `_flush_metrics_cache(epoch)` to write all metric from that
+        epoch to file. That method batches the device-to-CPU scalar transfer once per optimization
         step instead of synchronizing the GPU repeatedly throughout the forward/loss code.
-
-        This method can be used to cache a loss for a particular parameter, or the total (sum 
-        across parameters). Expected use inside trainers:
-
-            self._cache_loss("LD", loss_LD_i.detach(), param_tuple) # LD loss for a specific parameter
-            self._cache_loss("LD", loss_LD.detach())                # Total LD loss
 
         Do not pass Python floats and do not call `.item()` before caching.  The tensor must contain
         exactly one scalar value and must already be detached from the autograd graph.  The matching
-        `_flush_loss_cache(...)` call should run once per training step after `optimizer.step()`.
+        `_flush_metrics_cache(...)` call should run once per training step after `optimizer.step()`.
 
 
         -------------------------------------------------------------------------------------------
         Arguments:
         -------------------------------------------------------------------------------------------
 
-        loss_name : str
-            Name of the loss component (e.g., 'recon', 'rollout_ROM')
-        loss_value : torch.Tensor
-            Detached scalar tensor containing the loss value to cache.
-        param_tuple : tuple | None
-            Optional parameter combination as a tuple (can be used as dictionary key). If not 
-            specified, we assume `total`. 
+        key : str
+            Name of the metric (e.g., 'loss/recon', 'grad/raw')
+        value : torch.Tensor
+            Detached scalar tensor containing the metric to cache.
         """
 
-        assert isinstance(loss_name, str),              "loss_name must be a string";
-        if param_tuple is not None:
-            assert isinstance(param_tuple, tuple),      "param_tuple must be a tuple or None";
-        assert isinstance(loss_value, torch.Tensor),    "loss_value must be a torch.Tensor; pass loss.detach(), not loss.item()";
-        assert loss_value.numel() == 1,                 "loss_value must contain exactly one scalar value";
-        assert loss_value.requires_grad == False,       "loss_value must be detached before caching; pass loss.detach()";
+        assert isinstance(key, str),            "key must be a string";
+        assert isinstance(value, torch.Tensor), "value must be a torch.Tensor; pass loss.detach(), not loss.item()";
+        assert value.numel() == 1,              "value must contain exactly one scalar value";
+        assert value.requires_grad == False,    "value must be detached before caching; pass loss.detach()";
 
-        key : tuple | str = param_tuple if param_tuple is not None else 'total';
-        self._loss_cache.append((loss_name, key, loss_value));
+        self._metrics_cache.append((key, value));
         return;
-
-
-    def _process_latent_dynamics_losses(
-            self,
-            raw_LD_Losses  : LD_Loss_Container,
-            device         : torch.device | str,
-    ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
-        r"""
-        Cache, aggregate, and weight an LD-owned loss dictionary.
-
-        `LatentDynamics.compute_losses(...)` returns an `LD_Loss_Container` whose loss keys must
-        match its weight keys. Each loss value is either a length-n_train list of scalar tensors for
-        parameter-specific losses or one scalar tensor for a global loss. This helper caches
-        per-parameter entries when they exist, caches one total for every latent-dynamics loss key,
-        and forms the weighted latent-dynamics contribution to the trainer objective.
-
-
-        -------------------------------------------------------------------------------------------
-        Arguments
-        -------------------------------------------------------------------------------------------
-
-        raw_LD_Losses : LD_Loss_Container
-            A LD_Loss_Container object housing the losses and their weights. 
-
-        device : torch.device or str
-            Device on which to create the initial zero tensor for the weighted latent-dynamics loss.
-
-
-        -------------------------------------------------------------------------------------------
-        Returns
-        -------------------------------------------------------------------------------------------
-
-        loss_dict : dict[str, torch.Tensor]
-            Unweighted scalar total for each latent-dynamics loss with a non-zero weight. 
-            Per-parameter loss lists are summed across parameters; global scalar losses are 
-            passed through unchanged.
-
-        weighted_loss_sum : torch.Tensor
-            Scalar tensor equal to `sum(self.latent_dynamics.loss_weights[key] * loss_dict[key])`.
-        """
-
-        loss_dict          : dict[str, torch.Tensor] = {};
-        weighted_loss_sum  : torch.Tensor           = torch.zeros((), dtype = torch.float32, device = device);
-
-        # Process the losses item-by-item; summing per-parameter losses.
-        params              : numpy.ndarray         = raw_LD_Losses.params;
-        for key, value in raw_LD_Losses.losses.items():
-            if isinstance(value, list):
-                for i, param_loss in enumerate(value):
-                    param_tuple = tuple(params[i, :]);
-                    self._cache_loss(key, param_loss.detach(), param_tuple);
-                total_loss = torch.sum(torch.stack(value));
-            else:
-                total_loss = value;
-
-            self._cache_loss(key, total_loss.detach());
-
-            # Append to the loss dict if the weight is non-zero
-            if raw_LD_Losses.weights[key] > 0:
-                loss_dict[key] = total_loss;
-
-            # Update the weighted sum.
-            weighted_loss_sum = weighted_loss_sum + raw_LD_Losses.weights[key] * total_loss;
-
-        # All done :)
-        return loss_dict, weighted_loss_sum;
-    
 
 
     @staticmethod
@@ -708,21 +628,21 @@ class Trainer:
 
 
 
-    def _flush_loss_cache(self, epoch: int) -> dict[tuple[str, tuple | str], float]:
+    def _flush_metrics_cache(self, epoch: int) -> dict[str, float]:
         """
-        Flush cached loss tensors gathered during one epoch to a row in the jsonl file 
-        self.loss_by_param_path.
+        Flush cached metrics tensors gathered during one epoch to a row in the jsonl file
+        self.metrics_path.
 
         This method converts all cached detached scalar tensors into Python floats with a single
-        batched CPU transfer, then appends one JSON object to `self.loss_by_param_path`. Trainer
+        batched CPU transfer, then appends one JSON object to `self.metrics_path`. Trainer
         subclasses should call this exactly once per training step, after `optimizer.step()` and
         before checkpoint/report logic that needs scalar loss values.
 
-        The returned dictionary maps `(loss_name, param_tuple_or_total)` to the flushed float for
-        the current cache contents.  This lets trainers reuse the synchronized values for reporting
-        and best-loss checkpoint decisions without calling `.item()` again.
+        The returned dictionary maps metric keys to the flushed float for the current cache
+        contents.  This lets trainers reuse the synchronized values for reporting and best-loss
+        checkpoint decisions without calling `.item()` again.
 
-        
+
         -------------------------------------------------------------------------------------------
         Arguments:
         -------------------------------------------------------------------------------------------
@@ -730,59 +650,46 @@ class Trainer:
         epoch : int
             Epoch number
 
-        
+
         -------------------------------------------------------------------------------------------
         Returns:
         -------------------------------------------------------------------------------------------
 
-        flushed_values : dict[tuple[str, tuple | str], float]
-            The scalar values flushed from the cache.  Total losses use the key
-            `(loss_name, 'total')`.
+        flushed_values : dict[str, float]
+            The scalar values flushed from the cache.
         """
 
         # Checks
         assert isinstance(epoch, int),                  "epoch must be an int";
 
-        # Setup 
-        if len(self._loss_cache) == 0:
+        # Setup
+        if len(self._metrics_cache) == 0:
             return {};
 
-        # Stack first, then transfer once.  Losses for a trainer step should all live on one device.
-        first_device = self._loss_cache[0][2].device;
-        for _, _, loss_value in self._loss_cache:
-            assert loss_value.device == first_device, "cached loss tensors must live on the same device for batched flushing";
+        # Stack first, then transfer once. Metrics for a trainer step should all live on one device.
+        first_device = self._metrics_cache[0][1].device;
+        for _, metric_value in self._metrics_cache:
+            assert metric_value.device == first_device, "cached metrics tensors must live on the same device for batched flushing";
 
-        # Fetch loss values, then convert to cpu/list.
-        values_tensor : torch.Tensor = torch.stack([entry[2].reshape(()) for entry in self._loss_cache], dim = 0);
-        assert bool(torch.isfinite(values_tensor).all()), "cached loss tensors must be finite for JSONL logging";
+        # Fetch metrics values, then convert to cpu/list.
+        values_tensor : torch.Tensor = torch.stack([entry[1].reshape(()) for entry in self._metrics_cache], dim = 0);
+        assert bool(torch.isfinite(values_tensor).all()), "cached metrics tensors must be finite for JSONL logging";
         values_list   : list[float]  = [float(x) for x in values_tensor.cpu().tolist()];
 
-        flushed_values : dict[tuple[str, tuple | str], float] = {};
-        loss_records   : list[dict[str, Any]] = [];
-        for (loss_name, key, _), loss_float in zip(self._loss_cache, values_list):
-            flushed_values[(loss_name, key)] = loss_float;
-            if key == 'total':
-                loss_records.append({
-                    "loss_name" : loss_name,
-                    "param"     : None,
-                    "value"     : loss_float,
-                });
-            else:
-                assert isinstance(key, tuple), "cached non-total loss keys must be parameter tuples";
-                loss_records.append({
-                    "loss_name" : loss_name,
-                    "param"     : Trainer._jsonable_param(key),
-                    "value"     : loss_float,
-                });
+        flushed_values : dict[str, float] = {};
+        metric_records   : list[dict[str, Any]] = [];
+        for (key, _), value_float in zip(self._metrics_cache, values_list):
+            flushed_values[key] = value_float;
+            metric_records.append({key : value_float});
 
         # Now write to file.
-        with open(self.loss_by_param_path, "a", encoding = "utf-8") as handle:
-            json.dump({"epoch" : epoch, "losses" : loss_records}, handle, sort_keys = True, allow_nan = False);
+        with open(self.metrics_path, "a", encoding = "utf-8") as handle:
+            json.dump({"epoch" : epoch, "metrics" : metric_records}, handle, sort_keys = True, allow_nan = False);
             handle.write("\n");
-            LOGGER.debug("Saved losses from epoch %d to %s" % (epoch, self.loss_by_param_path));
+            LOGGER.debug("Saved metrics from epoch %d to %s" % (epoch, self.metrics_path));
 
-        # Reset cache loss and return :) 
-        self._loss_cache = [];
+        # Reset cache metrics and return :)
+        self._metrics_cache = [];
         return flushed_values;
 
 
@@ -823,7 +730,7 @@ class Trainer:
         """
         Collect EncoderDecoder parameters and LD-owned coefficient tensors for optimization.
 
-        The latent-dynamics coefficients live the latent dynamics object but can be fetched using 
+        The latent-dynamics coefficients live the latent dynamics object but can be fetched using
         the `parameters` method (which should return all parameters in the LD object).
 
 
@@ -912,7 +819,7 @@ class Trainer:
         checkpoint. Note that the loaded encoder_decoder will always be on cpu, so you may need to
         manually move it to another device if cpu is insufficient.
 
-        The LatentDynamics load method replaces the latent dynamics object's internal tensors 
+        The LatentDynamics load method replaces the latent dynamics object's internal tensors
         with those from the checkpoint and restores each trainable tensor as a trainable leaf
         tensor.
 
@@ -958,33 +865,33 @@ class Trainer:
     # Training.
     # ---------------------------------------------------------------------------------------------
 
-    def Iterate(self, 
-                start_iter  : int, 
-                end_iter    : int, 
+    def Iterate(self,
+                start_iter  : int,
+                end_iter    : int,
                 profiler    : torch.profiler.profile | None = None) -> None:
         """
-        Runs a round of training. It should train the encoder_decoder and training coefficients 
-        from iteration = start_iter to iteration = end_iter. Along the way, it should make 
-        checkpoints by calling `self._Save_Checkpoint(...)`. After training, we load the latest checkpoint
-        and use the serialized encoder_decoder and coefficients to update the encoder_decoder 
-        and latent dynamic coefficients, respectively. 
+        Runs a round of training. It should train the encoder_decoder and training coefficients
+        from iteration = start_iter to iteration = end_iter. Along the way, it should make
+        checkpoints by calling `self._Save_Checkpoint(...)`. After training, we load the latest
+        checkpoint and use the serialized encoder_decoder and coefficients to update the
+        encoder_decoder and latent dynamic coefficients, respectively.
 
         The function should also track specific losses for each training parameter combination
-        during each epoch using `_cache_loss`, then call `_flush_loss_cache` once per epoch after 
-        the optimizer step.
+        during each epoch using `_cache_metric`, then call `_flush_metrics_cache` once per epoch
+        after the optimizer step.
 
-        Finally, this function should record how long each part of the training process takes. 
-        Specifically, it should track how long each loss function takes to compute, as well as how 
+        Finally, this function should record how long each part of the training process takes.
+        Specifically, it should track how long each loss function takes to compute, as well as how
         long the back propagation step takes. It should record all of this using the self.timer
         attribute (see Utilities/Timing for details).
 
-        Note that if normalization is enabled, the entires in U_Train and U_Test will already be 
-        normalized when they are stored in the Trainer object. This also means that the 
+        Note that if normalization is enabled, the entires in U_Train and U_Test will already be
+        normalized when they are stored in the Trainer object. This also means that the
         EncoderDecoder should be trained using normalized data (if you just fetch from self.U_Train,
-        then this shouldn't be an issue). You may need to normalize data from the physics (such 
-        as initial conditions) before passing them into the EncoderDecoder. 
-        
-        
+        then this shouldn't be an issue). You may need to normalize data from the physics (such
+        as initial conditions) before passing them into the EncoderDecoder.
+
+
         -------------------------------------------------------------------------------------------
         Arguments:
         -------------------------------------------------------------------------------------------
@@ -992,18 +899,18 @@ class Trainer:
         start_iter : int
             The index of the first training iteration. Must have start_iter <= end_iter.
 
-        end_iter : int 
+        end_iter : int
             The index of the last training iteration. Must have start_iter <= end_iter.
 
         profiler : torch.profiler.profile
             An optional torch profiler that can be used to profile Iterate.
 
-            
+
         -------------------------------------------------------------------------------------------
         Returns:
         -------------------------------------------------------------------------------------------
 
-        None! 
+        None!
         """
 
         raise RuntimeError("Abstract method Trainer.Iterate!");
@@ -1024,9 +931,9 @@ class Trainer:
         critical because greedy sampling should use the best available coefficients when fitting
         interpolators / evaluating errors.
         """
-        
+
         # -------------------------------------------------------------------------------------
-        # Setup. 
+        # Setup.
 
         # Make sure we have at least one training data point.
         assert len(self.U_Train) > 0, "len(self.U_Train) = %d" % len(self.U_Train);
@@ -1047,16 +954,16 @@ class Trainer:
 
         # -----------------------------------------------------------------------------------------
         # Initialize loss tracking
-        
+
         # Delete existing files if starting fresh (restart_iter == 0)
         # This ensures we don't append to results from previous training runs
         if self.restart_iter == 0:
-            if os.path.exists(self.loss_by_param_path):
-                os.remove(self.loss_by_param_path);
-                LOGGER.info("Deleted existing loss_by_param file: %s" % self.loss_by_param_path);
+            if os.path.exists(self.metrics_path):
+                os.remove(self.metrics_path);
+                LOGGER.info("Deleted existing metrics file: %s" % self.metrics_path);
 
         # Reset loss cache.
-        self._loss_cache = [];
+        self._metrics_cache = [];
 
 
         # -----------------------------------------------------------------------------------------
@@ -1118,12 +1025,12 @@ class Trainer:
             profiler_table_str: str = "\n".join(profiler_results_list)
             with open("./HLaSDI_train_profile.txt", "a", encoding="utf-8") as handle:
                 handle.write(profiler_table_str)
-            
+
             # Now print the profiling results!
             print(profiler_table_str, flush = True);
         else:
             self.Iterate(start_iter = start_iter, end_iter = end_iter);
-        
+
 
         # -------------------------------------------------------------------------------------
         # Load model/params from checkpoint.
@@ -1150,8 +1057,6 @@ class Trainer:
 
 
 
-
-
     # ---------------------------------------------------------------------------------------------
     # Save, Load
     # ---------------------------------------------------------------------------------------------
@@ -1163,9 +1068,9 @@ class Trainer:
         -------------------------------------------------------------------------------------------
 
         dict_ : dict
-            A dictionary housing most of the internal variables in self. You can pass this 
-            dictionary to self (after initializing it using ParameterSpace, encoder_decoder, and 
-            LatentDynamics objects) to make a GLaSDI object whose internal state matches that of 
+            A dictionary housing most of the internal variables in self. You can pass this
+            dictionary to self (after initializing it using ParameterSpace, encoder_decoder, and
+            LatentDynamics objects) to make a GLaSDI object whose internal state matches that of
             self.
         """
 
@@ -1176,8 +1081,8 @@ class Trainer:
                  'U_Test'                   : self.U_Test,
                  't_Train'                  : self.t_Train,
                  't_Test'                   : self.t_Test,
-                 'restart_iter'             : self.restart_iter, 
-                 'timer'                    : self.timer.export(), 
+                 'restart_iter'             : self.restart_iter,
+                 'timer'                    : self.timer.export(),
                  'config'                   : config,
                  'normalize'                : self.normalize,
                  'data_mean'                : None if self.data_mean is None else [float(m.detach().cpu().item()) for m in self.data_mean],
@@ -1188,30 +1093,30 @@ class Trainer:
 
     def load(self, dict_ : dict) -> None:
         """
-        Modifies self's internal state to match the one whose export method generated the dict_ 
+        Modifies self's internal state to match the one whose export method generated the dict_
         dictionary.
 
 
         -------------------------------------------------------------------------------------------
-        Arguments 
+        Arguments
         -------------------------------------------------------------------------------------------
 
-        dict_ : dict 
-            This should be a dictionary returned by calling the export method on another 
-            GLaSDI object. We use this to make self hav the same internal state as the object that 
-            generated dict_. 
-            
+        dict_ : dict
+            This should be a dictionary returned by calling the export method on another
+            GLaSDI object. We use this to make self hav the same internal state as the object that
+            generated dict_.
+
 
         -------------------------------------------------------------------------------------------
-        Returns  
+        Returns
         -------------------------------------------------------------------------------------------
-        
+
         Nothing!
         """
 
         # Extract instance variables from dict_.
-        self.U_Train            : list[list[torch.Tensor]]  = dict_['U_Train'];             # len = n_train, i'th element is an n_IC element list.  
-        self.U_Train_Clean      : list[list[torch.Tensor]]  = dict_['U_Train_Clean'];       # len = n_train, i'th element is an n_IC element list.  
+        self.U_Train            : list[list[torch.Tensor]]  = dict_['U_Train'];             # len = n_train, i'th element is an n_IC element list.
+        self.U_Train_Clean      : list[list[torch.Tensor]]  = dict_['U_Train_Clean'];       # len = n_train, i'th element is an n_IC element list.
         self.noise_ratio        : float                     = float(dict_['noise_ratio']);
         self.U_Test             : list[list[torch.Tensor]]  = dict_['U_Test'];              # len = n_test, i'th element is an n_IC element list.
 
@@ -1232,12 +1137,12 @@ class Trainer:
             self.data_mean = None;
             self.data_std  = None;
 
-        # Next, compute n_IC.           
+        # Next, compute n_IC.
         self.n_IC = len(self.U_Test[0]);
 
-        # Load the timer / optimizer. 
+        # Load the timer / optimizer.
         self.timer.load(dict_['timer']);
-        self._loss_cache = [];
+        self._metrics_cache = [];
 
 
         # All done!
