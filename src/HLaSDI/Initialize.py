@@ -9,7 +9,7 @@ import  torch;
 
 
 from    HLaSDI.LatentDynamics          import  LatentDynamics, SINDy, SINDy_weak, SwitchSINDy;
-from    HLaSDI.LatentDynamics          import  SwitchSINDy_weak, DampedSpring, DampedSpring_weak, CABLE;
+from    HLaSDI.LatentDynamics          import  SwitchSINDy_weak, DampedSpring, DampedSpring_weak, CABLE, CABLE_weak;
 
 from    HLaSDI.ParameterSpace          import  ParameterSpace;
 
@@ -58,7 +58,8 @@ ld_dict = {                     'sindy'                     : SINDy,
                                 'spring_w'                  : DampedSpring_weak,
                                 'switch'                    : SwitchSINDy,
                                 'switch_w'                  : SwitchSINDy_weak,
-                                'cable'                     : CABLE};
+                                    'cable'                     : CABLE,
+                                    'cable_w'                   : CABLE_weak};
 
 trainer_dict = {                'First_Order_Rollout'       : First_Order_Rollout,
                                 'First_Order_Weak'          : First_Order_Weak,
