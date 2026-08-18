@@ -83,6 +83,11 @@ def _check_min_less_than_max(min_value: float, max_value: float, *, name: str) -
         raise ValueError(f"{name}.min must be smaller than {name}.max.")
 
 
+def _check_bounds(bounds: tuple[float, float], *, name: str) -> None:
+    if bounds[0] >= bounds[1]:
+        raise ValueError(f"{name} lower bound must be smaller than its upper bound.")
+
+
 def _check_sequence_3tuple_param(value: Any, *, n_layers: int, field_name: str) -> None:
     """Validate Conv3d scalar/3-tuple/per-layer 3-tuple configuration."""
 
@@ -382,6 +387,79 @@ EncoderDecoderConfig = Annotated[
 
 
 # -------------------------------------------------------------------------------------------------
+# Interpolator schemas
+# -------------------------------------------------------------------------------------------------
+
+
+class BaseInterpolatorConfig(ConfigBase):
+    """Base interpolator config."""
+
+    type: str
+
+
+class BaseGPKernelConfig(ConfigBase):
+    """Base Gaussian-process kernel config."""
+
+    type: str
+
+    # Initial kernel length scale in normalized parameter space.
+    length_scale: PositiveFloat
+
+    # Bounds used by scikit-learn during length-scale optimization.
+    length_scale_bounds: tuple[PositiveFloat, PositiveFloat]
+
+    @model_validator(mode = "after")
+    def validate_length_scale_bounds(self) -> "BaseGPKernelConfig":
+        _check_bounds(self.length_scale_bounds, name = "length_scale_bounds")
+        return self
+
+
+class MaternKernelConfig(BaseGPKernelConfig):
+    type    : Literal["Matern"]
+    nu      : PositiveFloat
+
+
+class RBFKernelConfig(BaseGPKernelConfig):
+    type    : Literal["RBF"]
+
+
+GPKernelConfig = Annotated[MaternKernelConfig | RBFKernelConfig, Field(discriminator = "type")]
+
+
+class GPInterpolatorSettings(ConfigBase):
+    """Gaussian-process interpolator settings."""
+
+    # Kernel used for all independent coefficient GPs.
+    kernel: GPKernelConfig
+
+    # Multiplicative constant-kernel value and optimizer bounds.
+    constant_value: PositiveFloat
+    constant_value_bounds: tuple[PositiveFloat, PositiveFloat]
+
+    # Diagonal noise added to the kernel matrix.
+    alpha: NonNegativeFloat
+
+    # Number of optimizer restarts used by scikit-learn.
+    n_restarts_optimizer: NonNegativeInt
+
+    # Random seed used by scikit-learn's optimizer restarts.
+    random_state: int
+
+    @model_validator(mode = "after")
+    def validate_constant_value_bounds(self) -> "GPInterpolatorSettings":
+        _check_bounds(self.constant_value_bounds, name = "constant_value_bounds")
+        return self
+
+
+class GPInterpolatorConfig(BaseInterpolatorConfig):
+    type    : Literal["GP"]
+    GP      : GPInterpolatorSettings
+
+
+InterpolatorConfig = GPInterpolatorConfig
+
+
+# -------------------------------------------------------------------------------------------------
 # Latent-dynamics schemas
 # -------------------------------------------------------------------------------------------------
 
@@ -423,7 +501,7 @@ class InterpolatableLatentDynamicsConfig(LatentDynamicsBaseConfig):
     """Base config for latent dynamics that interpolate coefficients at test parameters."""
 
     # How should we determine the latent dynamics at testing parameter combinations?
-    interpolator_type: Literal["GP"]
+    interpolator: InterpolatorConfig
 
 
 class StrongInterpolatableLatentDynamicsSettings(ConfigBase):

@@ -22,10 +22,29 @@ from HLaSDI.Schemas import (
 )
 
 
+def _gp_interpolator_config():
+    return {
+        "type": "GP",
+        "GP": {
+            "kernel": {
+                "type": "Matern",
+                "length_scale": 1.0,
+                "length_scale_bounds": (1.0, 1.0e3),
+                "nu": 2.5,
+            },
+            "constant_value": 1.0,
+            "constant_value_bounds": (1.0e-3, 1.0e3),
+            "alpha": 4.0e-4,
+            "n_restarts_optimizer": 10,
+            "random_state": 1,
+        },
+    }
+
+
 def _sindy_config(lstsq_reg=1.0, trainable=True):
     return SINDyLatentDynamicsConfig.model_validate({
         "type": "sindy",
-        "interpolator_type": "GP",
+        "interpolator": _gp_interpolator_config(),
         "trainable": trainable,
         "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "sindy": {"lstsq_reg": lstsq_reg},
@@ -35,7 +54,7 @@ def _sindy_config(lstsq_reg=1.0, trainable=True):
 def _spring_config(lstsq_reg=1.0, trainable=True):
     return DampedSpringLatentDynamicsConfig.model_validate({
         "type": "spring",
-        "interpolator_type": "GP",
+        "interpolator": _gp_interpolator_config(),
         "trainable": trainable,
         "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "spring": {"lstsq_reg": lstsq_reg},
@@ -45,7 +64,7 @@ def _spring_config(lstsq_reg=1.0, trainable=True):
 def _sindy_w_config(test_func_type="PC-poly", trainable=True):
     return SINDyWeakLatentDynamicsConfig.model_validate({
         "type": "sindy_w",
-        "interpolator_type": "GP",
+        "interpolator": _gp_interpolator_config(),
         "trainable": trainable,
         "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "sindy_w": {
@@ -59,7 +78,7 @@ def _sindy_w_config(test_func_type="PC-poly", trainable=True):
 def _spring_w_config(test_func_type="PC-poly", trainable=True):
     return DampedSpringWeakLatentDynamicsConfig.model_validate({
         "type": "spring_w",
-        "interpolator_type": "GP",
+        "interpolator": _gp_interpolator_config(),
         "trainable": trainable,
         "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "spring_w": {
@@ -73,7 +92,7 @@ def _spring_w_config(test_func_type="PC-poly", trainable=True):
 def _switch_w_config(test_func_type="PC-poly", trainable=True):
     return SwitchSINDyWeakLatentDynamicsConfig.model_validate({
         "type": "switch_w",
-        "interpolator_type": "GP",
+        "interpolator": _gp_interpolator_config(),
         "trainable": trainable,
         "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "switch_w": {
@@ -166,7 +185,7 @@ def test_interpolate_sample_mean_and_std_preserve_keys_and_shapes():
         (0.0,): {"A": torch.zeros(1, 1), "b": torch.zeros(1)},
         (1.0,): {"A": torch.ones(1, 1), "b": torch.ones(1)},
     }
-    interp = GPInterpolate()
+    interp = GPInterpolate(_sindy_config().interpolator)
     interp.update_train_coefs(train_coefs)
 
     mean = interp.mean(numpy.array([0.5]))
@@ -187,7 +206,7 @@ def test_interpolate_sample_mean_and_std_preserve_keys_and_shapes():
 def test_gp_interpolate_update_train_coefs_skips_unchanged_refit(monkeypatch):
     calls = {"n": 0}
 
-    def fake_fit_gps(X, Y):
+    def fake_fit_gps(X, Y, config):
         calls["n"] += 1
         return [object() for _ in range(Y.shape[1])]
 
@@ -196,7 +215,7 @@ def test_gp_interpolate_update_train_coefs_skips_unchanged_refit(monkeypatch):
         (0.0,): {"A": torch.zeros(1, 1), "b": torch.zeros(1)},
         (1.0,): {"A": torch.ones(1, 1), "b": torch.ones(1)},
     }
-    interp = GPInterpolate()
+    interp = GPInterpolate(_sindy_config().interpolator)
     assert calls["n"] == 0
 
     interp.update_train_coefs(train_coefs)
@@ -227,7 +246,7 @@ def test_base_flatten_coefficients_concatenates_native_dict_items():
 
 def test_interpolate_rejects_non_tensor_values():
     with pytest.raises(AssertionError):
-        interp = GPInterpolate()
+        interp = GPInterpolate(_sindy_config().interpolator)
         interp.update_train_coefs({(0.0,): {"A": numpy.zeros((1, 1))}})
 
 from HLaSDI.LatentDynamics import DampedSpring, DampedSpring_weak, SINDy_weak, SwitchSINDy_weak
@@ -348,7 +367,7 @@ from HLaSDI.LatentDynamics import LatentDynamics, WeakLatentDynamics
 def _weak_base_config(test_func_type="PC-poly"):
     return SINDyWeakLatentDynamicsConfig.model_validate({
         "type": "sindy_w",
-        "interpolator_type": "GP",
+        "interpolator": _gp_interpolator_config(),
         "trainable": True,
         "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "sindy_w": {
@@ -362,7 +381,7 @@ def _weak_base_config(test_func_type="PC-poly"):
 def test_weak_latent_dynamics_requires_weak_config_keys():
     bad_config = {
         "type": "sindy_w",
-        "interpolator_type": "GP",
+        "interpolator": _gp_interpolator_config(),
         "trainable": True,
         "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "sindy_w": {"test_func_width": 0.5, "overlap": 0.5},

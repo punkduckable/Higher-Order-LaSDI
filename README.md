@@ -384,7 +384,8 @@ Configuration files are YAML-based and specify:
 
 ### Latent Dynamics (`latent_dynamics`)
 - Type: `sindy`, `spring`, `switch`, `sindy_w`, `spring_w`, `switch_w`, or `cable`.
-- `interpolator_type`: optional; currently only `"GP"` is implemented and is used by default.
+- `interpolator`: required for interpolatable models; currently supports `type: GP` with `Matern`
+  or `RBF` kernels.
 - `loss_weights`: LD-owned losses. Interpolatable affine models use `LD`, `coef`, and `stab`; CABLE uses `LD`, `coef`, `diversity`, and `tail`.
 - CABLE-specific settings include `n_experts`, `n_active`, `hidden_widths`, and `activations`.
 

@@ -9,6 +9,7 @@ from    sklearn.gaussian_process.kernels    import  ConstantKernel, RBF, Matern;
 from    sklearn.gaussian_process            import  GaussianProcessRegressor;
 from    sklearn.exceptions                  import  ConvergenceWarning;
 from    HLaSDI.Interpolate.Interpolate      import  Interpolate;
+from    HLaSDI.Schemas                      import  GPInterpolatorConfig;
 
 # Set up logging.
 import  logging;
@@ -29,9 +30,11 @@ class GPInterpolate(Interpolate):
     keys and tensor shapes as the latent-dynamics model's `train_coefs` entries.
     """
 
-    def __init__(self) -> None:
-        r"""Initialize an empty GP interpolator. Fitting happens in `update_train_coefs(...)`."""
+    def __init__(self, config : GPInterpolatorConfig) -> None:
+        r"""Initialize an empty GP interpolator from config."""
 
+        assert isinstance(config, GPInterpolatorConfig), "config must be a GPInterpolatorConfig, got %s" % str(type(config));
+        Interpolate.__init__(self, config);
         return;
 
 
@@ -186,7 +189,7 @@ class GPInterpolate(Interpolate):
             for key in self.param_keys:
                 Y_rows.append(train_coefs[key][name].detach().cpu().numpy().reshape(1, -1));
             Y : numpy.ndarray = numpy.concatenate(Y_rows, axis = 0);
-            self.gps[name] = fit_gps(self.X, Y);
+            self.gps[name] = fit_gps(self.X, Y, self.config);
             LOGGER.info("Fit %d GPs for coefficient tensor '%s' with shape %s" % (Y.shape[1], name, tuple(self.coef_shapes[name])));
 
         self._train_coefs_snapshot = self._snapshot_train_coefs(train_coefs);
@@ -301,7 +304,7 @@ class GPInterpolate(Interpolate):
 # Gaussian Process functions! 
 # -------------------------------------------------------------------------------------------------
 
-def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegressor]:
+def fit_gps(X : numpy.ndarray, Y : numpy.ndarray, config : GPInterpolatorConfig) -> list[GaussianProcessRegressor]:
     r"""
     Trains a GP for each column of Y. If Y has shape n_train x n_GPs, then we train k GP 
     regressors. In this case, we assume that X has shape n_train x input_dim. Thus, the Input to 
@@ -328,6 +331,9 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
         the input and target random variables, respectively. We fit a GP on this data. Thus, 
         n_train is the number of training examples and input_dim is the dimension of the input 
         space to the GPs. 
+
+    config : GPInterpolatorConfig
+        Validated Gaussian-process interpolator configuration.
     
     
     -----------------------------------------------------------------------------------------------
@@ -340,15 +346,17 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
     """
 
     # Checks.
-    assert isinstance(Y, numpy.ndarray),        "type(Y) = %s" % str(type(Y));
-    assert isinstance(X, numpy.ndarray),        "type(X) = %s" % str(type(X));
-    assert len(Y.shape)         == 2,           "Y.shape = %s" % str(Y.shape);
-    assert len(X.shape)         == 2,           "X.shape = %s" % str(X.shape);
-    assert X.shape[0]           == Y.shape[0],  "X.shape = %s, Y.shape = %s" % (str(X.shape), str(Y.shape));
+    assert isinstance(Y, numpy.ndarray),                "type(Y) = %s" % str(type(Y));
+    assert isinstance(X, numpy.ndarray),                "type(X) = %s" % str(type(X));
+    assert isinstance(config, GPInterpolatorConfig),    "config must be a GPInterpolatorConfig, got %s" % str(type(config));
+    assert len(Y.shape)         == 2,                   "Y.shape = %s" % str(Y.shape);
+    assert len(X.shape)         == 2,                   "X.shape = %s" % str(X.shape);
+    assert X.shape[0]           == Y.shape[0],          "X.shape = %s, Y.shape = %s" % (str(X.shape), str(Y.shape));
 
     # Setup.
     n_GPs       : int   = Y.shape[1];
     n_inputs    : int   = X.shape[1];
+    gp_config            = config.GP;
 
     # Scale inputs to improve conditioning of kernel hyperparameter optimization.
     # This is especially important when parameters have very different magnitudes
@@ -410,32 +418,33 @@ def fit_gps(X : numpy.ndarray, Y : numpy.ndarray) -> list[GaussianProcessRegress
                 ith_std = ith_eps;
         targets_i_s: numpy.ndarray = (targets_i - ith_mean) / ith_std;
 
-        # Make the kernel.
-        # Option 1: Matern kernel (recommended for smooth but non-infinitely-differentiable functions)
-        # Length scales tuned for normalized parameter space (mean = 0, std = 1).
-        # For a 5x5 grid, typical distances are O(1), so length scales of 0.5-5 give smooth interpolation.
-        # Increased minimum to 0.5 to prevent overfitting to local patterns.
-        kernel  = ConstantKernel(constant_value = 1.0, constant_value_bounds = (1e-3, 1e3)) * \
-                  Matern(length_scale = 1.0, length_scale_bounds = (1.0, 1e3), nu = 2.5);
-        # Option 2: RBF kernel (for infinitely smooth functions)
-        # kernel  = ConstantKernel(constant_value = 1.0, constant_value_bounds = (1e-3, 1e3)) * \
-        #           RBF(length_scale_bounds = (0.1, 10.0));
+        # Make a fresh kernel because scikit-learn mutates kernel hyperparameters during fit.
+        kernel_config = gp_config.kernel;
+        if kernel_config.type == "Matern":
+            base_kernel = Matern(
+                length_scale        = kernel_config.length_scale,
+                length_scale_bounds = kernel_config.length_scale_bounds,
+                nu                  = kernel_config.nu);
+        else:
+            base_kernel = RBF(
+                length_scale        = kernel_config.length_scale,
+                length_scale_bounds = kernel_config.length_scale_bounds);
+        kernel = ConstantKernel(
+                    constant_value        = gp_config.constant_value,
+                    constant_value_bounds = gp_config.constant_value_bounds) * base_kernel;
 
         # Initialize the GP object.
         #
         # alpha: Adds noise to the diagonal of the kernel matrix (observation noise).
         #        Larger values = more uncertainty = less overfitting to training data.
-        #        Typical range: 1e-10 (very confident) to 1e-3 (high uncertainty).
-        #        Using 4e-4 for tighter, more stable predictions to prevent divergent dynamics.
         #
         # n_restarts_optimizer: Number of random restarts for hyperparameter optimization.
         #                       More restarts = better hyperparameters but slower.
-        #                       Using 10 restarts for better kernel tuning and stability.
         ith_gp      = GaussianProcessRegressor(
                             kernel                  = kernel, 
-                            alpha                   = 4e-4,     # Tighter uncertainty to prevent divergent coefficients
-                            n_restarts_optimizer    = 10,       # More restarts for better hyperparameters
-                            random_state            = 1);
+                            alpha                   = gp_config.alpha,
+                            n_restarts_optimizer    = gp_config.n_restarts_optimizer,
+                            random_state            = gp_config.random_state);
 
         # Fit it to the data (train).
         with warnings.catch_warnings():

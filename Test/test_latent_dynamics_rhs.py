@@ -20,10 +20,29 @@ from HLaSDI.Schemas import (
 )
 
 
+def _gp_interpolator_config():
+    return {
+        "type": "GP",
+        "GP": {
+            "kernel": {
+                "type": "Matern",
+                "length_scale": 1.0,
+                "length_scale_bounds": (1.0, 1.0e3),
+                "nu": 2.5,
+            },
+            "constant_value": 1.0,
+            "constant_value_bounds": (1.0e-3, 1.0e3),
+            "alpha": 4.0e-4,
+            "n_restarts_optimizer": 10,
+            "random_state": 1,
+        },
+    }
+
+
 def _sindy_config(trainable=True):
     return SINDyLatentDynamicsConfig.model_validate({
         "type": "sindy",
-        "interpolator_type": "GP",
+        "interpolator": _gp_interpolator_config(),
         "trainable": trainable,
         "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "sindy": {"lstsq_reg": 0.0},
@@ -33,7 +52,7 @@ def _sindy_config(trainable=True):
 def _sindy_w_config(trainable=True):
     return SINDyWeakLatentDynamicsConfig.model_validate({
         "type": "sindy_w",
-        "interpolator_type": "GP",
+        "interpolator": _gp_interpolator_config(),
         "trainable": trainable,
         "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "sindy_w": {"test_func_type": "PC-poly", "test_func_width": 0.5, "overlap": 0.5},
@@ -43,7 +62,7 @@ def _sindy_w_config(trainable=True):
 def _spring_config(trainable=True):
     return DampedSpringLatentDynamicsConfig.model_validate({
         "type": "spring",
-        "interpolator_type": "GP",
+        "interpolator": _gp_interpolator_config(),
         "trainable": trainable,
         "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "spring": {"lstsq_reg": 0.0},
@@ -53,7 +72,7 @@ def _spring_config(trainable=True):
 def _spring_w_config(trainable=True):
     return DampedSpringWeakLatentDynamicsConfig.model_validate({
         "type": "spring_w",
-        "interpolator_type": "GP",
+        "interpolator": _gp_interpolator_config(),
         "trainable": trainable,
         "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "spring_w": {"test_func_type": "PC-poly", "test_func_width": 0.5, "overlap": 0.5},
@@ -63,7 +82,7 @@ def _spring_w_config(trainable=True):
 def _switch_config(trainable=True):
     return SwitchSINDyLatentDynamicsConfig.model_validate({
         "type": "switch",
-        "interpolator_type": "GP",
+        "interpolator": _gp_interpolator_config(),
         "trainable": trainable,
         "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "switch": {"lstsq_reg": 0.0},
@@ -73,7 +92,7 @@ def _switch_config(trainable=True):
 def _switch_w_config(trainable=True):
     return SwitchSINDyWeakLatentDynamicsConfig.model_validate({
         "type": "switch_w",
-        "interpolator_type": "GP",
+        "interpolator": _gp_interpolator_config(),
         "trainable": trainable,
         "loss_weights": {"LD": 1.0, "coef": 1.0, "stab": 1.0},
         "switch_w": {"test_func_type": "PC-poly", "test_func_width": 0.5, "overlap": 0.5},

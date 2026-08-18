@@ -74,7 +74,19 @@ EncoderDecoder:
     activations:            ["sin", "sin", "sin", "sin"]
 
 latent_dynamics:
-  interpolator_type:        GP
+  interpolator:
+    type:                   GP
+    GP:
+      kernel:
+        type:               Matern
+        length_scale:       1.0
+        length_scale_bounds: [1.0, 1.0e3]
+        nu:                 2.5
+      constant_value:       1.0
+      constant_value_bounds: [1.0e-3, 1.0e3]
+      alpha:                4.0e-4
+      n_restarts_optimizer: 10
+      random_state:         1
   type:                     sindy
   trainable:                true
   loss_weights:

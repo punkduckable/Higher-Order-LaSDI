@@ -148,9 +148,9 @@ class InterpolatableLatentDynamics(LatentDynamics):
 
         # Set up the Interpolate object. GP is the only implemented interpolator at the moment.
         assert isinstance(config, LatentDynamicsBaseConfig), "config must be a LatentDynamicsBaseConfig, got %s" % str(type(config));
-        interpolator_type : str = config.interpolator_type;
+        interpolator_type : str = config.interpolator.type;
         assert interpolator_type in {"GP"}, "Allowed interpolator types are `GP`, got %s" % interpolator_type;
-        self.interpolator = GPInterpolate();
+        self.interpolator = GPInterpolate(config.interpolator);
 
         # Finally, set a dummy `train_coefs` dict.
         self.train_coefs     : dict[tuple[float, ...], dict[str, torch.Tensor]] = {};

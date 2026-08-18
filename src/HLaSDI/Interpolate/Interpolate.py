@@ -7,6 +7,8 @@ import  logging;
 import  numpy;
 import  torch;
 
+from    HLaSDI.Schemas      import  BaseInterpolatorConfig;
+
 LOGGER : logging.Logger = logging.getLogger(__name__);
 
 
@@ -22,6 +24,13 @@ class Interpolate:
     Interpolate objects define posterior distributions over training coefficients (conditioned on
     a parameter value), and provide mechanics from sampling from those posterior distributions.
     """
+
+    def __init__(self, config : BaseInterpolatorConfig) -> None:
+        r"""Initialize the interpolator from a validated interpolator config."""
+
+        assert isinstance(config, BaseInterpolatorConfig), "config must be a BaseInterpolatorConfig, got %s" % str(type(config));
+        self.config = config;
+        return;
 
 
     def update_train_coefs(self, train_coefs : dict[tuple[float, ...], dict[str, torch.Tensor]]) -> None:
@@ -141,4 +150,3 @@ class Interpolate:
         """
 
         raise RuntimeError("Abstract function Interpolate.std!");
-

@@ -54,6 +54,25 @@ def test_schema_rejects_missing_explicit_noise_ratio():
         validate_experiment_config(config)
 
 
+def test_schema_rejects_missing_interpolator_config():
+    config = _load_example("Burgers2D.yml")
+    del config["latent_dynamics"]["interpolator"]
+
+    with pytest.raises(ValidationError, match="Field required"):
+        validate_experiment_config(config)
+
+
+def test_schema_accepts_rbf_interpolator_kernel():
+    config = _load_example("Burgers2D.yml")
+    kernel = config["latent_dynamics"]["interpolator"]["GP"]["kernel"]
+    kernel["type"] = "RBF"
+    del kernel["nu"]
+
+    validated = validate_experiment_config(config)
+
+    assert validated.latent_dynamics.interpolator.GP.kernel.type == "RBF"
+
+
 def test_schema_rejects_incompatible_trainer_and_latent_dynamics_order():
     config = _load_example("Burgers2D.yml")
     config["trainer"]["type"] = "Second_Order_Rollout"
