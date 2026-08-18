@@ -554,11 +554,19 @@ From the Higher-Order-LaSDI repository root:
 ```bash
 export UV_CACHE_DIR="/p/vast1/robertrs/.cache/uv"
 mkdir -p "$UV_CACHE_DIR"
-uv sync --python 3.11 --extra pymfem
+uv sync --python 3.11 --extra pymfem --extra viz
 source .venv/bin/activate
 ```
 
-PyMFEM should be installed into this same uv-managed `.venv`.
+PyMFEM should be installed into this same uv-managed `.venv`. Before continuing, confirm that the
+active environment is using Python 3.11:
+
+```bash
+python --version
+```
+
+If this prints Python 3.12 or newer, remove/recreate `.venv` with the `uv sync --python 3.11 ...`
+command above before building PyMFEM.
 
 ### 2. Clone and Checkout PyMFEM
 
@@ -604,17 +612,28 @@ sudo yum install openmpi openmpi-devel
 
 **On LC:**
 
-Note that you may need to use a different version for `intel-classic` and `openmpi`.
+Use one LC MPI module consistently for both `mpi4py` and the PyMFEM build. On many LC systems with
+`intel-classic/2021.6.0`, the working MPI is MVAPICH2 rather than OpenMPI. The exact version may
+vary by machine.
 
 ```bash
 module --force purge
 module load StdEnv
 module load intel-classic/2021.6.0
-module load openmpi/4.1.2
 
+# Load one MPI implementation and keep it loaded for the rest of this install.
+# On LC systems where this module is available, MVAPICH2 is known to work:
+module load mvapich2/2.3.7
+
+# Sanity-check which MPI wrapper will be used.
+module list
 which mpicc
-mpicc --showme:link 2>/dev/null || mpicc -show
+mpicc --showme:link 2>/dev/null || mpicc -show 2>/dev/null || true
 ```
+
+If your LC machine uses a different MVAPICH2 version, load that version instead. OpenMPI can also
+work, but only if `which mpicc` and the checks below show that both `mpi4py` and PyMFEM are using
+the same OpenMPI installation. Do not mix MPI implementations.
 
 ### 6. Install mpi4py
 
@@ -625,135 +644,126 @@ uv pip install mpi4py==4.0.3
 
 **On LC:**
 
-On some LC systems, the Python toolchain injects an Anaconda-provided MPI (`libmpi.so.12`) into the
-link/runtime search path. If `mpi4py` links against that, but you load OpenMPI at runtime, imports
-can fail with missing OpenMPI symbols (e.g. `undefined symbol: ompi_mpi_real`).
+Build `mpi4py` from source in the same shell where the LC MPI module is loaded. This avoids
+installing a prebuilt wheel or accidentally linking against a different MPI implementation.
 
-The procedure below forces `mpi4py` to link against the OpenMPI module you loaded above.
+Run this from the Higher-Order-LaSDI repository root:
 
-First, install Cython and remove any existing `mpi4py`:
 ```bash
-source ./Higher-Order-LaSDI/.venv/bin/activate  # adjust path if needed
+module --force purge
+module load StdEnv
+module load intel-classic/2021.6.0
+module load mvapich2/2.3.7   # or the MPI module selected in step 5
 
-uv pip install --upgrade "cython>=3.0"
+# Optional but recommended for MVAPICH2: avoid noisy single-process import warnings.
+export MV2_USE_ALIGNED_ALLOC=1
+export MV2_USE_THREAD_WARNING=0
+
+source .venv/bin/activate
+
+# Confirm this is the MPI compiler wrapper you intend to use.
+which mpicc
+mpicc --showme:link 2>/dev/null || mpicc -show 2>/dev/null || true
+
+# Remove the wheel that may have been installed by `uv sync --extra pymfem`.
 uv pip uninstall -y mpi4py
+
+# Make sure the non-isolated source build has its Python build dependencies.
+# PyMFEM's setup.py also imports pip internals, so pip must exist inside the uv venv.
+uv pip install --upgrade pip "cython>=3.0" "setuptools>=70,<81" wheel
+
+# Force mpi4py's build to use the MPI compiler wrapper from the loaded module.
+export MPICC="$(which mpicc)"
+export MPI4PY_BUILD_MPICC="$MPICC"
+export MPI4PY_BUILD_CONFIGURE=1
+
+uv pip install --no-binary=mpi4py --no-build-isolation --no-cache "mpi4py==4.0.3"
 ```
 
-Next, download the `mpi4py` source distribution:
+Verify the resulting `mpi4py` extension links against the loaded LC MPI library:
 
 ```bash
-cd /tmp
-rm -rf mpi4py-src && mkdir mpi4py-src && cd mpi4py-src
-python -m pip download --no-deps --no-binary=mpi4py mpi4py==4.0.3
-tar -xf mpi4py-4.0.3.tar.gz
-cd mpi4py-4.0.3
-```
+MPI_SO=$(python - <<'PY'
+from pathlib import Path
+import mpi4py
 
-Create an `mpi.cfg` that points to your loaded OpenMPI `mpicc/mpicxx` and forces linkage against
-OpenMPI's `libmpi.so.40`:
-
-```bash
-OMPI_PREFIX="$(dirname "$(dirname "$(which mpicc)")")"
-OMPI_LIB="$OMPI_PREFIX/lib"
-
-cat > mpi.cfg <<EOF
-[mpi]
-mpicc  = $OMPI_PREFIX/bin/mpicc
-mpicxx = $OMPI_PREFIX/bin/mpicxx
-
-# key: do NOT link -lmpi
-libraries =
-
-# ensure OpenMPI runtime path is present
-runtime_library_dirs = $OMPI_LIB
-
-# force the exact OpenMPI SONAME
-extra_objects = $OMPI_LIB/libmpi.so.40
-EOF
-```
-
-Install from source using that config:
-```bash
-uv pip install -U pip setuptools wheel
-
-# tell mpi4py to use your mpi.cfg
-export MPI4PY_BUILD_MPICFG="$PWD/mpi.cfg"
-
-# build/install
-python -m pip install --no-build-isolation .
-```
-
-Verify the resulting `mpi4py` extension is linked only against OpenMPI (`libmpi.so.40`):
-
-```bash
-MPI_SO=$(python -c "import site,glob,os; sp=site.getsitepackages()[0]; print(glob.glob(os.path.join(sp,'mpi4py','MPI*.so'))[0])")
+matches = sorted(Path(mpi4py.__file__).parent.glob("MPI*.so"))
+if not matches:
+    raise SystemExit("Could not find mpi4py MPI extension")
+print(matches[0])
+PY
+)
 echo "$MPI_SO"
 
-readelf -d "$MPI_SO" | egrep 'NEEDED.*libmpi|RPATH|RUNPATH'
-ldd "$MPI_SO" | egrep 'libmpi|open-rte|open-pal|anaconda|not found'
+readelf -d "$MPI_SO" | grep -E 'NEEDED.*libmpi|RPATH|RUNPATH'
+ldd "$MPI_SO" | grep -E 'libmpi|mvapich|open-rte|open-pal|anaconda|not found'
 ```
 
-The `readelf` output should include:
+The important check is that `ldd` resolves `libmpi` to the MPI module you loaded. For example:
 
-```
-... (NEEDED) Shared library: [libmpi.so.40]
-```
-
-If you also see `libmpi.so.12` under `NEEDED` (and `ldd` resolves it from an Anaconda path),
-imports may still fail. As a last resort, you can remove that unwanted dependency with `patchelf`:
-
-```bash
-cp -v "$MPI_SO" "${MPI_SO}.bak"
-patchelf --remove-needed libmpi.so.12 "$MPI_SO"
-readelf -d "$MPI_SO" | egrep 'NEEDED.*libmpi|RPATH|RUNPATH'
-```
+- MVAPICH2 on LC may show `libmpi.so.12` resolved from a path containing `/usr/tce/.../mvapich2-...`.
+  That is OK.
+- OpenMPI 4.x commonly shows `libmpi.so.40` resolved from an OpenMPI module path. That is also OK.
+- An Anaconda MPI path or `not found` is not OK; re-run the uninstall/build commands above after
+  purging modules and reloading the MPI module you intend to use.
 
 Now run a test import:
 ```bash
+export MV2_USE_ALIGNED_ALLOC=1
+export MV2_USE_THREAD_WARNING=0
 python -c "from mpi4py import MPI; print(MPI.Get_library_version())"
 ```
 
-This should print something like the following:
+This should print the same MPI implementation you loaded and exit without a Python traceback. On LC
+with MVAPICH2, a successful output may include a long banner like:
 
-`Open MPI v4.1.2, package: Open MPI sly1@rzwhippet7 Distribution, ident: 4.1.2, repo rev: v4.1.2, Nov 24, 2021`
+```
+MVAPICH2 Version      :	2.3.7
+```
 
-If so, mpi4py is now installed and linked correctly. Change back to the PyMFEM directory:
+If the command prints the MVAPICH2/OpenMPI version and has exit code 0, mpi4py is installed and linked
+correctly. Change back to the PyMFEM directory:
 
 ```bash
 cd <path to PyMFEM directory>
 ```
 
-**Suppressing warnings on LC:**
+### 7. Build PyMFEM
 
-When running on some nodes, you may see OpenMPI warnings about OpenFabrics/InfiniBand initialization.
-These are often benign for single-process runs. One way to silence the warning is:
+Back in the PyMFEM directory, first make sure `pip` exists inside the active Higher-Order-LaSDI uv
+environment. PyMFEM v_4.7.0.1's `setup.py` imports `pip._internal.locations`, so the build fails
+with `ModuleNotFoundError: No module named 'pip'` if the uv venv was created without pip:
 
 ```bash
-export OMPI_MCA_btl_openib_warn_no_device_params_found=0
-export OMPI_MCA_btl_openib_allow_ib=0
+uv pip install --upgrade pip setuptools wheel
+python -c "import pip._internal.locations; print('pip is available')"
 ```
 
-Avoid hard-coding `OMPI_MCA_btl="self,tcp"` unless you know your system provides the `btl:tcp`
-component; on some systems it can cause `MPI_Init` failures on compute nodes.
-
-### 7. Build PyMFEM
+Then build PyMFEM using the same MPI module/wrappers used for `mpi4py`:
 
 ```bash
 python setup.py install -v --with-parallel --with-gslib \
   --CC=gcc --CXX=g++ --MPICC=mpicc --MPICXX=mpic++ --with-lapack
 ```
-**Note**: On some systems you may need to adjust compiler names (e.g., `gcc-11`, `g++-11`).
+
+**LC note**: with `intel-classic` + MVAPICH2, you may need compiler names consistent with the loaded
+MPI wrappers, for example:
+
+```bash
+python setup.py install -v --with-parallel --with-gslib \
+  --CC=icc --CXX=icpc --MPICC=mpicc --MPICXX=mpicxx --with-lapack
+```
 
 If this works, you have now installed PyMFEM!
 
 ### LC note: “Do I need to redo this every login?”
 
-- The **uv-managed environment is persistent**: once `.venv` (and the patched `mpi4py` inside it) is
+- The **uv-managed environment is persistent**: once `.venv` (and the source-built `mpi4py` inside it) is
   created, it will keep working across logins *as long as you don't reinstall/upgrade `mpi4py`* inside it.
 - Your **module environment is not persistent**: you generally need to `module load intel-classic`
-  and `module load openmpi` again in each new shell / batch job.
-- Any **environment variables** (e.g. `OMPI_MCA_btl`) must be set each session/job if you want them.
-  (e.g. `OMPI_MCA_btl_openib_allow_ib`, `OMPI_MCA_btl_openib_warn_no_device_params_found`).
+  and the same MPI module (`mvapich2` or `openmpi`) again in each new shell / batch job.
+- Any **MPI environment variables** must be set each session/job if you want them
+  (e.g. `MV2_USE_ALIGNED_ALLOC`, `OMPI_MCA_btl_openib_allow_ib`).
 
 A simple solution is to create a small helper script (e.g. `env_lc.sh` in Higher-Order-LaSDI repo) with the following contents:
 
@@ -762,10 +772,10 @@ A simple solution is to create a small helper script (e.g. `env_lc.sh` in Higher
 module --force purge
 module load StdEnv
 module load intel-classic/2021.6.0
-module load openmpi/4.1.2
+module load mvapich2/2.3.7  # or the MPI module used to build mpi4py/PyMFEM
 source ./.venv/bin/activate
-export OMPI_MCA_btl_openib_warn_no_device_params_found=0
-export OMPI_MCA_btl_openib_allow_ib=0
+export MV2_USE_ALIGNED_ALLOC=1
+export MV2_USE_THREAD_WARNING=0
 ```
 
 Before running LaSDI, `source` the script:

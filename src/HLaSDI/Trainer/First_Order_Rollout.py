@@ -799,7 +799,8 @@ class First_Order_Rollout(Trainer):
             )
             detached_grad_norm = grad_norm.detach();
             self._cache_metric("grad_norm/raw", detached_grad_norm);
-            self._cache_metric("grad_norm/actual", torch.min(detached_grad_norm, detached_grad_norm.new_full((1), self.gradient_clip)));
+            clip_value = detached_grad_norm.new_tensor(self.gradient_clip);
+            self._cache_metric("grad_norm/actual", torch.minimum(detached_grad_norm, clip_value));
     
             # Log if gradient clipping activates (indicates potential instability)
             if grad_norm > self.gradient_clip:

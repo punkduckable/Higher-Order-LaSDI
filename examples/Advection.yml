@@ -26,7 +26,7 @@ trainer:
 
     p_IC_rollout_init:      0.01
     IC_rollout_update_freq: 10
-    IC_dp_per_update:       0.02
+    IC_dp_per_update:       0.005
     max_p_IC_rollout:       1.0       # Maximum proportion of the time window used for IC rollout loss.
 
     warmup_epochs:          80        # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.

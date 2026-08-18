@@ -4,32 +4,37 @@
 
 import  logging;
 
-import  numpy;
-import  torch; 
+from    HLaSDI.LatentDynamics       import  LatentDynamics, SINDy, SINDy_weak, SwitchSINDy;
+from    HLaSDI.LatentDynamics       import  SwitchSINDy_weak, DampedSpring, DampedSpring_weak, CABLE, CABLE_weak;
 
+from    HLaSDI.ParameterSpace       import  ParameterSpace;
 
-from    HLaSDI.LatentDynamics          import  LatentDynamics, SINDy, SINDy_weak, SwitchSINDy;
-from    HLaSDI.LatentDynamics          import  SwitchSINDy_weak, DampedSpring, DampedSpring_weak, CABLE, CABLE_weak;
+from    HLaSDI.Trainer              import  Trainer, First_Order_Rollout, First_Order_Weak;
+from    HLaSDI.Trainer              import  Second_Order_Rollout, Second_Order_Weak;
 
-from    HLaSDI.ParameterSpace          import  ParameterSpace;
+from    HLaSDI.EncoderDecoder       import  EncoderDecoder, Autoencoder, load_Autoencoder;
+from    HLaSDI.EncoderDecoder       import  Autoencoder_Pair, load_Autoencoder_Pair;
+from    HLaSDI.EncoderDecoder       import  CNN_3D_Autoencoder, load_CNN_3D_Autoencoder;
 
-from    HLaSDI.Trainer                 import  Trainer, First_Order_Rollout, First_Order_Weak;
-from    HLaSDI.Trainer                 import  Second_Order_Rollout, Second_Order_Weak;
+from    HLaSDI.Physics              import  Physics, Burgers2D, Thermal, Burgers, BurgersSecondOrder;
+from    HLaSDI.Physics              import  Explicit, ExplicitSecondOrder;
+try:
+    from  HLaSDI.Physics.Advection              import Advection;
+    from  HLaSDI.Physics.NonlinearElasticity    import NonlinearElasticity;
+    from  HLaSDI.Physics.WaveEquation           import WaveEquation;
+    from  HLaSDI.Physics.KleinGordon            import KleinGordon;
+    from  HLaSDI.Physics.Telegraphers           import Telegraphers;
+except ModuleNotFoundError as exc:
+    if exc.name not in {"mfem", "mpi4py"}:
+        raise;
+    Advection           = None;
+    NonlinearElasticity = None;
+    WaveEquation        = None;
+    KleinGordon         = None;
+    Telegraphers        = None;
 
-from    HLaSDI.EncoderDecoder          import  EncoderDecoder, Autoencoder, load_Autoencoder;
-from    HLaSDI.EncoderDecoder          import  Autoencoder_Pair, load_Autoencoder_Pair;
-from    HLaSDI.EncoderDecoder          import  CNN_3D_Autoencoder, load_CNN_3D_Autoencoder;
-
-from    HLaSDI.Physics                 import  Physics, Burgers2D, Thermal, Burgers, BurgersSecondOrder;
-from    HLaSDI.Physics                 import  Explicit, ExplicitSecondOrder;
-# from    HLaSDI.Physics.Advection        import  Advection;             # mfem dependency.
-# from  HLaSDI.Physics.NonlinearElasticity    import  NonlinearElasticity;   # mfem dependency.
-# from  HLaSDI.Physics.WaveEquation       import  WaveEquation;          # mfem dependency.
-# from  HLaSDI.Physics.KleinGordon        import  KleinGordon;           # mfem dependency.
-# from  HLaSDI.Physics.Telegraphers       import  Telegraphers;          # mfem dependency.
-
-from    HLaSDI.Sample                  import  Sampler, FOM_Rollout, FOM_Variance, ROM_Discrepancy;
-from    HLaSDI.Schemas                 import  ExperimentConfig, validate_experiment_config;
+from    HLaSDI.Sample                       import  Sampler, FOM_Rollout, FOM_Variance, ROM_Discrepancy;
+from    HLaSDI.Schemas                      import  ExperimentConfig, validate_experiment_config;
 
 # Set up logger.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
@@ -58,8 +63,8 @@ ld_dict = {                     'sindy'                     : SINDy,
                                 'spring_w'                  : DampedSpring_weak,
                                 'switch'                    : SwitchSINDy,
                                 'switch_w'                  : SwitchSINDy_weak,
-                                    'cable'                     : CABLE,
-                                    'cable_w'                   : CABLE_weak};
+                                'cable'                     : CABLE,
+                                'cable_w'                   : CABLE_weak};
 
 trainer_dict = {                'First_Order_Rollout'       : First_Order_Rollout,
                                 'First_Order_Weak'          : First_Order_Weak,
@@ -75,14 +80,13 @@ physics_dict = {                'Burgers'                   : Burgers.Burgers,
                                 'Burgers2D'                 : Burgers2D.Burgers2D,
                                 'Explicit'                  : Explicit.Explicit,
                                 'ExplicitSecondOrder'       : ExplicitSecondOrder.Explicit,
-                                'Thermal'                   : Thermal.Thermal,
-                                'Advection'                 : Advection.Advection,                           # mfem dependency
-                                # 'NonlinearElasticity'       : NonlinearElasticity.NonlinearElasticity,       # mfem dependency
-                                # 'WaveEquation'              : WaveEquation.WaveEquation,                      # mfem dependency
-                                # 'KleinGordon'               : KleinGordon.KleinGordon,                        # mfem dependency
-                                # 'Telegraphers'              : Telegraphers.Telegraphers                       # mfem dependency
-                                };
-
+                                'Thermal'                   : Thermal.Thermal};
+if Advection is not None:
+    physics_dict.update({       'Advection'                 : Advection,
+                                'NonlinearElasticity'       : NonlinearElasticity,
+                                'WaveEquation'              : WaveEquation,
+                                'KleinGordon'               : KleinGordon,
+                                'Telegraphers'              : Telegraphers});
 
 
 # -------------------------------------------------------------------------------------------------
@@ -313,6 +317,8 @@ def Initialize_Physics(config: ExperimentConfig, param_names : list[str]) -> Phy
     LOGGER.info("Initializing Physics (%s)" % physics_type);
 
     # Next, initialize the "physics" object we are using to build the simulations.
+    if physics_type not in physics_dict:
+      raise ImportError(f"Physics model '{physics_type}' is not available. If this is an MFEM-based model, install mfem and mpi4py.");
     physics         : Physics   = physics_dict[physics_type](physics_cfg, param_names);
 
     # All done!
