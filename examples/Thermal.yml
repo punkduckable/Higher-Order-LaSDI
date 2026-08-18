@@ -83,13 +83,23 @@ latent_dynamics:
   type:                     cable
   trainable:                true
   loss_weights: 
-    LD:                     20.0
-    coef:                   1.0
-    stab:                   0.005
-  switch_w:
-    test_func_type:         'PC-poly'
-    test_func_width:        100.0
-    overlap:                0.85
+    LD:                     1.0
+    diversity:              0.0005
+    coef:                   0.0001
+    tail:                   0.1
+  cable:
+    n_experts:              16
+    n_active:               4
+    hidden_widths:          [64, 64]
+    activations:            ['tanh', 'tanh']
+    use_biases:             true 
+    use_z_in_gate:          false
+    coef_norm:              'l2'
+    eps_engaged:            0.001
+    use_mask:               true
+    mask_threshold:         0.0005
+    first_mask_step:        1000
+    mask_update_freq:       250
 
 physics:
   type:                     Thermal
