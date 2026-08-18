@@ -171,6 +171,7 @@ class CABLE_weak(WeakLatentDynamics, CABLE):
         loss_LD_list        : list[torch.Tensor]      = [];
         loss_tail_list      : list[torch.Tensor]      = [];
         weights_list        : list[torch.Tensor]      = [];
+        n_engaged_list      : list[torch.Tensor]      = [];
         tail_mass_list      : list[torch.Tensor]      = [];
         metrics             : dict[str, torch.Tensor] = {};
         summed_weights      : torch.Tensor            = torch.zeros((self.n_experts), dtype = self.unmasked_A.dtype, device = self.unmasked_A.device);
@@ -213,6 +214,7 @@ class CABLE_weak(WeakLatentDynamics, CABLE):
             # through the tail-mass loss, not by discontinuously truncating the RHS.
             ith_weights : torch.Tensor = self._weights_for_t_grid(ith_t_Grid, ith_params, t0 = ith_t_Grid[0], t_span = ith_t_Grid[-1] - ith_t_Grid[0]);
             weights_list.append(ith_weights.to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype));
+            n_engaged_list.append(torch.sum(ith_weights > 0.001, dim = 1).to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype));
             ith_RHS : torch.Tensor = self._evaluate_torch_rhs_from_weights(ith_Z, ith_weights);
 
             # Weak residual. Following the weak-form convention used by the other latent dynamics
@@ -253,8 +255,10 @@ class CABLE_weak(WeakLatentDynamics, CABLE):
         # Dense gate/tail diagnostics across all parameters and times.
         weights     : torch.Tensor = torch.cat(weights_list, dim = 0);
         tail_masses : torch.Tensor = torch.cat(tail_mass_list, dim = 0);
-        metrics.update(tensor_statistics(prefix = "expert/weights", values = weights));
-        metrics.update(tensor_statistics(prefix = "mass/tail",      values = tail_masses));
+        n_engaged   : torch.Tensor = torch.cat(n_engaged_list, dim = 0);
+        metrics.update(tensor_statistics(prefix = "expert/weights",      values = weights));
+        metrics.update(tensor_statistics(prefix = "mass/tail",           values = tail_masses));
+        metrics.update(tensor_statistics(prefix = "experts/num_engaged", values = n_engaged));
 
         # Coefficient loss is the sum of the selected norms of each expert matrix plus each
         # optional expert bias. The masked `A`/`b` properties ensure removed coefficients do not

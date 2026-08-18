@@ -83,7 +83,6 @@ def _switch_w_config(trainable=True):
 def _cable_config(trainable=True, n_active=2):
     return CABLELatentDynamicsConfig.model_validate({
         "type": "cable",
-        "interpolator_type": "GP",
         "trainable": trainable,
         "loss_weights": {"LD": 1.0, "coef": 1.0, "diversity": 1.0, "tail": 1.0},
         "cable": {
@@ -111,7 +110,6 @@ def _cable_config_with_settings(trainable=True, n_active=2, **settings):
     cable_settings.update(settings)
     return CABLELatentDynamicsConfig.model_validate({
         "type": "cable",
-        "interpolator_type": "GP",
         "trainable": trainable,
         "loss_weights": {"LD": 1.0, "coef": 1.0, "diversity": 1.0, "tail": 1.0},
         "cable": cable_settings,
@@ -121,7 +119,6 @@ def _cable_config_with_settings(trainable=True, n_active=2, **settings):
 def _cable_w_config(trainable=True, n_active=2):
     return WeakCABLELatentDynamicsConfig.model_validate({
         "type": "cable_w",
-        "interpolator_type": "GP",
         "trainable": trainable,
         "loss_weights": {"LD": 1.0, "coef": 1.0, "diversity": 1.0, "tail": 1.0},
         "cable": {
@@ -380,6 +377,10 @@ def test_cable_compute_losses_uses_dense_pre_topk_weights_for_diversity_and_tail
     # The tail-mass penalty is therefore mean(0.5**2) = 0.25.
     assert torch.allclose(losses["tail"], torch.tensor(0.25))
     assert torch.allclose(result.metrics["loss/tail/total"], torch.tensor(0.25))
+    assert torch.allclose(result.metrics["experts/num_engaged/mean"], torch.tensor(2.0))
+    assert torch.allclose(result.metrics["experts/num_engaged/std"], torch.tensor(0.0))
+    assert torch.allclose(result.metrics["experts/num_engaged/min"], torch.tensor(2.0))
+    assert torch.allclose(result.metrics["experts/num_engaged/max"], torch.tensor(2.0))
     assert torch.allclose(ld.last_tail_mass_loss, torch.tensor(0.25))
     assert len(ld.last_tail_mass_loss_list) == 1
     assert torch.allclose(ld.last_tail_mass_loss_list[0], torch.tensor(0.25))
@@ -428,3 +429,7 @@ def test_cable_weak_compute_losses_returns_scalar_totals_and_metrics():
     assert all(loss.ndim == 0 for loss in result.losses.values())
     assert torch.allclose(result.losses["LD"], torch.tensor(0.0))
     assert torch.allclose(result.metrics["loss/LD/total"], torch.tensor(0.0))
+    assert torch.allclose(result.metrics["experts/num_engaged/mean"], torch.tensor(2.0))
+    assert torch.allclose(result.metrics["experts/num_engaged/std"], torch.tensor(0.0))
+    assert torch.allclose(result.metrics["experts/num_engaged/min"], torch.tensor(2.0))
+    assert torch.allclose(result.metrics["experts/num_engaged/max"], torch.tensor(2.0))
