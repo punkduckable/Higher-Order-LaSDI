@@ -3,6 +3,7 @@
 # -------------------------------------------------------------------------------------------------
 
 import  os;
+import  time;
 
 import  json;
 import  logging;
@@ -306,12 +307,14 @@ class Trainer:
         project_dir = os.path.abspath(os.path.join(src_dir, os.pardir, os.pardir, os.pardir));  # .../Higher-Order-LaSDI
         self.path_checkpoint    : str = os.path.join(project_dir, "checkpoint");
         self.path_results       : str = os.path.join(project_dir, "results");
+        self.checkpoint_path    : str = os.path.join(self.path_checkpoint, "checkpoint_%d_%d.pt" % (time.time_ns(), os.getpid()));
 
         # Make sure the checkpoints and results directories exist.
         from pathlib import Path;
         Path(self.path_checkpoint).mkdir(   parents = True, exist_ok = True);
         Path(self.path_results).mkdir(      parents = True, exist_ok = True);
         LOGGER.info("Checkpoint directory: %s" % self.path_checkpoint);
+        LOGGER.info("Checkpoint file: %s" % self.checkpoint_path);
         LOGGER.info("Results directory: %s" % self.path_results);
 
         # Build a loss cache; this will be a list whose entries are tuples of the form:
@@ -776,9 +779,6 @@ class Trainer:
             A string housing the path to the file housing the saved checkpoint.
         """
 
-        # Set up the checkpoint path.
-        checkpoint_path : str = self.path_checkpoint + '/' + 'checkpoint.pt';
-
         # Fetch a detached CPU copy of the encoder-decoder parameters without moving the live model.
         with torch.no_grad():
             model_state: dict[str, torch.Tensor] = {
@@ -791,9 +791,9 @@ class Trainer:
         torch.save({"EncoderDecoder_state_dict"     : model_state,
                     "latent_dynamics"               : self.latent_dynamics.export(),
                     "iteration number"              : iter},
-                    checkpoint_path);
+                    self.checkpoint_path);
 
-        return checkpoint_path;
+        return self.checkpoint_path;
 
 
 
@@ -822,14 +822,11 @@ class Trainer:
             The iteration number corresponding to when the checkpoint was made.
         """
 
-        # Set up the checkpoint path.
-        checkpoint_path : str = self.path_checkpoint + '/' + 'checkpoint.pt';
-
         # Load the checkpoint.
         # NOTE: PyTorch >= 2.6 defaults `weights_only=True`, which disallows loading arbitrary
         # pickled objects. Our checkpoint intentionally stores dictionaries of tensors, so we must
         # set `weights_only=False`.
-        checkpoint_dict : dict = torch.load(checkpoint_path, map_location = 'cpu', weights_only = False);
+        checkpoint_dict : dict = torch.load(self.checkpoint_path, map_location = 'cpu', weights_only = False);
 
         # Load the EncoderDecoder state dictionary.
         self.encoder_decoder.cpu().load_state_dict(checkpoint_dict["EncoderDecoder_state_dict"]);
