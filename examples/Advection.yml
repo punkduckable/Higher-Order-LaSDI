@@ -1,9 +1,9 @@
 trainer:
   type:                     "First_Order_Rollout"
 
-  max_iter:                 12000
-  n_iter:                   4000
-  max_greedy_iter:          12000
+  max_iter:                 4000
+  n_iter:                   2000
+  max_greedy_iter:          4000
 
   # If true, compute a single global mean/std from TRAINING data only, and normalize
   # all training/testing trajectories using these values.
@@ -26,7 +26,7 @@ trainer:
 
     p_IC_rollout_init:      0.01
     IC_rollout_update_freq: 10
-    IC_dp_per_update:       0.005
+    IC_dp_per_update:       0.01
     max_p_IC_rollout:       1.0       # Maximum proportion of the time window used for IC rollout loss.
 
     warmup_epochs:          80        # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
@@ -79,9 +79,9 @@ latent_dynamics:
   trainable:                true
   loss_weights: 
     LD:                     1.0
-    diversity:              0.001
-    coef:                   0.00005
-    tail:                   0.05
+    diversity:              0.0005
+    coef:                   0.0001
+    tail:                   0.1
   cable: 
     n_experts:              16
     n_active:               4
@@ -91,9 +91,9 @@ latent_dynamics:
     coef_norm:              'l2'
     use_mask:               true
     eps_engaged:            0.001
-    mask_threshold:         0.001
+    mask_threshold:         0.0005
     first_mask_step:        1000
-    mask_update_freq:       1000
+    mask_update_freq:       250
 
 physics:
   type:                     Advection

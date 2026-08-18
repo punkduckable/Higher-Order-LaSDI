@@ -34,11 +34,23 @@ class _EncoderDecoder(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.dummy = torch.nn.Parameter(torch.zeros(()))
+        self.n_IC = 1
         self.to_calls = []
 
     def to(self, *args, **kwargs):
         self.to_calls.append(args[0] if len(args) > 0 else kwargs.get("device"))
         return super().to(*args, **kwargs)
+
+    def latent_initial_conditions(self, FOM_IC):
+        ROM_IC = []
+        for ith_FOM_IC in FOM_IC:
+            ROM_IC.append([numpy.array([float(ith_FOM_IC[0][0]), 0.0])])
+        return ROM_IC
+
+
+class _Physics:
+    def initial_condition(self, param):
+        return [numpy.array([float(param[0])])]
 
 
 class _LatentDynamics:
@@ -60,14 +72,13 @@ class _Trainer:
         self.param_space = _ParamSpace()
         self.encoder_decoder = _EncoderDecoder()
         self.latent_dynamics = _LatentDynamics()
-        self.physics = object()
+        self.physics = _Physics()
         self.t_Train = [
             torch.tensor([0.0, 0.25, 1.0], dtype = torch.float64),
             numpy.array([0.0, 0.5, 1.5], dtype = numpy.float64),
         ]
         self.t_Test = []
         self.U_Test = []
-        self.checked_train_coefficients = False
         self.restart_iter = 12
         self.cached_metrics = []
         self.flushed_epochs = []
@@ -84,7 +95,8 @@ def test_rom_discrepancy_samples_candidate_with_largest_minimum_rhs_discrepancy(
     rom_module = importlib.import_module("HLaSDI.Sample.ROM_Discrepancy")
     rollout_calls = []
 
-    def mean_rollout(encoder_decoder, physics, latent_dynamics, param_grid, t_Grid, trainer):
+    def mean_rollout(ROM_IC, latent_dynamics, param_grid, t_Grid):
+        assert len(ROM_IC) == param_grid.shape[0]
         rollout_calls.append((param_grid.copy(), t_Grid))
         Zis = []
         for j in range(param_grid.shape[0]):
@@ -101,7 +113,6 @@ def test_rom_discrepancy_samples_candidate_with_largest_minimum_rhs_discrepancy(
     next_step = sampler.Sample(trainer)
 
     assert next_step == NextStep.RunSample
-    assert trainer.checked_train_coefficients
     assert trainer.cached_metrics[0][0] == "time/new_sample"
     assert trainer.cached_metrics[0][1] >= 0.0
     assert trainer.flushed_epochs == [trainer.restart_iter]

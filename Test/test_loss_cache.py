@@ -47,18 +47,27 @@ def test_cache_metric_writes_one_jsonl_row_and_preserves_keys(tmp_path):
     ]
 
 
-def test_cache_metric_rejects_non_tensor_metric():
+def test_cache_metric_accepts_python_scalar_timing(tmp_path):
+    dummy = _MetricsCacheDummy(tmp_path / "Dummy_metrics.jsonl")
+
+    Trainer._cache_metric(dummy, "time/step", 1.0)
+    flushed = Trainer._flush_metrics_cache(dummy, 3)
+
+    assert flushed["time/step"] == 1.0
+
+
+def test_cache_metric_rejects_unsupported_metric_type():
     dummy = _MetricsCacheDummy("unused.jsonl")
 
-    with pytest.raises(AssertionError, match="value must be a torch.Tensor"):
-        Trainer._cache_metric(dummy, "bad_metric", 1.0)
+    with pytest.raises(TypeError, match="detached scalar torch.Tensor or a Python scalar"):
+        Trainer._cache_metric(dummy, "bad_metric", object())
 
 
 def test_flush_metrics_cache_rejects_nonfinite_metrics(tmp_path):
     dummy = _MetricsCacheDummy(tmp_path / "Dummy_metrics.jsonl")
     Trainer._cache_metric(dummy, "nan_metric", torch.tensor(float("nan")))
 
-    with pytest.raises(AssertionError, match="cached metrics tensors must be finite"):
+    with pytest.raises(AssertionError, match="cached tensor metrics must be finite"):
         Trainer._flush_metrics_cache(dummy, 1)
 
 
