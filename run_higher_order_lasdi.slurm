@@ -30,7 +30,7 @@ set -u
 
 # ----------------------------- User settings ------------------------------
 # Name of the example file in ./examples. Include the .yml extension.
-Example="Advection.yml"
+Example="Thermal.yml"
 
 # Repository root. Leave empty to auto-detect. If auto-detection fails on your
 # system, set this to the absolute path of the Higher-Order-LaSDI checkout, e.g.

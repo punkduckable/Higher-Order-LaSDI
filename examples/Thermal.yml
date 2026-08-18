@@ -45,13 +45,7 @@ workflow:
   restart_file:           
 
 sampler: 
-  type:                     'FOM_Rollout'
-  FOM_Rollout:
-    sample_test_LD:         True            # True: sample LD rollouts; False: use mean LD rollout.
-    n_samples:              20              # Required only when sample_test_LD is True.
-    normalized_FOM:         True            # Compute absolute errors using normalized or de-normalized values?
-    error_normalization:    none            # none | global_std | trajectory_std
-    eps:                    0.01
+  type:                     'ROM_Discrepancy'
 
 parameter_space:
   parameters:
@@ -86,29 +80,26 @@ EncoderDecoder:
     conv_activations:       ["silu", "silu", "silu"]
 
 latent_dynamics:
-  interpolator:
-    type:                   GP
-    GP:
-      kernel:
-        type:               Matern
-        length_scale:       1.0
-        length_scale_bounds: [1.0, 1.0e3]
-        nu:                 2.5
-      constant_value:       1.0
-      constant_value_bounds: [1.0e-3, 1.0e3]
-      alpha:                4.0e-4
-      n_restarts_optimizer: 10
-      random_state:         1
-  type:                     switch_w
+  type:                     cable
   trainable:                true
   loss_weights: 
-    LD:                     20.0
-    coef:                   1.0
-    stab:                   0.005
-  switch_w:
-    test_func_type:         'PC-poly'
-    test_func_width:        100.0
-    overlap:                0.85
+    LD:                     1.0
+    diversity:              0.0005
+    coef:                   0.0001
+    tail:                   0.1
+  cable:
+    n_experts:              16
+    n_active:               4
+    hidden_widths:          [64, 64]
+    activations:            ['tanh', 'tanh']
+    use_biases:             true 
+    use_z_in_gate:          false
+    coef_norm:              'l2'
+    eps_engaged:            0.001
+    use_mask:               true
+    mask_threshold:         0.0005
+    first_mask_step:        1000
+    mask_update_freq:       250
 
 physics:
   type:                     Thermal
