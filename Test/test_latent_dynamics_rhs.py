@@ -159,6 +159,41 @@ def _zero_cable_gate(ld):
         torch.nn.init.zeros_(layer.bias)
 
 
+def test_cable_rhs_can_use_latent_state_in_gate_inputs():
+    params = numpy.array([[0.25]])
+    t = torch.tensor([0.0, 1.0], dtype=torch.float64)
+    z = torch.tensor([[-1.0], [1.0]], dtype=torch.float64)
+
+    ld = CABLE(
+        n_z=1,
+        Uniform_t_Grid=True,
+        n_p=1,
+        config=_cable_config_with_settings(use_z_in_gate=True, hidden_widths=[1]),
+    )
+    with torch.no_grad():
+        first, second = ld.w.layers
+        first.weight.zero_()
+        first.bias.zero_()
+        second.weight.zero_()
+        second.bias.zero_()
+        # Gate inputs are [tau, params, z]. Make the logits depend only on z.
+        first.weight[0, -1] = 1.0
+        second.weight[0, 0] = 1.0
+        second.weight[1, 0] = -1.0
+    ld.unmasked_A = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.tensor([[[0.0]], [[1.0]]], dtype=torch.float32, requires_grad=True)
+
+    rhs = ld.RHS(Z=[[z]], t_Grid=[t], params=params)[0]
+
+    hidden = torch.tanh(z[:, 0].to(dtype=torch.float32))
+    expected_weights = torch.softmax(torch.stack([hidden, -hidden], dim=1), dim=1)
+    expected = expected_weights[:, 1].to(dtype=z.dtype).reshape(-1, 1)
+    assert isinstance(rhs, torch.Tensor)
+    assert rhs.shape == z.shape
+    assert torch.allclose(rhs, expected)
+    assert rhs[0, 0] > rhs[1, 0]
+
+
 def test_sindy_rhs_matches_affine_model_for_strong_and_weak():
     params = numpy.array([[0.25]])
     t = torch.tensor([0.0, 0.5, 1.0], dtype=torch.float64)

@@ -214,7 +214,7 @@ class CABLE_weak(WeakLatentDynamics, CABLE):
             # Evaluate dense expert weights and the CABLE RHS on the latent trajectory. We keep the
             # dense pre-top-k weights here because the top-k sparsity target is enforced only
             # through the tail-mass loss, not by discontinuously truncating the RHS.
-            ith_weights : torch.Tensor = self._weights_for_t_grid(ith_t_Grid, ith_params, t0 = ith_t_Grid[0], t_span = ith_t_Grid[-1] - ith_t_Grid[0]);
+            ith_weights : torch.Tensor = self._weights(ith_t_Grid, ith_Z, ith_params, t0 = ith_t_Grid[0], t_span = ith_t_Grid[-1] - ith_t_Grid[0]);
             weights_list.append(ith_weights.to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype));
             ith_RHS : torch.Tensor = self._evaluate_torch_rhs_from_weights(ith_Z, ith_weights);
 

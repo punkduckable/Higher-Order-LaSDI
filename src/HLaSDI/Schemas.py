@@ -547,6 +547,10 @@ class CABLELatentDynamicsSettings(ConfigBase):
     # Should each expert include a bias?
     use_biases : bool
 
+    # Should we include the LD state in the gate inputs? If not, we only use the time and
+    # parameter values.
+    use_z_in_gate : bool = False
+
     # Which (vector) norm should we use for the coefficient loss? This is applied to the flattened
     # expert coefficients for each expert.
     coef_norm : Literal['l1', 'l2']
