@@ -456,8 +456,10 @@ class CABLE(LatentDynamics):
         self.last_tail_mass_loss_list = [loss.detach() for loss in loss_tail_list];
 
         # All done :)
-        metrics["loss/diversity/total"]   = loss_diversity.detach();
-        metrics["loss/coef/total"]        = loss_coef.detach();
+        metrics["loss/diversity/total"] = loss_diversity.detach();
+        metrics["loss/coef/total"]      = loss_coef.detach();
+        metrics["loss/coef/A"]          = A_norms.detach();
+        metrics["loss/coef/b"]          = b_norms.detach();
         loss_LD     : torch.Tensor      = torch.sum(torch.stack(loss_LD_list));
         loss_tail   : torch.Tensor      = torch.sum(torch.stack(loss_tail_list));
         metrics["loss/LD/total"]        = loss_LD.detach();

@@ -12,6 +12,7 @@ from    HLaSDI.LatentDynamics.Interpolatable   import  InterpolatableLatentDynam
 from    HLaSDI.LatentDynamics.LatentDynamics   import  LD_Loss_Container;
 from    HLaSDI.LatentDynamics.DampedSpring     import  DampedSpring;
 from    HLaSDI.Schemas                         import  DampedSpringWeakLatentDynamicsConfig;
+from    HLaSDI.Utilities.Statistics            import  tensor_statistics;
 
 
 # Setup Logger.
@@ -248,10 +249,15 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
         assert len(Latent_States) == len(t_Grid) == params.shape[0];
 
         # Setup
-        loss_LD_list   : list[torch.Tensor]         = [];
-        loss_coef_list : list[torch.Tensor]         = [];
-        loss_stab_list : list[torch.Tensor]         = [];
-        metrics        : dict[str, torch.Tensor]    = {};
+        loss_LD_list            : list[torch.Tensor]        = [];
+        loss_coef_list          : list[torch.Tensor]        = [];
+        loss_stab_list          : list[torch.Tensor]        = [];
+        coef_K_fro_list         : list[torch.Tensor]        = [];
+        coef_C_fro_list         : list[torch.Tensor]        = [];
+        coef_b_l2_list          : list[torch.Tensor]        = [];
+        lambda_max_list         : list[torch.Tensor]        = [];
+        weight_fun_residuals    : list[torch.Tensor]        = [];
+        metrics                 : dict[str, torch.Tensor]   = {};
 
         # -----------------------------------------------------------------------------------------
         # Loop over parameter combinations.
@@ -309,6 +315,11 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
 
             loss_D = self.MSE(lhs_D / scale_D, weak_RHS / scale_D);
             loss_V = self.MSE(lhs_V / scale_V, weak_RHS / scale_V);
+
+            # Approximate the L2 (integral) norm of phi_h'(t) z(t) - phi_h(t)  f(z(t), t, theta)
+            residual_D : torch.Tensor = (lhs_D - weak_RHS) / scale_D;
+            residual_V : torch.Tensor = (lhs_V - weak_RHS) / scale_V;
+            weight_fun_residuals.append(torch.sqrt(0.5*torch.mean(residual_D**2, dim = 1) + 0.5*torch.mean(residual_V**2, dim = 1)));
             
 
             Loss_LD_i = 0.5 * loss_D + 0.5 * loss_V;
@@ -320,15 +331,23 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
             A_top    = torch.cat([Z0, I], dim = 1);
             A_bottom = torch.cat([K, C], dim = 1);
             A = torch.cat([A_top, A_bottom], dim = 0);
-            Loss_Stab_i = self.stability_penalty(A);
+            lambda_max = torch.linalg.eigvalsh(0.5*(A + A.T)).max();
+            Loss_Stab_i = torch.nn.functional.softplus(lambda_max + 0.1);
 
             # Compute coefficient loss.
-            Loss_coef_i = torch.norm(K, 'fro') + torch.norm(C, 'fro') + torch.norm(b);
+            coef_K_fro = torch.norm(K, 'fro');
+            coef_C_fro = torch.norm(C, 'fro');
+            coef_b_l2  = torch.norm(b);
+            Loss_coef_i = coef_K_fro + coef_C_fro + coef_b_l2;
 
             # Package the results from this combination of parameter values.
             loss_LD_list.append(Loss_LD_i);
             loss_stab_list.append(Loss_Stab_i);
             loss_coef_list.append(Loss_coef_i);
+            coef_K_fro_list.append(coef_K_fro);
+            coef_C_fro_list.append(coef_C_fro);
+            coef_b_l2_list.append(coef_b_l2);
+            lambda_max_list.append(lambda_max);
             metrics[f"loss/LD/{str(params[i, :])}"]     = Loss_LD_i.detach();
             metrics[f"loss/coef/{str(params[i, :])}"]   = Loss_coef_i.detach();
             metrics[f"loss/stab/{str(params[i, :])}"]   = Loss_Stab_i.detach();
@@ -339,6 +358,12 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
         metrics["loss/LD/total"]    = loss_LD.detach();
         metrics["loss/coef/total"]  = loss_coef.detach();
         metrics["loss/stab/total"]  = loss_stab.detach();
+        metrics.update(tensor_statistics(prefix = "coef/K/fro", values = torch.stack(coef_K_fro_list)));
+        metrics.update(tensor_statistics(prefix = "coef/C/fro", values = torch.stack(coef_C_fro_list)));
+        metrics.update(tensor_statistics(prefix = "coef/b/l2",  values = torch.stack(coef_b_l2_list)));
+        metrics["stability/lambda_max/mean"] = torch.mean(torch.stack(lambda_max_list)).detach();
+        metrics["stability/lambda_max/max"]  = torch.max(torch.stack(lambda_max_list)).detach();
+        metrics.update(tensor_statistics(prefix = "weak/residual_per_weight_function", values = torch.cat(weight_fun_residuals, dim = 0)));
 
         losses_dict = {'LD' : loss_LD, 'coef' : loss_coef, 'stab' : loss_stab};
 

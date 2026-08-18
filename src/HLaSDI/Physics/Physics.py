@@ -311,11 +311,16 @@ class Physics:
         Loads self's internal state from the dictionary dict_.
         """
 
-        self.config         : dict          = dict_['config'];
-        self.param_names    : list[str]     = dict_['param_names'];
-        self.X_Positions    : numpy.ndarray = dict_['X_Positions'];
-        self.Frame_Shape    : list[int]     = dict_['Frame_Shape'];
-        self.Uniform_t_Grid : bool          = dict_['Uniform_t_Grid'];
+        config = dict_['config'];
+        if isinstance(config, dict):
+            config = type(self.config).model_validate(config);
+        assert isinstance(config, BasePhysicsConfig), "physics config must be a BasePhysicsConfig, got %s" % str(type(config));
+
+        self.config         : BasePhysicsConfig = config;
+        self.param_names    : list[str]         = dict_['param_names'];
+        self.X_Positions    : numpy.ndarray     = dict_['X_Positions'];
+        self.Frame_Shape    : list[int]         = dict_['Frame_Shape'];
+        self.Uniform_t_Grid : bool              = dict_['Uniform_t_Grid'];
         return;
     
 

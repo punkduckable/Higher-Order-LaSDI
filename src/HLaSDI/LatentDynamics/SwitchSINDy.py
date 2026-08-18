@@ -12,6 +12,7 @@ from    HLaSDI.LatentDynamics.LatentDynamics   import  LD_Loss_Container;
 from    HLaSDI.Schemas                         import  SwitchSINDyLatentDynamicsConfig;
 from    HLaSDI.Utilities.FiniteDifference      import  Derivative1_Order4, Derivative1_Order2_NonUniform;
 from    HLaSDI.Utilities.FirstOrderSolvers     import  RK4;
+from    HLaSDI.Utilities.Statistics            import  tensor_statistics;
 
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
@@ -257,10 +258,16 @@ class SwitchSINDy(InterpolatableLatentDynamics):
 
         # Prepare containers for the three loss components returned to the Trainer. The Trainer
         # applies the user-specified weights and sums these values into the total objective.
-        loss_LD_list   : list[torch.Tensor]         = [];
-        loss_coef_list : list[torch.Tensor]         = [];
-        loss_stab_list : list[torch.Tensor]         = [];
-        metrics        : dict[str, torch.Tensor]    = {};
+        loss_LD_list            : list[torch.Tensor]        = [];
+        loss_coef_list          : list[torch.Tensor]        = [];
+        loss_stab_list          : list[torch.Tensor]        = [];
+        coef_A_before_fro_list  : list[torch.Tensor]        = [];
+        coef_b_before_l2_list   : list[torch.Tensor]        = [];
+        coef_A_after_fro_list   : list[torch.Tensor]        = [];
+        coef_b_after_l2_list    : list[torch.Tensor]        = [];
+        lambda_before_list      : list[torch.Tensor]        = [];
+        lambda_after_list       : list[torch.Tensor]        = [];
+        metrics                 : dict[str, torch.Tensor]   = {};
 
         # -----------------------------------------------------------------------------------------
         # Loop over parameter combinations.
@@ -324,16 +331,28 @@ class SwitchSINDy(InterpolatableLatentDynamics):
             # -------------------------------------------------------------------------------------
 
             # Coefficient regularization: penalize the sizes of both affine systems.
-            loss_coef = torch.norm(A_before, 'fro') + torch.norm(b_before) + torch.norm(A_after, 'fro') + torch.norm(b_after);
+            coef_A_before_fro = torch.norm(A_before, 'fro');
+            coef_b_before_l2  = torch.norm(b_before);
+            coef_A_after_fro  = torch.norm(A_after, 'fro');
+            coef_b_after_l2   = torch.norm(b_after);
+            loss_coef = coef_A_before_fro + coef_b_before_l2 + coef_A_after_fro + coef_b_after_l2;
 
             # Stability regularization: apply the base-class differentiable stability penalty to
             # each linear part. The constant terms b_before/b_after do not affect linear stability.
-            loss_stab = self.stability_penalty(A_before) + self.stability_penalty(A_after);
+            lambda_before = torch.linalg.eigvalsh(0.5*(A_before + A_before.T)).max();
+            lambda_after  = torch.linalg.eigvalsh(0.5*(A_after  + A_after.T)).max();
+            loss_stab = torch.nn.functional.softplus(lambda_before + 0.1) + torch.nn.functional.softplus(lambda_after + 0.1);
 
             # Package this parameter's losses.
             loss_LD_list.append(loss_LD);
             loss_coef_list.append(loss_coef);
             loss_stab_list.append(loss_stab);
+            coef_A_before_fro_list.append(coef_A_before_fro);
+            coef_b_before_l2_list.append(coef_b_before_l2);
+            coef_A_after_fro_list.append(coef_A_after_fro);
+            coef_b_after_l2_list.append(coef_b_after_l2);
+            lambda_before_list.append(lambda_before);
+            lambda_after_list.append(lambda_after);
             metrics[f"loss/LD/{str(params[i, :])}"]     = loss_LD.detach();
             metrics[f"loss/coef/{str(params[i, :])}"]   = loss_coef.detach();
             metrics[f"loss/stab/{str(params[i, :])}"]   = loss_stab.detach();
@@ -344,6 +363,14 @@ class SwitchSINDy(InterpolatableLatentDynamics):
         metrics["loss/LD/total"]    = loss_LD.detach();
         metrics["loss/coef/total"]  = loss_coef.detach();
         metrics["loss/stab/total"]  = loss_stab.detach();
+        metrics.update(tensor_statistics(prefix = "coef/A_before/fro",  values = torch.stack(coef_A_before_fro_list)));
+        metrics.update(tensor_statistics(prefix = "coef/b_before/l2",   values = torch.stack(coef_b_before_l2_list)));
+        metrics.update(tensor_statistics(prefix = "coef/A_after/fro",   values = torch.stack(coef_A_after_fro_list)));
+        metrics.update(tensor_statistics(prefix = "coef/b_after/l2",    values = torch.stack(coef_b_after_l2_list)));
+        metrics["stability/lambda_max_before/mean"] = torch.mean(torch.stack(lambda_before_list)).detach();
+        metrics["stability/lambda_max_before/max"]  = torch.max(torch.stack(lambda_before_list)).detach();
+        metrics["stability/lambda_max_after/mean"]  = torch.mean(torch.stack(lambda_after_list)).detach();
+        metrics["stability/lambda_max_after/max"]   = torch.max(torch.stack(lambda_after_list)).detach();
 
         losses_dict = {'LD' : loss_LD, 'coef' : loss_coef, 'stab' : loss_stab};
 

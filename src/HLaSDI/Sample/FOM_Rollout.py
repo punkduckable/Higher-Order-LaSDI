@@ -192,6 +192,7 @@ class FOM_Rollout(Sampler):
         # ---------------------------------------------------------------------------------------------
         # Generate the latent trajectories.
 
+        rollout_timer : float = time.perf_counter();
         if self.sample_test_LD:
             LOGGER.debug("Sampling roms with %d rollouts per candidate" % self.n_samples);
             Zis_Samples : list[list[numpy.ndarray]] = Sample_Rollouts(
@@ -220,11 +221,14 @@ class FOM_Rollout(Sampler):
                 for Zij_raw in Zi_raw:
                     ith_Zs.append(numpy.expand_dims(Zij_raw, axis = 1));
                 Zis_Samples.append(ith_Zs);
+        rollout_time : float = time.perf_counter() - rollout_timer;
                     
 
         # ---------------------------------------------------------------------------------------------
         # Decode the samples and compute relative errors
 
+        scoring_timer : float = time.perf_counter();
+        decode_time : float = 0.0;
         LOGGER.debug("Setting up arrays to hold relative errors");
         n_samples   : int   = self.n_samples if self.n_samples is not None else 1;
         n_IC        : int   = trainer.n_IC;
@@ -274,6 +278,7 @@ class FOM_Rollout(Sampler):
 
         max_Total_Rel_Error : float = -1.0;
         m_index             : int   = 0;
+        Candidate_Scores    : numpy.ndarray = numpy.zeros((n_candidates), dtype = numpy.float32);
 
         # Candidate_parameters is a list[ndarray]; make it an ndarray for indexing/logging.
         candidate_parameters = numpy.asarray(candidate_parameters);
@@ -313,7 +318,9 @@ class FOM_Rollout(Sampler):
                     Zis_sample_ij : list[torch.Tensor] = [];
                     for k in range(n_IC):
                         Zis_sample_ij.append(torch.Tensor(Zis_Samples[i][k][:, j, :]));
+                    decode_timer : float = time.perf_counter();
                     U_Pred_ij : tuple[torch.Tensor] = encoder_decoder.Decode(*Zis_sample_ij);
+                    decode_time += time.perf_counter() - decode_timer;
 
                     # Convert to numpy and denormalize.
                     U_pred_np = U_Pred_ij[p].detach().numpy();
@@ -333,6 +340,8 @@ class FOM_Rollout(Sampler):
                 # Add the contribution for the p'th IC to the total for the i'th candidate.
                 Total_i += float(numpy.max(mean_over_samples));
 
+            Candidate_Scores[i] = Total_i;
+
             # Check if we have a new "worst" parameter combination.
             if Total_i > max_Total_Rel_Error:
                 LOGGER.info("Found new largest sampling score (%f) with parameter combination %s" % (Total_i, str(candidate_parameters[i])));
@@ -351,7 +360,16 @@ class FOM_Rollout(Sampler):
         # stop the timer and return the parameter. 
         new_sample : numpy.ndarray = candidate_parameters[m_index, :].reshape(1, -1);
         LOGGER.info('New param: ' + str(numpy.round(new_sample, 4)) + '\n');
-        trainer._cache_metric("time/new_sample", time.perf_counter() - new_sample_timer);
+        trainer._cache_metric("time/new_sample",        time.perf_counter() - new_sample_timer);
+        trainer._cache_metric("sampler/n_candidates",   n_candidates);
+        trainer._cache_metric("sampler/score/selected", Candidate_Scores[m_index]);
+        trainer._cache_metric("sampler/score/max",      numpy.max(Candidate_Scores));
+        trainer._cache_metric("sampler/score/mean",     numpy.mean(Candidate_Scores));
+        trainer._cache_metric("sampler/score/std",      numpy.std(Candidate_Scores));
+        trainer._cache_metric("sampler/score/min",      numpy.min(Candidate_Scores));
+        trainer._cache_metric("time/sampler/rollout",   rollout_time);
+        trainer._cache_metric("time/sampler/decode",    decode_time);
+        trainer._cache_metric("time/sampler/scoring",   time.perf_counter() - scoring_timer);
         trainer._flush_metrics_cache(trainer.restart_iter);
 
         # Now, append the new sample to the training set

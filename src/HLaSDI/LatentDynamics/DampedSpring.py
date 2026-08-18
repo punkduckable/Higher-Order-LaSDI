@@ -12,6 +12,7 @@ from    HLaSDI.LatentDynamics.LatentDynamics   import  LD_Loss_Container;
 from    HLaSDI.Schemas                         import  DampedSpringLatentDynamicsConfig;
 from    HLaSDI.Utilities.FiniteDifference      import  Derivative1_Order4, Derivative1_Order2_NonUniform;
 from    HLaSDI.Utilities.SecondOrderSolvers    import  RK4;
+from    HLaSDI.Utilities.Statistics            import  tensor_statistics;
 
 
 # Setup Logger.
@@ -272,6 +273,10 @@ class DampedSpring(InterpolatableLatentDynamics):
         loss_LD_list : list[torch.Tensor] = [];
         loss_coef_list : list[torch.Tensor] = [];
         loss_stab_list : list[torch.Tensor] = [];
+        coef_K_fro_list : list[torch.Tensor] = [];
+        coef_C_fro_list : list[torch.Tensor] = [];
+        coef_b_l2_list : list[torch.Tensor] = [];
+        lambda_max_list : list[torch.Tensor] = [];
         metrics        : dict[str, torch.Tensor] = {};
 
         # -----------------------------------------------------------------------------------------
@@ -324,15 +329,23 @@ class DampedSpring(InterpolatableLatentDynamics):
             A_top    = torch.cat([Z0, I], dim = 1);
             A_bottom = torch.cat([K, C], dim = 1);
             A = torch.cat([A_top, A_bottom], dim = 0);
-            Loss_Stab = self.stability_penalty(A);
+            lambda_max = torch.linalg.eigvalsh(0.5*(A + A.T)).max();
+            Loss_Stab = torch.nn.functional.softplus(lambda_max + 0.1);
 
             # Penalize all native coefficient tensors.
-            Loss_coef = torch.norm(K, 'fro') + torch.norm(C, 'fro') + torch.norm(b);
+            coef_K_fro = torch.norm(K, 'fro');
+            coef_C_fro = torch.norm(C, 'fro');
+            coef_b_l2  = torch.norm(b);
+            Loss_coef = coef_K_fro + coef_C_fro + coef_b_l2;
 
             # Store per-parameter losses for later summation and metric logging.
             loss_LD_list.append(Loss_LD);
             loss_coef_list.append(Loss_coef);
             loss_stab_list.append(Loss_Stab);
+            coef_K_fro_list.append(coef_K_fro);
+            coef_C_fro_list.append(coef_C_fro);
+            coef_b_l2_list.append(coef_b_l2);
+            lambda_max_list.append(lambda_max);
             metrics[f"loss/LD/{str(params[i, :])}"]     = Loss_LD.detach();
             metrics[f"loss/coef/{str(params[i, :])}"]   = Loss_coef.detach();
             metrics[f"loss/stab/{str(params[i, :])}"]   = Loss_Stab.detach();
@@ -343,6 +356,11 @@ class DampedSpring(InterpolatableLatentDynamics):
         metrics["loss/LD/total"]    = loss_LD.detach();
         metrics["loss/coef/total"]  = loss_coef.detach();
         metrics["loss/stab/total"]  = loss_stab.detach();
+        metrics.update(tensor_statistics(prefix = "coef/K/fro", values = torch.stack(coef_K_fro_list)));
+        metrics.update(tensor_statistics(prefix = "coef/C/fro", values = torch.stack(coef_C_fro_list)));
+        metrics.update(tensor_statistics(prefix = "coef/b/l2",  values = torch.stack(coef_b_l2_list)));
+        metrics["stability/lambda_max/mean"] = torch.mean(torch.stack(lambda_max_list)).detach();
+        metrics["stability/lambda_max/max"]  = torch.max(torch.stack(lambda_max_list)).detach();
 
         losses_dict = {'LD' : loss_LD, 'coef' : loss_coef, 'stab' : loss_stab};
 

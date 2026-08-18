@@ -179,12 +179,15 @@ class ROM_Discrepancy(Sampler):
         # the solution to the mean latent dynamics for the i'th candidate on the j'th training time
         # grid.
         Discrepancies : numpy.ndarray = numpy.zeros((n_candidates), dtype = numpy.float32);
+        rollout_time : float = 0.0;
+        scoring_time : float = 0.0;
         for i in range(n_candidates):
             # broadcast the i'th parameter to have n_train copies of itself; this way, we can use
             # Mean_Rollout to solve the LD along each training time grid. 
             broadcast_ith_candidate = numpy.broadcast_to(candidate_parameters[i, :], (n_train, n_param));
 
             # Solve the LD for the i'th candidate at each time training time grid. 
+            rollout_timer : float = time.perf_counter();
             Zis_Mean : list[list[numpy.ndarray]] = Mean_Rollout(
                                                     encoder_decoder     = encoder_decoder, 
                                                     physics             = trainer.physics,
@@ -192,9 +195,11 @@ class ROM_Discrepancy(Sampler):
                                                     param_grid          = broadcast_ith_candidate, 
                                                     t_Grid              = t_Train_np, 
                                                     trainer             = trainer);  
+            rollout_time += time.perf_counter() - rollout_timer;
 
             # Evaluate the RHS of the latent dynamics for each training parameter along these
             # trajectories.
+            scoring_timer : float = time.perf_counter();
             RHS_training : list[numpy.ndarray] = trainer.latent_dynamics.RHS(
                                                     Z       = Zis_Mean,
                                                     t_Grid  = t_Train_np,
@@ -236,6 +241,7 @@ class ROM_Discrepancy(Sampler):
 
             # The discrepancy for the i'th candidate is the minimum across training parameters.
             Discrepancies[i] = numpy.min(ith_Discrepancies);
+            scoring_time += time.perf_counter() - scoring_timer;
 
 
         # ---------------------------------------------------------------------------------------------
@@ -251,7 +257,15 @@ class ROM_Discrepancy(Sampler):
         # stop the timer and return the parameter. 
         new_sample : numpy.ndarray = candidate_parameters[index, :].reshape(1, -1);
         LOGGER.info('New param: ' + str(numpy.round(new_sample, 4)) + '\n');
-        trainer._cache_metric("time/new_sample", time.perf_counter() - new_sample_timer);
+        trainer._cache_metric("time/new_sample",        time.perf_counter() - new_sample_timer);
+        trainer._cache_metric("sampler/n_candidates",   n_candidates);
+        trainer._cache_metric("sampler/score/selected", Discrepancies[index]);
+        trainer._cache_metric("sampler/score/max",      numpy.max(Discrepancies));
+        trainer._cache_metric("sampler/score/mean",     numpy.mean(Discrepancies));
+        trainer._cache_metric("sampler/score/std",      numpy.std(Discrepancies));
+        trainer._cache_metric("sampler/score/min",      numpy.min(Discrepancies));
+        trainer._cache_metric("time/sampler/rollout",   rollout_time);
+        trainer._cache_metric("time/sampler/scoring",   scoring_time);
         trainer._flush_metrics_cache(trainer.restart_iter);
 
         # Now, append the new sample to the training set

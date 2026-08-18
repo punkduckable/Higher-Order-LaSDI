@@ -180,6 +180,7 @@ class FOM_Variance(Sampler):
                 LatentStates_i.append(numpy.empty([self.n_samples, len(t_Candidates[i]), n_z], dtype = numpy.float32));
             LatentStates.append(LatentStates_i);
         
+        rollout_timer : float = time.perf_counter();
         for i in range(n_candidates):
             # Fetch the t_Grid for the i'th combination of parameter values.
             # Use a 1D time grid (shared across ICs). This avoids accidental shape/length
@@ -195,9 +196,11 @@ class FOM_Variance(Sampler):
                                                                     sample  = True);
                 for k in range(trainer.n_IC):
                     LatentStates[i][k][j, :, :] = LatentState_ij[0][k];
+        rollout_time : float = time.perf_counter() - rollout_timer;
 
         # Find the index of the parameter with the largest std.
-        m_index : int = get_FOM_max_std(encoder_decoder, LatentStates, candidate_parameters);
+        scoring_timer : float = time.perf_counter();
+        m_index, Candidate_Scores, decode_time = get_FOM_max_std(encoder_decoder, LatentStates, candidate_parameters);
 
 
         # ---------------------------------------------------------------------------------------------
@@ -210,7 +213,16 @@ class FOM_Variance(Sampler):
         # stop the timer and return the parameter. 
         new_sample : numpy.ndarray = candidate_parameters[m_index, :].reshape(1, -1);
         LOGGER.info('New param: ' + str(numpy.round(new_sample, 4)) + '\n');
-        trainer._cache_metric("time/new_sample", time.perf_counter() - new_sample_timer);
+        trainer._cache_metric("time/new_sample",        time.perf_counter() - new_sample_timer);
+        trainer._cache_metric("sampler/n_candidates",   n_candidates);
+        trainer._cache_metric("sampler/score/selected", Candidate_Scores[m_index]);
+        trainer._cache_metric("sampler/score/max",      numpy.max(Candidate_Scores));
+        trainer._cache_metric("sampler/score/mean",     numpy.mean(Candidate_Scores));
+        trainer._cache_metric("sampler/score/std",      numpy.std(Candidate_Scores));
+        trainer._cache_metric("sampler/score/min",      numpy.min(Candidate_Scores));
+        trainer._cache_metric("time/sampler/rollout",   rollout_time);
+        trainer._cache_metric("time/sampler/decode",    decode_time);
+        trainer._cache_metric("time/sampler/scoring",   time.perf_counter() - scoring_timer);
         trainer._flush_metrics_cache(trainer.restart_iter);
 
         # Now, append the new sample to the training set
@@ -223,7 +235,7 @@ class FOM_Variance(Sampler):
 
 
 
-def get_FOM_max_std(encoder_decoder : EncoderDecoder, LatentStates : list[list[numpy.ndarray]], candidate_parameters : numpy.ndarray) -> int:
+def get_FOM_max_std(encoder_decoder : EncoderDecoder, LatentStates : list[list[numpy.ndarray]], candidate_parameters : numpy.ndarray):
     r"""
     We find the combination of parameter values which produces with FOM solution with the greatest
     variance.
@@ -274,9 +286,15 @@ def get_FOM_max_std(encoder_decoder : EncoderDecoder, LatentStates : list[list[n
     Returns:
     -----------------------------------------------------------------------------------------------
 
+    m_index, candidate_scores, decode_time.
+
     m_index : int
         The index of the testing parameter that gives the largest standard deviation. See the 
         description above for details.
+    candidate_scores : numpy.ndarray, [n_param]
+        i'th element holds the score for the i'th candidate.
+    decode_time : float
+        The total time to decode all latent states back to the FOM space.
     """
     
     # Run checks.
@@ -315,8 +333,10 @@ def get_FOM_max_std(encoder_decoder : EncoderDecoder, LatentStates : list[list[n
     # Find parameter combination with the max STD.
     # ---------------------------------------------------------------------------------------------
 
-    max_std     : float     = 0.0;
-    m_index     : int       = 0;
+    max_std             : float         = 0.0;
+    m_index             : int           = 0;
+    candidate_scores    : numpy.ndarray = numpy.zeros((n_param), dtype = numpy.float32);
+    decode_time         : float         = 0.0;
 
     for i in range(n_param):
         # i'th parameter's latent trajectories:
@@ -332,7 +352,9 @@ def get_FOM_max_std(encoder_decoder : EncoderDecoder, LatentStates : list[list[n
             Z0_list.append(torch.from_numpy(LatentStates[i][k][0, :, :]));
 
         # Decode        
+        decode_timer : float = time.perf_counter();
         U0_tuple : tuple[torch.Tensor, ...] = encoder_decoder.Decode(*Z0_list);
+        decode_time += time.perf_counter() - decode_timer;
         assert len(U0_tuple) == n_IC, "Decode returned %d outputs; expected n_IC=%d" % (len(U0_tuple), n_IC);
 
         # Build an array to hold the predictions (for each sample) for the i'th combination of
@@ -353,7 +375,9 @@ def get_FOM_max_std(encoder_decoder : EncoderDecoder, LatentStates : list[list[n
                 Z_ij.append(torch.from_numpy(LatentStates[i][k][j, :, :]));
             
             # Decode and store.
+            decode_timer = time.perf_counter();
             U_ij : tuple[torch.Tensor, ...] = encoder_decoder.Decode(*Z_ij);
+            decode_time += time.perf_counter() - decode_timer;
             for k in range(n_IC):
                 U_Pred_i[k][j, ...] = U_ij[k].detach().numpy();
 
@@ -372,6 +396,8 @@ def get_FOM_max_std(encoder_decoder : EncoderDecoder, LatentStates : list[list[n
             
             max_std_i = max(max_std_i, float(U_std_k.max()));
 
+        candidate_scores[i] = max_std_i;
+
         # Check if the max from the i'th combination exceeds the current global maximum. If so, 
         # updated m_index.
         if max_std_i > max_std:
@@ -380,4 +406,4 @@ def get_FOM_max_std(encoder_decoder : EncoderDecoder, LatentStates : list[list[n
             max_std = max_std_i;
 
     # All done!
-    return m_index;
+    return m_index, candidate_scores, decode_time;

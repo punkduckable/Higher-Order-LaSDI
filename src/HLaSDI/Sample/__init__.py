@@ -9,11 +9,10 @@ Sampling strategies for LaSDI active learning.
 
 from    .Sampler                import  Sampler;
 from    .FOM_Rollout            import  FOM_Rollout;
-from    .FOM_Variance           import  FOM_Variance, get_FOM_max_std;
+from    .FOM_Variance           import  FOM_Variance;
 from    .ROM_Discrepancy        import  ROM_Discrepancy;
 
 __all__ = [    "Sampler",
                "FOM_Rollout",
                "FOM_Variance",
-               "ROM_Discrepancy",
-               "get_FOM_max_std"];
+               "ROM_Discrepancy"];

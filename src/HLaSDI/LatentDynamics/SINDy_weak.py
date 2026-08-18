@@ -12,6 +12,7 @@ from    HLaSDI.LatentDynamics.Interpolatable   import  InterpolatableLatentDynam
 from    HLaSDI.LatentDynamics.LatentDynamics   import  LD_Loss_Container;
 from    HLaSDI.LatentDynamics.SINDy            import  SINDy;
 from    HLaSDI.Schemas                         import  SINDyWeakLatentDynamicsConfig;
+from    HLaSDI.Utilities.Statistics            import  tensor_statistics;
 
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
@@ -235,10 +236,14 @@ class SINDy_weak(WeakLatentDynamics, SINDy):
         assert isinstance(Latent_States, list);
         assert len(Latent_States) == len(t_Grid) == params.shape[0];
 
-        loss_LD_list   : list[torch.Tensor]         = [];
-        loss_coef_list : list[torch.Tensor]         = [];
-        loss_stab_list : list[torch.Tensor]         = [];
-        metrics        : dict[str, torch.Tensor]    = {};
+        loss_LD_list            : list[torch.Tensor]        = [];
+        loss_coef_list          : list[torch.Tensor]        = [];
+        loss_stab_list          : list[torch.Tensor]        = [];
+        coef_A_fro_list         : list[torch.Tensor]        = [];
+        coef_b_l2_list          : list[torch.Tensor]        = [];
+        lambda_max_list         : list[torch.Tensor]        = [];
+        weight_fun_residuals    : list[torch.Tensor]        = [];
+        metrics                 : dict[str, torch.Tensor]   = {};
 
         # -----------------------------------------------------------------------------------------
         # Loop over parameter combinations.
@@ -275,13 +280,23 @@ class SINDy_weak(WeakLatentDynamics, SINDy):
             scale : torch.Tensor = torch.linalg.norm(dPhis, dim = 1, keepdim = True).clamp(min = 1.0e-10);
             loss_LD = self.MSE(weak_LHS / scale, weak_RHS / scale);
 
+            # Approximate the L2 (integral) norm of phi_h'(t) z(t) - phi_h(t)  f(z(t), t, theta)
+            normalized_residual : torch.Tensor = (weak_LHS - weak_RHS) / scale;
+            weight_fun_residuals.append(torch.sqrt(torch.mean(normalized_residual**2, dim = 1)));
+
             # Compute regularization terms.
-            loss_coef = torch.norm(A, 'fro') + torch.norm(b);
-            loss_stab = self.stability_penalty(A);
+            coef_A_fro = torch.norm(A, 'fro');
+            coef_b_l2  = torch.norm(b);
+            lambda_max = torch.linalg.eigvalsh(0.5*(A + A.T)).max();
+            loss_coef = coef_A_fro + coef_b_l2;
+            loss_stab = torch.nn.functional.softplus(lambda_max + 0.1);
 
             loss_LD_list.append(loss_LD);
             loss_coef_list.append(loss_coef);
             loss_stab_list.append(loss_stab);
+            coef_A_fro_list.append(coef_A_fro);
+            coef_b_l2_list.append(coef_b_l2);
+            lambda_max_list.append(lambda_max);
             metrics[f"loss/LD/{str(params[i, :])}"]     = loss_LD.detach();
             metrics[f"loss/coef/{str(params[i, :])}"]   = loss_coef.detach();
             metrics[f"loss/stab/{str(params[i, :])}"]   = loss_stab.detach();
@@ -292,6 +307,11 @@ class SINDy_weak(WeakLatentDynamics, SINDy):
         metrics["loss/LD/total"]    = loss_LD.detach();
         metrics["loss/coef/total"]  = loss_coef.detach();
         metrics["loss/stab/total"]  = loss_stab.detach();
+        metrics.update(tensor_statistics(prefix = "coef/A/fro", values = torch.stack(coef_A_fro_list)));
+        metrics.update(tensor_statistics(prefix = "coef/b/l2",  values = torch.stack(coef_b_l2_list)));
+        metrics["stability/lambda_max/mean"] = torch.mean(torch.stack(lambda_max_list)).detach();
+        metrics["stability/lambda_max/max"]  = torch.max(torch.stack(lambda_max_list)).detach();
+        metrics.update(tensor_statistics(prefix = "weak/weight_fun_residuals", values = torch.cat(weight_fun_residuals, dim = 0)));
 
         losses_dict = {'LD' : loss_LD, 'coef' : loss_coef, 'stab' : loss_stab};
 

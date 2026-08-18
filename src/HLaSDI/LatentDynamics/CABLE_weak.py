@@ -168,14 +168,15 @@ class CABLE_weak(WeakLatentDynamics, CABLE):
         # Accumulate scalar loss contributions and diagnostics across all parameter rows. The
         # trainable CABLE coefficients are global, so coefficient/diversity losses are computed
         # once after the loop rather than separately per parameter.
-        loss_LD_list        : list[torch.Tensor]      = [];
-        loss_tail_list      : list[torch.Tensor]      = [];
-        weights_list        : list[torch.Tensor]      = [];
-        n_engaged_list      : list[torch.Tensor]      = [];
-        tail_mass_list      : list[torch.Tensor]      = [];
-        metrics             : dict[str, torch.Tensor] = {};
-        summed_weights      : torch.Tensor            = torch.zeros((self.n_experts), dtype = self.unmasked_A.dtype, device = self.unmasked_A.device);
-        times_engaged       : torch.Tensor            = torch.zeros((self.n_experts), dtype = torch.int64, device = self.unmasked_A.device);
+        loss_LD_list            : list[torch.Tensor]      = [];
+        loss_tail_list          : list[torch.Tensor]      = [];
+        weights_list            : list[torch.Tensor]      = [];
+        n_engaged_list          : list[torch.Tensor]      = [];
+        tail_mass_list          : list[torch.Tensor]      = [];
+        weight_fun_residuals    : list[torch.Tensor] = [];
+        metrics                 : dict[str, torch.Tensor] = {};
+        summed_weights          : torch.Tensor            = torch.zeros((self.n_experts), dtype = self.unmasked_A.dtype, device = self.unmasked_A.device);
+        times_engaged           : torch.Tensor            = torch.zeros((self.n_experts), dtype = torch.int64, device = self.unmasked_A.device);
 
         # Periodically update hard coefficient masks, matching CABLE.compute_losses. Masked entries
         # are multiplied out through the CABLE `A`/`b` properties used below.
@@ -238,6 +239,10 @@ class CABLE_weak(WeakLatentDynamics, CABLE):
             loss_LD_list.append(ith_loss_LD);
             metrics[f"loss/LD/{str(ith_params)}"] = ith_loss_LD.detach();
 
+            # Approximate the L2 (integral) norm of phi_h'(t) z(t) - phi_h(t)  f(z(t), t, theta)
+            normalized_residual : torch.Tensor = (weak_LHS - weak_RHS) / scale;
+            weight_fun_residuals.append(torch.sqrt(torch.mean(normalized_residual**2, dim = 1)));
+
             # Accumulate dense expert loads. The diversity loss below is a squared-CV penalty on
             # these totals, encouraging every expert to be used somewhere without forcing uniform
             # weights at every time sample.
@@ -261,10 +266,11 @@ class CABLE_weak(WeakLatentDynamics, CABLE):
         weights     : torch.Tensor = torch.cat(weights_list, dim = 0);
         tail_masses : torch.Tensor = torch.cat(tail_mass_list, dim = 0);
         n_engaged   : torch.Tensor = torch.cat(n_engaged_list, dim = 0);
-        metrics.update(tensor_statistics(prefix = "expert/weights",      values = weights));
-        metrics.update(tensor_statistics(prefix = "mass/tail",           values = tail_masses));
-        metrics.update(tensor_statistics(prefix = "experts/num_engaged", values = n_engaged));
-        metrics.update(tensor_statistics(prefix = "experts/times_engaged", values = times_engaged));
+        metrics.update(tensor_statistics(prefix = "expert/weights",             values = weights));
+        metrics.update(tensor_statistics(prefix = "mass/tail",                  values = tail_masses));
+        metrics.update(tensor_statistics(prefix = "experts/num_engaged",        values = n_engaged));
+        metrics.update(tensor_statistics(prefix = "experts/times_engaged",      values = times_engaged));
+        metrics.update(tensor_statistics(prefix = "weak/weight_fun_residuals",  values = torch.cat(weight_fun_residuals, dim = 0)));
         metrics["experts/num_ever_engaged"] = torch.sum(times_engaged > 0).to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype).detach();
 
         # Coefficient loss is the sum of the selected norms of each expert matrix plus each

@@ -824,7 +824,19 @@ class Second_Order_Weak(Second_Order_Rollout):
             #  Run back propagation and update the encoder_decoder parameters. 
             # Note: optimizer.zero_grad() is already called at the start of the iteration (line 373)
             loss.backward();
-            
+
+            # Record the gradient in the LD and encoder_decoder
+            grad_sq_encoder_decoder = torch.zeros((), device = device);
+            for param in encoder_decoder_device.parameters():
+                if param.grad is not None:
+                    grad_sq_encoder_decoder = grad_sq_encoder_decoder + torch.sum(param.grad.detach()**2);
+            grad_sq_latent_dynamics = torch.zeros((), device = device);
+            for param in self.latent_dynamics.parameters():
+                if param.grad is not None:
+                    grad_sq_latent_dynamics = grad_sq_latent_dynamics + torch.sum(param.grad.detach()**2);
+            self._cache_metric("grad_norm/encoder_decoder/raw", torch.sqrt(grad_sq_encoder_decoder).detach());
+            self._cache_metric("grad_norm/latent_dynamics/raw", torch.sqrt(grad_sq_latent_dynamics).detach());
+
             # Clip gradients to prevent explosion during latent dynamics rollout.
             grad_norm = torch.nn.utils.clip_grad_norm_(
                 optimizer_parameters_list,
