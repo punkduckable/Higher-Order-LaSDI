@@ -28,7 +28,7 @@ set -u
 
 # ----------------------------- User settings ------------------------------
 # Name of the example file in ./examples. Include the .yml extension.
-Example="Thermal.yml"
+Example="Explicit.yml"
 
 # Repository root. Leave empty to auto-detect. If auto-detection fails on your
 # system, set this to the absolute path of the Higher-Order-LaSDI checkout, e.g.
@@ -43,6 +43,13 @@ ExamplesDir="examples"
 # moved into the dated Figures subdirectory by scripts/cleanup_run.py.
 STDOUT_FILE="HLaSDI_${FLUX_JOB_ID:-manual}_stdout.txt"
 STDERR_FILE="HLaSDI_${FLUX_JOB_ID:-manual}_stderr.txt"
+
+# LC module environment used when PyMFEM/mpi4py were built. Keep these modules
+# consistent with the install environment, especially for PyMFEM examples.
+LoadLCModules="true"
+LCCompilerModule="intel-classic/2021.6.0"
+LCMPIModule="mvapich2/2.3.7"
+
 
 # ----------------------------- Run workflow -------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -77,10 +84,29 @@ fi
 
 cd "$REPO_ROOT" || exit 1
 
-# Keep uv's package cache out of $HOME to avoid home-directory quota failures
-# on shared systems.
-export UV_CACHE_DIR="${UV_CACHE_DIR:-/p/vast1/robertrs/.cache/uv}"
-mkdir -p "$UV_CACHE_DIR"
+if [[ "$LoadLCModules" == "true" ]]; then
+    # Batch shells may not initialize the LC module command by default.
+    if ! command -v module >/dev/null 2>&1; then
+        # shellcheck disable=SC1091
+        source /etc/profile || true
+    fi
+
+    if ! command -v module >/dev/null 2>&1; then
+        echo "ERROR: environment modules are not available in this batch shell." >&2
+        exit 2
+    fi
+
+    module --force purge
+    module load StdEnv
+    module load "$LCCompilerModule"
+    module load "$LCMPIModule"
+
+    # Suppress benign MVAPICH2 import warnings in batch logs.
+    export MV2_USE_ALIGNED_ALLOC=1
+    export MV2_USE_THREAD_WARNING=0
+fi
+
+PYTHON="${REPO_ROOT}/.venv/bin/python"
 
 if [[ "$ExamplesDir" == /* ]]; then
     EXAMPLES_PATH="$ExamplesDir"
@@ -108,21 +134,27 @@ if [[ "$Example" == */* || ! -f "$CONFIG_FILE" ]]; then
     exit 2
 fi
 
-if ! command -v uv >/dev/null 2>&1; then
-    echo "ERROR: uv is not available on PATH" >&2
+if [[ ! -x "$PYTHON" ]]; then
+    echo "ERROR: Python environment not found at $PYTHON" >&2
+    echo "Run 'uv sync --python 3.11 --extra pymfem' in the repository root before submitting this job." >&2
     exit 2
 fi
 
-if [[ ! -x ./.venv/bin/python ]]; then
-    echo "ERROR: uv environment not found at ./.venv/bin/python" >&2
-    echo "Run 'uv sync' in the repository root before submitting this job." >&2
-    exit 2
-fi
+# Activate for subprocesses that inspect VIRTUAL_ENV/PATH, but invoke $PYTHON
+# explicitly below so the batch job uses the same interpreter that was tested
+# interactively.
+# shellcheck disable=SC1091
+source "${REPO_ROOT}/.venv/bin/activate"
+
+# Preflight the exact Python environment used by the job. This catches PyMFEM
+# environment mismatches before launching the full workflow.
+"$PYTHON" -c 'import sys; print("Python:", sys.executable); import mfem; print("mfem:", mfem.__file__)'
 
 echo "Starting Higher-Order-LaSDI job at $(date)"
 echo "Flux job id: ${FLUX_JOB_ID:-manual}"
 echo "Repository:  ${REPO_ROOT}"
 echo "Config:      ${CONFIG_FILE}"
+echo "Python:      ${PYTHON}"
 echo "Stdout:      ${STDOUT_FILE}"
 echo "Stderr:      ${STDERR_FILE}"
 
@@ -132,7 +164,7 @@ export MPLBACKEND=Agg
 RUN_START_EPOCH="$(date +%s)"
 
 echo "Launching training workflow (LaSDI) at $(date)"
-uv run --no-sync python scripts/run_experiment.py --config "$CONFIG_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE"
+"$PYTHON" scripts/run_experiment.py --config "$CONFIG_FILE" > "$STDOUT_FILE" 2> "$STDERR_FILE"
 workflow_status=$?
 
 echo "Training workflow finished at $(date) with exit code ${workflow_status}"
@@ -143,7 +175,7 @@ if [[ "$workflow_status" -eq 0 ]]; then
     # Fetch the newest serialized experiment artifact created by this job. This excludes
     # per-parameter loss JSONL files and avoids accidentally analyzing a stale artifact.
     ARTIFACT_FILE="$(
-        uv run --no-sync python -c 'from pathlib import Path; import sys
+        "$PYTHON" -c 'from pathlib import Path; import sys
 start = float(sys.argv[1])
 results = Path("results")
 files = [p for p in results.iterdir() if p.is_file() and not p.name.endswith("loss_by_param.jsonl") and p.stat().st_mtime >= start] if results.is_dir() else []
@@ -153,7 +185,7 @@ print(max(files, key=lambda p: p.stat().st_mtime).resolve() if files else "")' "
     if [[ -n "$ARTIFACT_FILE" && -f "$ARTIFACT_FILE" ]]; then
         echo "Launching analysis workflow at $(date)"
         echo "Artifact: ${ARTIFACT_FILE}"
-        uv run --no-sync python scripts/analyze_experiment.py --artifact "$ARTIFACT_FILE" >> "$STDOUT_FILE" 2>> "$STDERR_FILE"
+        "$PYTHON" scripts/analyze_experiment.py --artifact "$ARTIFACT_FILE" >> "$STDOUT_FILE" 2>> "$STDERR_FILE"
         analysis_status=$?
         echo "Analysis workflow finished at $(date) with exit code ${analysis_status}"
     else
@@ -181,7 +213,7 @@ if [[ -n "$ARTIFACT_FILE" && -f "$ARTIFACT_FILE" ]]; then
     cleanup_args+=(--artifact "$ARTIFACT_FILE" --min-figure-mtime "$RUN_START_EPOCH")
 fi
 
-cleanup_output="$(uv run --no-sync python scripts/cleanup_run.py "${cleanup_args[@]}" 2>&1)"
+cleanup_output="$("$PYTHON" scripts/cleanup_run.py "${cleanup_args[@]}" 2>&1)"
 cleanup_status=$?
 printf '%s\n' "$cleanup_output"
 
@@ -191,7 +223,7 @@ else
     ARCHIVE_DIR="$(printf '%s\n' "$cleanup_output" | sed -n 's/^Archive directory: //p' | tail -n 1)"
     if [[ -n "$ARCHIVE_DIR" && -d "$ARCHIVE_DIR" ]]; then
         METRICS_FILE="$(
-            uv run --no-sync python -c 'from pathlib import Path; import sys
+            "$PYTHON" -c 'from pathlib import Path; import sys
 run_dir = Path(sys.argv[1])
 metrics_files = sorted(
     run_dir.glob("*_metrics.jsonl"),
@@ -205,7 +237,7 @@ print(metrics_files[-1].resolve() if metrics_files else "")' "$ARCHIVE_DIR"
             echo "Building TensorBoard files at $(date)"
             echo "Metrics: ${METRICS_FILE}"
             echo "Logdir:  ${TB_LOGDIR}"
-            uv run --no-sync python scripts/jsonl_to_tensorboard.py "$METRICS_FILE" --logdir "$TB_LOGDIR"
+            "$PYTHON" scripts/jsonl_to_tensorboard.py "$METRICS_FILE" --logdir "$TB_LOGDIR"
             tensorboard_status=$?
             if [[ "$tensorboard_status" -ne 0 ]]; then
                 echo "WARNING: jsonl_to_tensorboard.py exited with code ${tensorboard_status}" >&2
