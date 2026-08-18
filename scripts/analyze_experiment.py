@@ -197,8 +197,8 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
 
             # Fetch the reconstruction and true solution.
             if hasattr(trainer, "has_normalization") and trainer.has_normalization():
-                ij_Reconstruction = trainer.denormalize_tensor(ith_Reconstruction[j], j).detach().numpy();   # physical units
-                ij_True           = trainer.denormalize_tensor(trainer.U_Test[i][j], j).detach().numpy();    # physical units
+                ij_Reconstruction = trainer.denormalize(ith_Reconstruction[j], j).detach().numpy();   # physical units
+                ij_True           = trainer.denormalize(trainer.U_Test[i][j], j).detach().numpy();    # physical units
             else:
                 ij_Reconstruction   : numpy.ndarray = ith_Reconstruction[j].detach().numpy();   # shape = (n_t_i, physics.Frame_Shape)
                 ij_True             : numpy.ndarray = trainer.U_Test[i][j].detach().numpy();    # shape = (n_t_i, physics.Frame_Shape)
@@ -291,20 +291,31 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
     # either be a scalar field on a 2d or 3d domain, or a 2d/3d vector field in a 2d/3d domain. 
     # In these cases, we can make an animation of the solution.... let's do that!
     if((len(physics.X_Positions.shape) == 2) and (physics.X_Positions.shape[0] in (2, 3))):
-        
+
         # First, generate latent trajectories for the i_worst'th element of the test set.
         LOGGER.debug("Generating trajectory plot for testing combination %d: %s" % (i_worst, param_space.test_space[i_worst]));
 
         # Generate the solution trajectory using the mean for the posterior distribution.
         param_worst    : numpy.ndarray         = param_space.test_space[i_worst, :].reshape(1, -1);
         t_worst        : torch.Tensor          = trainer.t_Test[i_worst];                          # shape = (n_t)
-        U_True_worst   : list[torch.Tensor]    = trainer.U_Test[i_worst];                          # length = n_IC        
-        Zi_mean_np     : list[numpy.ndarray]   = Mean_Rollout(  encoder_decoder = encoder_decoder, # n_IC element list whose j'th element has shape (n_t(i), n_z)
-                                                                physics         = physics, 
-                                                                latent_dynamics = latent_dynamics, 
-                                                                param_grid      = param_worst, 
-                                                                t_Grid          = [t_worst],
-                                                                trainer         = trainer)[0];
+        U_True_worst   : list[torch.Tensor]    = trainer.U_Test[i_worst];                          # length = n_IC
+
+        # Fetch the FOM ICs.
+        FOM_IC : list[list[numpy.ndarray]] = [trainer.physics.initial_condition(param_worst.reshape(-1))];
+        if (trainer is not None) and hasattr(trainer, "has_normalization") and trainer.has_normalization():
+            Normalized_FOM_IC : list[numpy.ndarray] = [];
+            for k in range(len(FOM_IC[0])):
+                Normalized_FOM_IC.append(trainer.normalize(FOM_IC[0][k], k));
+            FOM_IC = [Normalized_FOM_IC];
+
+        # Now encode it.
+        ROM_IC : list[list[numpy.ndarray]] = trainer.encoder_decoder.latent_initial_conditions(FOM_IC);
+
+        # Rollout this set of latent dynamics
+        Zi_mean_np     : list[numpy.ndarray]   = Mean_Rollout(  ROM_IC          = ROM_IC,           # n_IC element list whose j'th element has shape (n_t(i), n_z)
+                                                                latent_dynamics = latent_dynamics,
+                                                                param_grid      = param_worst,
+                                                                t_Grid          = [t_worst])[0];
 
         # Map Zi_mean_np to a tensor and then decode.
         Zi_mean     : list[torch.Tensor]    = [];
@@ -332,8 +343,8 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
                 LOGGER.info(f"  U_Pred_worst[{i}] range before denorm: [{U_Pred_worst[i].min().item():.3e}, {U_Pred_worst[i].max().item():.3e}]");
                 
                 # Both U_True_worst and U_Pred_worst should be in normalized units
-                U_i_true_np = trainer.denormalize_tensor(U_True_worst[i], i).detach().numpy();
-                U_i_pred_np = trainer.denormalize_tensor(U_Pred_worst[i], i).detach().numpy();
+                U_i_true_np = trainer.denormalize(U_True_worst[i], i).detach().numpy();
+                U_i_pred_np = trainer.denormalize(U_Pred_worst[i], i).detach().numpy();
                 
                 LOGGER.info(f"  U_true_np range after denorm: [{U_i_true_np.min():.3e}, {U_i_true_np.max():.3e}]");
                 LOGGER.info(f"  U_pred_np range after denorm: [{U_i_pred_np.min():.3e}, {U_i_pred_np.max():.3e}]");

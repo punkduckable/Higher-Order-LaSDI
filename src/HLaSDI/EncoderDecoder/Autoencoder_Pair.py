@@ -8,12 +8,11 @@ from    copy                                import  deepcopy;
 import  torch;
 import  numpy;
 
-
 from    HLaSDI.EncoderDecoder              import  EncoderDecoder;
 from    HLaSDI.EncoderDecoder.MLP          import  act_dict;
 from    HLaSDI.EncoderDecoder.Autoencoder  import  Autoencoder, load_Autoencoder;
-from    HLaSDI.Schemas                     import  AEEncoderDecoderConfig;
-from    HLaSDI.Schemas                     import  PairEncoderDecoderConfig, AutoencoderPairEncoderDecoderConfig;
+from    HLaSDI.Schemas                     import  AEEncoderDecoderConfig, PairEncoderDecoderConfig, AutoencoderPairEncoderDecoderConfig;
+
 # Set up logging.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
 

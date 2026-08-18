@@ -151,6 +151,26 @@ class ROM_Discrepancy(Sampler):
 
 
         # -----------------------------------------------------------------------------------------
+        # Fetch and encode candidate FOM initial conditions.  
+
+        # Rollouts now consume latent initial conditions directly, so this sampler owns the 
+        # physics/normalization boundary.
+        FOM_IC : list[list[numpy.ndarray]] = [];
+        has_norm : bool = hasattr(trainer, "has_normalization") and trainer.has_normalization();
+        for i in range(n_candidates):
+            ith_FOM_IC : list[numpy.ndarray] = trainer.physics.initial_condition(candidate_parameters[i]);
+            assert isinstance(ith_FOM_IC, list), "type(ith_FOM_IC) = %s, expected list" % str(type(ith_FOM_IC));
+            assert len(ith_FOM_IC) == encoder_decoder.n_IC, "len(ith_FOM_IC) = %d, expected %d (=encoder_decoder.n_IC)" % (len(ith_FOM_IC), encoder_decoder.n_IC);
+
+            if has_norm:
+                Normalized_FOM_IC : list[numpy.ndarray] = [];
+                for k in range(len(ith_FOM_IC)):
+                    Normalized_FOM_IC.append(trainer.normalize(ith_FOM_IC[k], k));
+                ith_FOM_IC = Normalized_FOM_IC;
+
+            FOM_IC.append(ith_FOM_IC);
+
+        # -----------------------------------------------------------------------------------------
         # Compute ROM discrepancy for each testing parameter. 
 
         LOGGER.debug("Setting up arrays to hold ROM discrepancies");
@@ -185,16 +205,15 @@ class ROM_Discrepancy(Sampler):
             # broadcast the i'th parameter to have n_train copies of itself; this way, we can use
             # Mean_Rollout to solve the LD along each training time grid. 
             broadcast_ith_candidate = numpy.broadcast_to(candidate_parameters[i, :], (n_train, n_param));
+            broadcast_ith_ROM_IC : list[list[numpy.ndarray]] = encoder_decoder.latent_initial_conditions([FOM_IC[i] for _ in range(n_train)]);
 
             # Solve the LD for the i'th candidate at each time training time grid. 
             rollout_timer : float = time.perf_counter();
             Zis_Mean : list[list[numpy.ndarray]] = Mean_Rollout(
-                                                    encoder_decoder     = encoder_decoder, 
-                                                    physics             = trainer.physics,
+                                                    ROM_IC              = broadcast_ith_ROM_IC,
                                                     latent_dynamics     = trainer.latent_dynamics, 
                                                     param_grid          = broadcast_ith_candidate, 
-                                                    t_Grid              = t_Train_np, 
-                                                    trainer             = trainer);  
+                                                    t_Grid              = t_Train_np);  
             rollout_time += time.perf_counter() - rollout_timer;
 
             # Evaluate the RHS of the latent dynamics for each training parameter along these

@@ -157,7 +157,6 @@ class FOM_Rollout(Sampler):
         n_train         : int               = trainer.param_space.n_train();
 
 
-
         # ---------------------------------------------------------------------------------------------
         # Find the candidate parameters ({test set} - {train set}).
 
@@ -188,6 +187,30 @@ class FOM_Rollout(Sampler):
         assert n_candidates >= 1, "n_candidates = %d" % n_candidates;
         candidate_parameters    = numpy.array(candidate_parameters);
 
+        # ---------------------------------------------------------------------------------------------
+        # Compute ROM ICs.
+    
+        # First, fetch the FOM ICs.
+        FOM_IC : list[list[numpy.ndarray]] = []; # len = n_candidates; i'th element has n_IC elements
+        has_norm : bool = (trainer is not None) and hasattr(trainer, "has_normalization") and trainer.has_normalization();
+        for i in range(n_candidates):
+            # Get the ICs for the i'th combination of parameter values.
+            ith_FOM_IC : list[numpy.ndarray] = trainer.physics.initial_condition(candidate_parameters[i]);
+            assert isinstance(ith_FOM_IC, list), "type(ith_FOM_IC) = %s, expected list" % str(type(ith_FOM_IC));
+            assert len(ith_FOM_IC) == trainer.encoder_decoder.n_IC, "len(ith_FOM_IC) = %d, expected %d (=encoder_decoder.n_IC)" % (len(ith_FOM_IC), trainer.encoder_decoder.n_IC);
+
+            # Apply normalization if available.    
+            if has_norm:
+                Normalized_FOM_IC : list[numpy.ndarray] = [];
+                for k in range(len(ith_FOM_IC)):
+                    Normalized_FOM_IC.append(trainer.normalize(ith_FOM_IC[k], k));
+                ith_FOM_IC = Normalized_FOM_IC;
+
+            # All done!
+            FOM_IC.append(ith_FOM_IC);
+
+        # Now encode them.
+        ROM_IC : list[list[numpy.ndarray]] = trainer.encoder_decoder.latent_initial_conditions(FOM_IC);
 
         # ---------------------------------------------------------------------------------------------
         # Generate the latent trajectories.
@@ -196,22 +219,18 @@ class FOM_Rollout(Sampler):
         if self.sample_test_LD:
             LOGGER.debug("Sampling roms with %d rollouts per candidate" % self.n_samples);
             Zis_Samples : list[list[numpy.ndarray]] = Sample_Rollouts(
-                                                        encoder_decoder     = encoder_decoder, 
-                                                        physics             = trainer.physics,
-                                                        latent_dynamics     = trainer.latent_dynamics, 
+                                                        ROM_IC              = ROM_IC,
+                                                        latent_dynamics     = trainer.latent_dynamics,
                                                         param_grid          = candidate_parameters, 
                                                         t_Grid              = t_Candidates, 
-                                                        n_samples           = self.n_samples, 
-                                                        trainer             = trainer);
+                                                        n_samples           = self.n_samples);
         else:
             LOGGER.debug("Using mean latent dynamics rollout for each candidate (no sampling)");
             Zis_Raw : list[list[numpy.ndarray]] = Mean_Rollout(
-                                                        encoder_decoder     = encoder_decoder, 
-                                                        physics             = trainer.physics,
-                                                        latent_dynamics     = trainer.latent_dynamics, 
+                                                        ROM_IC              = ROM_IC,
+                                                        latent_dynamics     = trainer.latent_dynamics,
                                                         param_grid          = candidate_parameters, 
-                                                        t_Grid              = t_Candidates, 
-                                                        trainer             = trainer);  
+                                                        t_Grid              = t_Candidates);  
 
             # Reshape each component of Zi to have shape [n_t_i, 1, n_z]. This matches the
             # Sample_Rollouts output contract, using a single pseudo-sample for the mean rollout.

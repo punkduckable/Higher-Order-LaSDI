@@ -701,7 +701,7 @@ class First_Order_Rollout(Trainer):
                     # Convert to tensors and reshape for encoding
                     U_IC_i            : torch.Tensor              = torch.tensor(FOM_IC_i[0], dtype = torch.float32, device = device).reshape((1,) + FOM_IC_i[0].shape);
                     if self.has_normalization():
-                        U_IC_i = self.normalize_tensor(U_IC_i, 0);
+                        U_IC_i = self.normalize(U_IC_i, 0);
                     
                     # Encode the FOM initial conditions
                     Z_IC_i : torch.Tensor = encoder_decoder_device.Encode(U_IC_i)[0].reshape(-1);

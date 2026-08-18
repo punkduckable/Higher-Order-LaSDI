@@ -2,14 +2,14 @@
 # Imports and Setup
 # -------------------------------------------------------------------------------------------------
 
+import  logging;
+
 import  torch;
 import  numpy;
-from    HLaSDI.Physics                     import  Physics;
-from    HLaSDI.LatentDynamics              import  LatentDynamics;
-from    HLaSDI.EncoderDecoder              import  EncoderDecoder;
-from    HLaSDI.Trainer                     import  Trainer;
 
-import  logging;
+from    HLaSDI.LatentDynamics              import  LatentDynamics;
+
+
 LOGGER : logging.Logger = logging.getLogger(__name__);
 
 
@@ -20,12 +20,10 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 # Rollout using mean LD coefficients
 # -------------------------------------------------------------------------------------------------
 
-def Mean_Rollout(   encoder_decoder : EncoderDecoder, 
-                    physics         : Physics, 
-                    latent_dynamics : LatentDynamics, 
+def Mean_Rollout(   ROM_IC          : list[list[numpy.ndarray]], 
+                    latent_dynamics : LatentDynamics,
                     param_grid      : numpy.ndarray,
-                    t_Grid          : list[numpy.ndarray | torch.Tensor],
-                    trainer         : Trainer) -> list[list[numpy.ndarray]]:
+                    t_Grid          : list[numpy.ndarray | torch.Tensor]) -> list[list[numpy.ndarray]]:
     """
     This function simulates the latent dynamics for a set of parameter values by using the mean of
     the posterior distribution for each coefficient's posterior distribution. Specifically, for 
@@ -38,18 +36,14 @@ def Mean_Rollout(   encoder_decoder : EncoderDecoder,
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    encoder_decoder : EncoderDecoder
-        The actual EncoderDecoder object that we use to map the ICs into the latent space. physics, 
-        latent_dynamics, and EncoderDecoder should have the same number of initial conditions.
+    ROM_IC : list[list[numpy.ndarray]], len = n_param 
+        The encoded initial conditions for each parameter value. i'th element should be an n_IC 
+        element list whose j'th element holds the initial condition for the j'th derivative of 
+        the latent dynamics when we use the i'th combination of parameter values.
 
-    physics : Physics
-        Allows us to get the latent IC solution for each combination of parameter values. physics, 
-        latent_dynamics, and EncoderDecoder should have the same number of initial conditions.
-    
     latent_dynamics : LatentDynamics
-        describes how we specify the dynamics in the EncoderDecoder's latent space. We assume that 
-        physics, latent_dynamics, and EncoderDecoder all have the same number of initial 
-        conditions.
+        describes how we specify the dynamics we want to rollout. We use this to simulate the 
+        latent dynamics forward in time. 
     
     param_grid : numpy.ndarray, shape = (n_param, n_p)
         i,j element holds the value of the j'th parameter in the i'th combination of parameter 
@@ -59,44 +53,37 @@ def Mean_Rollout(   encoder_decoder : EncoderDecoder,
     t_Grid : list[torch.Tensor], len = n_param
         i'th element is a one-dimensional numpy.ndarray or torch.Tensor object of shape (n_t(i))
         whose k'th entry specifies the k'th time value.
-
-    trainer : Trainer
-        The trainer object. We use this to get normalization stats if they are enabled.
-        If normalization is enabled, we use the stats to normalize initial conditions and
-        de-normalize predictions for reporting/plots.
-        before encoding them.
-    
     
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
     
     Zis : list[list[numpy.ndarray]], len = n_param
-        i'th element is an n_IC element list whoe j'th element is a 2d numpy.ndarray object of 
+        i'th element is an n_IC element list whose j'th element is a 2d numpy.ndarray object of 
         shape (n_t_i, n_z) whose p, q element holds the q'th component of the j'th derivative of 
         the latent solution at the p'th time step when we the means of the posterior distribution 
         for the i'th combination of parameter values to define the latent dynamics.
     """
 
     # Checks. 
-    assert isinstance(param_grid, numpy.ndarray),   "type(param_grid) = %s, expected numpy.ndarray" % (type(param_grid) == numpy.ndarray);
-    assert param_grid.ndim    == 2,                 "param_grid.ndim = %d, expected 2" % (param_grid.ndim);
-    n_param : int   = param_grid.shape[0];
-    n_p     : int   = param_grid.shape[1];
+    assert isinstance(param_grid, numpy.ndarray),   "type(param_grid) = %s, expected numpy.ndarray" % (type(param_grid));
+    assert len(param_grid.shape)    == 2,           "len(param_grid.shape) = %d, expected 2" % (len(param_grid.shape));
+    n_param     : int               = param_grid.shape[0];
+    n_p         : int               = param_grid.shape[1];
+    assert len(ROM_IC) == n_param,                  "ROM_IC has length %d, but got %d parameters. These must match." % (len(ROM_IC), n_param);
+    
+    assert len(t_Grid)              == n_param,     "len(t_Grid) = %d, n_param %d" % (len(t_Grid), n_param);
+    for i in range(n_param):
+        assert isinstance(t_Grid[i], numpy.ndarray) or isinstance(t_Grid[i], torch.Tensor), "type(t_Grid[%d]) = %s, expected numpy.ndarray or torch.Tensor" % (i, type(t_Grid[i]));
 
-    assert isinstance(t_Grid, list),                "type(t_Grid) = %s, expected list" % (type(t_Grid) == list);
-    assert len(t_Grid)  == n_param,                 "len(t_Grid) = %d, n_param %d" % (len(t_Grid), n_param);
-
-    n_IC    : int   = latent_dynamics.n_IC;
-    n_z     : int   = latent_dynamics.n_z;
-    assert encoder_decoder.n_IC == n_IC,            "encoder_decoder.n_IC = %d, n_IC %d" % (encoder_decoder.n_IC, n_IC);
-    assert physics.n_IC         == n_IC,            "physics.n_IC = %d, n_IC %d" % (physics.n_IC, n_IC);
-
-
-    # For each parameter in param_grid, fetch the corresponding initial condition and then encode
-    # it. This gives us a list whose i'th element holds the encoding of the i'th initial condition.
-    LOGGER.debug("Fetching latent space initial conditions for %d combinations of parameters." % n_param);
-    Z0      : list[list[numpy.ndarray]] = encoder_decoder.latent_initial_conditions(param_grid, physics, trainer = trainer);
+    n_IC        : int               = latent_dynamics.n_IC; 
+    n_z         : int               = latent_dynamics.n_z;
+    for i in range(n_param):
+        assert isinstance(ROM_IC[i], list), "type(ROM_IC[%d]) = %s, expected list" % (i, type(ROM_IC[i]));
+        assert len(ROM_IC[i]) == n_IC, "len(ROM_IC[%d]) = %d, expected %d (=latent_dynamics.n_IC)" % (i, len(ROM_IC[i]), n_IC);
+        for j in range(n_IC):
+            assert isinstance(ROM_IC[i][j], numpy.ndarray), "type(ROM_IC[%d][%d]) = %s, expected numpy.ndarray" % (i, j, type(ROM_IC[i][j]));
+            assert ROM_IC[i][j].size == n_z, "ROM_IC[%d][%d].shape = %s, expected %d entries (=latent_dynamics.n_z)" % (i, j, str(ROM_IC[i][j].shape), n_z);
 
     # Make each element of t_Grid into a one-dimensional numpy.ndarray.
     t_Grid_np : list[numpy.ndarray] = [];
@@ -110,7 +97,7 @@ def Mean_Rollout(   encoder_decoder : EncoderDecoder,
     # Simulate the laten dynamics! For each testing parameter, use the mean value of each posterior 
     # distribution to define the coefficients. 
     LOGGER.info("simulating initial conditions for %d combinations of parameters forward in time" % n_param);
-    Zis : list[list[numpy.ndarray]] = latent_dynamics.simulate( IC      = Z0, 
+    Zis : list[list[numpy.ndarray]] = latent_dynamics.simulate( IC      = ROM_IC, 
                                                                 t_Grid  = t_Grid_np,
                                                                 params  = param_grid,
                                                                 sample  = False);
@@ -132,13 +119,11 @@ def Mean_Rollout(   encoder_decoder : EncoderDecoder,
 # Rollout using LD coefficient samples
 # -------------------------------------------------------------------------------------------------
 
-def Sample_Rollouts(encoder_decoder : EncoderDecoder, 
-                    physics         : Physics, 
-                    latent_dynamics : LatentDynamics, 
+def Sample_Rollouts(ROM_IC          : list[list[numpy.ndarray]],
+                    latent_dynamics : LatentDynamics,
                     param_grid      : numpy.ndarray, 
                     t_Grid          : list[numpy.ndarray | torch.Tensor],
-                    n_samples       : int,
-                    trainer         : Trainer) ->           list[list[numpy.ndarray]]:
+                    n_samples       : int) ->           list[list[numpy.ndarray]]:
     """
     This function samples the latent coefficients, solves the corresponding latent dynamics, and 
     then returns the resulting latent solutions. 
@@ -148,19 +133,14 @@ def Sample_Rollouts(encoder_decoder : EncoderDecoder,
     Arguments
     -----------------------------------------------------------------------------------------------
 
-    encoder_decoder : EncoderDecoder
-        An EncoderDecoder (i.e., autoencoder). We use this to map the FOM IC's (which we can get 
-        from physics) to the latent space using the EncoderDecoder's encoder. physics, 
-        latent_dynamics, and encoder_decoder should have the same number of initial conditions.
+    ROM_IC : list[list[numpy.ndarray]], len = n_param 
+        The encoded initial conditions for each parameter value. i'th element should be an n_IC 
+        element list whose j'th element holds the initial condition for the j'th derivative of 
+        the latent dynamics when we use the i'th combination of parameter values.
 
-    physics : Physics
-        allows us to find the IC for a particular combination of parameter values. physics, 
-        latent_dynamics, and encoder_decoder should have the same number of initial conditions.
-    
     latent_dynamics : LatentDynamics
-        describes how we specify the dynamics in the encoder_decoder's latent space. We use this
-        to simulate the latent dynamics forward in time. physics, latent_dynamics, and 
-        encoder_decoder should have the same number of initial conditions.
+        describes how we specify the dynamics we want to rollout. We use this to simulate the 
+        latent dynamics forward in time. 
 
     param_grid : numpy.ndarray, shape = (n_param, n_p)
         i,j element of holds the value of the j'th parameter in the i'th combination of parameter 
@@ -190,43 +170,39 @@ def Sample_Rollouts(encoder_decoder : EncoderDecoder,
     """
     
     # Checks
-    assert isinstance(t_Grid, list), "type(t_Grid) = %s, expected list" % (type(t_Grid) == list);
+    assert isinstance(t_Grid,   list), "type(t_Grid) = %s, expected list" % (type(t_Grid) == list);
     assert isinstance(n_samples, int), "type(n_samples) = %s, expected int" % (type(n_samples) == int);
 
     assert isinstance(param_grid, numpy.ndarray), "type(param_grid) = %s, expected numpy.ndarray" % (type(param_grid));
     assert len(param_grid.shape)    == 2, "len(param_grid.shape) = %d, expected 2" % (len(param_grid.shape));
     n_param     : int               = param_grid.shape[0];
     n_p         : int               = param_grid.shape[1];
-
+    assert len(ROM_IC) == n_param,      "ROM_IC has length %d, but got %d parameters. These must match." % (len(ROM_IC), n_param);
+    
     assert len(t_Grid)              == n_param, "len(t_Grid) = %d, n_param %d" % (len(t_Grid), n_param);
     for i in range(n_param):
         assert isinstance(t_Grid[i], numpy.ndarray) or isinstance(t_Grid[i], torch.Tensor), "type(t_Grid[%d]) = %s, expected numpy.ndarray or torch.Tensor" % (i, type(t_Grid[i]));
 
-    n_IC        : int               = latent_dynamics.n_IC;
-    n_z         : int               = encoder_decoder.n_z;
-    assert physics.n_IC             == n_IC, "physics.n_IC = %d, n_IC %d" % (physics.n_IC, n_IC);
-    assert encoder_decoder.n_IC     == n_IC, "encoder_decoder.n_IC = %d, n_IC %d" % (encoder_decoder.n_IC, n_IC);
-
+    n_IC        : int               = latent_dynamics.n_IC; 
+    n_z         : int               = latent_dynamics.n_z;
+    for i in range(n_param):
+        assert isinstance(ROM_IC[i], list), "type(ROM_IC[%d]) = %s, expected list" % (i, type(ROM_IC[i]));
+        assert len(ROM_IC[i]) == n_IC, "len(ROM_IC[%d]) = %d, expected %d (=latent_dynamics.n_IC)" % (i, len(ROM_IC[i]), n_IC);
+        for j in range(n_IC):
+            assert isinstance(ROM_IC[i][j], numpy.ndarray), "type(ROM_IC[%d][%d]) = %s, expected numpy.ndarray" % (i, j, type(ROM_IC[i][j]));
+            assert ROM_IC[i][j].size == n_z, "ROM_IC[%d][%d].shape = %s, expected %d entries (=latent_dynamics.n_z)" % (i, j, str(ROM_IC[i][j].shape), n_z);
 
     # Reshape t_Grid so that each element is a one-dimensional numpy.ndarray.
     LOGGER.debug("reshaping t_Grid so that the i'th element has shape (n_t(i),).");
     t_Grid_np : list[numpy.ndarray] = [];
     for i in range(n_param):
         if(isinstance(t_Grid[i], torch.Tensor)):
-            t_Grid_np.append(t_Grid[i].detach().numpy());
+            t_Grid_np.append(t_Grid[i].detach().cpu().numpy());
         else:
             t_Grid_np.append(t_Grid[i]);
         
         t_Grid_np[i] = t_Grid_np[i].reshape(-1);
     
-    # For each combination of parameter values in param_grid, fetch the corresponding initial 
-    # condition and then encode it. This gives us a list whose i'th element is an n_IC element
-    # list whose j'th element is an array of shape (n_z) holding the IC for the j'th derivative
-    # of the latent state when we use the i'th combination of parameter values. 
-    LOGGER.debug("Fetching latent space initial conditions for %d combinations of parameters." % n_param);
-    Z0      : list[list[numpy.ndarray]] = encoder_decoder.latent_initial_conditions(param_grid, physics, trainer = trainer);
-
-
     # Setup a list to hold the simulated dynamics. There are n_param parameters. For each 
     # combination of parameter values, we have n_IC initial conditions. For each IC, we 
     # have n_samples simulations, each of which has n_t_i frames, each of which has n_z components
@@ -279,9 +255,9 @@ def Sample_Rollouts(encoder_decoder : EncoderDecoder,
 
                 # Generate the remaining samples even if they might diverge
                 for sample_idx in range(n_needed):
-                    Z0_i = [Z0[i][j] for j in range(n_IC)];
+                    ith_ROM_IC = ROM_IC[i]; 
                     traj = latent_dynamics.simulate( 
-                                            IC      = [Z0_i], 
+                                            IC      = [ith_ROM_IC], 
                                             t_Grid  = [t_Grid_np[i]], 
                                             params  = param_grid[i, :].reshape(1, -1),
                                             sample  = True);
@@ -293,12 +269,12 @@ def Sample_Rollouts(encoder_decoder : EncoderDecoder,
                 total_resample_attempts += 1;
                                 
                 # Get IC for this parameter (list of n_IC arrays, each shape (n_z))
-                Z0_i = [Z0[i][j] for j in range(n_IC)];
+                ith_ROM_IC = ROM_IC[i]; 
                 
                 # Simulate: returns list[list[array]], outer list has 1 element (1 param), 
                 # inner list has n_IC elements
                 traj = latent_dynamics.simulate( 
-                                        IC      = [Z0_i], 
+                                        IC      = [ith_ROM_IC], 
                                         t_Grid  = [t_Grid_np[i]], 
                                         params  = param_grid[i, :].reshape(1, -1),
                                         sample   = True);

@@ -140,6 +140,32 @@ def Plot_Latent_Trajectories(physics         : Physics,
 
 
     # ---------------------------------------------------------------------------------------------
+    # Compute ROM ICs.
+
+    # First, fetch the FOM ICs.
+    FOM_IC : list[list[numpy.ndarray]] = []; # len = n_param; i'th element has n_IC elements
+    has_norm : bool = (trainer is not None) and hasattr(trainer, "has_normalization") and trainer.has_normalization();
+    for i in range(n_param):
+        # Get the ICs for the i'th combination of parameter values.
+        ith_FOM_IC : list[numpy.ndarray] = physics.initial_condition(param_grid[i]);
+        assert isinstance(ith_FOM_IC, list), "type(ith_FOM_IC) = %s, expected list" % str(type(ith_FOM_IC));
+        assert len(ith_FOM_IC) == encoder_decoder.n_IC, "len(ith_FOM_IC) = %d, expected %d (=encoder_decoder.n_IC)" % (len(ith_FOM_IC), encoder_decoder.n_IC);
+
+        # Apply normalization if available.    
+        if has_norm:
+            Normalized_FOM_IC : list[numpy.ndarray] = [];
+            for k in range(len(ith_FOM_IC)):
+                Normalized_FOM_IC.append(trainer.normalize(ith_FOM_IC[k], k));
+            ith_FOM_IC = Normalized_FOM_IC;
+
+        # All done!
+        FOM_IC.append(ith_FOM_IC);
+
+    # Now encode them.
+    ROM_IC : list[list[numpy.ndarray]] = encoder_decoder.latent_initial_conditions(FOM_IC);
+
+
+    # ---------------------------------------------------------------------------------------------
     # Generate the Latent Trajectories.
 
     # First generate the latent trajectories. This is a an n_param element list whose i'th element
@@ -147,13 +173,11 @@ def Plot_Latent_Trajectories(physics         : Physics,
     # Here, n_param is the number of combinations of parameter values.
     LOGGER.info("Solving the latent dynamics using %d samples of the posterior distributions for %d combinations of parameter values" % (n_samples, n_param));
     Predicted_Latent_Trajectories : list[list[numpy.ndarray]] = Sample_Rollouts( 
-                                                                    encoder_decoder = encoder_decoder, 
-                                                                    physics         = physics, 
+                                                                    ROM_IC          = ROM_IC,
                                                                     latent_dynamics = latent_dynamics, 
                                                                     param_grid      = param_grid,
                                                                     t_Grid          = t_Grid,
-                                                                    n_samples       = n_samples,
-                                                                    trainer         = trainer);
+                                                                    n_samples       = n_samples);
     
     # Now encode the FOM trajectories. Store these in an n_param element list whose i'th element
     # is an n_IC element list whose j'th element is a numpy array of shape (n_t(i), n_z) holding

@@ -336,7 +336,7 @@ class Sampler:
         #
         # If enabled and stats are not set yet, compute mean/std from the (unnormalized) training data,
         # store them on the trainer, then normalize both training and testing trajectories in-place.
-        if hasattr(trainer, "normalize") and bool(trainer.normalize):
+        if hasattr(trainer, "normalization_enabled") and bool(trainer.normalization_enabled):
             if not (hasattr(trainer, "has_normalization") and trainer.has_normalization()):
                 LOGGER.info("Computing normalization statistics...");
                 # Log data stats BEFORE normalization for debugging

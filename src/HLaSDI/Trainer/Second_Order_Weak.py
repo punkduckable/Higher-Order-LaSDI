@@ -709,8 +709,8 @@ class Second_Order_Weak(Second_Order_Rollout):
                     D_IC_i            : torch.Tensor              = torch.tensor(FOM_IC_i[0], dtype = torch.float32, device = device).reshape((1,) + FOM_IC_i[0].shape);
                     V_IC_i            : torch.Tensor              = torch.tensor(FOM_IC_i[1], dtype = torch.float32, device = device).reshape((1,) + FOM_IC_i[1].shape);
                     if self.has_normalization():
-                        D_IC_i = self.normalize_tensor(D_IC_i, 0);
-                        V_IC_i = self.normalize_tensor(V_IC_i, 1);
+                        D_IC_i = self.normalize(D_IC_i, 0);
+                        V_IC_i = self.normalize(V_IC_i, 1);
                     
                     # Encode the FOM initial conditions
                     Z_D_IC_i, Z_V_IC_i = encoder_decoder_device.Encode(D_IC_i, V_IC_i);

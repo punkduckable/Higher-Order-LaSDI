@@ -7,12 +7,6 @@ import      logging;
 import      torch;
 import      numpy;
 
-from        typing              import  TYPE_CHECKING;
-if TYPE_CHECKING:
-    from    HLaSDI.Trainer      import  Trainer;
-    from    HLaSDI.Physics      import  Physics;
-
-
 # Set up logging.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
@@ -156,8 +150,7 @@ class EncoderDecoder(torch.nn.Module):
 
         The base EncoderDecoder class defines the following methods:
         
-            - latent_initial_conditions: Maps a set of initial conditions for a given set of physics 
-             to the latent space.
+            - latent_initial_conditions: Maps provided FOM initial conditions to the latent space.
               
             - Set_Decoder_Active: Modifies the Decoder_Active attribute used by Decoder.
 
@@ -491,91 +484,72 @@ class EncoderDecoder(torch.nn.Module):
     # ---------------------------------------------------------------------------------------------
 
     def latent_initial_conditions(  self,
-                                    param_grid     : numpy.ndarray, 
-                                    physics        : "Physics",
-                                    trainer        : "Trainer") -> list[list[numpy.ndarray]]:
+                                    FOM_IC         : list[list[numpy.ndarray | torch.Tensor]]) -> list[list[numpy.ndarray]]:
         """
         This function maps a set of initial conditions for the FOM to initial conditions for the 
-        latent space dynamics. Specifically, we take in a set of possible parameter values. For 
-        each set of parameter values, we recover the FOM IC (from physics), then map this FOM IC to 
-        a latent space IC (by encoding it). We do this for each parameter combination and then 
-        return a list housing the latent space ICs.
+        latent space dynamics. The caller owns any physics lookup and normalization; this method
+        only encodes the provided FOM initial-condition arrays/tensors. This keeps the
+        EncoderDecoder package independent of Physics, Trainer, and Rollout implementations.
 
         
         -------------------------------------------------------------------------------------------
         Arguments
         -------------------------------------------------------------------------------------------
 
-        param_grid : numpy.ndarray, shape = (n_param, n_p)
-            i,j element of this array holds the value of the j'th parameter in the i'th combination of 
-            parameters. Here, n_param is the number of combinations of parameter values and n_p is the 
-            number of parameters (in each combination).
-
-        physics : "Physics"
-            A "Physics" object that, among other things, stores the IC for each combination of 
-            parameter values. This physics object should have the same number of initial conditions as 
-            self.
-        
-        trainer : "Trainer"
-            The trainer object used to train the EncoderDecoder.
-
+        FOM_IC : list[list[numpy.ndarray | torch.Tensor]], len = N 
+            A list of FOM initial conditions to encode. The i'th element should be a list of n_IC 
+            FOM initial conditions. If you are using a trainer with normalization, these should 
+            already be normalized. 
 
         -------------------------------------------------------------------------------------------
         Returns
         -------------------------------------------------------------------------------------------
         
-        Z0 : list[list[numpy.ndarray]], len = n_param
-            An n_param element list whose i'th element is an n_IC element list holding the encoding
-            of the initial conditions for the i'th combination of parameters. Each encoded initial
-            condition has shape (n_z).
-            
-            If we let U0_i denote the FOM IC for the i'th set of parameters, then the i'th element of 
-            the returned list is [self.encoder(*U0_i)].
+        ROM_IC : list[list[numpy.ndarray]], len = N
+            An N element list whose i'th element is an n_IC element list holding the encoding
+            of the i'th element of FOM_IC. Each encoded initial condition has shape (n_z).
         """
 
         # Checks.
-        assert isinstance(param_grid, numpy.ndarray),   "type(param_grid) = %s, must be numpy.ndarray" % str(type(param_grid));
-        assert len(param_grid.shape) == 2,              "param_grid.shape = %s, must have length 2" % str(param_grid.shape);
-        assert physics.n_IC == self.n_IC,               "physics.n_IC = %d, self.n_IC = %d; must be equal" % (physics.n_IC, self.n_IC);
+        assert isinstance(FOM_IC, list),    "FOM_IC must be a list of normalized initial conditions, got %s" % str(type(FOM_IC));
+        N : int = len(FOM_IC);
 
         # Determine device for encoding.
         encoder_device : torch.device = next(self.parameters()).device;
 
-        n_param : int = param_grid.shape[0];
-        Z0      : list[list[numpy.ndarray]] = [];
-        LOGGER.debug("Encoding initial conditions for %d combinations of parameter values" % n_param);
-
-        has_norm : bool = (trainer is not None) and hasattr(trainer, "has_normalization") and trainer.has_normalization();
+        # Setup 
+        LOGGER.debug("Encoding %d sets of FOM initial conditions." % N);
+        ROM_IC      : list[list[numpy.ndarray]] = [];
 
         with torch.no_grad():
-            for i in range(n_param):
-                # Get the ICs for the i'th combination of parameter values.
-                ICs : list[numpy.ndarray] = physics.initial_condition(param_grid[i]);
-                assert isinstance(ICs, list), "type(ICs) = %s, expected list" % str(type(ICs));
-                assert len(ICs) == self.n_IC, "len(ICs) = %d, expected %d (=self.n_IC)" % (len(ICs), self.n_IC);
+            for i in range(N):
+                # Get the i'th set of IC's
+                ith_FOM_IC : list[numpy.ndarray] = FOM_IC[i];
+                assert isinstance(ith_FOM_IC, list), "type(FOM_IC[%d]) = %s, expected list" % (i, str(type(ith_FOM_IC)));
+                assert len(ith_FOM_IC) == self.n_IC, "len(FOM_IC[%d]) = %d, expected %d (=self.n_IC)" % (i, len(ith_FOM_IC), self.n_IC);
 
-                # Convert ICs to tensors, optionally normalize, then encode.
-                X0_list : list[torch.Tensor] = [];
+                # Convert ICs to tensors, then encode.
+                ith_FOM_IC_list : list[torch.Tensor] = [];
                 for k in range(self.n_IC):
-                    x0_np : numpy.ndarray = ICs[k];
-                    x0_t  : torch.Tensor  = torch.Tensor(x0_np).reshape((1,) + x0_np.shape).to(encoder_device);
-                    if has_norm:
-                        x0_t = trainer.normalize_tensor(x0_t, k);
-                    X0_list.append(x0_t);
+                    ith_FOM_IC_k  : numpy.ndarray | torch.Tensor = ith_FOM_IC[k];
+                    assert isinstance(ith_FOM_IC_k, (numpy.ndarray, torch.Tensor)), "type(FOM_IC[%d][%d]) = %s, expected numpy.ndarray or torch.Tensor" % (i, k, str(type(ith_FOM_IC_k)));
+                    ith_FOM_IC_t  : torch.Tensor  = torch.as_tensor(ith_FOM_IC_k, dtype = torch.float32, device = encoder_device);
+                    ith_FOM_IC_t = ith_FOM_IC_t.reshape((1,) + tuple(ith_FOM_IC_t.shape));
+                    ith_FOM_IC_list.append(ith_FOM_IC_t);
 
-                # Encode (positional arguments). Must return a tuple of length self.n_IC.
-                Z0_tuple : tuple[torch.Tensor, ...] = self.Encode(*X0_list);
-                assert isinstance(Z0_tuple, tuple), "Encode must return a tuple; got %s" % str(type(Z0_tuple));
-                assert len(Z0_tuple) == self.n_IC,  "Encode returned %d outputs; expected %d (=self.n_IC)" % (len(Z0_tuple), self.n_IC);
+                # Encode (positional arguments). This returns a tuple of length self.n_IC.
+                ith_ROM_IC_tuple : tuple[torch.Tensor, ...] = self.Encode(*ith_FOM_IC_list);
+                assert isinstance(ith_ROM_IC_tuple, tuple), "Encode must return a tuple; got %s" % str(type(ith_ROM_IC_tuple));
+                assert len(ith_ROM_IC_tuple) == self.n_IC,  "Encode returned %d outputs; expected %d (=self.n_IC)" % (len(ith_ROM_IC_tuple), self.n_IC);
 
-                # Detach to one-dimensional numpy arrays for the LatentDynamics.simulate API.
-                Z0_i : list[numpy.ndarray] = [];
+                # Detach to one-dimensional numpy arrays.
+                ith_ROM_IC_np : list[numpy.ndarray] = [];
                 for k in range(self.n_IC):
-                    Z0_i.append(Z0_tuple[k].detach().cpu().numpy().reshape(-1));
+                    ith_ROM_IC_np.append(ith_ROM_IC_tuple[k].detach().cpu().numpy().reshape(-1));
 
-                Z0.append(Z0_i);
+                ROM_IC.append(ith_ROM_IC_np);
 
-        return Z0;
+        return ROM_IC;
 
 
 

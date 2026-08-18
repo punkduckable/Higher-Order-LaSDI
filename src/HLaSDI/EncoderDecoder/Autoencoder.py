@@ -11,6 +11,7 @@ import  numpy;
 from    HLaSDI.EncoderDecoder      import  EncoderDecoder;
 from    HLaSDI.EncoderDecoder.MLP  import  MultiLayerPerceptron, act_dict;
 from    HLaSDI.Schemas             import  AEEncoderDecoderConfig, AutoencoderEncoderDecoderConfig;
+
 # Set up logging.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
 

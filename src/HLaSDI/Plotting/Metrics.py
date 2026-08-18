@@ -172,16 +172,51 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
         coef_means = None
         coef_stds = None;
 
+
+    # ---------------------------------------------------------------------------------------------
+    # Compute ROM ICs.
+
+    # First, fetch the FOM ICs.
+    FOM_IC : list[list[numpy.ndarray]] = []; # len = n_Test; i'th element has n_IC elements
+    has_norm : bool = (trainer is not None) and hasattr(trainer, "has_normalization") and trainer.has_normalization();
+    for i in range(n_Test):
+        # Get the ICs for the i'th combination of parameter values.
+        ith_FOM_IC : list[numpy.ndarray] = physics.initial_condition(param_test[i]);
+        assert isinstance(ith_FOM_IC, list), "type(ith_FOM_IC) = %s, expected list" % str(type(ith_FOM_IC));
+        assert len(ith_FOM_IC) == encoder_decoder.n_IC, "len(ith_FOM_IC) = %d, expected %d (=encoder_decoder.n_IC)" % (len(ith_FOM_IC), encoder_decoder.n_IC);
+
+        # Apply normalization if available.    
+        if has_norm:
+            Normalized_FOM_IC : list[numpy.ndarray] = [];
+            for k in range(len(ith_FOM_IC)):
+                Normalized_FOM_IC.append(trainer.normalize(ith_FOM_IC[k], k));
+            ith_FOM_IC = Normalized_FOM_IC;
+
+        # All done!
+        FOM_IC.append(ith_FOM_IC);
+
+    # Now encode them.
+    ROM_IC : list[list[numpy.ndarray]] = encoder_decoder.latent_initial_conditions(FOM_IC);
+
     # ---------------------------------------------------------------------------------------------
     # Draw n_samples samples of the posterior distribution.
 
     # For each combination of parameter values in the testing set, sample the latent coefficients 
     # and solve the latent dynamics forward in time. 
     LOGGER.info("Generating latent dynamics trajectories for %d samples of the coefficients for %d combinations of testing parameter" % (n_samples, n_Test));
-    Zis_samples     : list[list[numpy.ndarray]] = Sample_Rollouts(encoder_decoder, physics, latent_dynamics, param_test, t_Test, n_samples, trainer = trainer);    # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_samples, n_z)
+    Zis_samples     : list[list[numpy.ndarray]] = Sample_Rollouts(
+                                                    ROM_IC          = ROM_IC, 
+                                                    latent_dynamics = latent_dynamics, 
+                                                    param_grid      = param_test,
+                                                    t_Grid          = t_Test, 
+                                                    n_samples       = n_samples);    # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_samples, n_z)
 
     LOGGER.info("Generating latent dynamics trajectories using posterior distribution means for %d combinations of testing parameter" % (n_Test));
-    Zis_mean        : list[list[numpy.ndarray]] = Mean_Rollout(encoder_decoder, physics, latent_dynamics, param_test, t_Test, trainer = trainer);               # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_z)
+    Zis_mean        : list[list[numpy.ndarray]] = Mean_Rollout(
+                                                    ROM_IC          = ROM_IC,
+                                                    latent_dynamics = latent_dynamics, 
+                                                    param_grid      = param_test, 
+                                                    t_Grid          = t_Test);               # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_z)
         
 
     # ---------------------------------------------------------------------------------------------
@@ -348,4 +383,3 @@ def flatten_coefficients(coefs : dict[str, torch.Tensor] | list[dict[str, torch.
         rows.append(numpy.concatenate(parts, axis = 0).reshape(1, -1));
 
     return numpy.concatenate(rows, axis = 0);
-

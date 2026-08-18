@@ -13,6 +13,7 @@ from    HLaSDI.EncoderDecoder              import  EncoderDecoder;
 from    HLaSDI.EncoderDecoder.MLP          import  MultiLayerPerceptron, act_dict;
 from    HLaSDI.Schemas                     import  CNN3DEncoderDecoderConfig, CNN3DAEEncoderDecoderConfig;
 from    HLaSDI.Schemas                     import  CNN3DAutoencoderEncoderDecoderConfig;
+
 # Set up logging.
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
 

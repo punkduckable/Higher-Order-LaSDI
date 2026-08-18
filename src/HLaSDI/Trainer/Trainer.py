@@ -72,7 +72,7 @@ class Trainer:
         Global iteration limit for training.
     max_greedy_iter : int
         Global iteration limit for greedy sampling rounds.
-    normalize : bool
+    normalization_enabled : bool
         Whether generated FOM trajectories are normalized before training.
     config : dict
         The `trainer` configuration dictionary.
@@ -145,7 +145,7 @@ class Trainer:
 
     # If true, the Sampler will normalize the training data before storing it in this
     # object. See Sampler/Sampler.py for details.
-    normalize : bool;
+    normalization_enabled : bool;
 
     # The trainer configuration file.
     config : dict;
@@ -186,10 +186,10 @@ class Trainer:
         The trainer also defines model checkpointing (via the _Save_Checkpoint method which
         Iterate should call each time it finds a new best model).
 
-        Trainer also control data normalization normalization; the base class defines several
-        methods for normalizing and de-normalizign data (set_normalization_stats_from_training,
-        set_normalization_stats_from_test, normalize_tensor, denormalize_tensor,
-        denormalize_np, denormalize_np, scale_std_np, and normalize_U_inplace); see
+        Trainer also controls data normalization; the base class defines several
+        methods for normalizing and de-normalizing data (set_normalization_stats_from_training,
+        set_normalization_stats_from_test, normalize, denormalize,
+        denormalize_np, scale_std_np, and normalize_U_inplace); see
         each one and their doc strings for details). Normalization generally works by re-centering
         and re-scaling training data before it is fed into the EncoderDecoder; this dramatically
         improves EncoderDecoder performance (mostly because ML models tend to work best when their
@@ -287,7 +287,7 @@ class Trainer:
         # Optional normalization (training-only stats).
         # If enabled, we compute a single mean/std across ALL training trajectories (per IC),
         # then normalize both training + testing trajectories using these values.
-        self.normalize              : bool                      = trainer_config.normalize;
+        self.normalization_enabled  : bool                      = trainer_config.normalize;
         self.data_mean              : list[torch.Tensor] | None = None;   # per-IC scalar tensors (CPU)
         self.data_std               : list[torch.Tensor] | None = None;   # per-IC scalar tensors (CPU)
 
@@ -420,7 +420,7 @@ class Trainer:
     # -------------------------------------------------------------------------------------------------
 
     def has_normalization(self) -> bool:
-        return bool(self.normalize and (self.data_mean is not None) and (self.data_std is not None));
+        return bool(self.normalization_enabled and (self.data_mean is not None) and (self.data_std is not None));
 
 
 
@@ -470,7 +470,7 @@ class Trainer:
         Compute and store mean/std from current training trajectories.
         Stats live on the trainer only; downstream utilities should be passed the trainer.
         """
-        assert self.normalize, "Normalization is disabled";
+        assert self.normalization_enabled, "Normalization is disabled";
         means, stds = self._compute_mean_std_from_U(self.U_Train);
         self.data_mean = [torch.tensor(m, dtype = torch.float32) for m in means];
         self.data_std  = [torch.tensor(s, dtype = torch.float32) for s in stds];
@@ -488,7 +488,7 @@ class Trainer:
         Compute and store mean/std from ALL test trajectories (better global statistics).
         This is preferred over training-only stats when training set is small (e.g., 4 corners).
         """
-        assert self.normalize, "Normalization is disabled";
+        assert self.normalization_enabled, "Normalization is disabled";
         assert len(self.U_Test) > 0, "Test set is empty!";
         means, stds = self._compute_mean_std_from_U(self.U_Test);
         self.data_mean = [torch.tensor(m, dtype = torch.float32) for m in means];
@@ -502,7 +502,10 @@ class Trainer:
 
 
 
-    def normalize_tensor(self, X: torch.Tensor, ic_idx: int) -> torch.Tensor:
+    def normalize(self, X: torch.Tensor | numpy.ndarray, ic_idx: int) -> torch.Tensor | numpy.ndarray:
+        """
+        Normalize a tensor or numpy array using the trainer's stored per-IC scalar statistics.
+        """
         if not self.has_normalization():
             return X;
         assert self.data_mean is not None and self.data_std is not None;
@@ -512,7 +515,10 @@ class Trainer:
 
 
 
-    def denormalize_tensor(self, X: torch.Tensor, ic_idx: int) -> torch.Tensor:
+    def denormalize(self, X: torch.Tensor | numpy.ndarray, ic_idx: int) -> torch.Tensor | numpy.ndarray:
+        """
+        De-normalize a tensor or numpy array using the trainer's stored per-IC scalar statistics.
+        """
         if not self.has_normalization():
             return X;
         assert self.data_mean is not None and self.data_std is not None;
@@ -558,7 +564,7 @@ class Trainer:
         for i in range(len(U)):
             assert len(U[i]) == n_IC, "U[%d] has %d ICs but expected %d" % (i, len(U[i]), n_IC);
             for j in range(n_IC):
-                U[i][j] = self.normalize_tensor(U[i][j], j);
+                U[i][j] = self.normalize(U[i][j], j);
         return;
 
 
@@ -860,7 +866,7 @@ class Trainer:
 
         Finally, this function should record how long each part of the training process takes.
         Specifically, it should track how long each loss function takes to compute, as well as how
-        long the back propagation step takes. 
+        long the back propagation step takes.
 
         Note that if normalization is enabled, the entires in U_Train and U_Test will already be
         normalized when they are stored in the Trainer object. This also means that the
@@ -1053,7 +1059,7 @@ class Trainer:
                  't_Test'                   : self.t_Test,
                  'restart_iter'             : self.restart_iter,
                  'config'                   : config,
-                 'normalize'                : self.normalize,
+                 'normalize'                : self.normalization_enabled,
                  'data_mean'                : None if self.data_mean is None else [float(m.detach().cpu().item()) for m in self.data_mean],
                  'data_std'                 : None if self.data_std  is None else [float(s.detach().cpu().item()) for s in self.data_std]};
         return dict_;
@@ -1095,10 +1101,10 @@ class Trainer:
         self.restart_iter       : int                       = dict_['restart_iter'];
 
         # Restore normalization stats (if present).
-        self.normalize = bool(dict_.get('normalize', False));
+        self.normalization_enabled = bool(dict_.get('normalize', False));
         dm = dict_.get('data_mean', None);
         ds = dict_.get('data_std', None);
-        if self.normalize and (dm is not None) and (ds is not None):
+        if self.normalization_enabled and (dm is not None) and (ds is not None):
             # Load scalar stats (handle both raw floats and scalar numpy arrays)
             self.data_mean = [torch.tensor(float(x) if not isinstance(x, numpy.ndarray) else float(x.item()), dtype = torch.float32) for x in dm];
             self.data_std  = [torch.tensor(float(x) if not isinstance(x, numpy.ndarray) else float(x.item()), dtype = torch.float32) for x in ds];

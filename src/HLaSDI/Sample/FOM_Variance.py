@@ -122,8 +122,11 @@ class FOM_Variance(Sampler):
         n_test          : int               = trainer.param_space.n_test();
         n_train         : int               = trainer.param_space.n_train();
 
-        # First, find the candidate parameters. These are the elements of the testing set that 
-        # are not already in the training set.
+
+        # ---------------------------------------------------------------------------------------------
+        # Find the candidate parameters. 
+
+        # These are the elements of the testing set that are not already in the training set.
         candidate_parameters_list   : list[numpy.ndarray]   = [];
         t_Candidates                : list[torch.Tensor]    = [];
         for i in range(n_test):
@@ -149,28 +152,39 @@ class FOM_Variance(Sampler):
         candidate_parameters    = numpy.array(candidate_parameters_list);        # (n_candidates, n_p) 
 
 
-        # Map the initial conditions for the FOM to initial conditions in the latent space.
-        # Yields an n_candidates element list whose i'th element is an n_IC element list whose j'th
-        # element is an numpy.ndarray of shape (n_z) whose k'th element holds the k'th component
-        # of the encoding of the initial condition for the j'th derivative of the latent dynamics 
-        # corresponding to the i'th candidate combination of parameter values.
-        Z0 : list[list[numpy.ndarray]]  = encoder_decoder.latent_initial_conditions(  
-                                                                    param_grid  = candidate_parameters, 
-                                                                    physics     = trainer.physics,
-                                                                    trainer     = trainer);
+        # ---------------------------------------------------------------------------------------------
+        # Compute ROM ICs.
+    
+        # First, fetch the FOM ICs.
+        FOM_IC : list[list[numpy.ndarray]] = []; # len = n_candidates; i'th element has n_IC elements
+        has_norm : bool = (trainer is not None) and hasattr(trainer, "has_normalization") and trainer.has_normalization();
+        for i in range(n_candidates):
+            # Get the ICs for the i'th combination of parameter values.
+            ith_FOM_IC : list[numpy.ndarray] = trainer.physics.initial_condition(candidate_parameters[i]);
+            assert isinstance(ith_FOM_IC, list), "type(ith_FOM_IC) = %s, expected list" % str(type(ith_FOM_IC));
+            assert len(ith_FOM_IC) == trainer.encoder_decoder.n_IC, "len(ith_FOM_IC) = %d, expected %d (=encoder_decoder.n_IC)" % (len(ith_FOM_IC), trainer.encoder_decoder.n_IC);
 
-        # Now, solve the latent dynamics forward in time using samples of samples of the latent
-        # dynamics. There are n_candidates combinations of parameter values, and we want 
-        # n_samples sets of LD samples for each combination of parameter values. For the i'th one
-        # of those, we want to solve the latent dynamics for n_t(i) times steps. Each solution 
-        # frame consists of n_IC elements of \marthbb{R}^{n_z}.
-        # 
-        # Thus, we store the latent states in an n_candidates element list whose i'th element is an 
-        # n_IC element list whose j'th element is an array of shape (n_samples, n_t(i), n_z) whose
-        # p, q, r element holds the r'th component of j'th derivative of the latent state at the 
-        # q'th time step when we use the p'th set of coefficient values sampled from the posterior
-        # distribution for the i'th combination of testing parameter values.
-        LatentStates    : list[list[numpy.ndarray]]     = [];
+            # Apply normalization if available.    
+            if has_norm:
+                Normalized_FOM_IC : list[numpy.ndarray] = [];
+                for k in range(len(ith_FOM_IC)):
+                    Normalized_FOM_IC.append(trainer.normalize(ith_FOM_IC[k], k));
+                ith_FOM_IC = Normalized_FOM_IC;
+
+            # All done!
+            FOM_IC.append(ith_FOM_IC);
+
+        # Now encode them.
+        ROM_IC : list[list[numpy.ndarray]] = encoder_decoder.latent_initial_conditions(FOM_IC);
+
+
+        # -----------------------------------------------------------------------------------------
+        # Generate the latent trajectories.
+
+        # Setup; initialize LatentStates to hold n_samples trajectories for each candidate 
+        # parameter. Thus, LatentStates will be an n_candidate list whose i'th element is
+        # a n_IC element list of arrays of shape (n_samples, n_t(i), n_z).
+        LatentStates    : list[list[numpy.ndarray]]     = [];  
         n_z             : int                           = trainer.latent_dynamics.n_z;
         for i in range(n_candidates):
             LatentStates_i  : list[numpy.ndarray]    = [];
@@ -179,18 +193,20 @@ class FOM_Variance(Sampler):
                 # truncated outputs, etc.), so allocate per-candidate.
                 LatentStates_i.append(numpy.empty([self.n_samples, len(t_Candidates[i]), n_z], dtype = numpy.float32));
             LatentStates.append(LatentStates_i);
-        
+
+        # Draw n_samples samples of the LD for each candidate, solve the resulting IVPs forward 
+        # using corresponding ROM IC.
         rollout_timer : float = time.perf_counter();
         for i in range(n_candidates):
             # Fetch the t_Grid for the i'th combination of parameter values.
             # Use a 1D time grid (shared across ICs). This avoids accidental shape/length
             # mismatches due to 2D handling downstream.
-            t_Grid  : numpy.ndarray = t_Candidates[i].detach().numpy().reshape(-1);
+            t_Grid  : numpy.ndarray = t_Candidates[i].detach().cpu().numpy().reshape(-1);
 
             # Simulate one sample at a time; store the resulting frames.           
             for j in range(self.n_samples):
                 LatentState_ij : list[list[numpy.ndarray]] = trainer.latent_dynamics.simulate( 
-                                                                    IC      = [Z0[i]], 
+                                                                    IC      = [ROM_IC[i]], 
                                                                     t_Grid  = [t_Grid], 
                                                                     params  = candidate_parameters[i, :].reshape(1, -1),
                                                                     sample  = True);
