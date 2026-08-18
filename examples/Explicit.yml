@@ -85,12 +85,13 @@ latent_dynamics:
     hidden_widths:          [64, 64]
     activations:            ['tanh', 'tanh']
     use_biases:             true 
+    use_z_in_gate:          false
     coef_norm:              'l2'
     eps_engaged:            0.001
     use_mask:               true
-    mask_threshold:         0.001
+    mask_threshold:         0.0005
     first_mask_step:        1000
-    mask_update_freq:       100
+    mask_update_freq:       250
 
 physics:
   type:                     Explicit

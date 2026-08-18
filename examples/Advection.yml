@@ -88,6 +88,7 @@ latent_dynamics:
     hidden_widths:          [64, 64]
     activations:            ['tanh', 'tanh']
     use_biases:             true 
+    use_z_in_gate:          false
     coef_norm:              'l2'
     use_mask:               true
     eps_engaged:            0.001
