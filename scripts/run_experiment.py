@@ -6,10 +6,12 @@ import  sys;
 import  os;
 from    pathlib                     import  Path;
 
-# Expose `src/` as the import root for the repository sub-libraries.
+# Expose `src/` as the import root for the HLaSDI package.
 PROJECT_DIR         : Path  = Path(__file__).resolve().parent.parent;
 SRC_Path            : str   = str(PROJECT_DIR / "src");
-sys.path.append(SRC_Path);
+
+if(SRC_Path not in sys.path):
+    sys.path.insert(0, SRC_Path);
 
 import  yaml;
 import  argparse;
@@ -18,15 +20,16 @@ import  time;
 
 import  numpy;
 
-from    EncoderDecoder              import  EncoderDecoder;
-from    ParameterSpace              import  ParameterSpace;
-from    Physics                     import  Physics;
-from    Enums                       import  NextStep;
-from    LatentDynamics              import  LatentDynamics;
-from    Trainer                     import  Trainer;
-from    Initialize                  import  Initialize_Trainer;
-from    Sample                      import  Sampler;
-from    Utilities.Logging           import  Initialize_Logger, Log_Dictionary;
+from    HLaSDI.EncoderDecoder              import  EncoderDecoder;
+from    HLaSDI.ParameterSpace       import  ParameterSpace;
+from    HLaSDI.Physics                     import  Physics;
+from    HLaSDI.Enums                import  NextStep;
+from    HLaSDI.LatentDynamics              import  LatentDynamics;
+from    HLaSDI.Trainer                     import  Trainer;
+from    HLaSDI.Initialize           import  Initialize_Trainer;
+from    HLaSDI.Sample                      import  Sampler;
+from    HLaSDI.Schemas              import  validate_experiment_config;
+from    HLaSDI.Utilities.Logging    import  Initialize_Logger, Log_Dictionary;
 
 
 # Set up the logger.
@@ -62,16 +65,17 @@ def main():
 
     # Load the configuration file. 
     with open(args.config, 'r') as f:
-        config      = yaml.safe_load(f);
+        raw_config  = yaml.safe_load(f);
+    config = validate_experiment_config(raw_config);
     
-    # Report the configuration settings.
-    Log_Dictionary(LOGGER = LOGGER, D = config, level = logging.INFO);
+    # Report the validated configuration settings.
+    Log_Dictionary(LOGGER = LOGGER, D = config.to_runtime_dict(), level = logging.INFO);
 
     # Check if we are loading from a restart or not. If so, load it.
-    use_restart         : bool  = config['workflow']['use_restart'];
+    use_restart         : bool  = config.workflow.use_restart;
     restart_filename    : str   = "";
     if (use_restart == True):
-        restart_filename    : str   = config['workflow']['restart_file'];
+        restart_filename    : str   = config.workflow.restart_file;
         LOGGER.info("Loading from restart (%s)" % restart_filename);
 
         # Set up the restart path under Higher-Order-LaSDI/results (independent of CWD).
@@ -322,7 +326,7 @@ def Save(   param_space         : ParameterSpace,
         # now append the new date to the restart filename.
         restart_filename = restart_filename_no_ext + '__' + date_str + '.npy';
     else:
-        restart_filename : str = config["physics"]["type"] + '_' + date_str + '.npy';
+        restart_filename : str = config.physics.type + '_' + date_str + '.npy';
     # Set up the restart path.
     # Use an absolute results directory under the project root (Higher-Order-LaSDI/results),
     # independent of the current working directory.
@@ -338,8 +342,9 @@ def Save(   param_space         : ParameterSpace,
     LOGGER.info("Saving results to %s" % restart_path);
 
     # Build the restart save dictionary and then save it.
+    config_dict = config.to_runtime_dict() if hasattr(config, "to_runtime_dict") else config;
     restart_dict = {'parameter_space'   : param_space.export(),
-                    'config'            : config,
+                    'config'            : config_dict,
                     'physics'           : physics.export(),
                     'encoder_decoder'   : encoder_decoder.export(),
                     'latent_dynamics'   : latent_dynamics.export(),
@@ -392,7 +397,7 @@ def count_parameters(   encoder_decoder : EncoderDecoder,
 
     # Count learnable coefficients from trainer (only applies if we are learning the latent 
     # dynamics coefficients)
-    coef_params = sum(t.numel() for t in latent_dynamics.trainable_coef_tensors());
+    coef_params = sum(t.numel() for t in latent_dynamics.parameters());
     
     # Print summary
     LOGGER.info("=" * 80);

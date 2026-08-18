@@ -2,7 +2,7 @@
 """Convert LaSDI per-epoch JSONL metrics to TensorBoard event files.
 
 The trainers intentionally write package-agnostic JSON Lines files during training. This script is
-post-processing only: it reads a completed ``*_loss_by_param.jsonl`` file and writes TensorBoard
+post-processing only: it reads a completed ``*_metrics.jsonl`` file and writes TensorBoard
 scalar events that can be viewed with ``tensorboard --logdir ...``.
 """
 
@@ -16,14 +16,14 @@ from pathlib import Path
 from typing import Any
 
 
-LOSS_BY_PARAM_SUFFIX = "_loss_by_param"
+METRICS_SUFFIX = "_metrics"
 
 
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
 
     parser = argparse.ArgumentParser(
-        description="Convert a LaSDI *_loss_by_param.jsonl file to TensorBoard scalar events.",
+        description="Convert a LaSDI *_metrics.jsonl file to TensorBoard scalar events.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Directory where TensorBoard event files will be written. If omitted, uses "
-            "tb_runs/<jsonl stem without _loss_by_param>."
+            "tb_runs/<jsonl stem without _metrics>."
         ),
     )
     parser.add_argument(
@@ -54,14 +54,14 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help=(
-            "Optional comma-separated names for parameter values, e.g. "
-            "'laser_power,scan_speed,initial_temp'. If omitted, p0, p1, ... are used."
+            "Deprecated no-op retained for CLI compatibility with old commands; metric keys are "
+            "already serialized by the trainer."
         ),
     )
     parser.add_argument(
         "--totals-only",
         action="store_true",
-        help="Only export records with param == null; skip per-parameter scalar curves.",
+        help="Only export metric keys ending in /total.",
     )
     return parser.parse_args()
 
@@ -70,8 +70,8 @@ def default_logdir(jsonl_path: Path) -> Path:
     """Return the default TensorBoard output directory for a JSONL metrics file."""
 
     stem = jsonl_path.stem
-    if stem.endswith(LOSS_BY_PARAM_SUFFIX):
-        stem = stem[: -len(LOSS_BY_PARAM_SUFFIX)]
+    if stem.endswith(METRICS_SUFFIX):
+        stem = stem[: -len(METRICS_SUFFIX)]
     return Path("tb_runs") / stem
 
 
@@ -150,10 +150,10 @@ def read_jsonl_rows(jsonl_path: Path) -> list[dict[str, Any]]:
                 raise ValueError("line %d must contain a JSON object" % line_number)
             if "epoch" not in row:
                 raise ValueError("line %d is missing required key 'epoch'" % line_number)
-            if "losses" not in row:
-                raise ValueError("line %d is missing required key 'losses'" % line_number)
-            if not isinstance(row["losses"], list):
-                raise ValueError("line %d key 'losses' must be a list" % line_number)
+            if "metrics" not in row:
+                raise ValueError("line %d is missing required key 'metrics'" % line_number)
+            if not isinstance(row["metrics"], list):
+                raise ValueError("line %d key 'metrics' must be a list" % line_number)
             rows.append(row)
 
     if len(rows) == 0:
@@ -188,26 +188,22 @@ def convert_jsonl_to_tensorboard(
     try:
         for row in rows:
             epoch = int(row["epoch"])
-            for record in row["losses"]:
+            for record in row["metrics"]:
                 if not isinstance(record, dict):
-                    raise ValueError("loss records must be JSON objects, got %s" % type(record))
-                if "loss_name" not in record or "param" not in record or "value" not in record:
-                    raise ValueError("loss record is missing one of: loss_name, param, value")
+                    raise ValueError("metric records must be JSON objects, got %s" % type(record))
+                if len(record) != 1:
+                    raise ValueError("metric records must contain exactly one key/value pair")
 
-                loss_name = record["loss_name"]
-                param = record["param"]
-                value = float(record["value"])
+                tag, value_raw = next(iter(record.items()))
+                value = float(value_raw)
 
-                if not isinstance(loss_name, str):
-                    raise ValueError("loss_name must be a string, got %s" % type(loss_name))
-                if param is not None and not isinstance(param, list):
-                    raise ValueError("param must be null or a list, got %s" % type(param))
+                if not isinstance(tag, str):
+                    raise ValueError("metric key must be a string, got %s" % type(tag))
                 if not math.isfinite(value):
-                    raise ValueError("loss value must be finite, got %s" % value)
-                if totals_only and param is not None:
+                    raise ValueError("metric value must be finite, got %s" % value)
+                if totals_only and not tag.endswith("/total"):
                     continue
 
-                tag = tensorboard_tag(loss_name=loss_name, param=param, param_names=param_names)
                 writer.add_scalar(tag, value, epoch)
                 n_written += 1
     finally:

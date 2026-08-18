@@ -11,6 +11,8 @@ trainer:
 
   device:                 'cpu'
 
+  noise_ratio:            0.0
+
   Second_Order_Rollout:
     lr:                     0.001
     gradient_clip:          15.0        # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
@@ -32,17 +34,13 @@ trainer:
     loss_weights:
       recon:                1.0
       chain_rule:           1.0
-      LD:                   1.0
       rollout:              1.0
       IC_rollout:           1.0
-      coef:                 0.001
-      stab:                 0.1
       consistency:          1.0
 
     loss_types:
       recon:                "MAE"
       chain_rule:           "MAE"
-      LD:                   "MAE"
       rollout:              "MAE"
       IC_rollout:           "MAE"
       consistency:          "MAE"
@@ -84,8 +82,13 @@ EncoderDecoder:
 
 
 latent_dynamics:
+  interpolator_type:        GP
   type:                     spring
   trainable:                true
+  loss_weights: 
+    LD:                     1.0
+    coef:                   0.001
+    stab:                   0.1
   spring:
     lstsq_reg:              1.0           # Ridge-regression regularization for SINDy coefficient initialization (prevents blow-up for new greedy-sampled points).
 

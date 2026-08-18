@@ -12,19 +12,22 @@ import  numpy;
 import  torch;
 import  matplotlib.pyplot           as      plt;
 
-# Expose `src/` as the import root for the repository sub-libraries.
+# Expose `src/` as the import root for the HLaSDI package.
 PROJECT_DIR         : Path  = Path(__file__).resolve().parent.parent;
 SRC_Path            : str   = str(PROJECT_DIR / "src");
-sys.path.append(SRC_Path);
 
-from    Plotting.Metrics            import  Generate_Heatmap_Data;
-from    Plotting.Plot               import  Plot_Heatmap, Plot_Latent_Trajectories;
-from    Plotting.Plot               import  trainSpace_RelativeErrors_Heatmap;
-from    Plotting.Animate            import  make_solution_movies;
-from    Interpolate                 import  Interpolate;
-from    Interpolate.Rollouts        import  Mean_Rollout; 
-from    Utilities.Logging           import  Initialize_Logger;
-from    Initialize                  import  Initialize_Trainer;
+if(SRC_Path not in sys.path):
+    sys.path.insert(0, SRC_Path);
+
+from    HLaSDI.Plotting.Metrics            import  Generate_Heatmap_Data;
+from    HLaSDI.Plotting.Plot               import  Plot_Heatmap, Plot_Latent_Trajectories;
+from    HLaSDI.Plotting.Plot               import  trainSpace_RelativeErrors_Heatmap;
+from    HLaSDI.Plotting.Animate            import  make_solution_movies;
+from    HLaSDI.Rollouts                    import  Mean_Rollout; 
+from    HLaSDI.LatentDynamics              import  InterpolatableLatentDynamics;
+from    HLaSDI.Utilities.Logging           import  Initialize_Logger;
+from    HLaSDI.Initialize                  import  Initialize_Trainer;
+from    HLaSDI.Schemas                     import  validate_experiment_config;
 
 # Set up the command line arguments
 parser = argparse.ArgumentParser(description        = "",
@@ -93,12 +96,13 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
     # Load the saved artifact and extract the config.
     restart_dict : dict = numpy.load(str(artifact_file), allow_pickle = True).item();
     if("config" in restart_dict):
-        config : dict = restart_dict["config"];
+        config = validate_experiment_config(restart_dict["config"]);
     elif(("trainer" in restart_dict) and ("config" in restart_dict["trainer"])):
         LOGGER.warning("Artifact has no top-level config; falling back to trainer config.");
-        config : dict = restart_dict["trainer"]["config"];
+        config = validate_experiment_config(restart_dict["trainer"]["config"]);
     else:
         raise KeyError("Artifact must contain either restart_dict['config'] or restart_dict['trainer']['config']");
+    physics_type : str = config.physics.type;
 
     # Load the trainer, sampler, parameter space, physics, encoder_decoder, and latent dynamics.
     # This mirrors restart loading in run_experiment.py, except it does not write a checkpoint.
@@ -117,8 +121,6 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
 
     # Set up coefficient interpolator. 
     encoder_decoder.cpu();
-    trainer._check_train_coefficients();
-    interpolator : Interpolate = Interpolate(latent_dynamics.train_coefs);
 
     # Number of coefficient/ROM samples used for plotting + uncertainty metrics.
     # Most samplers expose this as an attribute; fall back to 20 for custom samplers.
@@ -131,7 +133,6 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
                                                                                         physics         = physics,
                                                                                         param_space     = param_space,
                                                                                         latent_dynamics = latent_dynamics,
-                                                                                        interpolator    = interpolator,
                                                                                         t_Test          = trainer.t_Test,
                                                                                         U_Test          = trainer.U_Test,
                                                                                         n_samples       = n_samples_plot,
@@ -146,12 +147,11 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
     Plot_Latent_Trajectories(  physics         = physics,
                                encoder_decoder = encoder_decoder,
                                latent_dynamics = latent_dynamics,
-                               interpolator    = interpolator,
                                param_grid      = param_space.test_space[i_worst, :].reshape(1, -1),
                                n_samples       = n_samples_plot,
                                U_True          = [trainer.U_Test[i_worst]],
                                t_Grid          = [trainer.t_Test[i_worst]],
-                               file_prefix     = config["physics"]["type"],
+                               file_prefix     = physics_type,
                                trainer         = trainer,
                                figsize         = (15, 13));
 
@@ -160,7 +160,7 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
     if(make_train_rel_error_heatmap == True):
         trainSpace_RelativeErrors_Heatmap(  trainer     = trainer, 
                                             param_space = param_space, 
-                                            file_prefix = config["physics"]["type"]);
+                                            file_prefix = physics_type);
 
 
 
@@ -233,13 +233,13 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
 
         if(i == 0):     
             title_str       : str = "Relative Error of the rollout of U for %s"           % str(param_space.test_space[i_worst]);
-            save_file_name  : str = config["physics"]["type"] + "_U_Rollout_Rel_Error_%s.png"                   % str(param_space.test_space[i_worst]);   
+            save_file_name  : str = physics_type + "_U_Rollout_Rel_Error_%s.png"                   % str(param_space.test_space[i_worst]);   
         elif(i == 1):   
             title_str       : str = "Relative Error of the rollout of D_t U for %s"       % str(param_space.test_space[i_worst]);
-            save_file_name  : str = config["physics"]["type"] + "_Dt_U_Rollout_Rel_Error_%s.png"                % str(param_space.test_space[i_worst]);
+            save_file_name  : str = physics_type + "_Dt_U_Rollout_Rel_Error_%s.png"                % str(param_space.test_space[i_worst]);
         else:           
             title_str       : str = "Relative Error of the rollout of D_t^%d U for %s"    % (i, str(param_space.test_space[i_worst]));
-            save_file_name  : str = config["physics"]["type"] + "_Dt^%d_U_Rollout_Rel_Error_%s.png"             % (i, str(param_space.test_space[i_worst]));
+            save_file_name  : str = physics_type + "_Dt^%d_U_Rollout_Rel_Error_%s.png"             % (i, str(param_space.test_space[i_worst]));
 
         # Plot the figure.
         plt.title(title_str);
@@ -259,13 +259,13 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
         
         if(i == 0):     
             title_str       : str = "Relative Error of the reconstruction of U for %s"        % str(param_space.test_space[i_worst]);
-            save_file_name  : str = config["physics"]["type"] + "_U_Recon_Rel_Error_%s.png"                         % str(param_space.test_space[i_worst]);   
+            save_file_name  : str = physics_type + "_U_Recon_Rel_Error_%s.png"                         % str(param_space.test_space[i_worst]);   
         elif(i == 1):   
             title_str       : str = "Relative Error of the reconstruction of D_t U for %s"    % str(param_space.test_space[i_worst]);
-            save_file_name  : str = config["physics"]["type"] + "_Dt_U_Recon_Rel_Error_%s.png"                      % str(param_space.test_space[i_worst]);
+            save_file_name  : str = physics_type + "_Dt_U_Recon_Rel_Error_%s.png"                      % str(param_space.test_space[i_worst]);
         else:           
             title_str       : str = "Relative Error of the reconstruction of D_t^%d U for %s" % (i, str(param_space.test_space[i_worst]));
-            save_file_name  : str = config["physics"]["type"] + "_Dt^%d_U_Recon_Rel_Error_%s.png"                   % (i, str(param_space.test_space[i_worst]));
+            save_file_name  : str = physics_type + "_Dt^%d_U_Recon_Rel_Error_%s.png"                   % (i, str(param_space.test_space[i_worst]));
 
         # Plot the figure.
         plt.title(title_str);
@@ -302,7 +302,6 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
         Zi_mean_np     : list[numpy.ndarray]   = Mean_Rollout(  encoder_decoder = encoder_decoder, # n_IC element list whose j'th element has shape (n_t(i), n_z)
                                                                 physics         = physics, 
                                                                 latent_dynamics = latent_dynamics, 
-                                                                interpolator    = interpolator, 
                                                                 param_grid      = param_worst, 
                                                                 t_Grid          = [t_worst],
                                                                 trainer         = trainer)[0];
@@ -317,11 +316,11 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
         n_IC        : int                   = physics.n_IC;
         for i in range(n_IC):
             if(i == 0):
-                prefix : str = "%s_U_%s"        % (config["physics"]["type"], str(param_space.test_space[i_worst]));
+                prefix : str = "%s_U_%s"        % (physics_type, str(param_space.test_space[i_worst]));
             elif(i == 1):
-                prefix : str = "%s_Dt_U_%s"     % (config["physics"]["type"], str(param_space.test_space[i_worst]));
+                prefix : str = "%s_Dt_U_%s"     % (physics_type, str(param_space.test_space[i_worst]));
             else:
-                prefix : str = "%s_Dt^%d_U_%s"  % (config["physics"]["type"], i, str(param_space.test_space[i_worst]));
+                prefix : str = "%s_Dt^%d_U_%s"  % (physics_type, i, str(param_space.test_space[i_worst]));
 
             # Make the movie.
             # Check normalization status and apply denormalization appropriately.
@@ -416,13 +415,13 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
                 # combination and derivative (computed over all time steps + spatial nodes), not a
                 # per-time/per-node std.
                 title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| u_{\text{Pred}}(t_k, x_j) - u_{\text{True}}(t_k, x_j) \right|} {\sigma \left( u_{\text{True}} \right) }$';
-                save_file_name  : str   = config["physics"]["type"] + "_U_Reconstruction_Relative_Error_Heatmap.png";
+                save_file_name  : str   = physics_type + "_U_Reconstruction_Relative_Error_Heatmap.png";
             elif(d == 1):
                 title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| \frac{d}{dt}u_{\text{Pred}}(t_k, x_j) - \frac{d}{dt}u_{\text{True}}(t_k, x_j) \right|} {\sigma \left( \frac{d}{dt}u_{\text{True}} \right) }$';
-                save_file_name  : str   = config["physics"]["type"] + "_Dt_U_Reconstruction_Relative_Error_Heatmap.png";
+                save_file_name  : str   = physics_type + "_Dt_U_Reconstruction_Relative_Error_Heatmap.png";
             else:
                 title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| \frac{d^{%d}}{dt^{%d}}u_{\text{Pred}}(t_k, x_j) - \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t_k, x_j) \right|} {\sigma \left( \frac{d^{%d}}{dt^{%d}}u_{\text{True}} \right) }$' % (d, d, d, d, d, d);
-                save_file_name  : str   = config["physics"]["type"] + "_Dt^%d_U_Reconstruction_Relative_Error_Heatmap.png" % d;
+                save_file_name  : str   = physics_type + "_Dt^%d_U_Reconstruction_Relative_Error_Heatmap.png" % d;
 
             Plot_Heatmap(   values          = Max_Recon_Rel_Error[:, d].reshape(param_space.test_grid_sizes) * 100, 
                             param_space     = param_space,
@@ -440,13 +439,13 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
                 # combination and derivative (computed over all time steps + spatial nodes), not a
                 # per-time/per-node std.
                 title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| u_{\text{Rollout}}(t_k, x_j) - u_{\text{True}}(t_k, x_j) \right|} {\sigma \left( u_{\text{True}} \right) }$';
-                save_file_name  : str   = config["physics"]["type"] + "_U_Rollout_Rel_Error_Heatmap.png";
+                save_file_name  : str   = physics_type + "_U_Rollout_Rel_Error_Heatmap.png";
             elif(d == 1):
                 title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| \frac{d}{dt}u_{\text{Rollout}}(t_k, x_j) - \frac{d}{dt}u_{\text{True}}(t_k, x_j) \right|} {\sigma \left( \frac{d}{dt}u_{\text{True}} \right) }$';
-                save_file_name  : str   = config["physics"]["type"] + "_Dt_U_Rollout_Rel_Error_Heatmap.png";
+                save_file_name  : str   = physics_type + "_Dt_U_Rollout_Rel_Error_Heatmap.png";
             else:
                 title           : str   = r'$\text{max}_{k} \frac{\text{mean}_{j} \left| \frac{d^{%d}}{dt^{%d}}u_{\text{Rollout}}(t_k, x_j) - \frac{d^{%d}}{dt^{%d}}u_{\text{True}}(t_k, x_j) \right|} {\sigma \left( \frac{d^{%d}}{dt^{%d}}u_{\text{True}} \right) }$' % (d, d, d, d, d, d);
-                save_file_name  : str   = config["physics"]["type"] + "_Dt^%d_U_Rollout_Rel_Error_Heatmap.png" % d;
+                save_file_name  : str   = physics_type + "_Dt^%d_U_Rollout_Rel_Error_Heatmap.png" % d;
 
             Plot_Heatmap(   values          = Max_Rollout_Rel_Error[:, d].reshape(param_space.test_grid_sizes) * 100, 
                             param_space     = param_space,
@@ -459,13 +458,13 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
         for d in range(n_IC):
             if(d == 0):
                 title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{1, \ldots, %d\}} \left[ u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % n_samples_plot;
-                save_file_name  : str   = config["physics"]["type"] + "_U_STD_Heatmap.png";
+                save_file_name  : str   = physics_type + "_U_STD_Heatmap.png";
             elif(d == 1):
                 title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{ 1, \ldots, %d\}} \left[\frac{d}{dt}u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % (n_samples_plot);
-                save_file_name  : str   = config["physics"]["type"] + "_Dt_U_STD_Heatmap.png";      
+                save_file_name  : str   = physics_type + "_Dt_U_STD_Heatmap.png";      
             else:
                 title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{ 1, \ldots, %d\}} \left[\frac{d^{%d}}{dt^{%d}}u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % (n_samples_plot, d, d);
-                save_file_name  : str   = config["physics"]["type"] + "_Dt^%d_U_STD_Heatmap.png" % d;
+                save_file_name  : str   = physics_type + "_Dt^%d_U_STD_Heatmap.png" % d;
 
 
             Plot_Heatmap(   values          = Max_STD[:, d].reshape(param_space.test_grid_sizes) * 100,
@@ -474,27 +473,29 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
                             save_file_name  = save_file_name);
 
 
-        # Plot the mean and std of each coefficient at each testing parameter.
-        for d in range(latent_dynamics.n_coefs):
-            title           : str   = "Coefficient %d mean" % d;
-            save_file_name  : str   = config["physics"]["type"] + "Coefficient_%d_mean.png" % d;
+        # Plot the mean and std of each coefficient (assuming the LD is interpolatable) at each 
+        # testing parameter.
+        if isinstance(latent_dynamics, InterpolatableLatentDynamics):
+            for d in range(latent_dynamics.n_coefs):
+                title           : str   = "Coefficient %d mean" % d;
+                save_file_name  : str   = physics_type + "Coefficient_%d_mean.png" % d;
 
-            Plot_Heatmap(   values          = coef_means[:, d].reshape(param_space.test_grid_sizes),
-                            param_space     = param_space, 
-                            title           = title,
-                            save_file_name  = save_file_name,
-                            show_plot       = False,
-                            annotate_cells  = False);
+                Plot_Heatmap(   values          = coef_means[:, d].reshape(param_space.test_grid_sizes),
+                                param_space     = param_space, 
+                                title           = title,
+                                save_file_name  = save_file_name,
+                                show_plot       = False,
+                                annotate_cells  = False);
 
-            title           : str   = "Coefficient %d std" % d;
-            save_file_name  : str   = config["physics"]["type"] + "Coefficient_%d_std.png" % d;
+                title           : str   = "Coefficient %d std" % d;
+                save_file_name  : str   = physics_type + "Coefficient_%d_std.png" % d;
 
-            Plot_Heatmap(   values          = coef_stds[:, d].reshape(param_space.test_grid_sizes),
-                            param_space     = param_space, 
-                            title           = title,
-                            save_file_name  = save_file_name,
-                            show_plot       = False,
-                            annotate_cells  = False);
+                Plot_Heatmap(   values          = coef_stds[:, d].reshape(param_space.test_grid_sizes),
+                                param_space     = param_space, 
+                                title           = title,
+                                save_file_name  = save_file_name,
+                                show_plot       = False,
+                                annotate_cells  = False);
     else:
         LOGGER.warning("Skipping parameter-space heatmaps because param_space.n_p = %d; Plot_Heatmap supports only 2D or 3D parameter spaces." % param_space.n_p);
 

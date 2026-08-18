@@ -56,17 +56,13 @@ trainer:
     loss_weights:
       recon:                1.0
       chain_rule:           1.0       # Weak-form variant: Phi @ V_FOM + dPhi @ D_pred ≈ 0 (no JVP, no FD).
-      LD:                   1.0
       rollout:              0.0
       IC_rollout:           0.0
-      coef:                 0.0001
-      stab:                 0.0
       consistency:          1.0       # Weak-form variant: dPhi @ Z_D + Phi @ Z_V ≈ 0 (no FD).
 
     loss_types:
       recon:                "MSE"
       chain_rule:           "MSE"
-      LD:                   "MSE"
       rollout:              "MSE"
       IC_rollout:           "MSE"
       consistency:          "MSE"
@@ -104,8 +100,13 @@ EncoderDecoder:
     activations:            ["sin", "sin", "sin", "sin"]
 
 latent_dynamics:
+  interpolator_type:        GP
   type:                     spring_w
   trainable:                true
+  loss_weights: 
+    LD:                     1.0
+    coef:                   0.0001
+    stab:                   0.0
   spring_w:
     test_func_type:         'PC-poly'
     test_func_width:        .1
@@ -124,12 +125,3 @@ physics:
     convergence_threshold:  0.00000001
     uniform_t_grid:         false
 
-  BurgersSecondOrder:
-    n_t:                    501
-    t_max:                  1.
-    n_x:                    1001
-    x_min:                  -3.
-    x_max:                  3.
-    maxk:                   10
-    convergence_threshold:  0.00000001
-    uniform_t_grid:         false
