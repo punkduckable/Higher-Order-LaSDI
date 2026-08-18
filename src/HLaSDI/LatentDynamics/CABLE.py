@@ -105,6 +105,7 @@ class CABLE(LatentDynamics):
         self.activations        : list[str]     = sub.activations;
         self.coef_norm          : str           = sub.coef_norm
         self.use_biases         : bool          = sub.use_biases;
+        self.eps_engaged        : float         = sub.eps_engaged;
         self.use_mask           : bool          = sub.use_mask;
         self.mask_threshold     : float | None  = sub.mask_threshold;
         self.first_mask_step    : int   | None  = sub.first_mask_step;
@@ -341,9 +342,10 @@ class CABLE(LatentDynamics):
         # Setup
         loss_LD_list        : list[torch.Tensor]        = [];
         summed_weights      : torch.Tensor              = torch.zeros((self.n_experts), dtype = self.unmasked_A.dtype, device = self.unmasked_A.device);
+        times_engaged       : torch.Tensor              = torch.zeros((self.n_experts), dtype = torch.int64, device = self.unmasked_A.device);
+        n_engaged_list      : list[torch.Tensor]        = [];
         loss_tail_list      : list[torch.Tensor]        = [];
         weights_list        : list[torch.Tensor]        = [];
-        n_engaged_list      : list[torch.Tensor]        = [];
         tail_mass_list      : list[torch.Tensor]        = [];
         metrics             : dict[str, torch.Tensor]   = {};
 
@@ -383,8 +385,12 @@ class CABLE(LatentDynamics):
             # Evaluate expert weights.
             ith_weights       : torch.Tensor = self._weights_for_t_grid(ith_t_Grid, ith_params, t0 = ith_t_Grid[0], t_span = ith_t_Grid[-1] - ith_t_Grid[0]);
             weights_list.append(ith_weights.to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype));
-            n_engaged_list.append(torch.sum(ith_weights > 0.001, dim = 1).to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype));
             ith_RHS           : torch.Tensor = self._evaluate_torch_rhs_from_weights(ith_Z, ith_weights);
+
+            # Record which experts are engaged during each step for this parameter.
+            ith_engaged : torch.Tensor = (ith_weights > self.eps_engaged).to(dtype = torch.bool, device = self.unmasked_A.device)
+            times_engaged += torch.sum(ith_engaged, dim = 0);
+            n_engaged_list.append(torch.sum(ith_engaged, dim = 1).to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype));
 
             # Compute the LD loss for the i'th combination of parameters.
             ith_loss_LD = self.MSE(dZdt, ith_RHS);
@@ -411,13 +417,16 @@ class CABLE(LatentDynamics):
             loss_tail_list.append(ith_tail_loss);
             metrics[f"loss/tail/{str(ith_params)}"] = ith_tail_loss.detach();
 
+
         # Evaluate loss statistics (computed across times and parameters).
-        weights     : torch.Tensor = torch.cat(weights_list, dim = 0);
-        tail_masses : torch.Tensor = torch.cat(tail_mass_list, dim = 0);
-        n_engaged   : torch.Tensor = torch.cat(n_engaged_list, dim = 0);
+        weights         : torch.Tensor = torch.cat(weights_list, dim = 0);
+        tail_masses     : torch.Tensor = torch.cat(tail_mass_list, dim = 0);
+        n_engaged       : torch.Tensor = torch.cat(n_engaged_list, dim = 0);
         metrics.update(tensor_statistics(prefix = "expert/weights",         values = weights));
         metrics.update(tensor_statistics(prefix = "mass/tail",              values = tail_masses));
         metrics.update(tensor_statistics(prefix = "experts/num_engaged",    values = n_engaged));
+        metrics.update(tensor_statistics(prefix = "experts/times_engaged",  values = times_engaged));
+        metrics["experts/num_ever_engaged"] = torch.sum(times_engaged > 0).to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype).detach();
 
         # Coefficient loss is the sum of the selected norms of the matrix portions of each expert,
         # plus the selected norm of each enabled bias. This is a scalar global loss, so the

@@ -473,6 +473,9 @@ class CABLELatentDynamicsSettings(ConfigBase):
     # expert coefficients for each expert.
     coef_norm : Literal['l1', 'l2']
 
+    # What expert weight counts as "engaged"? Used for metrics tracking.
+    eps_engaged : PositiveFloat = 1.0e-3
+
     # Should we periodically mask out coefficients that get too small? If so, once a coefficient
     # is masked, it will never be unmasked.
     use_mask : bool

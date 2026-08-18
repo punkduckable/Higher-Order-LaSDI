@@ -90,6 +90,7 @@ latent_dynamics:
     use_biases:             true 
     coef_norm:              'l2'
     use_mask:               true
+    eps_engaged:            0.001
     mask_threshold:         0.001
     first_mask_step:        1000
     mask_update_freq:       1000

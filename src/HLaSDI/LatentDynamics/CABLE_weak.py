@@ -175,6 +175,7 @@ class CABLE_weak(WeakLatentDynamics, CABLE):
         tail_mass_list      : list[torch.Tensor]      = [];
         metrics             : dict[str, torch.Tensor] = {};
         summed_weights      : torch.Tensor            = torch.zeros((self.n_experts), dtype = self.unmasked_A.dtype, device = self.unmasked_A.device);
+        times_engaged       : torch.Tensor            = torch.zeros((self.n_experts), dtype = torch.int64, device = self.unmasked_A.device);
 
         # Periodically update hard coefficient masks, matching CABLE.compute_losses. Masked entries
         # are multiplied out through the CABLE `A`/`b` properties used below.
@@ -214,8 +215,12 @@ class CABLE_weak(WeakLatentDynamics, CABLE):
             # through the tail-mass loss, not by discontinuously truncating the RHS.
             ith_weights : torch.Tensor = self._weights_for_t_grid(ith_t_Grid, ith_params, t0 = ith_t_Grid[0], t_span = ith_t_Grid[-1] - ith_t_Grid[0]);
             weights_list.append(ith_weights.to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype));
-            n_engaged_list.append(torch.sum(ith_weights > 0.001, dim = 1).to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype));
             ith_RHS : torch.Tensor = self._evaluate_torch_rhs_from_weights(ith_Z, ith_weights);
+
+            # Record which experts are engaged during each step for this parameter.
+            ith_engaged : torch.Tensor = (ith_weights > self.eps_engaged).to(dtype = torch.bool, device = self.unmasked_A.device);
+            times_engaged += torch.sum(ith_engaged, dim = 0);
+            n_engaged_list.append(torch.sum(ith_engaged, dim = 1).to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype));
 
             # Weak residual. Following the weak-form convention used by the other latent dynamics
             # classes, multiplication by sampled test-function rows approximates the time
@@ -259,6 +264,8 @@ class CABLE_weak(WeakLatentDynamics, CABLE):
         metrics.update(tensor_statistics(prefix = "expert/weights",      values = weights));
         metrics.update(tensor_statistics(prefix = "mass/tail",           values = tail_masses));
         metrics.update(tensor_statistics(prefix = "experts/num_engaged", values = n_engaged));
+        metrics.update(tensor_statistics(prefix = "experts/times_engaged", values = times_engaged));
+        metrics["experts/num_ever_engaged"] = torch.sum(times_engaged > 0).to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype).detach();
 
         # Coefficient loss is the sum of the selected norms of each expert matrix plus each
         # optional expert bias. The masked `A`/`b` properties ensure removed coefficients do not
