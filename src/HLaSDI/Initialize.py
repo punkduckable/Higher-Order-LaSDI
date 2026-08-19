@@ -212,7 +212,11 @@ def Initialize_Trainer(
     trainer                 = trainer_dict[trainer_type](physics, encoder_decoder, latent_dynamics, param_space, config);
     
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
+        fresh_run_ID       : str = trainer.run_ID;
         trainer.load(restart_dict['trainer']);
+        if make_restart_checkpoint == True:
+            trainer.run_ID = fresh_run_ID;
+            trainer._Set_Run_Directories();
 
     # Check if we should make a checkpoint using the current encoder_decoder parameters.
     if (bool(restart_dict) == True and make_restart_checkpoint == True): 

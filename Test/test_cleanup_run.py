@@ -6,23 +6,7 @@ from pathlib import Path
 SCRIPTS = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts"))
 sys.path.append(SCRIPTS)
 
-from cleanup_run import is_coefficient_heatmap, select_metrics_file
-
-
-def test_coefficient_heatmap_detects_sliced_mean_and_std_names():
-    assert is_coefficient_heatmap(
-        Path("ThermalCoefficient_0_mean__initial temp_2.98e+02.png")
-    )
-    assert is_coefficient_heatmap(
-        Path("ThermalCoefficient_12_std__initial temp_3.78e+02.png")
-    )
-
-
-def test_coefficient_heatmap_ignores_non_coefficient_heatmaps():
-    assert not is_coefficient_heatmap(
-        Path("Thermal_U_STD_Heatmap__initial temp_2.98e+02.png")
-    )
-    assert not is_coefficient_heatmap(Path("Thermal_U_Recon_Rel_Error.png"))
+from cleanup_run import select_metrics_file
 
 
 def test_select_metrics_uses_matching_save_prefix_even_if_filtered_out(tmp_path):

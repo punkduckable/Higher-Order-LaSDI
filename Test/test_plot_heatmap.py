@@ -1,5 +1,6 @@
 import os
 import sys
+from pathlib import Path
 
 import numpy
 import pytest
@@ -7,7 +8,6 @@ import pytest
 SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.append(SRC)
 
-import HLaSDI.Plotting.Plot as Plot
 from HLaSDI.ParameterSpace import ParameterSpace
 from HLaSDI.Plotting.Plot import Plot_Heatmap
 from HLaSDI.Schemas import ParameterSpaceConfig
@@ -31,14 +31,14 @@ def _parameter_space(sample_sizes):
     return ParameterSpace(config)
 
 
-def test_plot_heatmap_writes_single_2d_file(tmp_path, monkeypatch):
-    monkeypatch.setattr(Plot, "Figures_Path", str(tmp_path))
+def test_plot_heatmap_writes_single_2d_file(tmp_path):
     param_space = _parameter_space([2, 3])
     values = numpy.arange(6, dtype = numpy.float64).reshape(param_space.test_grid_sizes)
 
     Plot_Heatmap(
         values=values,
         param_space=param_space,
+        figures_dir=tmp_path,
         save_file_name="heat2d.png",
         show_plot=False,
         annotate_cells=False,
@@ -47,14 +47,14 @@ def test_plot_heatmap_writes_single_2d_file(tmp_path, monkeypatch):
     assert (tmp_path / "heat2d.png").exists()
 
 
-def test_plot_heatmap_writes_one_2d_slice_per_third_parameter(tmp_path, monkeypatch):
-    monkeypatch.setattr(Plot, "Figures_Path", str(tmp_path))
+def test_plot_heatmap_writes_one_2d_slice_per_third_parameter(tmp_path):
     param_space = _parameter_space([2, 2, 3])
     values = numpy.arange(12, dtype = numpy.float64).reshape(param_space.test_grid_sizes)
 
     Plot_Heatmap(
         values=values,
         param_space=param_space,
+        figures_dir=tmp_path,
         save_file_name="heat3d.png",
         show_plot=False,
         annotate_cells=False,
@@ -68,4 +68,4 @@ def test_plot_heatmap_rejects_parameter_spaces_above_3d():
     values = numpy.zeros(param_space.test_grid_sizes)
 
     with pytest.raises(ValueError, match="only supports 2D or 3D"):
-        Plot_Heatmap(values=values, param_space=param_space, show_plot=False)
+        Plot_Heatmap(values=values, param_space=param_space, figures_dir=Path("."), show_plot=False)

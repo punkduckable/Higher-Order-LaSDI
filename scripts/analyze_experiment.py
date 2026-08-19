@@ -36,7 +36,7 @@ parser.add_argument('--artifact',
                     default     = None,
                     required    = True,
                     type        = str,
-                    help        = 'the saved model/config/data from a training run.\n');
+                    help        = 'the npy file produced by a training run.\n');
 parser.add_argument('--relative-error-plot',
                     action      = "store_true",
                     help        = 'If true, we generate a heatmap of the relative error between FOM solutions in the training set.')
@@ -113,6 +113,9 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
         make_restart_checkpoint = False,
     );
     LOGGER.info("Done loading!");
+    figures_dir : Path = Path(trainer.figures_dir);
+    figures_dir.mkdir(parents = True, exist_ok = True);
+    LOGGER.info("Analysis figures directory: %s" % figures_dir);
 
 
     # ---------------------------------------------------------------------------------------------
@@ -153,6 +156,7 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
                                t_Grid          = [trainer.t_Test[i_worst]],
                                file_prefix     = physics_type,
                                trainer         = trainer,
+                               figures_dir     = figures_dir,
                                figsize         = (15, 13));
 
 
@@ -160,6 +164,7 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
     if(make_train_rel_error_heatmap == True):
         trainSpace_RelativeErrors_Heatmap(  trainer     = trainer, 
                                             param_space = param_space, 
+                                            figures_dir = figures_dir,
                                             file_prefix = physics_type);
 
 
@@ -245,8 +250,6 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
         plt.title(title_str);
     
         # Now save the figure.
-        figures_dir: Path = Path(__file__).resolve().parent.parent / "Figures";
-        figures_dir.mkdir(parents=True, exist_ok=True);
         plt.savefig(str(figures_dir / save_file_name));
 
 
@@ -271,8 +274,6 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
         plt.title(title_str);
     
         # Now save the figure.
-        figures_dir: Path = Path(__file__).resolve().parent.parent / "Figures";
-        figures_dir.mkdir(parents=True, exist_ok=True);
         plt.savefig(str(figures_dir / save_file_name));
     
     plt.show();
@@ -403,6 +404,7 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
                                  U_Pred         = U_i_pred_np, 
                                  X              = physics.X_Positions, 
                                  T              = t_worst.detach().numpy(),
+                                 save_dir       = figures_dir,
                                  vmin           = vmin,
                                  vmax           = vmax,
                                  fname_prefix   = prefix, 
@@ -436,6 +438,7 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
 
             Plot_Heatmap(   values          = Max_Recon_Rel_Error[:, d].reshape(param_space.test_grid_sizes) * 100, 
                             param_space     = param_space,
+                            figures_dir     = figures_dir,
                             title           = title, 
                             save_file_name  = save_file_name);
         
@@ -460,6 +463,7 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
 
             Plot_Heatmap(   values          = Max_Rollout_Rel_Error[:, d].reshape(param_space.test_grid_sizes) * 100, 
                             param_space     = param_space,
+                            figures_dir     = figures_dir,
                             title           = title, 
                             save_file_name  = save_file_name);
 
@@ -480,6 +484,7 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
 
             Plot_Heatmap(   values          = Max_STD[:, d].reshape(param_space.test_grid_sizes) * 100,
                             param_space     = param_space, 
+                            figures_dir     = figures_dir,
                             title           = title,
                             save_file_name  = save_file_name);
 
@@ -493,6 +498,7 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
 
                 Plot_Heatmap(   values          = coef_means[:, d].reshape(param_space.test_grid_sizes),
                                 param_space     = param_space, 
+                                figures_dir     = figures_dir,
                                 title           = title,
                                 save_file_name  = save_file_name,
                                 show_plot       = False,
@@ -503,6 +509,7 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
 
                 Plot_Heatmap(   values          = coef_stds[:, d].reshape(param_space.test_grid_sizes),
                                 param_space     = param_space, 
+                                figures_dir     = figures_dir,
                                 title           = title,
                                 save_file_name  = save_file_name,
                                 show_plot       = False,

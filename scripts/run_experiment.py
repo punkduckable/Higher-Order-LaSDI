@@ -5,6 +5,7 @@
 import  sys;
 import  os;
 from    pathlib                     import  Path;
+import  shutil;
 
 # Expose `src/` as the import root for the HLaSDI package.
 PROJECT_DIR         : Path  = Path(__file__).resolve().parent.parent;
@@ -73,14 +74,9 @@ def main():
 
     # Check if we are loading from a restart or not. If so, load it.
     use_restart         : bool  = config.workflow.use_restart;
-    restart_filename    : str   = "";
     if (use_restart == True):
-        restart_filename    : str   = config.workflow.restart_file;
-        LOGGER.info("Loading from restart (%s)" % restart_filename);
-
-        # Set up the restart path under Higher-Order-LaSDI/results (independent of CWD).
-        results_dir         : Path  = PROJECT_DIR / "results";
-        restart_path        : str   = str(results_dir / restart_filename);
+        restart_path    : str   = str(PROJECT_DIR / config.workflow.restart_file);
+        LOGGER.info("Loading from restart (%s)" % restart_path);
     
     LOGGER.info("Done! Took %fs" % (time.perf_counter() - timer));
 
@@ -107,6 +103,13 @@ def main():
     # Initialize the trainer.
     trainer, sampler, param_space, physics, encoder_decoder, latent_dynamics = Initialize_Trainer(config, restart_dict);
 
+    # Back up the exact config file used to start this trainer immediately after the run-specific
+    # results directory exists. This preserves the launch-time settings even if the source YAML is
+    # edited before training/analysis completes.
+    config_backup_path : Path = Path(trainer.results_dir) / Path(args.config).name;
+    shutil.copy2(args.config, config_backup_path);
+    LOGGER.info("Copied run config to %s" % config_backup_path);
+
     # Calculate and print the number of parameters
     count_parameters(encoder_decoder, latent_dynamics, trainer);
 
@@ -129,8 +132,7 @@ def main():
             encoder_decoder     = encoder_decoder, 
             latent_dynamics     = latent_dynamics,
             trainer             = trainer,
-            next_step           = next_step,
-            restart_filename    = restart_filename);
+            next_step           = next_step);
 
 
 
@@ -250,8 +252,7 @@ def Save(   param_space         : ParameterSpace,
             encoder_decoder     : EncoderDecoder, 
             latent_dynamics     : LatentDynamics,
             trainer             : Trainer, 
-            next_step           : NextStep, 
-            restart_filename    : str               = "") -> None:
+            next_step           : NextStep) -> None:
     """
     This function saves a trained encoder_decoder, trainer, latent dynamics, etc. You should call 
     this function after running the LASDI algorithm.
@@ -290,10 +291,6 @@ def Save(   param_space         : ParameterSpace,
         An enumeration indicating the next step (should we continue training). This should 
         have been returned by the final call to the step function.
 
-    restart_filename : str
-        If we loaded from a restart, then this is the name of the restart we loaded.
-        Otherwise, if we did not load from a restart, this should be an empty string.
-
 
     
     -----------------------------------------------------------------------------------------------
@@ -308,38 +305,13 @@ def Save(   param_space         : ParameterSpace,
     assert encoder_decoder.n_IC     == n_IC, "encoder_decoder.n_IC = %d != n_IC = %d" % (encoder_decoder.n_IC, n_IC);
     assert(physics.n_IC             == n_IC);
 
-
-    # Save restart (or final) file.
-    date        = time.localtime();
-    date_str    = "{month:02d}_{day:02d}_{year:04d}_{hour:02d}_{minute:02d}";
-    date_str    = date_str.format(month     = date.tm_mon, 
-                                  day       = date.tm_mday, 
-                                  year      = date.tm_year, 
-                                  hour      = date.tm_hour, 
-                                  minute    = date.tm_min);
-    
-    # Set up the restart filename.
-    if(len(restart_filename) > 0):
-        # Extract the non-extension portion of the restart filename.
-        restart_filename_no_ext : str = restart_filename.split('.')[0];
-
-        # now append the new date to the restart filename.
-        restart_filename = restart_filename_no_ext + '__' + date_str + '.npy';
-    else:
-        restart_filename : str = config.physics.type + '_' + date_str + '.npy';
     # Set up the restart path.
     # Use an absolute results directory under the project root (Higher-Order-LaSDI/results),
     # independent of the current working directory.
-    from pathlib import Path;
-    if hasattr(trainer, "path_results"):
-        results_dir = Path(trainer.path_results);
-    else:
-        src_dir = Path(__file__).resolve().parent;
-        project_dir = src_dir.parent;
-        results_dir = project_dir / "results";
+    results_dir = Path(trainer.results_dir);
     results_dir.mkdir(parents=True, exist_ok=True);
-    restart_path = str(results_dir / restart_filename);
-    LOGGER.info("Saving results to %s" % restart_path);
+    restart_file = str(results_dir / (config.physics.type + '.npy'));
+    LOGGER.info("Saving results to %s" % restart_file);
 
     # Build the restart save dictionary and then save it.
     config_dict = config.to_runtime_dict() if hasattr(config, "to_runtime_dict") else config;
@@ -349,9 +321,8 @@ def Save(   param_space         : ParameterSpace,
                     'encoder_decoder'   : encoder_decoder.export(),
                     'latent_dynamics'   : latent_dynamics.export(),
                     'trainer'           : trainer.export(),
-                    'timestamp'         : date_str,
                     'next_step'         : next_step};
-    numpy.save(restart_path, restart_dict);
+    numpy.save(restart_file, restart_dict);
 
     # All done!
     return;

@@ -7,6 +7,7 @@ import  time;
 
 import  json;
 import  logging;
+from    pathlib                             import Path;
 from    typing                              import Any;
 
 import  torch;
@@ -302,35 +303,59 @@ class Trainer:
         else:
             self.device = 'cpu';
 
-        # Set paths for checkpointing/results.
-        src_dir     = os.path.dirname(os.path.abspath(__file__));                       # .../Higher-Order-LaSDI/src/HLaSDI/Trainer
-        project_dir = os.path.abspath(os.path.join(src_dir, os.pardir, os.pardir, os.pardir));  # .../Higher-Order-LaSDI
-        self.path_checkpoint    : str = os.path.join(project_dir, "checkpoint");
-        self.path_results       : str = os.path.join(project_dir, "results");
-        self.checkpoint_path    : str = os.path.join(self.path_checkpoint, "checkpoint_%d_%d.pt" % (time.time_ns(), os.getpid()));
+        # Set up a unique "Run ID" for this training run.
+        # Format: <trainer type>_<date/time>_<pid>
+        date                    = time.localtime();
+        date_str        : str   = time.strftime("%Y%m%d_%H%M%S", date);
+        self.run_ID     : str   = "%s_%s_%d" % (trainer_config.type, date_str, os.getpid());
 
-        # Make sure the checkpoints and results directories exist.
-        from pathlib import Path;
-        Path(self.path_checkpoint).mkdir(   parents = True, exist_ok = True);
-        Path(self.path_results).mkdir(      parents = True, exist_ok = True);
-        LOGGER.info("Checkpoint directory: %s" % self.path_checkpoint);
-        LOGGER.info("Checkpoint file: %s" % self.checkpoint_path);
-        LOGGER.info("Results directory: %s" % self.path_results);
+        # Make run-specific checkpoint/results/figures directories.
+        self._Set_Run_Directories();
+        LOGGER.info("Checkpoint directory:  %s" % self.checkpoint_dir);
+        LOGGER.info("Checkpoint file:       %s" % self.checkpoint_file);
+        LOGGER.info("Results directory:     %s" % self.results_dir);
+        LOGGER.info("Figures directory:     %s" % self.figures_dir);
 
         # Build a loss cache; this will be a list whose entries are tuples of the form:
         #   (loss_name, param_tuple or "total", loss_value)
         # The _flush_metrics_cache method post-processes/serializes the contents of this list.
         self._metrics_cache                    = [];
 
-        # Figure out where we will save cached losses.
-        base_filename       : str   = self.physics.config.type;
-        self.metrics_path   : str   = os.path.join(self.path_results, base_filename + '_metrics.jsonl');
-
         # Final setup.
         self.restart_iter           = 0;                # Global iteration index at the start of the next training round
         self.best_epoch             = None;             # Optional: subclasses may set this when checkpointing
 
         # All done!
+        return;
+
+
+    def _Set_Run_Directories(self) -> None:
+        """
+        Set path attributes derived from ``self.run_ID``.
+
+        ``run_ID`` is serialized with the trainer state. Recomputing these paths in one place keeps
+        fresh runs, restarts, and analysis loads aligned with the same run-specific directory
+        structure.
+        """
+
+        # Fetch top level directories. 
+        src_dir                 : str   = os.path.dirname(os.path.abspath(__file__));                         # .../Higher-Order-LaSDI/src/HLaSDI/Trainer
+        project_dir             : Path  = Path(os.path.abspath(os.path.join(src_dir, os.pardir, os.pardir, os.pardir)));
+
+        # Now set up paths for run-specific figures, results, checkpoints, and metrics.
+        self.checkpoint_dir     : str   = str(project_dir / "checkpoint" / self.run_ID);
+        self.checkpoint_file    : str   = str(Path(self.checkpoint_dir) / "checkpoint.pt");
+        self.checkpoint_path    : str   = self.checkpoint_file;
+        self.results_dir        : str   = str(project_dir / "results" / self.run_ID);
+        self.figures_dir        : str   = str(project_dir / "Figures" / self.run_ID);
+        self.metrics_path       : str   = os.path.join(self.results_dir, self.physics.config.type + '_metrics.jsonl');
+
+        # Make the directories.
+        Path(self.checkpoint_dir).mkdir(parents = True, exist_ok = True);
+        Path(self.results_dir).mkdir(   parents = True, exist_ok = True);
+        Path(self.figures_dir).mkdir(   parents = True, exist_ok = True);
+
+
         return;
 
 
@@ -926,11 +951,6 @@ class Trainer:
         if self.noise_ratio > 0.0:
             self.apply_noise_to_U_Train();
 
-        # Make sure the checkpoints and results directories exist.
-        from pathlib import Path
-        Path(self.path_checkpoint).mkdir(   parents = True, exist_ok = True);
-        Path(self.path_results).mkdir(      parents = True, exist_ok = True);
-
 
         # -----------------------------------------------------------------------------------------
         # Initialize loss tracking
@@ -1056,6 +1076,11 @@ class Trainer:
                  't_Test'                   : self.t_Test,
                  'restart_iter'             : self.restart_iter,
                  'config'                   : config,
+                 'run_ID'                   : self.run_ID,
+                 'checkpoint_dir'           : self.checkpoint_dir,
+                 'checkpoint_file'          : self.checkpoint_file,
+                 'results_dir'              : self.results_dir,
+                 'figures_dir'              : self.figures_dir,
                  'normalize'                : self.normalization_enabled,
                  'data_mean'                : None if self.data_mean is None else [float(m.detach().cpu().item()) for m in self.data_mean],
                  'data_std'                 : None if self.data_std  is None else [float(s.detach().cpu().item()) for s in self.data_std]};
@@ -1096,6 +1121,8 @@ class Trainer:
         self.t_Test             : list[torch.Tensor]        = dict_['t_Test'];              # len = n_test.
 
         self.restart_iter       : int                       = dict_['restart_iter'];
+        self.run_ID             : str                       = dict_['run_ID'];
+        self._Set_Run_Directories();
 
         # Restore normalization stats (if present).
         self.normalization_enabled = bool(dict_.get('normalize', False));

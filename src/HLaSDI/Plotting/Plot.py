@@ -2,11 +2,7 @@
 # Import and Setup
 # -------------------------------------------------------------------------------------------------
 
-import  os;
 from    pathlib                                 import  Path;
-
-# Resolve paths relative to the project root (Higher-Order-LaSDI/), independent of CWD.
-Figures_Path        : str   = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "Figures"));
 
 import  logging;
 
@@ -28,7 +24,7 @@ from    HLaSDI.Rollouts                        import  Sample_Rollouts;
 # Set up the logger
 LOGGER : logging.Logger = logging.getLogger(__name__);
 
-# Set plot settings. 
+# Set plot settings.
 mpl.rcParams['lines.linewidth'] = 2;
 mpl.rcParams['axes.linewidth']  = 1.5;
 mpl.rcParams['axes.edgecolor']  = "black";
@@ -54,15 +50,16 @@ def Plot_Latent_Trajectories(physics         : Physics,
                              param_grid      : numpy.ndarray,
                              U_True          : list[list[torch.Tensor]],
                              t_Grid          : list[torch.Tensor],
+                             figures_dir     : Path | str,
                              file_prefix     : str,
                              trainer         = None,
                              n_samples       : int           = 20,
                              figsize         : tuple[int]    = (15, 13)) -> None:
     """
-    This function plots the latent trajectories of the latent dynamics model for a combination of 
-    parameter values. Specifically, we fetch the FOM IC for the given parameter values, encode then, 
-    and then sample native latent-dynamics coefficient dictionaries, solve and plot each resulting 
-    dynamical solution, and then plot the encodings of the FOM trajectory. 
+    This function plots the latent trajectories of the latent dynamics model for a combination of
+    parameter values. Specifically, we fetch the FOM IC for the given parameter values, encode then,
+    and then sample native latent-dynamics coefficient dictionaries, solve and plot each resulting
+    dynamical solution, and then plot the encodings of the FOM trajectory.
 
 
     -----------------------------------------------------------------------------------------------
@@ -83,23 +80,26 @@ def Plot_Latent_Trajectories(physics         : Physics,
         We assume that the i'th row hodls the i'th combination of parameter values.
 
     U_True : list[list[torch.Tensor]], len = n_param
-        The i'th element is an n_IC element list whose j'th element is a torch.Tensor of shape 
-        (n_t_i,) + physics.Frame_Shape whose k'th row holds the j'th time derivative of the FOM 
+        The i'th element is an n_IC element list whose j'th element is a torch.Tensor of shape
+        (n_t_i,) + physics.Frame_Shape whose k'th row holds the j'th time derivative of the FOM
         solution for the i'th combination of prameter values at t_Grid[i][k].
 
     t_Grid : list[torch.Tensor], len = n_param
-        The i'th element is a 1D torch.Tensor object which holds the time grid for the i'th 
+        The i'th element is a 1D torch.Tensor object which holds the time grid for the i'th
         combination of parameter values. We assume that this tensor has shape (n_t_i,).
+
+    figures_dir : Path | str
+        The path to the run-specific directory where figures should be saved.
 
     file_prefix : str
         The prefix of the file name we use to save the plots. Usually the name of the FOM model.
-    
+
     n_samples : int
-        The number of coefficient samples we want to draw for each combination of parameter 
+        The number of coefficient samples we want to draw for each combination of parameter
         values.
-        
+
     figsize : tuple[int], len = 2
-        A two element tuple specifying the size of the overall figure size. 
+        A two element tuple specifying the size of the overall figure size.
 
 
     -----------------------------------------------------------------------------------------------
@@ -107,9 +107,10 @@ def Plot_Latent_Trajectories(physics         : Physics,
     -----------------------------------------------------------------------------------------------
 
     Nothing!
-    """ 
+    """
 
     # Checks
+    figures_dir = Path(figures_dir);
     assert isinstance(physics, Physics),                "type(physics) = %s" % type(physics);
     assert isinstance(encoder_decoder, EncoderDecoder), "type(encoder_decoder) = %s" % type(EncoderDecoder);
     assert isinstance(latent_dynamics, LatentDynamics), "type(latent_dynamics) = %s" % type(latent_dynamics);
@@ -151,7 +152,7 @@ def Plot_Latent_Trajectories(physics         : Physics,
         assert isinstance(ith_FOM_IC, list), "type(ith_FOM_IC) = %s, expected list" % str(type(ith_FOM_IC));
         assert len(ith_FOM_IC) == encoder_decoder.n_IC, "len(ith_FOM_IC) = %d, expected %d (=encoder_decoder.n_IC)" % (len(ith_FOM_IC), encoder_decoder.n_IC);
 
-        # Apply normalization if available.    
+        # Apply normalization if available.
         if has_norm:
             Normalized_FOM_IC : list[numpy.ndarray] = [];
             for k in range(len(ith_FOM_IC)):
@@ -169,16 +170,16 @@ def Plot_Latent_Trajectories(physics         : Physics,
     # Generate the Latent Trajectories.
 
     # First generate the latent trajectories. This is a an n_param element list whose i'th element
-    # is an n_IC element list whose j'th element is a 3d array of shape (n_t(i), n_samples, n_z). 
+    # is an n_IC element list whose j'th element is a 3d array of shape (n_t(i), n_samples, n_z).
     # Here, n_param is the number of combinations of parameter values.
     LOGGER.info("Solving the latent dynamics using %d samples of the posterior distributions for %d combinations of parameter values" % (n_samples, n_param));
-    Predicted_Latent_Trajectories : list[list[numpy.ndarray]] = Sample_Rollouts( 
+    Predicted_Latent_Trajectories : list[list[numpy.ndarray]] = Sample_Rollouts(
                                                                     ROM_IC          = ROM_IC,
-                                                                    latent_dynamics = latent_dynamics, 
+                                                                    latent_dynamics = latent_dynamics,
                                                                     param_grid      = param_grid,
                                                                     t_Grid          = t_Grid,
                                                                     n_samples       = n_samples);
-    
+
     # Now encode the FOM trajectories. Store these in an n_param element list whose i'th element
     # is an n_IC element list whose j'th element is a numpy array of shape (n_t(i), n_z) holding
     # the encoding of the j'th FOM trajectory for the i'th combination of parameter values.
@@ -188,9 +189,9 @@ def Plot_Latent_Trajectories(physics         : Physics,
         ith_Encoding : tuple[torch.Tensor] = encoder_decoder.Encode(*U_True[i]);
         for j in range(len(ith_Encoding)):
                 ith_True_Latent_Trajectories.append(ith_Encoding[j].detach().numpy());
-        
+
         True_Latent_Trajectories.append(ith_True_Latent_Trajectories);
-        
+
 
     # ---------------------------------------------------------------------------------------------
     # Make the plots!
@@ -212,7 +213,7 @@ def Plot_Latent_Trajectories(physics         : Physics,
             # Plot each component of the latent trajectories
             for k in range(latent_dynamics.n_z):
                 plt.plot(t_np, True_Latent_Trajectories[i][j][:, k], 'C' + str(k), linewidth = 3, alpha = 0.75);
-            
+
             # Determine the title and save file name.
             if(j == 0):
                 title          : str = "Z(t), param = %s" % (str(param_grid[i, :]));
@@ -223,14 +224,13 @@ def Plot_Latent_Trajectories(physics         : Physics,
             else:
                 title          : str = "Dt^%d Z(t), param = %s" % (j, str(param_grid[i, :]));
                 save_file_name : str = file_prefix + ("_Dt^%d_Z" % (j)) + "_param" + str(param_grid[i, :]) + ".png";
-            
+
             # Add plot labels and legend.
             plt.xlabel(r'$t$');
             plt.ylabel(r'$z$');
             plt.title(title);
 
             # Save the figure under Higher-Order-LaSDI/Figures (independent of CWD).
-            figures_dir : Path = Path(Figures_Path);
             figures_dir.mkdir(parents = True, exist_ok = True);
             save_file_path: str = str(figures_dir / save_file_name);
             plt.savefig(save_file_path);
@@ -240,7 +240,7 @@ def Plot_Latent_Trajectories(physics         : Physics,
 
     # All done!
     return;
-    
+
 
 
 # -------------------------------------------------------------------------------------------------
@@ -248,7 +248,25 @@ def Plot_Latent_Trajectories(physics         : Physics,
 # -------------------------------------------------------------------------------------------------
 
 def _format_param_value_for_label(value : float) -> str:
-    """Format parameter values consistently for plot titles and file-name suffixes."""
+    """
+    Format a parameter value for plot labels.
+
+
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+
+    value : float
+        The parameter value to format.
+
+
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    label : str
+        A compact string representation suitable for plot labels.
+    """
 
     if value == 0.0:
         return "0.0";
@@ -260,14 +278,54 @@ def _format_param_value_for_label(value : float) -> str:
 
 
 def _format_param_value_for_filename(value : float) -> str:
-    """Format parameter values for compact file names."""
+    """
+    Format a parameter value for file names.
+
+
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+
+    value : float
+        The parameter value to format.
+
+
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    label : str
+        A compact scientific-notation string suitable for file names.
+    """
 
     return numpy.format_float_scientific(float(value), precision = 2, unique = False, trim = 'k');
 
 
 
 def _append_suffix_to_file_name(file_name : str, suffix : str) -> str:
-    """Insert suffix before the file extension, if any."""
+    """
+    Insert a suffix before a file extension.
+
+
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+
+    file_name : str
+        The original file name.
+
+    suffix : str
+        The string to insert before the file extension.
+
+
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    new_file_name : str
+        The file name with ``suffix`` inserted before the extension. If ``file_name`` has no
+        extension, ``suffix`` is appended to the end of the name.
+    """
 
     path        : Path = Path(file_name);
     stem        : str  = path.stem if path.suffix != "" else path.name;
@@ -286,6 +344,25 @@ def _get_param_grid_1d(param_space : ParameterSpace, param_index : int) -> numpy
 
     ParameterSpace.createHyperMeshGrid uses numpy.meshgrid(..., indexing = 'ij'), so the values for
     parameter k vary only along axis k. We take index 0 along every other axis.
+
+
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+
+    param_space : ParameterSpace
+        The parameter space whose testing meshgrid contains the requested parameter grid.
+
+    param_index : int
+        The parameter index whose one-dimensional grid should be extracted.
+
+
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    param_grid : numpy.ndarray, shape = (n_values,)
+        The one-dimensional grid of testing values for parameter ``param_index``.
     """
 
     assert isinstance(param_space, ParameterSpace), "type(param_space) = %s" % type(param_space);
@@ -299,9 +376,10 @@ def _get_param_grid_1d(param_space : ParameterSpace, param_index : int) -> numpy
 
 
 
-def _Plot_Heatmap2d( values              : numpy.ndarray, 
+def _Plot_Heatmap2d( values              : numpy.ndarray,
                      param_space         : ParameterSpace,
-                     figsize             : tuple[int]         = (10, 10), 
+                     figures_dir         : Path | str,
+                     figsize             : tuple[int]         = (10, 10),
                      title               : str                = '',
                      save_file_name      : str                = "Heatmap",
                      show_plot           : bool | None        = None,
@@ -310,48 +388,51 @@ def _Plot_Heatmap2d( values              : numpy.ndarray,
                      fixed_param_indices : tuple[int, ...]    = (),
                      fixed_param_values  : tuple[float, ...]  = ()) -> None:
     """
-    This plot makes a "heatmap". Specifically, we assume that values represents the samples of 
-    a function which depends on two parameters, p1 and p2 (the two variables in the 
-    ParameterSpace object). The i,j entry of values represents the value of some function when 
-    p1 takes on it's i'th value and p2 takes on it's j'th. 
-    
-    We make an image whose i, j has a color based on values[i, j]. We also add boxes around 
-    each pixel that is part of the training set (with special red boxes for elements of the 
+    This plot makes a "heatmap". Specifically, we assume that values represents the samples of
+    a function which depends on two parameters, p1 and p2 (the two variables in the
+    ParameterSpace object). The i,j entry of values represents the value of some function when
+    p1 takes on it's i'th value and p2 takes on it's j'th.
+
+    We make an image whose i, j has a color based on values[i, j]. We also add boxes around
+    each pixel that is part of the training set (with special red boxes for elements of the
     initial training set).
 
-    
+
 
     -----------------------------------------------------------------------------------------------
     Arguments
     -----------------------------------------------------------------------------------------------
 
     values : numpy.ndarray, shape = (n1, n2)
-        i,j element holds the value of some function (that depends on two parameters, p1 and p2) 
-        when p1 = param_space.test_meshgrid[0][i, 0] and p2 = param_space.test_meshgrid[1][0, j]. 
-        Here, n1 and n2 represent the number of distinct values for the p1 and p2 parameters, 
+        i,j element holds the value of some function (that depends on two parameters, p1 and p2)
+        when p1 = param_space.test_meshgrid[0][i, 0] and p2 = param_space.test_meshgrid[1][0, j].
+        Here, n1 and n2 represent the number of distinct values for the p1 and p2 parameters,
         respectively.
 
     param_space : ParameterSpace
-        A ParameterSpace object which holds the combinations of parameters in the testing and 
+        A ParameterSpace object which holds the combinations of parameters in the testing and
         training sets. We assume that this object has two parameters (it's n_p attribute is two).
 
+    figures_dir : Path | str
+        The path to the run-specific directory where figures should be saved.
+
     figsize : tuple[int], len = 2
-        A two element tuple specifying the size of the overall figure size. 
+        A two element tuple specifying the size of the overall figure size.
 
     title : str
         The plot title.
 
     save_file_name : str
         The name of the file in which we want to save the figure in the Figures directory.
-    
+
     show_plot : bool | None
         If true, we will display the plot after saving it. Otherwise, we will not (save only).
         If None, we default to save-only behavior. The public ``Plot_Heatmap`` wrapper owns the
         dimension-dependent default policy.
-    
+
     annotate_cells : bool
-        If true, we add labels to each cell of the plot. If not, then we do not (though you 
-        can still approximate the cell's value based on its color). Disabling this can 
+        If true, we add labels to each cell of the plot. If not, then we do not (though you
+        can still approximate the cell's value based on its color). Disabling this can
         considerably speed up plotting.
 
 
@@ -363,6 +444,7 @@ def _Plot_Heatmap2d( values              : numpy.ndarray,
     """
 
     # Checks
+    figures_dir = Path(figures_dir);
     assert isinstance(values, numpy.ndarray),       "type(values) = %s" % type(values);
     assert isinstance(param_space, ParameterSpace), "type(param_space) = %s" % type(param_space);
     assert values.ndim      == 2,                    "values.ndim = %d != 2" % values.ndim;
@@ -386,9 +468,9 @@ def _Plot_Heatmap2d( values              : numpy.ndarray,
 
     assert isinstance(figsize, tuple), "type(figsize) = %s" % type(figsize);
     assert len(figsize)     == 2,      "len(figsize) = %d != 2" % len(figsize);
-    
+
     # Setup.
-    if show_plot == None: 
+    if show_plot == None:
         show_plot = False;
     n_train         : int           = param_space.n_train();
     n_test          : int           = param_space.n_test();
@@ -418,21 +500,40 @@ def _Plot_Heatmap2d( values              : numpy.ndarray,
     from matplotlib.colors import LinearSegmentedColormap;
     cmap = LinearSegmentedColormap.from_list('rg', ['C0', 'w', 'C3'], N = 256);
 
-    # Plot the figure as an image (the i,j pixel is just value[i, j], the value associated with 
+    # Plot the figure as an image (the i,j pixel is just value[i, j], the value associated with
     # the i'th value of p1 and j'th value of p2
     im = ax.imshow(values.T, cmap = cmap);
     fig.colorbar(im, ax = ax, fraction = 0.04);
-    
+
     # Format tick labels with scientific notation for small values
     def format_tick_label(val):
-        """Format tick labels: use scientific notation if |val| < 0.01 or |val| > 1000, else use 2 decimals."""
+        """
+        Format a parameter tick label.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        val : float
+            Parameter value to format.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        label : str
+            A string using scientific notation for very small/large values and fixed-point notation
+            otherwise.
+        """
         if val == 0.0:
             return '0.0';
         elif abs(val) < 0.01 or abs(val) > 1000:
             return f'{val:.2e}';
         else:
             return f'{val:.2f}';
-    
+
     ax.set_xticks(numpy.arange(0, n1, 2), labels = [format_tick_label(val) for val in p1_grid[::2]]);
     ax.set_yticks(numpy.arange(0, n2, 2), labels = [format_tick_label(val) for val in p2_grid[::2]]);
 
@@ -446,7 +547,7 @@ def _Plot_Heatmap2d( values              : numpy.ndarray,
 
 
     # ---------------------------------------------------------------------------------------------
-    # Add boxes around each "pixel" corresponding to a training point. 
+    # Add boxes around each "pixel" corresponding to a training point.
 
     # Stuff to help us plot the boxes.
     grid_square_x   : numpy.ndarray = numpy.arange(-0.5, n1, 1);
@@ -469,7 +570,7 @@ def _Plot_Heatmap2d( values              : numpy.ndarray,
             LOGGER.warning("Skipping training point %d with parameter %s because it falls outside the plotted grid." % (i, str(param_space.train_space[i, :])));
             continue;
 
-        # Add red boxes around the initial points and black ones around points we added to the 
+        # Add red boxes around the initial points and black ones around points we added to the
         # training set in later rounds.
         if i < n_init_train:
             color : str = 'r';
@@ -503,13 +604,12 @@ def _Plot_Heatmap2d( values              : numpy.ndarray,
     ax.set_title(title, fontsize = 18, pad = 36);
 
     # Save the figure under Higher-Order-LaSDI/Figures (independent of CWD).
-    figures_dir: Path = Path(Figures_Path);
     figures_dir.mkdir(parents=True, exist_ok=True);
     save_file_path: str = str(figures_dir / save_file_name);
     # Ensure labels/ticks are not clipped in saved figures.
     fig.tight_layout(rect = [0.06, 0.08, 0.98, 0.95]);
     fig.savefig(save_file_path);
-    
+
     # Show the plot and then return!
     if(show_plot == True):
         plt.show();
@@ -521,6 +621,7 @@ def _Plot_Heatmap2d( values              : numpy.ndarray,
 
 def Plot_Heatmap(  values          : numpy.ndarray,
                    param_space     : ParameterSpace,
+                   figures_dir     : Path | str,
                    figsize         : tuple[int]    = (10, 10),
                    title           : str           = '',
                    save_file_name  : str           = "Heatmap",
@@ -536,8 +637,50 @@ def Plot_Heatmap(  values          : numpy.ndarray,
 
     Training boxes in the 3D case are slice-aware: a training point is marked on a slice only when
     its third parameter matches that slice's third-parameter value.
+
+
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+
+    values : numpy.ndarray
+        Values to plot over the parameter test grid. The shape must match
+        ``param_space.test_grid_sizes``.
+
+    param_space : ParameterSpace
+        The parameter space defining the test grid and training points.
+
+    figures_dir : Path | str
+        The path to the run-specific directory where figures should be saved.
+
+    figsize : tuple[int], len = 2
+        A two element tuple specifying the size of each heatmap figure.
+
+    title : str
+        The plot title. For three-dimensional parameter spaces, the fixed parameter value is
+        appended to this title for each 2D slice.
+
+    save_file_name : str
+        The file name for the saved heatmap. For three-dimensional parameter spaces, a slice
+        suffix is inserted before the extension.
+
+    show_plot : bool | None
+        If true, display the plot after saving it. If false, save without displaying. If None, the
+        default is True for two-dimensional parameter spaces and False for three-dimensional
+        parameter spaces.
+
+    annotate_cells : bool
+        If true, write each numerical value in the corresponding heatmap cell.
+
+
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    Nothing!
     """
 
+    figures_dir = Path(figures_dir);
     if not isinstance(values, numpy.ndarray):
         raise TypeError("values must be a numpy.ndarray, got %s" % type(values));
     if not isinstance(param_space, ParameterSpace):
@@ -558,6 +701,7 @@ def Plot_Heatmap(  values          : numpy.ndarray,
             show_plot = True;
         _Plot_Heatmap2d(values         = values,
                         param_space    = param_space,
+                        figures_dir    = figures_dir,
                         figsize        = figsize,
                         title          = title,
                         save_file_name = save_file_name,
@@ -582,6 +726,7 @@ def Plot_Heatmap(  values          : numpy.ndarray,
 
         _Plot_Heatmap2d(values              = values[:, :, k],
                         param_space         = param_space,
+                        figures_dir         = figures_dir,
                         figsize             = figsize,
                         title               = title_k,
                         save_file_name      = file_name_k,
@@ -604,33 +749,37 @@ def Plot_Heatmap(  values          : numpy.ndarray,
 def trainSpace_RelativeErrors_Heatmap(
             trainer         : Trainer,
             param_space     : ParameterSpace,
-            figsize         : tuple[int]    = (10, 10), 
+            figures_dir     : Path | str,
+            figsize         : tuple[int]    = (10, 10),
             title           : str           = '',
             file_prefix     : str           = "") -> None:
     """
-    This function creates heatmaps showing the relative errors between all pairs of training 
-    trajectories. The (i,j) cell of the d'th heatmap displays the relative error of d'th 
-    derivative of the i-th train trajectory relative to the d'th derivative of the j-th train 
+    This function creates heatmaps showing the relative errors between all pairs of training
+    trajectories. The (i,j) cell of the d'th heatmap displays the relative error of d'th
+    derivative of the i-th train trajectory relative to the d'th derivative of the j-th train
     trajectory, computed as:
-    
+
         relative_error[d, i,j] = 100 * ||U_Train[i][d] - U_Train[j][d]||_2 / ||U_Train[j][d]||_2
-        
-    Each row and column is labeled with the corresponding parameter values (displayed as tuples), 
+
+    Each row and column is labeled with the corresponding parameter values (displayed as tuples),
     and the title includes the parameter names to provide context.
 
-    
+
     -----------------------------------------------------------------------------------------------
     Arguments
     -----------------------------------------------------------------------------------------------
 
     trainer : Trainer
-        A Trainer object that holds the training trajectories in its U_Train  attribute. U_Train 
-        should be a list of length n_train, where each element is a list of torch.Tensors 
+        A Trainer object that holds the training trajectories in its U_Train  attribute. U_Train
+        should be a list of length n_train, where each element is a list of torch.Tensors
         representing different initial conditions or derivatives.
 
     param_space : ParameterSpace
-        A ParameterSpace object which holds the training parameter combinations in its train_space 
+        A ParameterSpace object which holds the training parameter combinations in its train_space
         attribute. The parameter names are stored in param_space.param_names.
+
+    figures_dir : Path | str
+        The path to the run-specific directory where figures should be saved.
 
     figsize : tuple[int], len = 2
         A two-element tuple specifying the size of the overall figure. Default is (10, 10).
@@ -639,9 +788,9 @@ def trainSpace_RelativeErrors_Heatmap(
         The plot title. This will be displayed at the top of the heatmap.
 
     file_prefix : str
-        We prepend this string to "TrainSpaceRelativeErrorHeatmap" to get the name of the file 
+        We prepend this string to "TrainSpaceRelativeErrorHeatmap" to get the name of the file
         (without path) in which to save the figure in the Figures directory.
-    
+
 
     -----------------------------------------------------------------------------------------------
     Returns
@@ -651,6 +800,7 @@ def trainSpace_RelativeErrors_Heatmap(
     """
 
     # Checks
+    figures_dir = Path(figures_dir);
     assert isinstance(param_space, ParameterSpace), "type(param_space) = %s" % type(param_space);
     assert hasattr(trainer, 'U_Train'),             "trainer has no U_Train attribute";
     assert isinstance(trainer.U_Train, list),       "type(trainer.U_Train) = %s" % type(trainer.U_Train);
@@ -662,12 +812,12 @@ def trainSpace_RelativeErrors_Heatmap(
     n_train     : int       = len(trainer.U_Train);     # len = n_train, i'th element is a list of length n_IC
     param_names : list[str] = param_space.param_names;
     n_p         : int       = param_space.n_p;
-    
+
     assert n_train == param_space.n_train(),        "n_train = %d != param_space.n_train() = %d" % (n_train, param_space.n_train());
-    
+
     LOGGER.info("Making train space relative errors heatmap for %d training trajectories with parameters %s" % (n_train, str(param_names)));
 
-    
+
     # ---------------------------------------------------------------------------------------------
     # Compute the relative errors between all pairs of train trajectories
 
@@ -679,14 +829,35 @@ def trainSpace_RelativeErrors_Heatmap(
         """
         Linearly interpolate U_src(t_src) onto t_tgt.
 
-        Returns:
-            U_interp: Tensor of shape (n_eval, ...) corresponding to U_src interpolated at the
-                subset of t_tgt that lies within [min(t_src), max(t_src)].
-            mask: boolean mask of shape (t_tgt.shape[0],) indicating which t_tgt points were used.
+        No extrapolation is performed; the returned interpolation only includes points of
+        ``t_tgt`` that lie in the interval ``[min(t_src), max(t_src)]``. This helper works for
+        ``U_src`` with arbitrary spatial dimensions, provided the time dimension is dimension 0.
 
-        Notes:
-            - No extrapolation: we only evaluate on the overlapping time interval.
-            - Works for U_src with arbitrary spatial dimensions; time must be dim 0.
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        t_src : torch.Tensor, shape = (n_src,)
+            Source time grid.
+
+        U_src : torch.Tensor, shape = (n_src, ...)
+            Source trajectory values on ``t_src``.
+
+        t_tgt : torch.Tensor, shape = (n_tgt,)
+            Target time grid.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        U_interp : torch.Tensor, shape = (n_eval, ...)
+            ``U_src`` interpolated at the subset of target times that overlap the source time
+            interval.
+
+        mask : torch.Tensor, shape = (n_tgt,)
+            Boolean mask indicating which target time points were used.
         """
         assert t_src.ndim == 1, "t_src must be 1D";
         assert t_tgt.ndim == 1, "t_tgt must be 1D";
@@ -714,7 +885,7 @@ def trainSpace_RelativeErrors_Heatmap(
         # Flatten spatial dims so we can interpolate all components in parallel.
         U_src_flat = U_src_c.reshape(U_src_c.shape[0], -1);  # (n_src, n_feat)
 
-        # For each time value in t_eval, find the index of the time value in t_src 
+        # For each time value in t_eval, find the index of the time value in t_src
         # that is just <= the time value in t_eval. Specifically, the i'th element
         # of hi is the index j such that t_src_c[j - 1] < t_eval[i] <= t_src_c[j].
         hi_src = torch.searchsorted(t_src_c, t_eval, right = False);  # shape = (n_eval,)
@@ -725,15 +896,15 @@ def trainSpace_RelativeErrors_Heatmap(
         t0_src = t_src_c[lo_src];    # i'th element holds the time value just before the i'th time value in t_eval.
         t1_src = t_src_c[hi_src];    # i'th element holds the time value just after the i'th time value in t_eval.
         dt_src = (t1_src - t0_src);
-  
-        # The i'th element of t_eval occurs somewhere between t0[i] and t1[i]. 
+
+        # The i'th element of t_eval occurs somewhere between t0[i] and t1[i].
         # We compute 'w', whose i'th element is the proportion of the way from t0[i] to t1[i]
-        # where t_eval[i] lives. We guard against any repeated time values (dt==0) by falling 
+        # where t_eval[i] lives. We guard against any repeated time values (dt==0) by falling
         # back to left value.
         dt_safe = torch.where(dt_src == 0, torch.ones_like(dt_src), dt_src);
         w = ((t_eval - t0_src) / dt_safe).unsqueeze(1);  # (n_eval, 1)
 
-        # Use 'w' to compute the linear interpolation of U_src_flat[lo[i]] and U_src_flat[hi[i]] 
+        # Use 'w' to compute the linear interpolation of U_src_flat[lo[i]] and U_src_flat[hi[i]]
         # to get the i'th element of U_interp.
         U0_src = U_src_flat[lo_src];
         U1_src = U_src_flat[hi_src];
@@ -741,18 +912,18 @@ def trainSpace_RelativeErrors_Heatmap(
 
         U_src_interp = U_src_interp_flat.reshape(t_eval.shape[0], *U_src_c.shape[1:]);
         return U_src_interp, mask;
-    
-    
+
+
     # Initialize the relative error matrix
     n_IC            : int           = trainer.n_IC;
     relative_errors : numpy.ndarray = numpy.zeros((n_IC, n_train, n_train));
-    
-    # Compute relative errors for all pairs (i, j). 
+
+    # Compute relative errors for all pairs (i, j).
     for d in range(n_IC):
         for i in range(n_train):
             Ui : torch.Tensor = trainer.U_Train[i][d];
             ti : torch.Tensor = trainer.t_Train[i];
-            
+
             for j in range(n_train):
                 Uj : torch.Tensor = trainer.U_Train[j][d];
                 tj : torch.Tensor = trainer.t_Train[j];
@@ -779,76 +950,75 @@ def trainSpace_RelativeErrors_Heatmap(
                 base = Uj_eval.reshape(-1);
                 numerator   : float = torch.norm(diff, p = 2).item();
                 denominator : float = torch.norm(base, p = 2).item();
-                
+
                 if denominator > 0:
                     relative_errors[d, i, j] = 100*(numerator / denominator);
                 else:
                     relative_errors[d, i, j] = -1.0;  # Handle division by zero
-        
-        
+
+
     # ---------------------------------------------------------------------------------------------
     # Create parameter labels for rows and columns
-    
+
     # Get the train parameter combinations
     train_params : numpy.ndarray = param_space.train_space;  # shape = (n_train, n_p)
-    
+
     # Create labels as tuples of parameter values (scientific notation so small values don't round to 0.0)
     param_labels : list[str] = [];
     for i in range(n_train):
         parts: list[str] = [numpy.format_float_scientific(float(v), precision = 2, unique = False, trim = 'k')
                             for v in train_params[i, :]];
         param_labels.append("(" + ", ".join(parts) + ")");
-    
-    
+
+
     # ---------------------------------------------------------------------------------------------
     # Make the heatmaps!
-    
+
     for d in range(n_IC):
         # Set up the figure
         fig, ax = plt.subplots(1, 1, figsize = figsize);
         LOGGER.debug("Creating the relative errors heatmap");
-        
+
         # Set up the color map
         from matplotlib.colors import LinearSegmentedColormap;
         cmap = LinearSegmentedColormap.from_list('rg', ['C0', 'w', 'C3'], N = 256);
-            
+
         # Plot the heatmap using imshow
         im = ax.imshow(relative_errors[d, :, :], cmap = cmap, aspect = 'auto');
         fig.colorbar(im, ax = ax, fraction = 0.04);
-        
+
         # Set the tick labels
         ax.set_xticks(numpy.arange(n_train));
         ax.set_yticks(numpy.arange(n_train));
         ax.set_xticklabels(param_labels, rotation = 45, ha = 'right', fontsize = 8);
         ax.set_yticklabels(param_labels, fontsize = 8);
-        
+
         # Add the relative error values as text in each cell
         LOGGER.debug("Adding relative error values to each cell");
         for i in range(n_train):
             for j in range(n_train):
-                ax.text(j, i, f'{relative_errors[d, i, j]:.2f}%', 
+                ax.text(j, i, f'{relative_errors[d, i, j]:.2f}%',
                     fontsize = 8, ha = 'center', va = 'center', color = 'k');
-        
-    
+
+
         # Create a title that includes the parameter names
         param_names_tuple   : str = str(tuple(param_names));
         full_title          : str = title + '\n' + f'Parameters: {param_names_tuple}' if title else f'Train Space Relative Errors\nParameters: {param_names_tuple}';
-        
+
         # Set plot labels and title
         ax.set_xlabel('Train trajectory (j)', fontsize = 12, loc='right');
         ax.set_ylabel('Train trajectory (i)', fontsize = 12, rotation = 0, loc='top', labelpad=10);
         ax.set_title("D^%d U Relative Errors" % d + '\n' + full_title, fontsize = 15);
-        
+
         # Adjust layout to prevent label cutoff
         plt.tight_layout();
-        
+
         # Save the figure under Higher-Order-LaSDI/Figures (independent of CWD).
-        figures_dir: Path = Path(Figures_Path);
         figures_dir.mkdir(parents=True, exist_ok=True);
         save_file_path: str = str(figures_dir / (file_prefix + ("_D^%d U_" % d) + "TrainSpaceRelativeErrorHeatmap.png"));
         fig.savefig(save_file_path, dpi = 150, bbox_inches = 'tight');
         LOGGER.info("Saved heatmap to %s" % save_file_path);
-    
+
     # Show the plot and then return!
     plt.show();
     return;

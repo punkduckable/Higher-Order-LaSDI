@@ -133,7 +133,8 @@ class WorkflowConfig(ConfigBase):
     # Should we load the encoder/decoder/LD/optimizer from file or train from scratch?
     use_restart: bool
 
-    # If using a restart, this is name of the file in `results/` holding the serialized state. 
+    # If using a restart, this is the path from the project's main directory to the .npy file
+    # holding the serialized state.
     restart_file: str | None
 
     @model_validator(mode = "after")

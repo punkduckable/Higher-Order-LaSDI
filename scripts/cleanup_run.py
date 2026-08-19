@@ -1,28 +1,19 @@
 #!/usr/bin/env python3
-"""Archive Higher-Order-LaSDI outputs after a workflow run.
+"""Gather Higher-Order-LaSDI non-figure outputs into a run-specific results directory.
 
-The script creates a dated run directory under ``Figures`` named like
-``May 25 - 1``, ``May 25 - 2``, etc. It then:
+The run-specific directory is the trainer's ``results_dir``:
 
-* moves requested stdout/stderr/log files into that directory if they exist,
-* copies the example YAML config into that directory,
-* copies the requested result save, or the most recent result save from
-  ``results`` that is not a ``*_metrics.jsonl`` file,
-* copies the matching ``*_metrics.jsonl`` file from ``results``, and
-* moves top-level files in ``Figures`` whose modification time is later than
-  the archived result save, or later than ``--min-figure-mtime`` when supplied.
-  Coefficient mean/std heatmap files are moved into a
-  ``Coefficient Heatmaps`` subdirectory.
+    results/<trainer type>_<date/time>_<pid>/
 
-Only direct children of ``Figures`` are moved; existing dated subdirectories
-are never traversed.
+``run_experiment.py`` writes the serialized artifact, metrics JSONL, and a copy of the launch
+config there. This cleanup script moves requested stdout/stderr/log files into the same directory
+and copies the example config if it was not already backed up. Figures are intentionally left in
+the separate run-specific ``Figures/<run_ID>`` directory.
 """
 
 from __future__ import annotations
 
 import argparse
-import datetime as dt
-import re
 import shutil
 from pathlib import Path
 
@@ -42,7 +33,7 @@ def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
 
     parser = argparse.ArgumentParser(
-        description="Archive Higher-Order-LaSDI logs, configs, results, and figures."
+        description="Archive Higher-Order-LaSDI logs, configs, and results."
     )
     parser.add_argument(
         "example",
@@ -112,16 +103,16 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Explicit serialized experiment artifact to copy into the archive. "
-            "Relative paths are interpreted relative to --repo-root, then ./results."
+            "Relative paths are interpreted relative to --repo-root, --run-dir, then ./results."
         ),
     )
     parser.add_argument(
-        "--min-figure-mtime",
-        type=float,
-        default=None,
+        "--run-dir",
+        type=Path,
+        required=True,
         help=(
-            "Only move figures modified after this Unix timestamp. If omitted, "
-            "figures are moved only if they are newer than the archived result save."
+            "Run-specific results directory (trainer.results_dir). Relative paths are "
+            "interpreted relative to --repo-root."
         ),
     )
     return parser.parse_args()
@@ -171,28 +162,6 @@ def resolve_example(
     return config_path
 
 
-def next_run_directory(figures_dir: Path, today: dt.date) -> Path:
-    """Create and return the next ``Month Day - N`` directory in ``Figures``."""
-
-    date_prefix = f"{today.strftime('%B')} {today.day}"
-    pattern = re.compile(rf"^{re.escape(date_prefix)} - (\d+)(?:\b| .*)")
-
-    used_numbers: set[int] = set()
-    if figures_dir.is_dir():
-        for path in figures_dir.iterdir():
-            if not path.is_dir():
-                continue
-            match = pattern.match(path.name)
-            if match:
-                used_numbers.add(int(match.group(1)))
-
-    run_number = 1
-    while run_number in used_numbers:
-        run_number += 1
-
-    return figures_dir / f"{date_prefix} - {run_number}"
-
-
 def latest_file(paths: list[Path]) -> Path | None:
     """Return the existing file with the newest modification time, or ``None``."""
 
@@ -202,7 +171,7 @@ def latest_file(paths: list[Path]) -> Path | None:
     return max(existing_paths, key=lambda path: path.stat().st_mtime)
 
 
-def resolve_result_save(repo_root: Path, result_save: Path) -> Path:
+def resolve_result_save(repo_root: Path, result_save: Path, run_dir: Path) -> Path:
     """Resolve an explicit serialized experiment artifact path."""
 
     candidates: list[Path] = []
@@ -210,6 +179,7 @@ def resolve_result_save(repo_root: Path, result_save: Path) -> Path:
         candidates.append(result_save)
     else:
         candidates.append(repo_root / result_save)
+        candidates.append(run_dir / result_save)
         candidates.append(repo_root / "results" / result_save)
 
     for candidate in candidates:
@@ -218,6 +188,14 @@ def resolve_result_save(repo_root: Path, result_save: Path) -> Path:
             return resolved
 
     raise FileNotFoundError(f"result save does not exist: {result_save}")
+
+
+def resolve_run_dir(repo_root: Path, run_dir: Path) -> Path:
+    """Resolve the explicit run-specific results directory."""
+
+    if run_dir.is_absolute():
+        return run_dir.resolve()
+    return (repo_root / run_dir).resolve()
 
 
 def unique_destination(destination: Path) -> Path:
@@ -244,7 +222,28 @@ def copy_file(source: Path, destination_dir: Path, dry_run: bool) -> None:
         print(f"SKIP missing file: {source}")
         return
 
+    if source.resolve() == (destination_dir / source.name).resolve():
+        print(f"SKIP already in archive: {source}")
+        return
+
     destination = unique_destination(destination_dir / source.name)
+    print(f"COPY {source} -> {destination}")
+    if not dry_run:
+        shutil.copy2(source, destination)
+
+
+def copy_file_if_missing(source: Path, destination_dir: Path, dry_run: bool) -> None:
+    """Copy ``source`` into ``destination_dir`` only when that filename is absent."""
+
+    if not source.is_file():
+        print(f"SKIP missing file: {source}")
+        return
+
+    destination = destination_dir / source.name
+    if destination.exists():
+        print(f"SKIP existing file: {destination}")
+        return
+
     print(f"COPY {source} -> {destination}")
     if not dry_run:
         shutil.copy2(source, destination)
@@ -289,22 +288,16 @@ def collect_log_files(repo_root: Path, args: argparse.Namespace) -> list[Path]:
     return log_files
 
 
-def top_level_figures_after(figures_dir: Path, timestamp: float) -> list[Path]:
-    """Return direct child files of ``Figures`` modified after ``timestamp``."""
-
-    figure_files: list[Path] = []
-    for path in figures_dir.iterdir():
-        if not path.is_file():
-            continue
-        if path.stat().st_mtime > timestamp:
-            figure_files.append(path)
-    return sorted(figure_files, key=lambda path: path.stat().st_mtime)
-
-
 def is_metrics_file(path: Path) -> bool:
     """Return True for metric JSONL files."""
 
     return path.name.endswith(METRICS_SUFFIX)
+
+
+def is_result_save(path: Path) -> bool:
+    """Return True for serialized experiment artifacts."""
+
+    return path.is_file() and path.suffix == ".npy"
 
 
 def metrics_prefix(path: Path) -> str:
@@ -365,73 +358,49 @@ def select_metrics_file(
     )
 
 
-def is_coefficient_heatmap(path: Path) -> bool:
-    """Return True for coefficient mean/std heatmap images."""
-
-    lower_name = path.name.lower()
-    if not lower_name.endswith(".png"):
-        return False
-
-    return (
-        re.search(r"coefficient_\d+_(?:mean|std)(?:__.*)?\.png$", lower_name)
-        is not None
-    )
-
-
 def main() -> int:
     """Archive the run artifacts and return a process exit code."""
 
     # Fetch arguments, set up directory structure.
     args = parse_args()
     repo_root = args.repo_root.resolve()
-    figures_dir = repo_root / "Figures"
-    results_dir = repo_root / "results"
+    run_dir = resolve_run_dir(repo_root, args.run_dir)
 
     # Get path to config file.
     config_path = resolve_example(repo_root, args.example, args.examples_dir)
 
+    # Ensure the run-specific results directory exists. If a path exists but is not a directory,
+    # fail fast rather than silently writing somewhere unexpected.
+    if run_dir.exists() and not run_dir.is_dir():
+        raise NotADirectoryError(f"expected run directory path: {run_dir}")
+    if not run_dir.exists():
+        print(f"CREATE directory: {run_dir}")
+        if not args.dry_run:
+            run_dir.mkdir(parents=True, exist_ok=True)
+
     # Resolve an explicitly requested serialized artifact before any filesystem mutations. This
     # avoids creating a run directory or moving logs when the artifact path is misspelled.
     explicit_result_save = (
-        resolve_result_save(repo_root, args.result_save)
+        resolve_result_save(repo_root, args.result_save, run_dir)
         if args.result_save is not None
         else None
     )
 
-    # Ensure output directories exist. If a path exists but is not a directory,
-    # fail fast rather than silently writing somewhere unexpected.
-    for directory in (figures_dir, results_dir):
-        if directory.exists() and not directory.is_dir():
-            raise NotADirectoryError(f"expected directory path: {directory}")
-        if not directory.exists():
-            print(f"CREATE directory: {directory}")
-            if not args.dry_run:
-                directory.mkdir(parents=True, exist_ok=True)
-
-    # Set up a directory (and coefficient heatmap sub-directory) to hold the files.
-    run_dir = next_run_directory(figures_dir, dt.date.today())
-    heatmap_dir = run_dir / "Coefficient Heatmaps"
-
     print(f"Archive directory: {run_dir}")
-    if not args.dry_run:
-        run_dir.mkdir(parents=False, exist_ok=False)
 
     # Logs are moved because they are run-specific scratch files in repo root.
     for log_file in collect_log_files(repo_root, args):
         move_file(log_file, run_dir, args.dry_run)
 
-    # Configs/results are copied so canonical inputs and result saves remain
-    # available in their standard repository locations.
-    copy_file(config_path, run_dir, args.dry_run)
+    # run_experiment.py copies this config at trainer initialization time. If cleanup is called
+    # separately and the config is missing from the run directory, copy it now without making a
+    # duplicate.
+    copy_file_if_missing(config_path, run_dir, args.dry_run)
 
-    # Fetch all files in results (or, if min_result_mtime is defined, then only
-    # files in results created after this).
+    # Fetch all files in the run-specific results directory (or, if min_result_mtime is defined,
+    # only files created after this).
     # In dry-run mode the directory may not actually have been created above.
-    all_result_files = (
-        [path for path in results_dir.iterdir() if path.is_file()]
-        if results_dir.is_dir()
-        else []
-    )
+    all_result_files = [path for path in run_dir.iterdir() if path.is_file()] if run_dir.is_dir() else []
     result_files = all_result_files
     if args.min_result_mtime is not None:
         result_files = [
@@ -441,10 +410,10 @@ def main() -> int:
         ]
 
     # Fetch the save/metrics files. Prefer an explicit serialized artifact when supplied;
-    # otherwise keep the legacy behavior of selecting the most recent non-metrics result file.
+    # otherwise select the most recent serialized experiment artifact in this run directory.
     if args.result_save is None:
         latest_save = latest_file(
-            [path for path in result_files if not is_metrics_file(path)]
+            [path for path in result_files if is_result_save(path)]
         )
     else:
         latest_save = explicit_result_save
@@ -457,13 +426,13 @@ def main() -> int:
 
     # Copy the save
     if latest_save is None:
-        print("WARNING: no non-metrics result save found in results; skipping figure move.")
+        print("WARNING: no serialized result save found in run results directory.")
     else:
         copy_file(latest_save, run_dir, args.dry_run)
 
     # Copy metrics
     if latest_metrics is None:
-        print("WARNING: no *_metrics.jsonl file found in results.")
+        print("WARNING: no *_metrics.jsonl file found in run results directory.")
     else:
         if (
             args.min_result_mtime is not None
@@ -475,25 +444,6 @@ def main() -> int:
                 f"{latest_metrics}"
             )
         copy_file(latest_metrics, run_dir, args.dry_run)
-
-    # Now move the figures created after the save, or after the explicit figure timestamp if one
-    # was provided. This supports the split train/analyze workflow, where analysis may be run as a
-    # separate job after the serialized artifact already exists.
-    if latest_save is not None:
-        figure_mtime = (
-            args.min_figure_mtime
-            if args.min_figure_mtime is not None
-            else latest_save.stat().st_mtime
-        )
-        for figure_file in top_level_figures_after(figures_dir, figure_mtime):
-            if figure_file.resolve().is_relative_to(run_dir.resolve()):
-                continue
-            if is_coefficient_heatmap(figure_file):
-                if not args.dry_run:
-                    heatmap_dir.mkdir(exist_ok=True)
-                move_file(figure_file, heatmap_dir, args.dry_run)
-            else:
-                move_file(figure_file, run_dir, args.dry_run)
 
     print("Cleanup complete.")
     return 0
