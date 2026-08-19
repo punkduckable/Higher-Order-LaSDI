@@ -22,7 +22,7 @@
 #SBATCH --time=06:00:00
 #
 # Keep SLURM's own wrapper output separate from the Python stdout/stderr logs.
-# The Python logs are written below and then moved by scripts/cleanup_run.py.
+# The Python logs are written below and then moved into this run's results directory.
 #SBATCH --output=slurm-%x.log
 #SBATCH --error=slurm-%x.err
 
@@ -42,7 +42,7 @@ RepositoryRoot=""
 ExamplesDir="examples"
 
 # Python stdout/stderr files. These are created in the repository root and
-# moved into the dated Figures subdirectory by scripts/cleanup_run.py.
+# moved into this run's results directory after training/analysis finishes.
 STDOUT_FILE="HLaSDI_${SLURM_JOB_ID:-manual}_stdout.txt"
 STDERR_FILE="HLaSDI_${SLURM_JOB_ID:-manual}_stderr.txt"
 
@@ -209,64 +209,52 @@ else
     echo "Skipping analysis because training failed." >&2
 fi
 
-echo "Running cleanup..."
+echo "Archiving Python logs..."
 
-# Cleanup is intentionally run even if training fails, so partial logs/configs
-# are still archived for debugging. It copies result/config files into trainer.results_dir.
-if [[ -n "$RUN_RESULTS_DIR" ]]; then
-    cleanup_args=(
-        "$Example"
-        --repo-root "$REPO_ROOT"
-        --examples-dir "$EXAMPLES_PATH"
-        --stdout "$STDOUT_FILE"
-        --stderr "$STDERR_FILE"
-        --run-dir "$RUN_RESULTS_DIR"
-        --min-result-mtime "$RUN_START_EPOCH"
-    )
-    if [[ -n "$ARTIFACT_FILE" && -f "$ARTIFACT_FILE" ]]; then
-        cleanup_args+=(--artifact "$ARTIFACT_FILE")
-    fi
+ARCHIVE_DIR="$RUN_RESULTS_DIR"
+if [[ -n "$ARCHIVE_DIR" && -d "$ARCHIVE_DIR" ]]; then
+    for log_file in "$STDOUT_FILE" "$STDERR_FILE"; do
+        if [[ -f "$log_file" ]]; then
+            log_destination="${ARCHIVE_DIR}/$(basename "$log_file")"
+            if [[ -e "$log_destination" ]]; then
+                echo "WARNING: not moving ${log_file}; destination already exists: ${log_destination}" >&2
+            else
+                echo "MOVE ${log_file} -> ${log_destination}"
+                mv "$log_file" "$log_destination"
+            fi
+        else
+            echo "SKIP missing log file: ${log_file}"
+        fi
+    done
 
-    cleanup_output="$("$PYTHON" scripts/cleanup_run.py "${cleanup_args[@]}" 2>&1)"
-    cleanup_status=$?
-    printf '%s\n' "$cleanup_output"
-else
-    cleanup_output=""
-    cleanup_status=2
-    echo "WARNING: skipping cleanup_run.py because no run-specific results directory was found." >&2
-fi
-
-if [[ "$cleanup_status" -ne 0 ]]; then
-    echo "WARNING: cleanup_run.py exited with code ${cleanup_status}" >&2
-else
-    ARCHIVE_DIR="$(printf '%s\n' "$cleanup_output" | sed -n 's/^Archive directory: //p' | tail -n 1)"
-    if [[ -n "$ARCHIVE_DIR" && -d "$ARCHIVE_DIR" ]]; then
-        METRICS_FILE="$(
-            "$PYTHON" -c 'from pathlib import Path; import sys
+    METRICS_FILE="$(
+        "$PYTHON" -c 'from pathlib import Path; import sys
 run_dir = Path(sys.argv[1])
 metrics_files = sorted(
     run_dir.glob("*_metrics.jsonl"),
     key=lambda path: path.stat().st_mtime,
 )
 print(metrics_files[-1].resolve() if metrics_files else "")' "$ARCHIVE_DIR"
-        )"
+    )"
 
-        if [[ -n "$METRICS_FILE" && -f "$METRICS_FILE" ]]; then
-            TB_LOGDIR="${ARCHIVE_DIR}/tb_runs"
-            echo "Building TensorBoard files at $(date)"
-            echo "Metrics: ${METRICS_FILE}"
-            echo "Logdir:  ${TB_LOGDIR}"
-            "$PYTHON" scripts/jsonl_to_tensorboard.py "$METRICS_FILE" --logdir "$TB_LOGDIR"
-            tensorboard_status=$?
-            if [[ "$tensorboard_status" -ne 0 ]]; then
-                echo "WARNING: jsonl_to_tensorboard.py exited with code ${tensorboard_status}" >&2
-            fi
-        else
-            echo "WARNING: no archived *_metrics.jsonl file found for TensorBoard conversion." >&2
+    if [[ -n "$METRICS_FILE" && -f "$METRICS_FILE" ]]; then
+        METRICS_BASENAME="$(basename "$METRICS_FILE")"
+        PHYSICS_NAME="${METRICS_BASENAME%_metrics.jsonl}"
+        RUN_ID="$(basename "$ARCHIVE_DIR")"
+        TB_LOGDIR="${REPO_ROOT}/tb_runs/${PHYSICS_NAME}/${RUN_ID}"
+        echo "Building TensorBoard files at $(date)"
+        echo "Metrics: ${METRICS_FILE}"
+        echo "Logdir:  ${TB_LOGDIR}"
+        "$PYTHON" scripts/jsonl_to_tensorboard.py "$METRICS_FILE" --logdir "$TB_LOGDIR"
+        tensorboard_status=$?
+        if [[ "$tensorboard_status" -ne 0 ]]; then
+            echo "WARNING: jsonl_to_tensorboard.py exited with code ${tensorboard_status}" >&2
         fi
     else
-        echo "WARNING: could not determine archive directory for TensorBoard conversion." >&2
+        echo "WARNING: no run *_metrics.jsonl file found for TensorBoard conversion." >&2
     fi
+else
+    echo "WARNING: could not determine run-specific results directory for log archival/TensorBoard conversion." >&2
 fi
 
 if [[ "$workflow_status" -ne 0 ]]; then
