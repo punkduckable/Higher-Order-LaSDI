@@ -32,7 +32,8 @@ class Second_Order_Rollout(Trainer):
                  encoder_decoder    : EncoderDecoder, 
                  latent_dynamics    : LatentDynamics, 
                  param_space        : ParameterSpace, 
-                 config             : ExperimentConfig):
+                 config             : ExperimentConfig,
+                 run_ID             : str | None = None):
         """
         This defines a Trainer sub-class which is designed to run Rollouts on latent dynamics
         that have two initial conditions (n_IC = 2). It uses the following loss functions:
@@ -115,7 +116,8 @@ class Second_Order_Rollout(Trainer):
                             encoder_decoder = encoder_decoder,
                             latent_dynamics = latent_dynamics,
                             param_space     = param_space,
-                            trainer_config  = trainer_config);
+                            trainer_config  = trainer_config,
+                            run_ID          = run_ID);
 
 
         # Fetch training hyperparameters 

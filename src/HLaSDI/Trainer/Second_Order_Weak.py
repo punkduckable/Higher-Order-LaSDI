@@ -31,7 +31,8 @@ class Second_Order_Weak(Second_Order_Rollout):
                  encoder_decoder    : EncoderDecoder, 
                  latent_dynamics    : LatentDynamics, 
                  param_space        : ParameterSpace, 
-                 config             : ExperimentConfig):
+                 config             : ExperimentConfig,
+                 run_ID             : str | None = None):
         """
         This defines a Trainer class designed to train second-order dynamics using latent dynamics
         based on the weak formulation.
@@ -88,7 +89,8 @@ class Second_Order_Weak(Second_Order_Rollout):
                             encoder_decoder = encoder_decoder,
                             latent_dynamics = latent_dynamics,
                             param_space     = param_space,
-                            config          = config);
+                            config          = config,
+                            run_ID          = run_ID);
 
         # All done!
         return;

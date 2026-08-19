@@ -16,6 +16,7 @@ results/*
 output.txt
 Figures/*
 .venv/*
+.*
 .uv-cache/*
 .vscode/settings.json
 dconf/user
@@ -27,5 +28,4 @@ env_lc.sh
 *.err
 *.log
 uv.lock
-venv_mfem/*
 tb_runs/*

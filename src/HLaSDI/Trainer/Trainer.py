@@ -163,7 +163,8 @@ class Trainer:
                     encoder_decoder    : EncoderDecoder,
                     latent_dynamics    : LatentDynamics,
                     param_space        : ParameterSpace,
-                    trainer_config     : BaseTrainerConfig):
+                    trainer_config     : BaseTrainerConfig,
+                    run_ID             : str | None = None):
         """
         Abstract base class that defines how each round of training proceeds (the loss functions,
         and optimizer).
@@ -243,6 +244,11 @@ class Trainer:
                 - device   (defaults to "cpu")
                 - noise_ratio (defaults to 0.0; Gaussian noise std / signal RMS)
 
+        run_ID : str | None
+            Optional run identifier. If None, the trainer creates a new run-specific identifier
+            from the physics type, current time, and PID. If supplied, the trainer uses this
+            identifier for its checkpoint, results, and figures directories.
+
 
         -------------------------------------------------------------------------------------------
         Returns
@@ -303,11 +309,15 @@ class Trainer:
         else:
             self.device = 'cpu';
 
-        # Set up a unique "Run ID" for this training run.
-        # Format: <trainer type>_<date/time>_<pid>
-        date                    = time.localtime();
-        date_str        : str   = time.strftime("%Y%m%d_%H%M%S", date);
-        self.run_ID     : str   = "%s_%s_%d" % (trainer_config.type, date_str, os.getpid());
+        # Set up a unique "Run ID" for this training run unless the caller supplied one (e.g.,
+        # analysis of an existing artifact should reuse the artifact's run_ID instead of creating
+        # a transient timestamped directory).
+        if run_ID is None:
+            date                    = time.localtime();
+            date_str        : str   = time.strftime("%m_%d_%H_%M_%S", date);
+            self.run_ID     : str   = "%s_%s_%d" % (physics.config.type, date_str, os.getpid());
+        else:
+            self.run_ID     : str   = run_ID;
 
         # Make run-specific checkpoint/results/figures directories.
         self._Set_Run_Directories();
@@ -1088,7 +1098,7 @@ class Trainer:
 
 
 
-    def load(self, dict_ : dict) -> None:
+    def load(self, dict_ : dict, run_ID : str | None = None) -> None:
         """
         Modifies self's internal state to match the one whose export method generated the dict_
         dictionary.
@@ -1102,6 +1112,11 @@ class Trainer:
             This should be a dictionary returned by calling the export method on another
             GLaSDI object. We use this to make self hav the same internal state as the object that
             generated dict_.
+
+        run_ID : str | None
+            Optional run identifier override. If None, load the run identifier serialized in
+            ``dict_``. If supplied, keep all loaded trainer state but use this run identifier for
+            path bookkeeping.
 
 
         -------------------------------------------------------------------------------------------
@@ -1121,7 +1136,7 @@ class Trainer:
         self.t_Test             : list[torch.Tensor]        = dict_['t_Test'];              # len = n_test.
 
         self.restart_iter       : int                       = dict_['restart_iter'];
-        self.run_ID             : str                       = dict_['run_ID'];
+        self.run_ID             : str                       = dict_['run_ID'] if run_ID is None else run_ID;
         self._Set_Run_Directories();
 
         # Restore normalization stats (if present).

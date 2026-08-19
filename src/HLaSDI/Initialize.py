@@ -95,8 +95,8 @@ if Advection is not None:
 
 def Initialize_Trainer( 
         config                  : ExperimentConfig | dict, 
-        restart_dict            : dict  = {},
-        make_restart_checkpoint : bool  = True,
+        restart_dict            : dict       = {},
+        make_restart_checkpoint : bool       = True,
     ) -> tuple[Trainer, Sampler, ParameterSpace, Physics, EncoderDecoder, LatentDynamics]:
     """
     Initialize a Trainer object with a latent space model and physics object according to config 
@@ -127,7 +127,6 @@ def Initialize_Trainer(
         If True and restart_dict is provided, then make a checkpoint using the loaded 
         encoder_decoder parameters. This preserves the original restart behavior for training. Set
         this to False when loading a saved artifact for analysis only.
-            
     
     -----------------------------------------------------------------------------------------------
     Returns
@@ -209,14 +208,15 @@ def Initialize_Trainer(
     # Initialize the trainer object. If we are using a restart file, then load the 
     # trainer from that file.
     trainer_type            = config.trainer.type;
-    trainer                 = trainer_dict[trainer_type](physics, encoder_decoder, latent_dynamics, param_space, config);
+    if (bool(restart_dict) == True) and (make_restart_checkpoint == False):
+        trainer_run_ID = restart_dict['trainer']['run_ID'];
+    else:
+        trainer_run_ID = None;
+
+    trainer                 = trainer_dict[trainer_type](physics, encoder_decoder, latent_dynamics, param_space, config, run_ID = trainer_run_ID);
     
     if (bool(restart_dict) == True):        # Empty dictionaries evaluate to False. restart_dict is empty if we are not using a restart file.
-        fresh_run_ID       : str = trainer.run_ID;
-        trainer.load(restart_dict['trainer']);
-        if make_restart_checkpoint == True:
-            trainer.run_ID = fresh_run_ID;
-            trainer._Set_Run_Directories();
+        trainer.load(restart_dict['trainer'], run_ID = trainer.run_ID);
 
     # Check if we should make a checkpoint using the current encoder_decoder parameters.
     if (bool(restart_dict) == True and make_restart_checkpoint == True): 

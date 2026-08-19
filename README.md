@@ -578,24 +578,22 @@ cd ./PyMFEM
 git checkout v_4.7.0.1
 ```
 
+Unfortunately, `requirements.txt` needs to be modified:
+
+```bash
+sed -i 's/^cmake$/cmake==3.31.10/' requirements.txt
+```
+
 ### 3. Install PyMFEM Python build dependencies
 
-Install PyMFEM's own requirements into the active uv-managed environment:
+After updating the cmake line, install PyMFEM's own requirements into the active uv-managed 
+environment:
 
 ```bash
 uv pip install -r requirements.txt
 ```
 
-### 4. Fix CMake Version
-
-PyMFEM v_4.7.0.1 requires cmake < 4.0:
-
-```bash
-uv pip uninstall cmake
-uv pip install cmake==3.31.10
-```
-
-### 5. Install MPI
+### 4. Install MPI
 
 **On macOS with Homebrew:**
 ```bash
@@ -636,7 +634,7 @@ If your LC machine uses a different MVAPICH2 version, load that version instead.
 work, but only if `which mpicc` and the checks below show that both `mpi4py` and PyMFEM are using
 the same OpenMPI installation. Do not mix MPI implementations.
 
-### 6. Install mpi4py
+### 5. Install mpi4py
 
 **On most systems:**
 ```bash
@@ -729,15 +727,21 @@ correctly. Change back to the PyMFEM directory:
 cd <path to PyMFEM directory>
 ```
 
-### 7. Build PyMFEM
+### 6. Build PyMFEM
 
 Back in the PyMFEM directory, first make sure `pip` exists inside the active Higher-Order-LaSDI uv
 environment. PyMFEM v_4.7.0.1's `setup.py` imports `pip._internal.locations`, so the build fails
 with `ModuleNotFoundError: No module named 'pip'` if the uv venv was created without pip:
 
 ```bash
-uv pip install --upgrade pip setuptools wheel
-python -c "import pip._internal.locations; print('pip is available')"
+uv pip install --upgrade pip wheel
+uv pip install "setuptools>=70,<81"
+python - <<'PY'
+import pip._internal.locations
+import importlib.metadata as md
+print("pip internals available")
+print("setuptools", md.version("setuptools"))
+PY
 ```
 
 Then build PyMFEM using the same MPI module/wrappers used for `mpi4py`:
@@ -1018,9 +1022,7 @@ JSONL metrics during the run, and TensorBoard event files can be generated after
 ```bash
 uv sync --extra viz
 
-uv run python scripts/jsonl_to_tensorboard.py \
-    results/Thermal_metrics.jsonl \
-    --logdir tb_runs/Thermal
+uv run python scripts/jsonl_to_tensorboard.py results/Thermal_metrics.jsonl --logdir tb_runs/Thermal
 
 uv run tensorboard --logdir tb_runs --host 0.0.0.0 --port 6006
 ```

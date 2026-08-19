@@ -28,7 +28,8 @@ class First_Order_Weak(First_Order_Rollout):
                  encoder_decoder    : EncoderDecoder,
                  latent_dynamics    : LatentDynamics,
                  param_space        : ParameterSpace,
-                 config             : ExperimentConfig):
+                 config             : ExperimentConfig,
+                 run_ID             : str | None = None):
         """
         First-order rollout trainer for weak-form latent dynamics.
 
@@ -51,7 +52,8 @@ class First_Order_Weak(First_Order_Rollout):
                             encoder_decoder     = encoder_decoder,
                             latent_dynamics     = latent_dynamics,
                             param_space         = param_space,
-                            config              = config);
+                            config              = config,
+                            run_ID              = run_ID);
 
         return;
 
