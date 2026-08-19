@@ -1085,6 +1085,8 @@ _LATENT_DYNAMICS_N_IC = {
     "cable": 1,
     "spring": 2,
     "spring_w": 2,
+    "cable" : 1,
+    "cable_w" : 1,
 }
 
 _PHYSICS_N_IC = {
