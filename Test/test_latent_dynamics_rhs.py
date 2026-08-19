@@ -328,6 +328,25 @@ def test_cable_simulate_integrates_constant_uniform_expert_mixture_numpy_inputs(
     assert numpy.allclose(z, expected)
 
 
+def test_cable_simulate_integrates_constant_uniform_expert_mixture_torch_inputs():
+    params = numpy.array([[0.25]])
+    t = numpy.array([0.0, 0.25, 0.5])
+    z0 = torch.tensor([1.0], dtype=torch.float64)
+
+    ld = CABLE(n_z=1, Uniform_t_Grid=True, n_p=1, config=_cable_config())
+    _zero_cable_gate(ld)
+    ld.unmasked_A = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.tensor([[[1.0]], [[3.0]]], dtype=torch.float32, requires_grad=True)
+
+    z = ld.simulate(IC=[[z0]], t_Grid=[t], params=params)[0][0]
+
+    expected = z0.reshape(1, 1) + 2.0*torch.tensor(t, dtype=z0.dtype).reshape(-1, 1)
+    assert isinstance(z, torch.Tensor)
+    assert z.dtype == z0.dtype
+    assert z.shape == expected.shape
+    assert torch.allclose(z, expected)
+
+
 def test_cable_compute_losses_updates_and_applies_hard_coefficient_masks():
     params = numpy.array([[0.25]])
     t = torch.linspace(0.0, 1.0, 5)

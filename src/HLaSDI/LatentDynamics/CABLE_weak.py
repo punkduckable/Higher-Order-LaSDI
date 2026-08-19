@@ -165,6 +165,13 @@ class CABLE_weak(WeakLatentDynamics, CABLE):
         assert len(Latent_States) == len(t_Grid) == params.shape[0];
         assert len(t_Grid) > 0;
 
+        # Map parameter rows to the gate device once. Keep the NumPy rows below for weak test
+        # function lookup and human-readable metric keys.
+        w_param         : torch.Tensor  = next(self.w.parameters());
+        gate_device                     = w_param.device;
+        gate_dtype                      = w_param.dtype;
+        params_tensor   : torch.Tensor  = torch.tensor(params, dtype = gate_dtype, device = gate_device);
+
         # Accumulate scalar loss contributions and diagnostics across all parameter rows. The
         # trainable CABLE coefficients are global, so coefficient/diversity losses are computed
         # once after the loop rather than separately per parameter.
@@ -195,7 +202,8 @@ class CABLE_weak(WeakLatentDynamics, CABLE):
 
         for i in range(len(t_Grid)):
             # Fetch this parameter's latent trajectory and time grid.
-            ith_params  : numpy.ndarray = params[i, :];
+            ith_params_np   : numpy.ndarray = params[i, :];
+            ith_params      : torch.Tensor  = params_tensor[i, :];
             ith_t_Grid  : torch.Tensor  = t_Grid[i];
             ith_Z       : torch.Tensor  = Latent_States[i][0];
             n_t_i       : int           = len(ith_t_Grid);
@@ -207,16 +215,21 @@ class CABLE_weak(WeakLatentDynamics, CABLE):
             # Fetch weak test functions and match their device/dtype to the latent trajectory.
             # get_test_functions returns rows sampled on the same time grid used when
             # add_weight_functions was called for this parameter.
-            Phis0, dPhis0 = self.get_test_functions(ith_params);
+            Phis0, dPhis0 = self.get_test_functions(ith_params_np);
             Phis   : torch.Tensor = Phis0.to(device = ith_Z.device, dtype = ith_Z.dtype);
             dPhis  : torch.Tensor = dPhis0.to(device = ith_Z.device, dtype = ith_Z.dtype);
 
             # Evaluate dense expert weights and the CABLE RHS on the latent trajectory. We keep the
             # dense pre-top-k weights here because the top-k sparsity target is enforced only
             # through the tail-mass loss, not by discontinuously truncating the RHS.
-            ith_weights : torch.Tensor = self._weights(ith_t_Grid, ith_Z, ith_params, t0 = ith_t_Grid[0], t_span = ith_t_Grid[-1] - ith_t_Grid[0]);
+            ith_RHS, ith_weights = self._evaluate_rhs(
+                                            Z       = ith_Z,
+                                            t_Grid  = ith_t_Grid,
+                                            params  = ith_params,
+                                            t0      = ith_t_Grid[0],
+                                            t_span  = ith_t_Grid[-1] - ith_t_Grid[0]);
             weights_list.append(ith_weights.to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype));
-            ith_RHS : torch.Tensor = self._evaluate_torch_rhs_from_weights(ith_Z, ith_weights);
+            assert isinstance(ith_RHS, torch.Tensor);
 
             # Record which experts are engaged during each step for this parameter.
             ith_engaged : torch.Tensor = (ith_weights > self.eps_engaged).to(dtype = torch.bool, device = self.unmasked_A.device);
@@ -237,7 +250,7 @@ class CABLE_weak(WeakLatentDynamics, CABLE):
             scale    : torch.Tensor = torch.linalg.norm(dPhis, dim = 1, keepdim = True).clamp(min = 1.0e-10);
             ith_loss_LD = self.MSE(weak_LHS / scale, weak_RHS / scale);
             loss_LD_list.append(ith_loss_LD);
-            metrics[f"loss/LD/{str(ith_params)}"] = ith_loss_LD.detach();
+            metrics[f"loss/LD/{str(ith_params_np)}"] = ith_loss_LD.detach();
 
             # Approximate the L2 (integral) norm of phi_h'(t) z(t) - phi_h(t)  f(z(t), t, theta)
             normalized_residual : torch.Tensor = (weak_LHS - weak_RHS) / scale;
@@ -260,7 +273,7 @@ class CABLE_weak(WeakLatentDynamics, CABLE):
             tail_mass_list.append(ith_tail_mass.to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype));
             ith_tail_loss : torch.Tensor = torch.mean(torch.pow(ith_tail_mass.to(device = self.unmasked_A.device, dtype = self.unmasked_A.dtype), 2));
             loss_tail_list.append(ith_tail_loss);
-            metrics[f"loss/tail/{str(ith_params)}"] = ith_tail_loss.detach();
+            metrics[f"loss/tail/{str(ith_params_np)}"] = ith_tail_loss.detach();
 
         # Dense gate/tail diagnostics across all parameters and times.
         weights     : torch.Tensor = torch.cat(weights_list, dim = 0);
