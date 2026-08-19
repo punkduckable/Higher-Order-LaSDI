@@ -49,6 +49,7 @@ def Plot_Meltpool_Dimensions(t_Grid          : torch.Tensor | numpy.ndarray,
                              U_Pred          : numpy.ndarray,
                              node_coords     : numpy.ndarray,
                              threshold       : float,
+                             figures_dir     : Path,
                              param           : numpy.ndarray | None = None,
                              file_prefix     : str                  = "Thermal",
                              n_for_avg       : int                  = 3,
@@ -108,7 +109,6 @@ def Plot_Meltpool_Dimensions(t_Grid          : torch.Tensor | numpy.ndarray,
     param_label : str = "" if param is None else " for %s" % str(param);
     param_suffix: str = "" if param is None else "_%s" % str(param);
 
-    figures_dir : Path = Path(Figures_Path);
     figures_dir.mkdir(parents = True, exist_ok = True);
 
     def _plot_dims(dims             : list[tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]],

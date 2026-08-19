@@ -20,7 +20,7 @@ if(SRC_Path not in sys.path):
     sys.path.insert(0, SRC_Path);
 
 from    HLaSDI.Plotting.Metrics            import  Generate_Heatmap_Data;
-from    HLaSDI.Plotting.Plot               import  Plot_Heatmap, Plot_Latent_Trajectories;
+from    HLaSDI.Plotting.Plot               import  Plot_Heatmap, Plot_Latent_Trajectories, Plot_Meltpool_Dimensions;
 from    HLaSDI.Plotting.Plot               import  trainSpace_RelativeErrors_Heatmap;
 from    HLaSDI.Plotting.Animate            import  make_solution_movies;
 from    HLaSDI.Rollouts                    import  Mean_Rollout; 
@@ -400,6 +400,7 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
                 Plot_Meltpool_Dimensions(t_Grid      = t_worst,
                                          U_True      = U_i_true_np,
                                          U_Pred      = U_i_pred_np,
+                                         figures_dir = figures_dir,
                                          node_coords = physics.X_Positions,
                                          threshold   = float(config["physics"]["Thermal"]["threshold"]),
                                          param       = param_space.test_space[i_worst],
