@@ -394,7 +394,7 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
             # parameter combination. Only the state U (not time derivatives) has a melt pool
             # interpretation. Arrays are already denormalized above, so the threshold is in
             # physical temperature units.
-            if (i == 0) and (config["physics"]["type"] == "Thermal"):
+            if (i == 0) and (config.physics.type == "Thermal"):
                 assert "Thermal" in config["physics"], "Thermal physics config missing `Thermal` section";
                 assert "threshold" in config["physics"]["Thermal"], "Thermal physics config missing `threshold`";
                 Plot_Meltpool_Dimensions(t_Grid      = t_worst,
