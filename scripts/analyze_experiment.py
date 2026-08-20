@@ -127,7 +127,7 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
 
     # Number of coefficient/ROM samples used for plotting + uncertainty metrics.
     # Most samplers expose this as an attribute; fall back to 20 for custom samplers.
-    n_samples_plot  : int = int(getattr(sampler, "n_samples", 20));
+    n_samples_plot  : int = int(getattr(sampler, "n_samples", 20)) if latent_dynamics.stochastic else 1;
     
     # Compute the relative error between the FOM solution and its prediction when we rollout the 
     # IC using the encoder_decoder.
@@ -467,26 +467,28 @@ def analyze_experiment(artifact_path : str, make_train_rel_error_heatmap: bool =
                             title           = title, 
                             save_file_name  = save_file_name);
 
-        # Plot the std of the component of the frame with the largest std (across the samples) in 
-        # the reconstruction of that component of that frame. Do this for each combination of 
-        # parameter values and derivative of the FOM solution.
-        for d in range(n_IC):
-            if(d == 0):
-                title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{1, \ldots, %d\}} \left[ u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % n_samples_plot;
-                save_file_name  : str   = physics_type + "_U_STD_Heatmap.png";
-            elif(d == 1):
-                title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{ 1, \ldots, %d\}} \left[\frac{d}{dt}u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % (n_samples_plot);
-                save_file_name  : str   = physics_type + "_Dt_U_STD_Heatmap.png";      
-            else:
-                title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{ 1, \ldots, %d\}} \left[\frac{d^{%d}}{dt^{%d}}u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % (n_samples_plot, d, d);
-                save_file_name  : str   = physics_type + "_Dt^%d_U_STD_Heatmap.png" % d;
+        # If stochastic, plot the std of the component of the frame with the largest std (across
+        # the samples) in the reconstruction of that component of that frame. Do this for each
+        # combination of parameter values and derivative of the FOM solution.
+        if latent_dynamics.stochastic:
+            assert Max_STD is not None;
+            for d in range(n_IC):
+                if(d == 0):
+                    title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{1, \ldots, %d\}} \left[ u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % n_samples_plot;
+                    save_file_name  : str   = physics_type + "_U_STD_Heatmap.png";
+                elif(d == 1):
+                    title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{ 1, \ldots, %d\}} \left[\frac{d}{dt}u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % (n_samples_plot);
+                    save_file_name  : str   = physics_type + "_Dt_U_STD_Heatmap.png";
+                else:
+                    title           : str   = r'$\text{max}_{i, j} \sigma_{k \in \{ 1, \ldots, %d\}} \left[\frac{d^{%d}}{dt^{%d}}u_{\text{Rollout}}(k)(t_i, x_j) \right]$' % (n_samples_plot, d, d);
+                    save_file_name  : str   = physics_type + "_Dt^%d_U_STD_Heatmap.png" % d;
 
 
-            Plot_Heatmap(   values          = Max_STD[:, d].reshape(param_space.test_grid_sizes) * 100,
-                            param_space     = param_space, 
-                            figures_dir     = figures_dir,
-                            title           = title,
-                            save_file_name  = save_file_name);
+                Plot_Heatmap(   values          = Max_STD[:, d].reshape(param_space.test_grid_sizes) * 100,
+                                param_space     = param_space,
+                                figures_dir     = figures_dir,
+                                title           = title,
+                                save_file_name  = save_file_name);
 
 
         # Plot the mean and std of each coefficient (assuming the LD is interpolatable) at each 

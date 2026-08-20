@@ -60,7 +60,7 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
 
         config : dict
             The latent-dynamics configuration dictionary. It must three keys: `type`, `trainable`,
-            and `spring_w`. It must have `config["type"] == "spring_w"` and `config["spring_w"]`
+            and `spring_w`. It must have `config.type == "spring_w"` and `config.spring_w`.
             should be a weak-form sub-dictionary containing the following keys:
                 - test_func_type: Specifies the kind of bump function. Either "bump" or "PC-poly".
                 - test_func_width: The width of each bump.

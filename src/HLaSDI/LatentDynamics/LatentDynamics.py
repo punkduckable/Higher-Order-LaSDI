@@ -225,7 +225,7 @@ class LatentDynamics:
 
         config : LatentDynamicsBaseConfig
             The "latent_dynamics" sub-dictionary of the config file. If `type == "weak"`, the
-            model-specific sub-dictionary `config[config["type"]]` must contain `overlap`,
+            model-specific sub-dictionary `config.<config.type>` must contain `overlap`,
             `test_func_width`, and `test_func_type`.
 
             

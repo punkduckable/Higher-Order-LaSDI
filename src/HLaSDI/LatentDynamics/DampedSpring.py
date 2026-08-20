@@ -62,7 +62,7 @@ class DampedSpring(InterpolatableLatentDynamics):
 
         config : dict
             The latent-dynamics configuration dictionary. It must three keys: `type`, `trainable`,
-            and `spring`. It must have `config["type"] == "spring"` and `config["spring"]` should 
+            and `spring`. It must have `config.type == "spring"` and `config.spring` should 
             be a dictionary housing sub-class specific settings. The required `lstsq_reg` entry 
             controls ridge regularization used by `initialize_coefficients(...)` when initializing 
             coefficients from encoded trajectories.

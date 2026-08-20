@@ -235,7 +235,7 @@ class Second_Order_Rollout(Trainer):
             # t_IC_rollout is the proportion of t_final_i - t_0_i over which we simulate.
             t_IC_rollout_i      : float         = p_IC_rollout*(t_final_i - t_0_i);
             t_IC_rollout_final_i: float         = t_IC_rollout_i + t_0_i;
-            LOGGER.info("We will rollout the initial condition for parameter combination #%d to t <= %f" % (i, t_IC_rollout_final_i));
+            LOGGER.debug("We will rollout the initial condition for parameter combination #%d to t <= %f" % (i, t_IC_rollout_final_i));
 
             # Now figure out how many time steps occur before t_IC_rollout_final_i.
             num_before_IC_rollout_final_i  : int           = 0;
@@ -244,7 +244,7 @@ class Second_Order_Rollout(Trainer):
                     break; 
                 
                 num_before_IC_rollout_final_i += 1;
-            LOGGER.info("We will rollout the initial condition for parameter combination #%d over %d time steps" % (i, num_before_IC_rollout_final_i));
+            LOGGER.debug("We will rollout the initial condition for parameter combination #%d over %d time steps" % (i, num_before_IC_rollout_final_i));
 
             # Now define the IC rollout time grid for the i'th combination of parameter values.
             #

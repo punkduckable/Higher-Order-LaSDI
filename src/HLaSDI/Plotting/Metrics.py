@@ -30,7 +30,7 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
                             t_Test          : list[torch.Tensor],
                             U_Test          : list[list[torch.Tensor]],
                             trainer         : Trainer,
-                            n_samples       : int       = 20) -> tuple[numpy.ndarray, numpy.ndarray, list[list[numpy.ndarray]], list[list[numpy.ndarray]], numpy.ndarray, numpy.ndarray]:
+                            n_samples       : int       = 20) -> tuple[numpy.ndarray, numpy.ndarray | None, list[list[numpy.ndarray]], list[list[numpy.ndarray]] | None, numpy.ndarray | None, numpy.ndarray | None]:
     r"""
     This function computes the relative error and STD between the FOM solution and its 
     prediction when we rollout the FOM solution using the the ICs and mean of the posterior 
@@ -95,7 +95,7 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
         If the `LD` is Interpolatable, this is the number of coefficient samples we draw from 
         each coefficient posterior. Otherwise, this does nothing. Each sample gives us 
         a set of coefficients which we can use to define the latent dynamics that we then solve 
-        forward in time. 
+        forward in time. Ignored if LD is not stochastic.
 
 
     
@@ -108,8 +108,9 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
     max_Rel_Error : numpy.ndarray, shape = (n_Test, n_IC)
         i, j element holds the maximum of rel_error[i][j] (see below).
     
-    max_STD : numpy.ndarray, shape = (n_Test, n_IC)
-        i, j element holds the maximum of STD[i][j] (see below).
+    max_STD : numpy.ndarray | None, shape = (n_Test, n_IC)
+        If the latent_dynamics is stochastic, the i, j element holds the maximum of
+        STD[i][j] (see below). Otherwise, it's none.
 
     Rel_Error : list[list[numpy.ndarray]], len = n_Test
         i'th element is an n_IC element list whose j'th element is an numpy.ndarray of shape 
@@ -117,12 +118,13 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
         of testing parameters. The k'th element of this array holds
             mean(u_Rollout[i][j][k, ...] - u_True[i][j][k, ...]) / std(u_True[i][j])
     
-    STD : list[list[numpy.ndarray]], len = n_Test
-        i'th element is an n_IC element list whose j'th element is an numpy.ndarray whose shape
-        matches that of U_Test[i][j]. The [k, ...] element of this array holds the std (across 
-        the samples) of the k'th frame of the reconstruction of the j'th derivative of the FOM 
-        solution when we use the i'th combination of testing parameters.
-    
+    STD : list[list[numpy.ndarray]] | None, len = n_Test
+        If the latent_dynamics is stochastic, i'th element is an n_IC element list whose j'th
+        element is an numpy.ndarray whose shape matches that of U_Test[i][j]. The [k, ...]
+        element of this array holds the std (across the samples) of the k'th frame of the
+        reconstruction of the j'th derivative of the FOM solution when we use the i'th combination
+        of testing parameters. None if LD is not stochastic.
+
     coef_means : numpy.ndarray, shape = (n_Test, n_Coef) | None
         i, j element holds the mean of the posterior distribution for the j'th coefficient 
         evaluated at the i'th combination of testing parameters. None if the LD is not 
@@ -169,8 +171,8 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
         coef_means = flatten_coefficients(coef_means_native);
         coef_stds  = flatten_coefficients(coef_stds_native);
     else:
-        coef_means = None
-        coef_stds = None;
+        coef_means  = None
+        coef_stds   = None;
 
 
     # ---------------------------------------------------------------------------------------------
@@ -199,17 +201,21 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
     ROM_IC : list[list[numpy.ndarray]] = encoder_decoder.latent_initial_conditions(FOM_IC);
 
     # ---------------------------------------------------------------------------------------------
-    # Draw n_samples samples of the posterior distribution.
-
-    # For each combination of parameter values in the testing set, sample the latent coefficients 
-    # and solve the latent dynamics forward in time. 
-    LOGGER.info("Generating latent dynamics trajectories for %d samples of the coefficients for %d combinations of testing parameter" % (n_samples, n_Test));
-    Zis_samples     : list[list[numpy.ndarray]] = Sample_Rollouts(
-                                                    ROM_IC          = ROM_IC, 
-                                                    latent_dynamics = latent_dynamics, 
-                                                    param_grid      = param_test,
-                                                    t_Grid          = t_Test, 
-                                                    n_samples       = n_samples);    # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_samples, n_z)
+    # If stochastic, draw n_samples samples of the posterior distribution.
+    
+    # Only draw samples if the LD is stochastic (so there will be a posterior distribution at
+    # the testing parameters)
+    Zis_samples : list[list[numpy.ndarray]] | None = None;
+    if latent_dynamics.stochastic:
+        # For each combination of parameter values in the testing set, sample the latent
+        # coefficients and solve the latent dynamics forward in time.
+        LOGGER.info("Generating latent dynamics trajectories for %d samples of the coefficients for %d combinations of testing parameter" % (n_samples, n_Test));
+        Zis_samples     : list[list[numpy.ndarray]] = Sample_Rollouts(
+                                                        ROM_IC          = ROM_IC,
+                                                        latent_dynamics = latent_dynamics,
+                                                        param_grid      = param_test,
+                                                        t_Grid          = t_Test,
+                                                        n_samples       = n_samples);    # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_samples, n_z)
 
     LOGGER.info("Generating latent dynamics trajectories using posterior distribution means for %d combinations of testing parameter" % (n_Test));
     Zis_mean        : list[list[numpy.ndarray]] = Mean_Rollout(
@@ -217,17 +223,14 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
                                                     latent_dynamics = latent_dynamics, 
                                                     param_grid      = param_test, 
                                                     t_Grid          = t_Test);               # len = n_test. i'th element is an n_IC element list whose j'th element has shape (n_t(i), n_z)
-        
+
 
     # ---------------------------------------------------------------------------------------------
     # Set up Rel_Error, STD, max_Rel_Error, and max_STD.
 
-    STD         : list[list[numpy.ndarray]] = [];           # (n_Test)
     Rel_Error   : list[list[numpy.ndarray]] = [];           # (n_Test)
-
     for i in range(n_Test):
         # Initialize lists for the i'th combination of parameter values
-        STD_i       : list[numpy.ndarray]   = [];
         Rel_Error_i : list[numpy.ndarray]   = [];
 
         # Fetch n_t_i.
@@ -235,16 +238,31 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
 
         # Build an array for each derivative of the FOM solution.
         for j in range(n_IC):
-            STD_i.append(numpy.zeros_like(U_Test[i][j].detach().cpu().numpy()));
             Rel_Error_i.append(numpy.zeros(n_t_i, dtype = numpy.float32));
 
         # Append the lists for the i'th combination to the overall lists.
-        STD.append(STD_i);
         Rel_Error.append(Rel_Error_i);
-    
     max_Rel_Error   = numpy.empty((n_Test, n_IC), dtype = numpy.float32);
-    max_STD         = numpy.empty((n_Test, n_IC), dtype = numpy.float32);
 
+    if latent_dynamics.stochastic:
+        STD         : list[list[numpy.ndarray]] = [];           # (n_Test)
+        for i in range(n_Test):
+            # Initialize lists for the i'th combination of parameter values
+            STD_i       : list[numpy.ndarray]   = [];
+
+            # Fetch n_t_i.
+            n_t_i : int = t_Test[i].shape[0];
+
+            # Build an array for each derivative of the FOM solution.
+            for j in range(n_IC):
+                STD_i.append(numpy.zeros_like(U_Test[i][j].detach().cpu().numpy()));
+
+            # Append the lists for the i'th combination to the overall lists.
+            STD.append(STD_i);
+        max_STD         = numpy.empty((n_Test, n_IC), dtype = numpy.float32);
+    else:
+        STD     = None;
+        max_STD = None;
 
 
     # ---------------------------------------------------------------------------------------------
@@ -297,7 +315,11 @@ def Generate_Heatmap_Data(  encoder_decoder : EncoderDecoder,
     
 
         # -------------------------------------------------------------------------------------
-        # Standard Deviation
+        # Standard Deviation, if stochastic.
+        
+        # Skip if not stochastic.
+        if latent_dynamics.stochastic == False:
+            continue;
 
         # Set up an array to hold the decoding of latent trajectory.
         FOM_Frame_Shape : list[int]             = physics.Frame_Shape;

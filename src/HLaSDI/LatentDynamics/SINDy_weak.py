@@ -67,7 +67,7 @@ class SINDy_weak(WeakLatentDynamics, SINDy):
             
         config : dict
             The latent-dynamics configuration dictionary. It must three keys: `type`, `trainable`,
-            and `sindy_w`. It must have `config["type"] == "sindy_w"` and `config["sindy_w"]` 
+            and `sindy_w`. It must have `config.type == "sindy_w"` and `config.sindy_w` 
             should be a weak-form sub-dictionary containing the following keys:
                 - test_func_type: Specifies the kind of bump function. Either "bump" or "PC-poly".
                 - test_func_width: The width of each bump.
