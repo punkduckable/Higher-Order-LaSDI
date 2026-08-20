@@ -28,7 +28,7 @@ trainer:
     IC_dp_per_update:       0.01
     max_p_IC_rollout:       1.0
 
-    warmup_epochs:          40          # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
+    warmup_epochs:          100        # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
 
     loss_weights:
       recon:                1.0
@@ -70,7 +70,7 @@ EncoderDecoder:
     # Fully-connected (FC) part
     hidden_widths_fc:       [500, 100]
     activations_fc:         ["silu", "silu"]
-    latent_dimension:       8
+    latent_dimension:       10
 
     # Convolutional part (3D)
     conv_channels:          [1, 16, 32, 64]            # Includes input channel.
@@ -80,16 +80,16 @@ EncoderDecoder:
     conv_activations:       ["silu", "silu", "silu"]
 
 latent_dynamics:
-  type:                     cable
+  type:                     cable_w
   trainable:                true
   loss_weights: 
     LD:                     1.0
     diversity:              0.0005
-    coef:                   0.0001
+    coef:                   0.001
     tail:                   0.1
   cable:
-    n_experts:              16
-    n_active:               4
+    n_experts:              50
+    n_active:               10
     hidden_widths:          [64, 64]
     activations:            ['tanh', 'tanh']
     use_biases:             true 
@@ -100,6 +100,10 @@ latent_dynamics:
     mask_threshold:         0.0005
     first_mask_step:        1000
     mask_update_freq:       250
+  weak:
+    test_func_type:         'PC-poly'
+    test_func_width:        100
+    overlap:                0.85
 
 physics:
   type:                     Thermal
