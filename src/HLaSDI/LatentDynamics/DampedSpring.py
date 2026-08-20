@@ -338,7 +338,7 @@ class DampedSpring(InterpolatableLatentDynamics):
             coef_b_l2  = torch.norm(b);
             Loss_coef = coef_K_fro + coef_C_fro + coef_b_l2;
 
-            # Store per-parameter losses for later summation and metric logging.
+            # Store parameter-local losses for later summation.
             loss_LD_list.append(Loss_LD);
             loss_coef_list.append(Loss_coef);
             loss_stab_list.append(Loss_Stab);
@@ -346,9 +346,6 @@ class DampedSpring(InterpolatableLatentDynamics):
             coef_C_fro_list.append(coef_C_fro);
             coef_b_l2_list.append(coef_b_l2);
             lambda_max_list.append(lambda_max);
-            metrics[f"loss/LD/{str(params[i, :])}"]     = Loss_LD.detach();
-            metrics[f"loss/coef/{str(params[i, :])}"]   = Loss_coef.detach();
-            metrics[f"loss/stab/{str(params[i, :])}"]   = Loss_Stab.detach();
 
         loss_LD   : torch.Tensor    = torch.sum(torch.stack(loss_LD_list));
         loss_coef : torch.Tensor    = torch.sum(torch.stack(loss_coef_list));

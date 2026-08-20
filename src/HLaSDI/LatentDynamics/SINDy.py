@@ -252,8 +252,8 @@ class SINDy(InterpolatableLatentDynamics):
         losses : LD_Loss_Container
             Container housing scalar total losses, matching loss weights, parameter rows, and
             scalar diagnostic metrics. Its `losses` dictionary has keys `LD`, `coef`, and `stab`;
-            each value is a scalar tensor summed over parameter rows. Per-parameter diagnostics are
-            available in `losses.metrics` under metric keys such as `loss/LD/<param>`.
+            each value is a scalar tensor summed over parameter rows. Loss metrics are logged only
+            as totals under keys such as `loss/LD/total`.
         """
 
         # Checks.
@@ -262,8 +262,7 @@ class SINDy(InterpolatableLatentDynamics):
         assert isinstance(Latent_States, list);
         assert len(Latent_States) == len(t_Grid) == params.shape[0];
 
-        # Prepare lists for per-parameter losses. We sum these into scalar totals below and
-        # preserve the per-parameter values as metrics.
+        # Prepare lists for parameter-local losses. We sum these into scalar totals below.
         loss_LD_list : list[torch.Tensor]           = [];
         loss_coef_list : list[torch.Tensor]         = [];
         loss_stab_list : list[torch.Tensor]         = [];
@@ -307,16 +306,13 @@ class SINDy(InterpolatableLatentDynamics):
             loss_stab = torch.nn.functional.softplus(lambda_max + 0.1);
             loss_coef = coef_A_fro + coef_b_l2;
 
-            # Store per-parameter losses for later summation and metric logging.
+            # Store parameter-local losses for later summation.
             loss_LD_list.append(loss_LD);
             loss_coef_list.append(loss_coef);
             loss_stab_list.append(loss_stab);
             coef_A_fro_list.append(coef_A_fro);
             coef_b_l2_list.append(coef_b_l2);
             lambda_max_list.append(lambda_max);
-            metrics[f"loss/LD/{str(params[i, :])}"]     = loss_LD.detach();
-            metrics[f"loss/coef/{str(params[i, :])}"]   = loss_coef.detach();
-            metrics[f"loss/stab/{str(params[i, :])}"]   = loss_stab.detach();
 
         loss_LD   : torch.Tensor    = torch.sum(torch.stack(loss_LD_list));
         loss_coef : torch.Tensor    = torch.sum(torch.stack(loss_coef_list));

@@ -80,7 +80,7 @@ def test_ld_loss_container_accepts_scalar_losses_and_metrics():
         },
         weights={"LD": 1.0, "coef": 0.5},
         params=params,
-        metrics={"loss/LD/[0.25]": torch.tensor(1.0)},
+        metrics={"loss/LD/total": torch.tensor(1.0)},
     )
 
     assert losses.params is params

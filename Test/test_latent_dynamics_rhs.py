@@ -159,6 +159,15 @@ def _zero_cable_gate(ld):
         torch.nn.init.zeros_(layer.bias)
 
 
+def _loss_metric_keys(metrics):
+    return {key for key in metrics if key.startswith("loss/")}
+
+
+def _assert_loss_metrics_have_total_suffix(metrics):
+    for key in _loss_metric_keys(metrics):
+        assert key.endswith("/total")
+
+
 def test_cable_rhs_can_use_latent_state_in_gate_inputs():
     params = numpy.array([[0.25]])
     t = torch.tensor([0.0, 1.0], dtype=torch.float64)
@@ -459,9 +468,46 @@ def test_cable_compute_losses_uses_dense_pre_topk_weights_for_diversity_and_tail
     assert torch.allclose(result.metrics["expert/times_engaged/min"], torch.tensor(5.0))
     assert torch.allclose(result.metrics["expert/times_engaged/max"], torch.tensor(5.0))
     assert torch.allclose(result.metrics["expert/num_ever_engaged"], torch.tensor(2.0))
+    assert _loss_metric_keys(result.metrics) == {
+        "loss/LD/total",
+        "loss/coef/A",
+        "loss/coef/b",
+        "loss/coef/total",
+        "loss/diversity/total",
+        "loss/tail/total",
+    }
+    _assert_loss_metrics_have_total_suffix(result.metrics)
     assert torch.allclose(ld.last_tail_mass_loss, torch.tensor(0.25))
     assert len(ld.last_tail_mass_loss_list) == 1
     assert torch.allclose(ld.last_tail_mass_loss_list[0], torch.tensor(0.25))
+
+
+def test_non_cable_latent_dynamics_log_loss_totals_only():
+    params = numpy.array([[0.25], [0.75]])
+    t = torch.linspace(0.0, 1.0, 5)
+    z = torch.zeros((5, 1))
+
+    ld = SINDy(n_z=1, Uniform_t_Grid=True, n_p=1, config=_sindy_config())
+    for param in params:
+        ld.set_train_coefs(
+            param,
+            {"A": torch.zeros((1, 1)), "b": torch.zeros(1)},
+            torch.device("cpu"),
+        )
+
+    result = ld.compute_losses(
+        Latent_States=[[z], [z]],
+        t_Grid=[t, t],
+        step=0,
+        params=params,
+    )
+
+    assert _loss_metric_keys(result.metrics) == {
+        "loss/LD/total",
+        "loss/coef/total",
+        "loss/stab/total",
+    }
+    _assert_loss_metrics_have_total_suffix(result.metrics)
 
 
 def test_cable_global_losses_are_not_divided_by_number_of_parameters():
@@ -516,3 +562,10 @@ def test_cable_weak_compute_losses_returns_scalar_totals_and_metrics():
     assert torch.allclose(result.metrics["expert/times_engaged/min"], torch.tensor(9.0))
     assert torch.allclose(result.metrics["expert/times_engaged/max"], torch.tensor(9.0))
     assert torch.allclose(result.metrics["expert/num_ever_engaged"], torch.tensor(2.0))
+    assert _loss_metric_keys(result.metrics) == {
+        "loss/LD/total",
+        "loss/coef/total",
+        "loss/diversity/total",
+        "loss/tail/total",
+    }
+    _assert_loss_metrics_have_total_suffix(result.metrics)

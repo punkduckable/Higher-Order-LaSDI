@@ -353,9 +353,6 @@ class SwitchSINDy(InterpolatableLatentDynamics):
             coef_b_after_l2_list.append(coef_b_after_l2);
             lambda_before_list.append(lambda_before);
             lambda_after_list.append(lambda_after);
-            metrics[f"loss/LD/{str(params[i, :])}"]     = loss_LD.detach();
-            metrics[f"loss/coef/{str(params[i, :])}"]   = loss_coef.detach();
-            metrics[f"loss/stab/{str(params[i, :])}"]   = loss_stab.detach();
 
         loss_LD   : torch.Tensor    = torch.sum(torch.stack(loss_LD_list));
         loss_coef : torch.Tensor    = torch.sum(torch.stack(loss_coef_list));

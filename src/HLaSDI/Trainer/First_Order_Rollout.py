@@ -312,8 +312,8 @@ class First_Order_Rollout(Trainer):
 
         **Loss logging**
 
-        This method records both per-parameter losses and totals using the base-class helpers
-        `_cache_metric(...)`
+        This method records scalar loss totals and timings using the base-class helpers
+        `_cache_metric(...)`.
 
 
         -------------------------------------------------------------------------------------------
@@ -460,6 +460,8 @@ class First_Order_Rollout(Trainer):
 
             # Setup. 
             Latent_States           : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 1 element list of (n_t_i, n_z) arrays.
+            forward_timer           : float                     = 0.0;
+            recon_loss_timer        : float                     = 0.0;
 
             # Cycle through the combinations of parameter values
             for i in range(n_train):
@@ -487,7 +489,7 @@ class First_Order_Rollout(Trainer):
                 U_Pred_i    : torch.Tensor  = encoder_decoder_device.Decode(Z_i)[0];
 
                 LOGGER.debug("Forward Pass (Autoencoder) - complete for parameter combination %d" % i);
-                self._cache_metric("time/Forward_Pass", time.perf_counter() - timer);
+                forward_timer += time.perf_counter() - timer;
 
 
                 # ----------------------------------------------------------------------------
@@ -509,16 +511,14 @@ class First_Order_Rollout(Trainer):
                         raise ValueError("Invalid reconstruction loss type: %s" % self.loss_types['recon']);
                     
                     loss_recon += recon_loss_ith_param;
-                    
-                    # Store recon loss for this parameter combination.
-                    ith_param_tuple = tuple(self.param_space.train_space[i, :]);
-                    self._cache_metric(f'loss/recon/{str(ith_param_tuple)}', recon_loss_ith_param.detach());
-                    
+
                     LOGGER.debug("Reconstruction Loss (Autoencoder) - complete for parameter combination %d" % i);
-                    self._cache_metric("time/Recon_Loss", time.perf_counter() - timer);
+                    recon_loss_timer += time.perf_counter() - timer;
 
             # Store total recon loss.
-            self._cache_metric('loss/recon/total', loss_recon.detach());
+            self._cache_metric("time/Forward_Pass", forward_timer);
+            self._cache_metric("time/Recon_Loss",   recon_loss_timer);
+            self._cache_metric('loss/recon/total',  loss_recon.detach());
 
 
             # --------------------------------------------------------------------------------
@@ -547,7 +547,6 @@ class First_Order_Rollout(Trainer):
 
             # ---------------------------------------------------------------------------------
             # Rollout loss. Note that we need the coefficients before we can compute this.
-            
             
             if(self.loss_weights['rollout'] > 0 and p_rollout > 0):
                 timer : float = time.perf_counter();
@@ -674,11 +673,6 @@ class First_Order_Rollout(Trainer):
                     loss_rollout_ROM += loss_rollout_ROM_ith_param
                     loss_rollout_FOM += loss_rollout_FOM_ith_param
 
-                    # Log loss for this combination of parameters
-                    param_tuple = tuple(self.param_space.train_space[i, :])
-                    self._cache_metric(f'loss/rollout/ROM/{str(param_tuple)}', loss_rollout_ROM_ith_param.detach());
-                    self._cache_metric(f'loss/rollout/FOM/{str(param_tuple)}', loss_rollout_FOM_ith_param.detach());
-
                 # Log total rollout loss.
                 self._cache_metric('loss/rollout/ROM/total', loss_rollout_ROM.detach());
                 self._cache_metric('loss/rollout/FOM/total', loss_rollout_FOM.detach());
@@ -743,11 +737,6 @@ class First_Order_Rollout(Trainer):
                     loss_IC_rollout_ROM += loss_IC_rollout_ROM_ith_param;
                     loss_IC_rollout_FOM += loss_IC_rollout_FOM_ith_param;
                     
-                    # Store per-parameter-combination loss
-                    param_tuple = tuple(self.param_space.train_space[i, :]);
-                    self._cache_metric(f'loss/IC_rollout/ROM/{str(param_tuple)}', loss_IC_rollout_ROM_ith_param.detach());
-                    self._cache_metric(f'loss/IC_rollout/FOM/{str(param_tuple)}', loss_IC_rollout_FOM_ith_param.detach());
-
                 # Store total IC rollout loss.
                 self._cache_metric('loss/IC_rollout/ROM/total', loss_IC_rollout_ROM.detach());
                 self._cache_metric('loss/IC_rollout/FOM/total', loss_IC_rollout_FOM.detach());
@@ -828,8 +817,8 @@ class First_Order_Rollout(Trainer):
 
             # Flush cached tensors after the optimizer update. This performs one batched
             # device-to-CPU scalar transfer for loss tracking, checkpoint decisions, and reporting,
-            flushed_metrics = self._flush_metrics_cache(iter + 1);
-            loss_value = flushed_metrics["loss/total"];
+            flushed_metrics : dict[str, float ] = self._flush_metrics_cache(iter + 1);
+            loss_value      : float             = flushed_metrics["loss/total"];
 
             # Check if we hit a new minimum loss. If so, make a checkpoint, record the loss and 
             # the iteration number. 

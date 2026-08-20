@@ -306,7 +306,8 @@ class CABLE_weak(WeakLatentDynamics, CABLE):
         loss_diversity  : torch.Tensor = torch.pow(std_load/(mean_load + eps), 2);
 
         # Preserve the same tail-loss diagnostics as CABLE: a per-parameter list and an unweighted
-        # average are useful for plotting, while the objective below uses the summed scalar.
+        # average are useful for plotting, while the objective/logged metric below uses the summed
+        # scalar.
         self.last_tail_mass_loss = torch.mean(torch.stack(loss_tail_list)).detach();
         self.last_tail_mass_loss_list = [loss.detach() for loss in loss_tail_list];
 
@@ -315,6 +316,8 @@ class CABLE_weak(WeakLatentDynamics, CABLE):
         loss_tail : torch.Tensor = torch.sum(torch.stack(loss_tail_list));
         metrics["loss/LD/total"]        = loss_LD.detach();
         metrics["loss/coef/total"]      = loss_coef.detach();
+        metrics["loss/coef/A"]          = A_norms.detach();
+        metrics["loss/coef/b"]          = b_norms.detach();
         metrics["loss/diversity/total"] = loss_diversity.detach();
         metrics["loss/tail/total"]      = loss_tail.detach();
 

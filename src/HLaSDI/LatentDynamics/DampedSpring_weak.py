@@ -348,9 +348,6 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
             coef_C_fro_list.append(coef_C_fro);
             coef_b_l2_list.append(coef_b_l2);
             lambda_max_list.append(lambda_max);
-            metrics[f"loss/LD/{str(params[i, :])}"]     = Loss_LD_i.detach();
-            metrics[f"loss/coef/{str(params[i, :])}"]   = Loss_coef_i.detach();
-            metrics[f"loss/stab/{str(params[i, :])}"]   = Loss_Stab_i.detach();
 
         loss_LD   : torch.Tensor    = torch.sum(torch.stack(loss_LD_list));
         loss_coef : torch.Tensor    = torch.sum(torch.stack(loss_coef_list));

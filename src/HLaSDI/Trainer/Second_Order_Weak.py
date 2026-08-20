@@ -160,7 +160,7 @@ class Second_Order_Weak(Second_Order_Rollout):
 
         **Loss logging**
 
-        This method records both per-parameter losses and totals using the base-class helpers
+        This method records scalar loss totals and timings using the base-class helpers
         `_cache_metric(...)`.
 
 
@@ -324,7 +324,11 @@ class Second_Order_Weak(Second_Order_Rollout):
             loss_IC_rollout_Z_V     : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
 
             # Setup. 
-            Latent_States       : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 2 element list of (n_t_i, n_z) arrays.
+            Latent_States           : list[list[torch.Tensor]]  = [];       # len = n_train. i'th element is 2 element list of (n_t_i, n_z) arrays.
+            forward_timer           : float                     = 0.0;
+            recon_loss_timer        : float                     = 0.0;
+            consistency_loss_timer  : float                     = 0.0;
+            chain_rule_loss_timer   : float                     = 0.0;
 
             # Cycle through the combinations of parameter values.
             for i in range(n_train):
@@ -364,9 +368,8 @@ class Second_Order_Weak(Second_Order_Rollout):
                 D_Pred_i    : torch.Tensor          = torch.squeeze(U_Pred_i[0]);  # shape = (n_t(i), physics.Frame_Shape)
                 V_Pred_i    : torch.Tensor          = torch.squeeze(U_Pred_i[1]);  # shape = (n_t(i), physics.Frame_Shape)
 
-
                 LOGGER.debug("Forward Pass (Autoencoder_Pair) - complete for parameter combination %d" % i);
-                self._cache_metric("time/Forward_Pass", time.perf_counter() - timer);
+                forward_timer += time.perf_counter() - timer;
 
 
                 # ----------------------------------------------------------------------------
@@ -394,13 +397,8 @@ class Second_Order_Weak(Second_Order_Rollout):
                     loss_recon_D += recon_D_loss_ith_param;
                     loss_recon_V += recon_V_loss_ith_param;
                     
-                    # Store per-parameter-combination loss
-                    param_tuple = tuple(self.param_space.train_space[i, :]);
-                    self._cache_metric(f'loss/recon/D/{str(param_tuple)}', recon_D_loss_ith_param.detach());
-                    self._cache_metric(f'loss/recon/V/{str(param_tuple)}', recon_V_loss_ith_param.detach());
-
                     LOGGER.debug("Reconstruction Loss (Autoencoder_Pair) - complete for parameter combination %d" % i);
-                    self._cache_metric("time/Recon_Loss", time.perf_counter() - timer);
+                    recon_loss_timer += time.perf_counter() - timer;
 
 
                 # ---------------------------------------------------------------------------------
@@ -440,12 +438,8 @@ class Second_Order_Weak(Second_Order_Rollout):
                     loss_consistency_Z += consistency_Z_loss_ith_param;
                     loss_consistency_U += consistency_U_loss_ith_param;
                     
-                    param_tuple = tuple(self.param_space.train_space[i, :]);
-                    self._cache_metric(f'loss/consistency_Z/{str(param_tuple)}', consistency_Z_loss_ith_param.detach());
-                    self._cache_metric(f'loss/consistency/U/{str(param_tuple)}', consistency_U_loss_ith_param.detach());
-
                     LOGGER.debug("Consistency Loss (Autoencoder_Pair) - complete for parameter combination %d" % i);
-                    self._cache_metric("time/Consistency_Loss", time.perf_counter() - timer);
+                    consistency_loss_timer      += time.perf_counter() - timer;
 
 
                 # ---------------------------------------------------------------------------------
@@ -487,14 +481,16 @@ class Second_Order_Weak(Second_Order_Rollout):
                     loss_chain_rule_U += chain_rule_U_loss_ith_param;
                     loss_chain_rule_Z += chain_rule_Z_loss_ith_param;
                     
-                    param_tuple = tuple(self.param_space.train_space[i, :]);
-                    self._cache_metric(f'loss/chain_rule/U/{str(param_tuple)}', chain_rule_U_loss_ith_param.detach());
-                    self._cache_metric(f'loss/chain_rule/Z/{str(param_tuple)}', chain_rule_Z_loss_ith_param.detach());
-
                     LOGGER.debug("Chain Rule Loss (Autoencoder_Pair) - complete for parameter combination %d" % i);
-                    self._cache_metric("time/Chain_Rule_Loss", time.perf_counter() - timer);
+                    chain_rule_loss_timer += time.perf_counter() - timer;
 
-            # Store the total recon, consistency, and chain rule losses.
+            # Cache timing information
+            self._cache_metric("time/Forward_Pass",         forward_timer);
+            self._cache_metric("time/Recon_Loss",           recon_loss_timer);
+            self._cache_metric("time/Consistency_Loss",     consistency_loss_timer);
+            self._cache_metric("time/Chain_Rule_Loss",      chain_rule_loss_timer);
+
+            # Cache the total recon, consistency, and chain rule losses.
             self._cache_metric('loss/recon/D/total', loss_recon_D.detach());
             self._cache_metric('loss/recon/V/total', loss_recon_V.detach());
             self._cache_metric('loss/consistency/Z/total', loss_consistency_Z.detach());
@@ -677,13 +673,6 @@ class Second_Order_Weak(Second_Order_Rollout):
                     loss_rollout_FOM_D += rollout_FOM_D_loss_ith_param;
                     loss_rollout_FOM_V += rollout_FOM_V_loss_ith_param;
 
-                    # Store results for this combination of parameters
-                    param_tuple = tuple(self.param_space.train_space[i, :]);
-                    self._cache_metric(f'loss/rollout/ROM/D/{str(param_tuple)}', rollout_ROM_D_loss_ith_param.detach());
-                    self._cache_metric(f'loss/rollout/ROM/V/{str(param_tuple)}', rollout_ROM_V_loss_ith_param.detach());
-                    self._cache_metric(f'loss/rollout/FOM/D/{str(param_tuple)}', rollout_FOM_D_loss_ith_param.detach());
-                    self._cache_metric(f'loss/rollout/FOM/V/{str(param_tuple)}', rollout_FOM_V_loss_ith_param.detach());
-
                 # Store total rollout loss.
                 self._cache_metric('loss/rollout/ROM/D/total', loss_rollout_ROM_D.detach());
                 self._cache_metric('loss/rollout/ROM/V/total', loss_rollout_ROM_V.detach());
@@ -767,13 +756,6 @@ class Second_Order_Weak(Second_Order_Rollout):
                     loss_IC_rollout_D    += IC_rollout_D_loss_ith_param;
                     loss_IC_rollout_V    += IC_rollout_V_loss_ith_param;
                     
-                    # Store per-parameter-combination loss
-                    param_tuple = tuple(self.param_space.train_space[i, :]);
-                    self._cache_metric(f'loss/IC_rollout/Z_D/{str(param_tuple)}', IC_rollout_Z_D_loss_ith_param.detach());
-                    self._cache_metric(f'loss/IC_rollout/Z_V/{str(param_tuple)}', IC_rollout_Z_V_loss_ith_param.detach());
-                    self._cache_metric(f'loss/IC_rollout/D/{str(param_tuple)}', IC_rollout_D_loss_ith_param.detach());
-                    self._cache_metric(f'loss/IC_rollout/V/{str(param_tuple)}', IC_rollout_V_loss_ith_param.detach());
-
                 # Store total IC rollout loss.
                 self._cache_metric('loss/IC_rollout/Z_D/total', loss_IC_rollout_Z_D.detach());
                 self._cache_metric('loss/IC_rollout/Z_V/total', loss_IC_rollout_Z_V.detach());

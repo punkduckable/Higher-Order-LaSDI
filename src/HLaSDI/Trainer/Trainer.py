@@ -100,8 +100,8 @@ class Trainer:
 
     - `Iterate(start_iter, end_iter)`: perform optimizer steps for the requested global iteration
       range, compute reconstruction/latent/rollout/etc. losses appropriate to the strategy, update
-      encoder/decoder/latent_dynamics parameters, record timing and per-parameter
-      losses, and call `_Save_Checkpoint(...)` whenever a new best model for the round is found.
+      encoder/decoder/latent_dynamics parameters, record timing and scalar loss totals, and call
+      `_Save_Checkpoint(...)` whenever a new best model for the round is found.
 
     Subclasses commonly use `_optimizer_parameters()` to build optimizers over both neural-network
     parameters and LD-owned coefficient tensors.  They may extend `export()` and `load()` for

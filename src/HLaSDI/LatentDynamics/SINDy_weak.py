@@ -297,9 +297,6 @@ class SINDy_weak(WeakLatentDynamics, SINDy):
             coef_A_fro_list.append(coef_A_fro);
             coef_b_l2_list.append(coef_b_l2);
             lambda_max_list.append(lambda_max);
-            metrics[f"loss/LD/{str(params[i, :])}"]     = loss_LD.detach();
-            metrics[f"loss/coef/{str(params[i, :])}"]   = loss_coef.detach();
-            metrics[f"loss/stab/{str(params[i, :])}"]   = loss_stab.detach();
 
         loss_LD   : torch.Tensor    = torch.sum(torch.stack(loss_LD_list));
         loss_coef : torch.Tensor    = torch.sum(torch.stack(loss_coef_list));

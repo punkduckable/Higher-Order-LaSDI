@@ -460,21 +460,20 @@ class CABLE(LatentDynamics):
         std_load        : torch.Tensor          = torch.std(summed_weights, unbiased = False);
         loss_diversity  : torch.Tensor          = torch.pow(std_load/(mean_load + eps), 2);
 
-        # Store the average tail-mass loss for diagnostics/plotting; the weighted objective uses
-        # the summed scalar returned under the `tail` key, while per-parameter values live in
-        # metrics.
+        # Store the average tail-mass loss for diagnostics/plotting; the weighted objective and
+        # logged loss metric use the summed scalar returned under the `tail` key.
         loss_tail : torch.Tensor = torch.mean(torch.stack(loss_tail_list));
         self.last_tail_mass_loss = loss_tail.detach();
         self.last_tail_mass_loss_list = [loss.detach() for loss in loss_tail_list];
 
         # All done :)
-        metrics["loss/diversity/total"] = loss_diversity.detach();
-        metrics["loss/coef/total"]      = loss_coef.detach();
-        metrics["loss/coef/A"]          = A_norms.detach();
-        metrics["loss/coef/b"]          = b_norms.detach();
         loss_LD     : torch.Tensor      = torch.sum(torch.stack(loss_LD_list));
         loss_tail   : torch.Tensor      = torch.sum(torch.stack(loss_tail_list));
         metrics["loss/LD/total"]        = loss_LD.detach();
+        metrics["loss/coef/total"]      = loss_coef.detach();
+        metrics["loss/coef/A"]          = A_norms.detach();
+        metrics["loss/coef/b"]          = b_norms.detach();
+        metrics["loss/diversity/total"] = loss_diversity.detach();
         metrics["loss/tail/total"]      = loss_tail.detach();
 
         losses_dict = {'LD' : loss_LD, 'coef' : loss_coef, 'diversity' : loss_diversity, 'tail' : loss_tail};
