@@ -9,8 +9,8 @@ import  torch;
 
 from    HLaSDI.LatentDynamics.Weak             import  WeakLatentDynamics;
 from    HLaSDI.LatentDynamics.LatentDynamics   import  LD_Loss_Container;
-from    HLaSDI.LatentDynamics.CABSOLE          import  CABSOLE;
-from    HLaSDI.Schemas                         import  WeakCABSOLELatentDynamicsConfig;
+from    HLaSDI.LatentDynamics.SOME             import  SOME;
+from    HLaSDI.Schemas                         import  WeakSOMELatentDynamicsConfig;
 from    HLaSDI.Utilities.Statistics            import  tensor_statistics;
 
 LOGGER  : logging.Logger    = logging.getLogger(__name__);
@@ -18,34 +18,34 @@ LOGGER  : logging.Logger    = logging.getLogger(__name__);
 
 
 # -------------------------------------------------------------------------------------------------
-# CABSOLE_weak class
+# SOME_weak class
 # -------------------------------------------------------------------------------------------------
 
-class CABSOLE_weak(WeakLatentDynamics, CABSOLE):
+class SOME_weak(WeakLatentDynamics, SOME):
     def __init__(   self,
                     n_z             : int,
                     Uniform_t_Grid  : bool,
                     n_p             : int,
-                    config          : WeakCABSOLELatentDynamicsConfig) -> None:
+                    config          : WeakSOMELatentDynamicsConfig) -> None:
         r"""
-        Initialize a weak-form CABSOLE latent-dynamics model.
+        Initialize a weak-form SOME latent-dynamics model.
 
-        CABSOLE_weak uses the same global mixture-of-second-order affine experts as CABSOLE,
+        SOME_weak uses the same global mixture-of-second-order affine experts as SOME,
 
             z''(t) = \sum_{m = 1}^{N} w_m(t, \theta) [ K_m z(t) + C_m z'(t) + b_m ],
 
         when biases are enabled, and the corresponding bias-free form when biases are disabled.
         The trainable state is therefore still the set of expert matrices, optional expert biases,
-        and gate-network parameters owned by CABSOLE.
+        and gate-network parameters owned by SOME.
 
-        The difference from CABSOLE is only the latent-dynamics residual used during training. Rather
+        The difference from SOME is only the latent-dynamics residual used during training. Rather
         than comparing the RHS against finite-difference estimates of z''(t), this class uses the
         compactly supported weak test functions stored by `WeakLatentDynamics` and enforces
 
             \int phi''(t) z(t) dt = \int phi(t) f(z(t), z'(t), t, \theta) dt.
 
         Note: This class inherits `parameters`, `initialize_coefficients`, `RHS`, `simulate`,
-        `export`, and `load` from CABSOLE.
+        `export`, and `load` from SOME.
 
 
         -------------------------------------------------------------------------------------------
@@ -63,8 +63,8 @@ class CABSOLE_weak(WeakLatentDynamics, CABSOLE):
         n_p : int
             The number of (scalar) parameters in the parameter space.
 
-        config : WeakCABSOLELatentDynamicsConfig
-            Weak CABSOLE latent-dynamics configuration. The `cabsole` settings define the expert and
+        config : WeakSOMELatentDynamicsConfig
+            Weak SOME latent-dynamics configuration. The `some` settings define the expert and
             gate-network configuration, while the `weak` settings define the weak-form test
             functions.
 
@@ -76,9 +76,9 @@ class CABSOLE_weak(WeakLatentDynamics, CABSOLE):
         Nothing!
         """
 
-        assert isinstance(config, WeakCABSOLELatentDynamicsConfig), "config must be a WeakCABSOLELatentDynamicsConfig, got %s" % str(type(config));
+        assert isinstance(config, WeakSOMELatentDynamicsConfig), "config must be a WeakSOMELatentDynamicsConfig, got %s" % str(type(config));
 
-        CABSOLE.__init__(
+        SOME.__init__(
             self,
             n_z            = n_z,
             Uniform_t_Grid = Uniform_t_Grid,
@@ -95,7 +95,7 @@ class CABSOLE_weak(WeakLatentDynamics, CABSOLE):
             config         = config,
         );
 
-        LOGGER.info("Initializing a CABSOLE_weak object with n_z = %d, Uniform_t_Grid = %s" % (
+        LOGGER.info("Initializing a SOME_weak object with n_z = %d, Uniform_t_Grid = %s" % (
             self.n_z,
             str(self.Uniform_t_Grid),
         ));
@@ -111,15 +111,15 @@ class CABSOLE_weak(WeakLatentDynamics, CABSOLE):
         params          : numpy.ndarray | None = None,
     ) -> LD_Loss_Container:
         r"""
-        Compute weak-form CABSOLE latent-dynamics and regularization losses.
+        Compute weak-form SOME latent-dynamics and regularization losses.
 
-        For each parameter value, this method evaluates the CABSOLE mixture-of-experts RHS on
+        For each parameter value, this method evaluates the SOME mixture-of-experts RHS on
         the latent trajectory and compares it to equivalent weak second-order terms,
 
             \int phi''(t) z(t) dt = -\int phi'(t) z'(t) dt
                                    =  \int phi(t) f(z(t), z'(t), t, \theta) dt.
 
-        The coefficient, diversity, tail-mass, and mask terms follow the strong-form CABSOLE
+        The coefficient, diversity, tail-mass, and mask terms follow the strong-form SOME
         implementation. In particular, the diversity loss is the squared coefficient of variation
         of the dense expert loads accumulated over all parameter values and time samples, while the
         tail loss penalizes dense softmax mass outside the top `n_active` experts.
@@ -135,7 +135,7 @@ class CABSOLE_weak(WeakLatentDynamics, CABSOLE):
             velocity for the i'th combination of parameter values.
 
         t_Grid : list[torch.Tensor], len = n_param
-            Time grids corresponding to the latent trajectories. These are used by the CABSOLE gate;
+            Time grids corresponding to the latent trajectories. These are used by the SOME gate;
             the weak residual itself uses test functions previously stored for each parameter row.
 
         step : int
@@ -159,7 +159,7 @@ class CABSOLE_weak(WeakLatentDynamics, CABSOLE):
         """
 
         # Checks.
-        assert params is not None, "CABSOLE_weak.compute_losses requires params for gate inputs and weak test functions";
+        assert params is not None, "SOME_weak.compute_losses requires params for gate inputs and weak test functions";
         assert isinstance(params, numpy.ndarray) and len(params.shape) == 2;
         assert params.shape[1] == self.n_p;
         assert isinstance(t_Grid, list);
@@ -175,7 +175,7 @@ class CABSOLE_weak(WeakLatentDynamics, CABSOLE):
         params_tensor   : torch.Tensor  = torch.tensor(params, dtype = gate_dtype, device = gate_device);
 
         # Accumulate scalar loss contributions and diagnostics across all parameter rows. The
-        # trainable CABSOLE coefficients are global, so coefficient/diversity losses are computed
+        # trainable SOME coefficients are global, so coefficient/diversity losses are computed
         # once after the loop rather than separately per parameter.
         loss_LD_list            : list[torch.Tensor]      = [];
         loss_tail_list          : list[torch.Tensor]      = [];
@@ -188,8 +188,8 @@ class CABSOLE_weak(WeakLatentDynamics, CABSOLE):
         summed_weights          : torch.Tensor            = torch.zeros((self.n_experts), dtype = self.unmasked_K.dtype, device = self.unmasked_K.device);
         times_engaged           : torch.Tensor            = torch.zeros((self.n_experts), dtype = torch.int64, device = self.unmasked_K.device);
 
-        # Periodically update hard coefficient masks, matching CABSOLE.compute_losses. Masked entries
-        # are multiplied out through the CABSOLE `K`/`C`/`b` properties used below.
+        # Periodically update hard coefficient masks, matching SOME.compute_losses. Masked entries
+        # are multiplied out through the SOME `K`/`C`/`b` properties used below.
         if self.use_mask:
             assert self.first_mask_step is not None;
             assert self.mask_update_freq is not None;
@@ -231,7 +231,7 @@ class CABSOLE_weak(WeakLatentDynamics, CABSOLE):
             dPhis   : torch.Tensor  = dPhis0.to(device = ith_Z.device, dtype = ith_Z.dtype);
             d2Phis  : torch.Tensor  = d2Phis0.to(device = ith_Z.device, dtype = ith_Z.dtype);
 
-            # Evaluate dense expert weights and the CABSOLE RHS on the latent trajectory. We keep the
+            # Evaluate dense expert weights and the SOME RHS on the latent trajectory. We keep the
             # dense pre-top-k weights here because the top-k sparsity target is enforced only
             # through the tail-mass loss, not by discontinuously truncating the RHS.
             ith_RHS, ith_weights = self._evaluate_rhs(
@@ -332,7 +332,7 @@ class CABSOLE_weak(WeakLatentDynamics, CABSOLE):
         std_load        : torch.Tensor = torch.std(summed_weights, unbiased = False);
         loss_diversity  : torch.Tensor = torch.pow(std_load/(mean_load + eps), 2);
 
-        # Preserve the same tail-loss diagnostics as CABSOLE: a per-parameter list and an unweighted
+        # Preserve the same tail-loss diagnostics as SOME: a per-parameter list and an unweighted
         # average are useful for plotting, while the objective/logged metric below uses the summed
         # scalar.
         self.last_tail_mass_loss = torch.mean(torch.stack(loss_tail_list)).detach();

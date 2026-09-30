@@ -9,7 +9,7 @@ import  numpy;
 import  torch;
 
 from    HLaSDI.LatentDynamics.LatentDynamics    import  LatentDynamics, LD_Loss_Container;
-from    HLaSDI.Schemas                          import  CABSOLELatentDynamicsConfig, WeakCABSOLELatentDynamicsConfig, CABLELatentDynamicsSettings;
+from    HLaSDI.Schemas                          import  SOMELatentDynamicsConfig, WeakSOMELatentDynamicsConfig, CABLELatentDynamicsSettings;
 from    HLaSDI.EncoderDecoder                   import  MultiLayerPerceptron;
 from    HLaSDI.Utilities.FiniteDifference       import  Derivative1_Order4, Derivative1_Order2_NonUniform;
 from    HLaSDI.Utilities.SecondOrderSolvers     import  RK4;
@@ -22,20 +22,18 @@ LOGGER : logging.Logger = logging.getLogger(__name__);
 
 
 # -------------------------------------------------------------------------------------------------
-# CABSOLE class
+# SOME class
 # -------------------------------------------------------------------------------------------------
 
-class CABSOLE(LatentDynamics):
+class SOME(LatentDynamics):
     def __init__(   self, 
                     n_z             :   int, 
                     Uniform_t_Grid  :   bool,
                     n_p             :   int, 
-                    config          :   CABSOLELatentDynamicsConfig | WeakCABSOLELatentDynamicsConfig) -> None:
+                    config          :   SOMELatentDynamicsConfig | WeakSOMELatentDynamicsConfig) -> None:
         r"""
-        Initializes a Second Order Convex Affine Blend of Second Order Latent Experts 
-        latent-dynamics object.
-
-        This class models second-order latent dynamics in native form as
+        Initializes a Second Order Mixture of Experts (SOME) latent-dynamics object. This class 
+        models second-order latent dynamics in native form as
 
             z''(t) = \sum_{m = 1}^{N} w_m(t, \theta) [ K_m z(t) + C_m z'(t) + b_m ].
 
@@ -58,8 +56,8 @@ class CABSOLE(LatentDynamics):
         n_p : int 
             The number of (scalar) parameters in the parameter space.
 
-        config : CABSOLELatentDynamicsConfig
-            The latent-dynamics configuration schema. The `cabsole` settings specify the number of
+        config : SOMELatentDynamicsConfig
+            The latent-dynamics configuration schema. The `some` settings specify the number of
             experts, the target number of active experts, epsilon, and the gate-network 
             architecture.
 
@@ -71,7 +69,7 @@ class CABSOLE(LatentDynamics):
         Nothing!
         """
 
-        assert isinstance(config, (CABSOLELatentDynamicsConfig, WeakCABSOLELatentDynamicsConfig)), "config must be a CABSOLELatentDynamicsConfig, got %s" % str(type(config));
+        assert isinstance(config, (SOMELatentDynamicsConfig, WeakSOMELatentDynamicsConfig)), "config must be a SOMELatentDynamicsConfig, got %s" % str(type(config));
 
         # Run the base class initializer. 
         LatentDynamics.__init__(
@@ -85,7 +83,7 @@ class CABSOLE(LatentDynamics):
             config         = config);
 
         # Extract sub-class specific attributes.
-        sub : CABLELatentDynamicsSettings       = config.cabsole;
+        sub : CABLELatentDynamicsSettings       = config.some;
         self.n_experts          : int           = sub.n_experts;
         self.n_active           : int           = sub.n_active;
         self.hidden_widths      : list[int]     = sub.hidden_widths;
@@ -147,7 +145,7 @@ class CABSOLE(LatentDynamics):
 
     def parameters(self) -> list[torch.Tensor]:
         r"""
-        Return CABSOLE-owned tensors that should be passed to torch optimizers.
+        Return SOME-owned tensors that should be passed to torch optimizers.
 
         These are the expert matrices, optional expert biases, and gate-network parameters. The list 
         is empty when the latent dynamics are frozen.
@@ -169,7 +167,7 @@ class CABSOLE(LatentDynamics):
 
     def move_parameters_to_device(self, device : torch.device | str) -> None:
         r"""
-        Move CABSOLE-owned parameters to a device.
+        Move SOME-owned parameters to a device.
 
 
         -------------------------------------------------------------------------------------------
@@ -214,12 +212,12 @@ class CABSOLE(LatentDynamics):
             device          : torch.device,
             params          : numpy.ndarray) -> None:
         r"""
-        Move the globally initialized CABSOLE parameters to the requested device.
+        Move the globally initialized SOME parameters to the requested device.
 
-        CABSOLE does not fit one coefficient dictionary per training parameter. Its experts and gate
+        SOME does not fit one coefficient dictionary per training parameter. Its experts and gate
         are initialized when the object is constructed and then trained directly. This method keeps
         the standard latent-dynamics initialization hook but only validates the incoming training
-        data and moves CABSOLE-owned tensors to `device`.
+        data and moves SOME-owned tensors to `device`.
 
 
         -------------------------------------------------------------------------------------------
@@ -235,7 +233,7 @@ class CABSOLE(LatentDynamics):
             Time grid for each latent trajectory.
 
         device : torch.device
-            The device where CABSOLE's experts and gate network should live.
+            The device where SOME's experts and gate network should live.
             
         params : numpy.ndarray, shape = (n_param, n_p)
             The parameters currently represented in the training set.
@@ -248,7 +246,7 @@ class CABSOLE(LatentDynamics):
         """
 
         # Checks.
-        assert params is not None, "CABSOLE.initialize_coefficients requires params!";
+        assert params is not None, "SOME.initialize_coefficients requires params!";
         assert isinstance(params, numpy.ndarray) and len(params.shape) == 2;
         assert params.shape[1] == self.n_p;
         assert isinstance(t_Grid, list);
@@ -275,7 +273,7 @@ class CABSOLE(LatentDynamics):
         r"""
         Compute latent-dynamics, coefficient, and gate-diversity losses for training parameters.
 
-        For each parameter row, this method evaluates the global CABSOLE mixture-of-experts model
+        For each parameter row, this method evaluates the global SOME mixture-of-experts model
 
             z''(t) = \sum_{m = 1}^{N} w_m(t, \theta) [ K_m z(t) + C_m z'(t) + b_m ].
 
@@ -319,7 +317,7 @@ class CABSOLE(LatentDynamics):
         """
     
         # Checks.
-        assert params is not None, "CABSOLE.compute_losses requires params for the gate network";
+        assert params is not None, "SOME.compute_losses requires params for the gate network";
         assert isinstance(params, numpy.ndarray) and len(params.shape) == 2;
         assert params.shape[1] == self.n_p;
         assert isinstance(t_Grid, list);
@@ -476,13 +474,13 @@ class CABSOLE(LatentDynamics):
                 params  : numpy.ndarray,
                 sample  : bool = False) -> list[torch.Tensor | numpy.ndarray]:
         r"""
-        Evaluate the CABSOLE mixture-of-second-order-experts right-hand side.
+        Evaluate the SOME mixture-of-second-order-experts right-hand side.
 
         For each parameter value, \theta, we evaluate
 
             z''(t) = \sum_{m = 1}^{N} w_m(t, \theta) [ K_m z(t) + C_m z'(t) + b_m ].
         
-        at each latent displacement/velocity pair in `Z[i]`. CABSOLE is deterministic and owns one
+        at each latent displacement/velocity pair in `Z[i]`. SOME is deterministic and owns one
         global expert set, so `sample` is accepted only for interface compatibility and ignored.
 
 
@@ -495,7 +493,7 @@ class CABSOLE(LatentDynamics):
             `Z[i][1]` stores latent velocities. Both entries must have shape (n_t(i), n_z).
 
         t_Grid : list[numpy.ndarray | torch.Tensor], len = n_param
-            The i'th entry is a one-dimensional time grid with length n_t(i). CABSOLE is
+            The i'th entry is a one-dimensional time grid with length n_t(i). SOME is
             non-autonomous through its gate, so these times are used when computing expert weights.
 
         params : numpy.ndarray, shape = (n_param, n_p)
@@ -511,7 +509,7 @@ class CABSOLE(LatentDynamics):
 
         RH_Sides : list[numpy.ndarray | torch.Tensor], len = n_param
             The i'th entry has the same backend and leading dimensions as `Z[i][0]` and last
-            dimension n_z. It stores the CABSOLE RHS evaluated at the supplied states/times.
+            dimension n_z. It stores the SOME RHS evaluated at the supplied states/times.
         """
 
         # Checks.
@@ -524,7 +522,7 @@ class CABSOLE(LatentDynamics):
 
         # Compute right-hand sides.
         RH_Sides : list[numpy.ndarray | torch.Tensor] = [];
-        LOGGER.debug("Computing CABSOLE RHS with %d parameter combinations" % n_param);
+        LOGGER.debug("Computing SOME RHS with %d parameter combinations" % n_param);
         for i in range(n_param):
             ith_Z       : numpy.ndarray | torch.Tensor  = Z[i][0];
             ith_dZ_dt   : numpy.ndarray | torch.Tensor  = Z[i][1];
@@ -563,7 +561,7 @@ class CABSOLE(LatentDynamics):
                     params  : numpy.ndarray,
                     sample  : bool = False) -> list[list[numpy.ndarray | torch.Tensor]]:
         r"""
-        Time-integrate the deterministic CABSOLE latent dynamics.
+        Time-integrate the deterministic SOME latent dynamics.
 
         The gate is evaluated at the RK stage time and parameter value, so the integrated system is
         generally non-autonomous even though each expert is affine in z. The model is
@@ -606,7 +604,7 @@ class CABSOLE(LatentDynamics):
 
         # Loop through parameter combinations.
         Z : list[list[numpy.ndarray | torch.Tensor]] = [];
-        LOGGER.debug("Simulating CABSOLE with %d parameter combinations" % n_param);
+        LOGGER.debug("Simulating SOME with %d parameter combinations" % n_param);
         for i in range(n_param):
             ith_IC     : list[numpy.ndarray | torch.Tensor]  = IC[i];
             ith_t_Grid : numpy.ndarray | torch.Tensor        = t_Grid[i];
@@ -667,7 +665,7 @@ class CABSOLE(LatentDynamics):
 
 
     def export(self) -> dict:
-        r"""Export CABSOLE metadata, expert tensors, and gate-network parameters."""
+        r"""Export SOME metadata, expert tensors, and gate-network parameters."""
 
         param_dict = {'n_z'             : self.n_z,
                       'n_IC'            : self.n_IC,
@@ -685,7 +683,7 @@ class CABSOLE(LatentDynamics):
 
 
     def load(self, dict_ : dict) -> None:
-        r"""Load CABSOLE metadata, expert tensors, and gate-network parameters."""
+        r"""Load SOME metadata, expert tensors, and gate-network parameters."""
 
         assert(self.n_z             == dict_['n_z']);
         assert(self.n_IC            == dict_['n_IC']);
@@ -1064,7 +1062,7 @@ class CABSOLE(LatentDynamics):
             f(t, z, z') = K_bar(t) z + C_bar(t) dz_dt + b_bar(t).
 
         This method intentionally does not modify or specialize `RK4`; it only constructs a faster
-        CABSOLE-specific right-hand-side function for the time-only gate case.
+        SOME-specific right-hand-side function for the time-only gate case.
 
 
         -------------------------------------------------------------------------------------------
@@ -1165,9 +1163,9 @@ class CABSOLE(LatentDynamics):
             t0      : float | torch.Tensor,
             t_span  : float | torch.Tensor) -> tuple[numpy.ndarray | torch.Tensor, torch.Tensor]:
         r"""
-        Evaluate CABSOLE's right-hand side and return the corresponding gate weights.
+        Evaluate SOME's right-hand side and return the corresponding gate weights.
 
-        This is the single pointwise CABSOLE RHS helper used by loss evaluation, public RHS calls,
+        This is the single pointwise SOME RHS helper used by loss evaluation, public RHS calls,
         and the generic simulation path. The backend of `Z` determines the backend of the returned
         RHS. NumPy inputs are evaluated under `torch.no_grad()` and converted back to NumPy; torch
         inputs preserve autograd through the gate, expert coefficients, and affine evaluation.
@@ -1205,7 +1203,7 @@ class CABSOLE(LatentDynamics):
         RHS, weights 
 
         RHS : numpy.ndarray | torch.Tensor, shape = Z.shape
-            CABSOLE right-hand-side values; will have the same type as Z. 
+            SOME right-hand-side values; will have the same type as Z. 
 
         weights : torch.Tensor, shape = (n_t, n_experts)
             The expert weights at each time step.

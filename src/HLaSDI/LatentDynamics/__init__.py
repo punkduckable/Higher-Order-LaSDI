@@ -4,7 +4,7 @@ Latent-dynamics models for LaSDI.
 `LatentDynamics` defines the shared coefficient, weak-form, and rollout interface. `SINDy` and
 `SwitchSINDy` define first-order affine latent ODEs, including switching dynamics. `CABLE`
 defines a deterministic mixture-of-affine-experts latent ODE. `DampedSpring` defines second-order
-latent dynamics, `CABSOLE` defines a deterministic second-order mixture-of-experts latent ODE, and
+latent dynamics, `SOME` defines a deterministic second-order mixture-of-experts latent ODE, and
 the `_weak` variants use weak-form residual losses.
 """
 
@@ -18,8 +18,8 @@ from    .SwitchSINDy            import  SwitchSINDy;
 from    .SwitchSINDy_weak       import  SwitchSINDy_weak;
 from    .CABLE                  import  CABLE;
 from    .CABLE_weak             import  CABLE_weak;
-from    .CABSOLE                import  CABSOLE;
-from    .CABSOLE_weak           import  CABSOLE_weak;
+from    .SOME                   import  SOME;
+from    .SOME_weak              import  SOME_weak;
 from    .Weak                   import  WeakLatentDynamics;
 
 __all__ = [    "LatentDynamics",
@@ -30,8 +30,8 @@ __all__ = [    "LatentDynamics",
                "SwitchSINDy_weak",
                "CABLE",
                "CABLE_weak",
-               "CABSOLE",
-               "CABSOLE_weak",
+               "SOME",
+               "SOME_weak",
                "DampedSpring",
                "DampedSpring_weak",
                "WeakLatentDynamics",

@@ -383,11 +383,13 @@ Configuration files are YAML-based and specify:
 - Number of decoder stages: `n_Decoders`
 
 ### Latent Dynamics (`latent_dynamics`)
-- Type: `sindy`, `spring`, `switch`, `sindy_w`, `spring_w`, `switch_w`, or `cable`.
+- Type: `sindy`, `spring`, `switch`, `sindy_w`, `spring_w`, `switch_w`, `cable`,
+  `cable_w`, `some`, or `some_w`.
 - `interpolator`: required for interpolatable models; currently supports `type: GP` with `Matern`
   or `RBF` kernels.
-- `loss_weights`: LD-owned losses. Interpolatable affine models use `LD`, `coef`, and `stab`; CABLE uses `LD`, `coef`, `diversity`, and `tail`.
-- CABLE-specific settings include `n_experts`, `n_active`, `hidden_widths`, and `activations`.
+- `loss_weights`: LD-owned losses. Interpolatable affine models use `LD`, `coef`, and `stab`;
+  CABLE/SOME use `LD`, `coef`, `diversity`, and `tail`.
+- CABLE/SOME settings include `n_experts`, `n_active`, `hidden_widths`, and `activations`.
 
 ### Physics (`physics`)
 - Physics type (must match a key in `physics_dict`)

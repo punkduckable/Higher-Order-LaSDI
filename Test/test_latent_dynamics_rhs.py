@@ -7,9 +7,9 @@ import torch
 SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.append(SRC)
 
-from HLaSDI.LatentDynamics import CABSOLE, CABSOLE_weak, CABLE, CABLE_weak, DampedSpring, DampedSpring_weak, SINDy, SINDy_weak, SwitchSINDy, SwitchSINDy_weak
+from HLaSDI.LatentDynamics import SOME, SOME_weak, CABLE, CABLE_weak, DampedSpring, DampedSpring_weak, SINDy, SINDy_weak, SwitchSINDy, SwitchSINDy_weak
 from HLaSDI.Schemas import (
-    CABSOLELatentDynamicsConfig,
+    SOMELatentDynamicsConfig,
     CABLELatentDynamicsConfig,
     DampedSpringLatentDynamicsConfig,
     DampedSpringWeakLatentDynamicsConfig,
@@ -18,7 +18,7 @@ from HLaSDI.Schemas import (
     SwitchSINDyLatentDynamicsConfig,
     SwitchSINDyWeakLatentDynamicsConfig,
     WeakCABLELatentDynamicsConfig,
-    WeakCABSOLELatentDynamicsConfig,
+    WeakSOMELatentDynamicsConfig,
 )
 
 
@@ -137,8 +137,8 @@ def _cable_config_with_settings(trainable=True, n_active=2, **settings):
     })
 
 
-def _cabsole_config_with_settings(trainable=True, n_active=2, **settings):
-    cabsole_settings = {
+def _some_config_with_settings(trainable=True, n_active=2, **settings):
+    some_settings = {
         "n_experts": 2,
         "n_active": n_active,
         "hidden_widths": [2],
@@ -147,21 +147,21 @@ def _cabsole_config_with_settings(trainable=True, n_active=2, **settings):
         "coef_norm": "l2",
         "use_mask": False,
     }
-    cabsole_settings.update(settings)
-    return CABSOLELatentDynamicsConfig.model_validate({
-        "type": "cabsole",
+    some_settings.update(settings)
+    return SOMELatentDynamicsConfig.model_validate({
+        "type": "some",
         "trainable": trainable,
         "loss_weights": {"LD": 1.0, "coef": 1.0, "diversity": 1.0, "tail": 1.0},
-        "cabsole": cabsole_settings,
+        "some": some_settings,
     })
 
 
-def _cabsole_w_config(trainable=True, n_active=2):
-    return WeakCABSOLELatentDynamicsConfig.model_validate({
-        "type": "cabsole_w",
+def _some_w_config(trainable=True, n_active=2):
+    return WeakSOMELatentDynamicsConfig.model_validate({
+        "type": "some_w",
         "trainable": trainable,
         "loss_weights": {"LD": 1.0, "coef": 1.0, "diversity": 1.0, "tail": 1.0},
-        "cabsole": {
+        "some": {
             "n_experts": 2,
             "n_active": n_active,
             "hidden_widths": [2],
@@ -198,7 +198,7 @@ def _zero_cable_gate(ld):
         torch.nn.init.zeros_(layer.bias)
 
 
-def _zero_cabsole_gate(ld):
+def _zero_some_gate(ld):
     _zero_cable_gate(ld)
 
 
@@ -246,14 +246,14 @@ def test_cable_rhs_can_use_latent_state_in_gate_inputs():
     assert rhs[0, 0] > rhs[1, 0]
 
 
-def test_cabsole_rhs_matches_uniform_mixture_of_second_order_experts():
+def test_some_rhs_matches_uniform_mixture_of_second_order_experts():
     params = numpy.array([[0.25]])
     t = torch.tensor([0.0, 0.5, 1.0], dtype=torch.float64)
     z = torch.tensor([[0.0], [1.0], [2.0]], dtype=torch.float64)
     dz = torch.tensor([[3.0], [4.0], [5.0]], dtype=torch.float64)
 
-    ld = CABSOLE(n_z=1, Uniform_t_Grid=True, n_p=1, config=_cabsole_config_with_settings())
-    _zero_cabsole_gate(ld)
+    ld = SOME(n_z=1, Uniform_t_Grid=True, n_p=1, config=_some_config_with_settings())
+    _zero_some_gate(ld)
     ld.unmasked_K = torch.tensor([[[1.0]], [[3.0]]], dtype=torch.float32, requires_grad=True)
     ld.unmasked_C = torch.tensor([[[5.0]], [[7.0]]], dtype=torch.float32, requires_grad=True)
     ld.unmasked_b = torch.tensor([[[10.0]], [[20.0]]], dtype=torch.float32, requires_grad=True)
@@ -267,14 +267,14 @@ def test_cabsole_rhs_matches_uniform_mixture_of_second_order_experts():
     assert torch.allclose(rhs, expected)
 
 
-def test_cabsole_compute_losses_differentiates_velocity_on_nonuniform_grid():
+def test_some_compute_losses_differentiates_velocity_on_nonuniform_grid():
     params = numpy.array([[0.25]])
     t = torch.tensor([0.0, 0.1, 0.4, 1.0], dtype=torch.float64)
     z = t.reshape(-1, 1)
     dz = torch.zeros((4, 1), dtype=torch.float64)
 
-    ld = CABSOLE(n_z=1, Uniform_t_Grid=False, n_p=1, config=_cabsole_config_with_settings())
-    _zero_cabsole_gate(ld)
+    ld = SOME(n_z=1, Uniform_t_Grid=False, n_p=1, config=_some_config_with_settings())
+    _zero_some_gate(ld)
     ld.unmasked_K = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
     ld.unmasked_C = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
     ld.unmasked_b = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
@@ -284,14 +284,14 @@ def test_cabsole_compute_losses_differentiates_velocity_on_nonuniform_grid():
     assert torch.allclose(losses["LD"], torch.tensor(0.0, dtype=torch.float64), atol=1.0e-14)
 
 
-def test_cabsole_simulate_integrates_constant_uniform_expert_mixture_torch_inputs():
+def test_some_simulate_integrates_constant_uniform_expert_mixture_torch_inputs():
     params = numpy.array([[0.25]])
     t = numpy.array([0.0, 0.25, 0.5])
     z0 = torch.tensor([1.0], dtype=torch.float64)
     dz0 = torch.tensor([2.0], dtype=torch.float64)
 
-    ld = CABSOLE(n_z=1, Uniform_t_Grid=True, n_p=1, config=_cabsole_config_with_settings())
-    _zero_cabsole_gate(ld)
+    ld = SOME(n_z=1, Uniform_t_Grid=True, n_p=1, config=_some_config_with_settings())
+    _zero_some_gate(ld)
     ld.unmasked_K = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
     ld.unmasked_C = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
     ld.unmasked_b = torch.tensor([[[1.0]], [[3.0]]], dtype=torch.float32, requires_grad=True)
@@ -679,14 +679,14 @@ def test_cable_weak_compute_losses_returns_scalar_totals_and_metrics():
     }
 
 
-def test_cabsole_weak_compute_losses_returns_scalar_totals_and_separate_weak_metrics():
+def test_some_weak_compute_losses_returns_scalar_totals_and_separate_weak_metrics():
     params = numpy.array([[0.25]])
     t = torch.linspace(0.0, 1.0, 9)
     z = torch.zeros((9, 1))
     dz = t.reshape(-1, 1)
 
-    ld = CABSOLE_weak(n_z=1, Uniform_t_Grid=True, n_p=1, config=_cabsole_w_config(n_active=1))
-    _zero_cabsole_gate(ld)
+    ld = SOME_weak(n_z=1, Uniform_t_Grid=True, n_p=1, config=_some_w_config(n_active=1))
+    _zero_some_gate(ld)
     ld.unmasked_K = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
     ld.unmasked_C = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
     ld.unmasked_b = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)

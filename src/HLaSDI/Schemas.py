@@ -488,8 +488,8 @@ class LatentDynamicsBaseConfig(ConfigBase):
             "switch_w" : {"LD", "coef", "stab"},
             "cable"    : {"LD", "coef", "diversity", "tail"},
             "cable_w"  : {"LD", "coef", "diversity", "tail"},
-            "cabsole"  : {"LD", "coef", "diversity", "tail"},
-            "cabsole_w": {"LD", "coef", "diversity", "tail"},
+            "some"     : {"LD", "coef", "diversity", "tail"},
+            "some_w"   : {"LD", "coef", "diversity", "tail"},
         };
 
         expected_keys = expected_keys_by_type.get(self.type);
@@ -531,12 +531,12 @@ class WeakLatentDynamicsSettings(ConfigBase):
 
 
 class CABLELatentDynamicsSettings(ConfigBase):
-    """CABLE mixture-of-experts latent dynamics settings."""
+    """Mixture-of-experts latent dynamics settings shared by CABLE and SOME."""
 
     # How many experts should we use?
     n_experts: PositiveInt 
 
-    # Roughly how many experts do we want to be active each step? CABLE imposes a series of soft
+    # Roughly how many experts do we want to be active each step? CABLE/SOME impose soft
     # penalties to concentrate all weight in <= n_active experts at each time/parameter. Must 
     # also be <= n_experts
     n_active : PositiveInt 
@@ -643,14 +643,14 @@ class WeakCABLELatentDynamicsConfig(LatentDynamicsBaseConfig):
     weak        : WeakLatentDynamicsSettings
 
 
-class CABSOLELatentDynamicsConfig(LatentDynamicsBaseConfig):
-    type        : Literal["cabsole"]
-    cabsole     : CABLELatentDynamicsSettings
+class SOMELatentDynamicsConfig(LatentDynamicsBaseConfig):
+    type        : Literal["some"]
+    some        : CABLELatentDynamicsSettings
 
 
-class WeakCABSOLELatentDynamicsConfig(LatentDynamicsBaseConfig):
-    type        : Literal["cabsole_w"]
-    cabsole     : CABLELatentDynamicsSettings
+class WeakSOMELatentDynamicsConfig(LatentDynamicsBaseConfig):
+    type        : Literal["some_w"]
+    some        : CABLELatentDynamicsSettings
     weak        : WeakLatentDynamicsSettings
 
 
@@ -663,8 +663,8 @@ LatentDynamicsConfig = Annotated[
     | SwitchSINDyWeakLatentDynamicsConfig
     | CABLELatentDynamicsConfig
     | WeakCABLELatentDynamicsConfig
-    | CABSOLELatentDynamicsConfig
-    | WeakCABSOLELatentDynamicsConfig,
+    | SOMELatentDynamicsConfig
+    | WeakSOMELatentDynamicsConfig,
     Field(discriminator = "type"),
 ]
 
@@ -1103,8 +1103,8 @@ _LATENT_DYNAMICS_N_IC = {
     "spring_w": 2,
     "cable" : 1,
     "cable_w" : 1,
-    "cabsole" : 2,
-    "cabsole_w" : 2,
+    "some" : 2,
+    "some_w" : 2,
 }
 
 _PHYSICS_N_IC = {
