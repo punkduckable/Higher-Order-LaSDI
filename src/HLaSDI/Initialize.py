@@ -5,7 +5,7 @@
 import  logging;
 
 from    HLaSDI.LatentDynamics       import  LatentDynamics, SINDy, SINDy_weak, SwitchSINDy;
-from    HLaSDI.LatentDynamics       import  SwitchSINDy_weak, DampedSpring, DampedSpring_weak, CABLE, CABLE_weak;
+from    HLaSDI.LatentDynamics       import  SwitchSINDy_weak, DampedSpring, DampedSpring_weak, CABLE, CABLE_weak, CABSOLE;
 
 from    HLaSDI.ParameterSpace       import  ParameterSpace;
 
@@ -64,7 +64,8 @@ ld_dict = {                     'sindy'                     : SINDy,
                                 'switch'                    : SwitchSINDy,
                                 'switch_w'                  : SwitchSINDy_weak,
                                 'cable'                     : CABLE,
-                                'cable_w'                   : CABLE_weak};
+                                'cable_w'                   : CABLE_weak,
+                                'cabsole'                   : CABSOLE};
 
 trainer_dict = {                'First_Order_Rollout'       : First_Order_Rollout,
                                 'First_Order_Weak'          : First_Order_Weak,

@@ -487,6 +487,9 @@ class LatentDynamicsBaseConfig(ConfigBase):
             "switch"   : {"LD", "coef", "stab"},
             "switch_w" : {"LD", "coef", "stab"},
             "cable"    : {"LD", "coef", "diversity", "tail"},
+            "cable_w"  : {"LD", "coef", "diversity", "tail"},
+            "cabsole"  : {"LD", "coef", "diversity", "tail"},
+            "cabsole_w": {"LD", "coef", "diversity", "tail"},
         };
 
         expected_keys = expected_keys_by_type.get(self.type);
@@ -598,6 +601,7 @@ class CABLELatentDynamicsSettings(ConfigBase):
         # All done :) 
         return self;
 
+
 class SINDyLatentDynamicsConfig(InterpolatableLatentDynamicsConfig):
     type        : Literal["sindy"]
     sindy       : StrongInterpolatableLatentDynamicsSettings
@@ -639,6 +643,17 @@ class WeakCABLELatentDynamicsConfig(LatentDynamicsBaseConfig):
     weak        : WeakLatentDynamicsSettings
 
 
+class CABSOLELatentDynamicsConfig(LatentDynamicsBaseConfig):
+    type        : Literal["cabsole"]
+    cabsole     : CABLELatentDynamicsSettings
+
+
+class WeakCABSOLELatentDynamicsConfig(LatentDynamicsBaseConfig):
+    type        : Literal["cabsole_w"]
+    cabsole     : CABLELatentDynamicsSettings
+    weak        : WeakLatentDynamicsSettings
+
+
 LatentDynamicsConfig = Annotated[
     SINDyLatentDynamicsConfig
     | SINDyWeakLatentDynamicsConfig
@@ -647,7 +662,9 @@ LatentDynamicsConfig = Annotated[
     | SwitchSINDyLatentDynamicsConfig
     | SwitchSINDyWeakLatentDynamicsConfig
     | CABLELatentDynamicsConfig
-    | WeakCABLELatentDynamicsConfig,
+    | WeakCABLELatentDynamicsConfig
+    | CABSOLELatentDynamicsConfig
+    | WeakCABSOLELatentDynamicsConfig,
     Field(discriminator = "type"),
 ]
 
@@ -1082,11 +1099,12 @@ _LATENT_DYNAMICS_N_IC = {
     "sindy_w": 1,
     "switch": 1,
     "switch_w": 1,
-    "cable": 1,
     "spring": 2,
     "spring_w": 2,
     "cable" : 1,
     "cable_w" : 1,
+    "cabsole" : 2,
+    "cabsole_w" : 2,
 }
 
 _PHYSICS_N_IC = {

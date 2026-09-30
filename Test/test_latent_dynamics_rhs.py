@@ -7,8 +7,9 @@ import torch
 SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.append(SRC)
 
-from HLaSDI.LatentDynamics import CABLE, CABLE_weak, DampedSpring, DampedSpring_weak, SINDy, SINDy_weak, SwitchSINDy, SwitchSINDy_weak
+from HLaSDI.LatentDynamics import CABSOLE, CABLE, CABLE_weak, DampedSpring, DampedSpring_weak, SINDy, SINDy_weak, SwitchSINDy, SwitchSINDy_weak
 from HLaSDI.Schemas import (
+    CABSOLELatentDynamicsConfig,
     CABLELatentDynamicsConfig,
     DampedSpringLatentDynamicsConfig,
     DampedSpringWeakLatentDynamicsConfig,
@@ -135,6 +136,25 @@ def _cable_config_with_settings(trainable=True, n_active=2, **settings):
     })
 
 
+def _cabsole_config_with_settings(trainable=True, n_active=2, **settings):
+    cabsole_settings = {
+        "n_experts": 2,
+        "n_active": n_active,
+        "hidden_widths": [2],
+        "activations": ["tanh"],
+        "use_biases": True,
+        "coef_norm": "l2",
+        "use_mask": False,
+    }
+    cabsole_settings.update(settings)
+    return CABSOLELatentDynamicsConfig.model_validate({
+        "type": "cabsole",
+        "trainable": trainable,
+        "loss_weights": {"LD": 1.0, "coef": 1.0, "diversity": 1.0, "tail": 1.0},
+        "cabsole": cabsole_settings,
+    })
+
+
 def _cable_w_config(trainable=True, n_active=2):
     return WeakCABLELatentDynamicsConfig.model_validate({
         "type": "cable_w",
@@ -157,6 +177,10 @@ def _zero_cable_gate(ld):
     for layer in ld.w.layers:
         torch.nn.init.zeros_(layer.weight)
         torch.nn.init.zeros_(layer.bias)
+
+
+def _zero_cabsole_gate(ld):
+    _zero_cable_gate(ld)
 
 
 def _loss_metric_keys(metrics):
@@ -201,6 +225,71 @@ def test_cable_rhs_can_use_latent_state_in_gate_inputs():
     assert rhs.shape == z.shape
     assert torch.allclose(rhs, expected)
     assert rhs[0, 0] > rhs[1, 0]
+
+
+def test_cabsole_rhs_matches_uniform_mixture_of_second_order_experts():
+    params = numpy.array([[0.25]])
+    t = torch.tensor([0.0, 0.5, 1.0], dtype=torch.float64)
+    z = torch.tensor([[0.0], [1.0], [2.0]], dtype=torch.float64)
+    dz = torch.tensor([[3.0], [4.0], [5.0]], dtype=torch.float64)
+
+    ld = CABSOLE(n_z=1, Uniform_t_Grid=True, n_p=1, config=_cabsole_config_with_settings())
+    _zero_cabsole_gate(ld)
+    ld.unmasked_K = torch.tensor([[[1.0]], [[3.0]]], dtype=torch.float32, requires_grad=True)
+    ld.unmasked_C = torch.tensor([[[5.0]], [[7.0]]], dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.tensor([[[10.0]], [[20.0]]], dtype=torch.float32, requires_grad=True)
+
+    rhs = ld.RHS(Z=[[z, dz]], t_Grid=[t], params=params)[0]
+
+    expected = 2.0*z + 6.0*dz + 15.0
+    assert isinstance(rhs, torch.Tensor)
+    assert rhs.dtype == z.dtype
+    assert rhs.shape == z.shape
+    assert torch.allclose(rhs, expected)
+
+
+def test_cabsole_compute_losses_differentiates_velocity_on_nonuniform_grid():
+    params = numpy.array([[0.25]])
+    t = torch.tensor([0.0, 0.1, 0.4, 1.0], dtype=torch.float64)
+    z = t.reshape(-1, 1)
+    dz = torch.zeros((4, 1), dtype=torch.float64)
+
+    ld = CABSOLE(n_z=1, Uniform_t_Grid=False, n_p=1, config=_cabsole_config_with_settings())
+    _zero_cabsole_gate(ld)
+    ld.unmasked_K = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_C = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+
+    losses = ld.compute_losses(Latent_States=[[z, dz]], t_Grid=[t], step=0, params=params).losses
+
+    assert torch.allclose(losses["LD"], torch.tensor(0.0, dtype=torch.float64), atol=1.0e-14)
+
+
+def test_cabsole_simulate_integrates_constant_uniform_expert_mixture_torch_inputs():
+    params = numpy.array([[0.25]])
+    t = numpy.array([0.0, 0.25, 0.5])
+    z0 = torch.tensor([1.0], dtype=torch.float64)
+    dz0 = torch.tensor([2.0], dtype=torch.float64)
+
+    ld = CABSOLE(n_z=1, Uniform_t_Grid=True, n_p=1, config=_cabsole_config_with_settings())
+    _zero_cabsole_gate(ld)
+    ld.unmasked_K = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_C = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.tensor([[[1.0]], [[3.0]]], dtype=torch.float32, requires_grad=True)
+
+    z, dz = ld.simulate(IC=[[z0, dz0]], t_Grid=[t], params=params)[0]
+
+    t_tensor = torch.tensor(t, dtype=z0.dtype).reshape(-1, 1)
+    expected_z = z0.reshape(1, 1) + dz0.reshape(1, 1)*t_tensor + t_tensor**2
+    expected_dz = dz0.reshape(1, 1) + 2.0*t_tensor
+    assert isinstance(z, torch.Tensor)
+    assert isinstance(dz, torch.Tensor)
+    assert z.dtype == z0.dtype
+    assert dz.dtype == dz0.dtype
+    assert z.shape == expected_z.shape
+    assert dz.shape == expected_dz.shape
+    assert torch.allclose(z, expected_z)
+    assert torch.allclose(dz, expected_dz)
 
 
 def test_sindy_rhs_matches_affine_model_for_strong_and_weak():
