@@ -19,6 +19,7 @@ from    .SwitchSINDy_weak       import  SwitchSINDy_weak;
 from    .CABLE                  import  CABLE;
 from    .CABLE_weak             import  CABLE_weak;
 from    .CABSOLE                import  CABSOLE;
+from    .CABSOLE_weak           import  CABSOLE_weak;
 from    .Weak                   import  WeakLatentDynamics;
 
 __all__ = [    "LatentDynamics",
@@ -30,6 +31,7 @@ __all__ = [    "LatentDynamics",
                "CABLE",
                "CABLE_weak",
                "CABSOLE",
+               "CABSOLE_weak",
                "DampedSpring",
                "DampedSpring_weak",
                "WeakLatentDynamics",

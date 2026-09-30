@@ -7,7 +7,7 @@ import torch
 SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.append(SRC)
 
-from HLaSDI.LatentDynamics import CABSOLE, CABLE, CABLE_weak, DampedSpring, DampedSpring_weak, SINDy, SINDy_weak, SwitchSINDy, SwitchSINDy_weak
+from HLaSDI.LatentDynamics import CABSOLE, CABSOLE_weak, CABLE, CABLE_weak, DampedSpring, DampedSpring_weak, SINDy, SINDy_weak, SwitchSINDy, SwitchSINDy_weak
 from HLaSDI.Schemas import (
     CABSOLELatentDynamicsConfig,
     CABLELatentDynamicsConfig,
@@ -18,6 +18,7 @@ from HLaSDI.Schemas import (
     SwitchSINDyLatentDynamicsConfig,
     SwitchSINDyWeakLatentDynamicsConfig,
     WeakCABLELatentDynamicsConfig,
+    WeakCABSOLELatentDynamicsConfig,
 )
 
 
@@ -152,6 +153,24 @@ def _cabsole_config_with_settings(trainable=True, n_active=2, **settings):
         "trainable": trainable,
         "loss_weights": {"LD": 1.0, "coef": 1.0, "diversity": 1.0, "tail": 1.0},
         "cabsole": cabsole_settings,
+    })
+
+
+def _cabsole_w_config(trainable=True, n_active=2):
+    return WeakCABSOLELatentDynamicsConfig.model_validate({
+        "type": "cabsole_w",
+        "trainable": trainable,
+        "loss_weights": {"LD": 1.0, "coef": 1.0, "diversity": 1.0, "tail": 1.0},
+        "cabsole": {
+            "n_experts": 2,
+            "n_active": n_active,
+            "hidden_widths": [2],
+            "activations": ["tanh"],
+            "use_biases": True,
+            "coef_norm": "l2",
+            "use_mask": False,
+        },
+        "weak": {"test_func_type": "PC-poly", "test_func_width": 0.5, "overlap": 0.5},
     })
 
 
@@ -565,7 +584,6 @@ def test_cable_compute_losses_uses_dense_pre_topk_weights_for_diversity_and_tail
         "loss/diversity/total",
         "loss/tail/total",
     }
-    _assert_loss_metrics_have_total_suffix(result.metrics)
     assert torch.allclose(ld.last_tail_mass_loss, torch.tensor(0.25))
     assert len(ld.last_tail_mass_loss_list) == 1
     assert torch.allclose(ld.last_tail_mass_loss_list[0], torch.tensor(0.25))
@@ -653,8 +671,44 @@ def test_cable_weak_compute_losses_returns_scalar_totals_and_metrics():
     assert torch.allclose(result.metrics["expert/num_ever_engaged"], torch.tensor(2.0))
     assert _loss_metric_keys(result.metrics) == {
         "loss/LD/total",
+        "loss/coef/A",
+        "loss/coef/b",
         "loss/coef/total",
         "loss/diversity/total",
         "loss/tail/total",
     }
-    _assert_loss_metrics_have_total_suffix(result.metrics)
+
+
+def test_cabsole_weak_compute_losses_returns_scalar_totals_and_separate_weak_metrics():
+    params = numpy.array([[0.25]])
+    t = torch.linspace(0.0, 1.0, 9)
+    z = torch.zeros((9, 1))
+    dz = t.reshape(-1, 1)
+
+    ld = CABSOLE_weak(n_z=1, Uniform_t_Grid=True, n_p=1, config=_cabsole_w_config(n_active=1))
+    _zero_cabsole_gate(ld)
+    ld.unmasked_K = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_C = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.add_weight_functions(params[0], t)
+
+    result = ld.compute_losses(
+        Latent_States=[[z, dz]],
+        t_Grid=[t],
+        step=0,
+        params=params,
+    )
+
+    assert set(result.losses.keys()) == {"LD", "coef", "diversity", "tail"}
+    assert all(loss.ndim == 0 for loss in result.losses.values())
+    assert torch.allclose(result.metrics["weak/weight_fun_residuals_D/mean"], torch.tensor(0.0))
+    assert result.metrics["weak/weight_fun_residuals_V/mean"] > 0.0
+    assert _loss_metric_keys(result.metrics) == {
+        "loss/LD/total",
+        "loss/coef/K",
+        "loss/coef/C",
+        "loss/coef/b",
+        "loss/coef/total",
+        "loss/diversity/total",
+        "loss/tail/total",
+    }
