@@ -29,7 +29,7 @@ class DampedSpring(InterpolatableLatentDynamics):
                     n_z             :   int, 
                     Uniform_t_Grid  :   bool,
                     n_p             :   int, 
-                    config          :   dict) -> None:
+                    config          :   DampedSpringLatentDynamicsConfig) -> None:
         r"""
         Initializes a DampedSpring latent-dynamics object.
 
@@ -60,12 +60,9 @@ class DampedSpring(InterpolatableLatentDynamics):
         n_p : int 
             The number of (scalar) parameters in the parameter space.
 
-        config : dict
-            The latent-dynamics configuration dictionary. It must three keys: `type`, `trainable`,
-            and `spring`. It must have `config.type == "spring"` and `config.spring` should 
-            be a dictionary housing sub-class specific settings. The required `lstsq_reg` entry 
-            controls ridge regularization used by `initialize_coefficients(...)` when initializing 
-            coefficients from encoded trajectories.
+        config : DampedSpringLatentDynamicsConfig
+            The latent-dynamics configuration schema.
+
 
 
         -------------------------------------------------------------------------------------------
@@ -75,8 +72,6 @@ class DampedSpring(InterpolatableLatentDynamics):
         Nothing!
         """
         
-        assert isinstance(config, DampedSpringLatentDynamicsConfig), "config must be a DampedSpringLatentDynamicsConfig, got %s" % str(type(config));
-
         # Run the base class initializer. This also creates the LD-owned train_coefs dictionary.
         InterpolatableLatentDynamics.__init__(   
             self,

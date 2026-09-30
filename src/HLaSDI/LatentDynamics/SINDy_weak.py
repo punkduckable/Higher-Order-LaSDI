@@ -65,14 +65,8 @@ class SINDy_weak(WeakLatentDynamics, SINDy):
         n_p : int 
             The number of (scalar) parameters in the parameter space.
             
-        config : dict
-            The latent-dynamics configuration dictionary. It must three keys: `type`, `trainable`,
-            and `sindy_w`. It must have `config.type == "sindy_w"` and `config.sindy_w` 
-            should be a weak-form sub-dictionary containing the following keys:
-                - test_func_type: Specifies the kind of bump function. Either "bump" or "PC-poly".
-                - test_func_width: The width of each bump.
-                - overlap: The amount of overlap between successive bumps.
-
+        config : SINDyWeakLatentDynamicsConfig
+            Config schema for the this latent dynamics object.
 
         -------------------------------------------------------------------------------------------
         Returns

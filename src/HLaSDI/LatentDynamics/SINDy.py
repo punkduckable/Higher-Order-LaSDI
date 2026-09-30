@@ -57,12 +57,9 @@ class SINDy(InterpolatableLatentDynamics):
         n_p : int 
             The number of (scalar) parameters in the parameter space.
 
-        config : dict
-            The latent-dynamics configuration dictionary. It must three keys: `type`, `trainable`,
-            and `sindy`. It must have `config.type == "sindy"` and `config.sindy` should be a 
-            dictionary housing sub-class specific settings. The required `lstsq_reg` entry controls
-            ridge regularization used by `initialize_coefficients(...)` when initializing 
-            coefficients from encoded trajectories.
+        config : SINDyLatentDynamicsConfig
+            Config schema for the this latent dynamics object.
+
 
 
         -------------------------------------------------------------------------------------------

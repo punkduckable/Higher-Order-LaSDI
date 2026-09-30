@@ -29,7 +29,7 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
                     n_z             :   int,
                     Uniform_t_Grid  :   bool,
                     n_p             :   int,
-                    config          :   dict) -> None:
+                    config          :   DampedSpringWeakLatentDynamicsConfig) -> None:
         r"""
         Initializes a DampedSpring_weak object. This is a subclass of the LatentDynamics class which
         implements the following latent dynamics
@@ -59,12 +59,7 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
             The number of (scalar) parameters in the parameter space.
 
         config : dict
-            The latent-dynamics configuration dictionary. It must three keys: `type`, `trainable`,
-            and `spring_w`. It must have `config.type == "spring_w"` and `config.spring_w`.
-            should be a weak-form sub-dictionary containing the following keys:
-                - test_func_type: Specifies the kind of bump function. Either "bump" or "PC-poly".
-                - test_func_width: The width of each bump.
-                - overlap: The amount of overlap between successive bumps.
+            The latent-dynamics configuration schema.
 
         -------------------------------------------------------------------------------------------
         Returns
@@ -72,9 +67,6 @@ class DampedSpring_weak(WeakLatentDynamics, DampedSpring):
 
         Nothing!
         """
-
-        assert isinstance(config, DampedSpringWeakLatentDynamicsConfig), "config must be a DampedSpringWeakLatentDynamicsConfig, got %s" % str(type(config));
-
         # Run the base class initializer. This does not set the n_t attribute.
         # Because K and C are n_z x n_z matrices, and b is in \mathbb{R}^n_z, there are
         # n_z*(2*n_z + 1) coefficients in the latent dynamics.
