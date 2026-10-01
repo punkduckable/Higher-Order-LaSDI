@@ -911,6 +911,35 @@ SamplerConfig = Annotated[
 
 
 # -------------------------------------------------------------------------------------------------
+# Profiling schemas
+# -------------------------------------------------------------------------------------------------
+
+class ProfilerConfig(ConfigBase):
+    """Config to control profiling of trainers."""
+
+    # Should we profile (makes training much slower)?
+    enabled: bool
+
+    # If enabled, how many steps should we wait before staring the profile?
+    wait_epochs: PositiveInt | None = None
+
+    # If enabled, how many epochs should "warmup" (use machinery but discard results) last?
+    warmup_epochs: PositiveInt | None = None
+
+    # If enabled, how many epochs should we track for?
+    active_epochs: PositiveInt | None = None
+
+    # If enabled, how many times should we repeat the wait -> warmup -> active cycle?
+    num_repeats: PositiveInt | None = None
+
+    @model_validator(mode = "after")
+    def validate_enabled(self) -> "ProfilerConfig":
+        if self.enabled and ((self.wait_epochs is None) or (self.warmup_epochs is None) or (self.active_epochs is None) or (self.num_repeats is None)):
+            raise ValueError("workflow.enabled = True requires wait_epochs, warmup_epochs, active_epochs, and num_repeats");
+        return self
+
+
+# -------------------------------------------------------------------------------------------------
 # Trainer schemas
 # -------------------------------------------------------------------------------------------------
 
@@ -1040,6 +1069,9 @@ class BaseTrainerConfig(ConfigBase):
 
     # Ratio of Gaussian noise standard deviation to signal RMS for training-data noise injection.
     noise_ratio: NonNegativeFloat
+
+    # Settings to control profiling.
+    profiler: ProfilerConfig
 
     @model_validator(mode = "after")
     def validate_iteration_bounds(self) -> "BaseTrainerConfig":

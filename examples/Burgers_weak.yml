@@ -32,8 +32,10 @@ trainer:
 
   normalize:              false
   device:                 'cpu'
-
   noise_ratio:            0.05
+
+  profiler: 
+    enabled:                False
 
   Second_Order_Weak:
     lr:                     0.001

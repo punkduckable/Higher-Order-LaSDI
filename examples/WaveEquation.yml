@@ -1,27 +1,32 @@
 trainer:
-  type:                   "Second_Order_Rollout"
+  type:                     "Second_Order_Rollout"
 
-  max_iter:               45000
-  n_iter:                 5000
-  max_greedy_iter:        45000
+  max_iter:                 6000
+  n_iter:                   2000
+  max_greedy_iter:          6000
 
   # If true, compute a single global mean/std from TRAINING data only, and normalize
   # all training/testing trajectories using these values.
-  normalize:              false
+  normalize:                true
+  device:                   'cuda:0'
+  noise_ratio:              0.0
 
-  device:                 'cpu'
-
-  noise_ratio:            0.0
+  profiler: 
+    enabled:                False 
+    wait_epochs:            10
+    warmup_epochs:          1
+    active_epochs:          1
+    num_repeats:            1
 
   Second_Order_Rollout:
     lr:                     0.001
-    gradient_clip:          15.0      # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
+    gradient_clip:          10.0      # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
 
     # p_rollout grows from p_rollout_init by dp_per_update every rollout_update_freq epochs, capped at max_p_rollout.
     p_rollout_init:         0.01
-    rollout_update_freq:    20
+    rollout_update_freq:    10
     dp_per_update:          0.01
-    max_p_rollout:          0.75      # Maximum proportion of the time window used for rollout loss.
+    max_p_rollout:          0.5       # Maximum proportion of the time window used for rollout loss.
     n_rollouts:             4         # Number of rollable start frames to rollout per training parameter per epoch.
 
     p_IC_rollout_init:      0.01
@@ -29,30 +34,28 @@ trainer:
     IC_dp_per_update:       0.01
     max_p_IC_rollout:       1.0       # Maximum proportion of the time window used for IC rollout loss.
 
-    warmup_epochs:          20    # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
+    warmup_epochs:          100       # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
 
     loss_weights:
       recon:                1.0
       chain_rule:           1.0
-      rollout:              1.0
-      IC_rollout:           1.0
+      rollout:              0.25
+      IC_rollout:           0.0
       consistency:          1.0
 
     loss_types:
-      recon:                "MAE"
-      chain_rule:           "MAE"
-      rollout:              "MAE"
-      IC_rollout:           "MAE"
-      consistency:          "MAE"
+      recon:                "MSE"
+      chain_rule:           "MSE"
+      rollout:              "MSE"
+      IC_rollout:           "MSE"
+      consistency:          "MSE"
 
 workflow:
-  use_restart:              True
-  restart_file:             WaveEquation_09_30_2025_09_43.npy
+  use_restart:              False
+  restart_file:             
 
 sampler:
-  type:                   'FOM_Variance'
-  FOM_Variance:
-    n_samples:            20        # Number of samples used to compute rollout stds.
+  type:                     'ROM_Discrepancy'
 
 parameter_space:
   parameters:
@@ -81,27 +84,26 @@ EncoderDecoder:
     activations:            ["sin", "sin", "sin", "sin"]
 
 latent_dynamics:
-  interpolator:
-    type:                   GP
-    GP:
-      kernel:
-        type:               Matern
-        length_scale:       1.0
-        length_scale_bounds: [1.0, 1.0e3]
-        nu:                 2.5
-      constant_value:       1.0
-      constant_value_bounds: [1.0e-3, 1.0e3]
-      alpha:                4.0e-4
-      n_restarts_optimizer: 10
-      random_state:         1
-  type:                     spring
+  type:                     some
   trainable:                true
-  loss_weights:
+  loss_weights: 
     LD:                     1.0
+    diversity:              0.001
     coef:                   0.001
-    stab:                   0.0
-  spring:
-    lstsq_reg:              1.0           # Ridge-regression regularization for SINDy coefficient initialization (prevents blow-up for new greedy-sampled points).
+    tail:                   0.01
+  some:
+    n_experts:              50
+    n_active:               10
+    hidden_widths:          [64, 64]
+    activations:            ['tanh', 'tanh']
+    use_biases:             true 
+    use_z_in_gate:          false
+    coef_norm:              'l2'
+    eps_engaged:            0.001
+    use_mask:               true
+    mask_threshold:         0.0005
+    first_mask_step:        1000
+    mask_update_freq:       250
 
 physics:
   type:                     WaveEquation

@@ -514,13 +514,15 @@ class Second_Order_Rollout(Trainer):
                 # the j'th time derivative of the FOM solution at time t_Grid[i][k] when we use 
                 # the i'th combination of parameter values. Here, n_t(i) is the number of time 
                 # steps in the solution for the i'th combination of parameter values. 
-                Z_i     : list[torch.Tensor]        = list(encoder_decoder_device.Encode(*U_Train_device[i]));
+                with self._profile_region("HLaSDI/forward_encode"):
+                    Z_i = list(encoder_decoder_device.Encode(*U_Train_device[i]));
                 Z_D_i   : torch.Tensor              = Z_i[0];       # shape (n_t(i), n_z)
                 Z_V_i   : torch.Tensor              = Z_i[1];       # shape (n_t(i), n_z)
                 
                 Latent_States.append(Z_i);
 
-                U_Pred_i    : list[torch.Tensor]    = list(encoder_decoder_device.Decode(*Z_i));
+                with self._profile_region("HLaSDI/forward_decode"):
+                    U_Pred_i = list(encoder_decoder_device.Decode(*Z_i));
                 D_Pred_i    : torch.Tensor          = U_Pred_i[0];  # shape = (n_t(i), physics.Frame_Shape)
                 V_Pred_i    : torch.Tensor          = U_Pred_i[1];  # shape = (n_t(i), physics.Frame_Shape)
 
@@ -541,11 +543,13 @@ class Second_Order_Rollout(Trainer):
                     
                     # Compute losses from normalized differences
                     if(self.loss_types['recon'] == "MSE"):
-                        recon_D_loss_ith_param = torch.mean(diff_D**2);
-                        recon_V_loss_ith_param = torch.mean(diff_V**2);
+                        with self._profile_region("HLaSDI/reconstruction_loss"):
+                            recon_D_loss_ith_param = torch.mean(diff_D**2);
+                            recon_V_loss_ith_param = torch.mean(diff_V**2);
                     elif(self.loss_types['recon'] == "MAE"):
-                        recon_D_loss_ith_param = torch.mean(torch.abs(diff_D));
-                        recon_V_loss_ith_param = torch.mean(torch.abs(diff_V));
+                        with self._profile_region("HLaSDI/reconstruction_loss"):
+                            recon_D_loss_ith_param = torch.mean(torch.abs(diff_D));
+                            recon_V_loss_ith_param = torch.mean(torch.abs(diff_V));
                     else:
                         recon_D_loss_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
                         recon_V_loss_ith_param = torch.zeros(1, dtype = torch.float32, device = device);
@@ -575,7 +579,8 @@ class Second_Order_Rollout(Trainer):
                     diff_Z = dZ_Di_dt - Z_V_i;
                     
                     # Compute loss from difference
-                    consistency_Z_loss_ith_param = torch.mean(diff_Z**2) if self.loss_types['consistency'] == "MSE" else torch.mean(torch.abs(diff_Z));
+                    with self._profile_region("HLaSDI/consistency_loss"):
+                        consistency_Z_loss_ith_param = torch.mean(diff_Z**2) if self.loss_types['consistency'] == "MSE" else torch.mean(torch.abs(diff_Z));
                     loss_consistency_Z          += consistency_Z_loss_ith_param;
                     
                     # Next, make sure that V_Pred actually looks like the derivative of D_Pred. 
@@ -589,7 +594,8 @@ class Second_Order_Rollout(Trainer):
                     diff_U = dD_Pred_i_dt - V_Pred_i;
                     
                     # Compute loss from difference
-                    consistency_U_loss_ith_param = torch.mean(diff_U**2) if self.loss_types['consistency'] == "MSE" else torch.mean(torch.abs(diff_U));
+                    with self._profile_region("HLaSDI/consistency_loss"):
+                        consistency_U_loss_ith_param = torch.mean(diff_U**2) if self.loss_types['consistency'] == "MSE" else torch.mean(torch.abs(diff_U));
                     loss_consistency_U          += consistency_U_loss_ith_param;
 
                     LOGGER.debug("Consistency Loss (Autoencoder_Pair) - complete for parameter combination %d" % i);
@@ -613,10 +619,11 @@ class Second_Order_Rollout(Trainer):
                     # inputs through func, then computes the jacobian-vector product (using 
                     # reverse mode AD) of inputs with v. It returns the result of the forward pass 
                     # and the associated jacobian-vector product. We only keep the latter.
-                    d_dz_D_Pred__Z_V_i  : torch.Tensor  = torch.autograd.functional.jvp(
-                                                                func    = lambda Z_D : encoder_decoder_device.Displacement_Autoencoder.Decode(Z_D)[0], 
-                                                                inputs  = Z_D_i, 
-                                                                v       = Z_V_i)[1];
+                    with self._profile_region("HLaSDI/chain_rule_loss/jvp_decoder"):
+                        d_dz_D_Pred__Z_V_i  : torch.Tensor  = torch.autograd.functional.jvp(
+                                                                    func    = lambda Z_D : encoder_decoder_device.Displacement_Autoencoder.Decode(Z_D)[0],
+                                                                    inputs  = Z_D_i,
+                                                                    v       = Z_V_i)[1];
                     
                     # Compute difference once
                     diff_U = V_i - d_dz_D_Pred__Z_V_i;
@@ -629,10 +636,11 @@ class Second_Order_Rollout(Trainer):
                     #       (d/dt)Z(t) \approx (d/dt)\phi_E,D(D(t))
                     #                   = (d/dX)\phi_E,D(D(t)) V(t)
                     # Here, \phi_E,D is the displacement portion of the encoder.
-                    d_dx_Z_D__V         : torch.Tensor  = torch.autograd.functional.jvp(
-                                                                func    = lambda D : encoder_decoder_device.Displacement_Autoencoder.Encode(D)[0],
-                                                                inputs  = D_i, 
-                                                                v       = V_i)[1];
+                    with self._profile_region("HLaSDI/chain_rule_loss/jvp_encoder"):
+                        d_dx_Z_D__V         : torch.Tensor  = torch.autograd.functional.jvp(
+                                                                    func    = lambda D : encoder_decoder_device.Displacement_Autoencoder.Encode(D)[0],
+                                                                    inputs  = D_i,
+                                                                    v       = V_i)[1];
                     
                     # Compute difference once
                     diff_Z = Z_V_i - d_dx_Z_D__V;
@@ -665,11 +673,12 @@ class Second_Order_Rollout(Trainer):
             timer : float = time.perf_counter();
 
             # Compute the latent dynamics losses.
-            LD_losses : LD_Loss_Container = self.latent_dynamics.compute_losses( 
-                                                        Latent_States    = Latent_States, 
-                                                        t_Grid           = t_Train_device,
-                                                        step             = iter,
-                                                        params           = self.param_space.train_space);
+            with self._profile_region("HLaSDI/latent_dynamics_loss"):
+                LD_losses : LD_Loss_Container = self.latent_dynamics.compute_losses(
+                                                            Latent_States    = Latent_States,
+                                                            t_Grid           = t_Train_device,
+                                                            step             = iter,
+                                                            params           = self.param_space.train_space);
 
             # Cache metrics
             for key, value in LD_losses.metrics.items():
@@ -769,10 +778,11 @@ class Second_Order_Rollout(Trainer):
                         Z_D0 : torch.Tensor = Z_D_i[k_int, :];
                         Z_V0 : torch.Tensor = Z_V_i[k_int, :];
 
-                        Z_pred_all : list[list[torch.Tensor]] = self.latent_dynamics.simulate(
-                            IC     = [[Z_D0, Z_V0]],
-                            t_Grid = [t_win_np],
-                            params = param_i);
+                        with self._profile_region("HLaSDI/rollout_loss/simulate"):
+                            Z_pred_all : list[list[torch.Tensor]] = self.latent_dynamics.simulate(
+                                IC     = [[Z_D0, Z_V0]],
+                                t_Grid = [t_win_np],
+                                params = param_i);
                         Z_D_pred = Z_pred_all[0][0];
                         Z_V_pred = Z_pred_all[0][1];
                         assert Z_D_pred.ndim == 2 and Z_V_pred.ndim == 2;
@@ -786,7 +796,8 @@ class Second_Order_Rollout(Trainer):
                     Z_D_pred_cat : torch.Tensor = torch.cat(Z_D_pred_windows, dim = 0);
                     Z_V_pred_cat : torch.Tensor = torch.cat(Z_V_pred_windows, dim = 0);
                     assert Z_D_pred_cat.shape[0] == Z_V_pred_cat.shape[0] == sum(lengths);
-                    D_pred_cat, V_pred_cat = encoder_decoder_device.Decode(Z_D_pred_cat, Z_V_pred_cat);
+                    with self._profile_region("HLaSDI/rollout_loss/decode"):
+                        D_pred_cat, V_pred_cat = encoder_decoder_device.Decode(Z_D_pred_cat, Z_V_pred_cat);
                     assert D_pred_cat.shape[0] == V_pred_cat.shape[0] == Z_D_pred_cat.shape[0];
 
                     # Compute losses window-by-window to preserve the old per-rollout weighting.
@@ -869,16 +880,18 @@ class Second_Order_Rollout(Trainer):
                     Z_V_IC_i = Z_V_IC_i.reshape(-1);
 
                     # Simulate the latent dynamics forward in time
-                    Z_IC_Rollout_i    : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(  IC      = [[Z_D_IC_i, Z_V_IC_i]], 
-                                                                                                    t_Grid  = [t_Grid_IC_rollout[i]], 
-                                                                                                    params  = param_i.reshape(1, -1));
+                    with self._profile_region("HLaSDI/IC_rollout_loss/simulate"):
+                        Z_IC_Rollout_i    : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(  IC      = [[Z_D_IC_i, Z_V_IC_i]],
+                                                                                                        t_Grid  = [t_Grid_IC_rollout[i]],
+                                                                                                        params  = param_i.reshape(1, -1));
                     
                     # Extract the predicted trajectory
                     Z_D_IC_Predict_i  : torch.Tensor              = Z_IC_Rollout_i[0][0];  # shape = (n_t_IC_rollout[i], n_z)
                     Z_V_IC_Predict_i  : torch.Tensor              = Z_IC_Rollout_i[0][1];  # shape = (n_t_IC_rollout[i], n_z)
 
                     # Decode the predicted trajectory to get FOM predictions
-                    D_IC_Predict_i, V_IC_Predict_i = encoder_decoder_device.Decode(Z_D_IC_Predict_i, Z_V_IC_Predict_i);
+                    with self._profile_region("HLaSDI/IC_rollout_loss/decode"):
+                        D_IC_Predict_i, V_IC_Predict_i = encoder_decoder_device.Decode(Z_D_IC_Predict_i, Z_V_IC_Predict_i);
                     
                     # Get the corresponding FOM targets
                     U_IC_Target_i     : list[torch.Tensor]        = U_IC_Rollout_Targets[i];
@@ -967,7 +980,8 @@ class Second_Order_Rollout(Trainer):
 
             #  Run back propagation and update the encoder_decoder parameters. 
             # Note: optimizer.zero_grad() is already called at the start of the iteration (line 373)
-            loss.backward();
+            with self._profile_region("HLaSDI/backward"):
+                loss.backward();
 
             grad_sq_encoder_decoder = torch.zeros((), device = device);
             for param in encoder_decoder_device.parameters():
@@ -996,7 +1010,8 @@ class Second_Order_Rollout(Trainer):
                 LOGGER.warning("Gradient norm %.2f exceeded threshold, clipped to %f (iter %d)" % (grad_norm, self.gradient_clip, iter + 1));
             
             LOGGER.debug("Backward Pass - backward() complete, calling optimizer.step()");
-            self.optimizer.step();
+            with self._profile_region("HLaSDI/optimizer_step"):
+                self.optimizer.step();
             LOGGER.debug("Backward Pass - complete (iteration %d)" % (iter + 1));
             self._cache_metric("time/backwards", time.perf_counter() - timer);
             self._cache_metric("time/step", time.perf_counter() - step_timer);
@@ -1034,7 +1049,7 @@ class Second_Order_Rollout(Trainer):
             if(self.loss_weights['IC_rollout'] > 0):    info_str += ", IC Roll D: %3.6f, IC Roll V: %3.6f, IC Roll ZD: %3.6f, IC Roll ZV: %3.6f"    % (flushed_metrics.get('loss/IC_rollout/D/total', 0.0),    flushed_metrics.get('loss/IC_rollout/V/total', 0.0),    flushed_metrics.get('loss/IC_rollout/Z_D/total', 0.0), flushed_metrics.get('loss/IC_rollout/Z_V/total', 0.0));
             for key in LD_losses.losses.keys():
                 info_str += ", %s: %3.6f"   % (key, flushed_metrics.get(f"loss/{key}/total", 0.0));
-            if isinstance(self.latent_dynamics, InterpolatableLatentDynamics): 
+            if isinstance(self.latent_dynamics, InterpolatableLatentDynamics):
                 info_str += ", max|c|: %.3f" % max_train_coef;
             LOGGER.info(info_str);
             

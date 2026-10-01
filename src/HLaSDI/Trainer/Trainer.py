@@ -5,10 +5,11 @@
 import  os;
 import  time;
 
+import  contextlib;
 import  json;
 import  logging;
 from    pathlib                             import Path;
-from    typing                              import Any;
+from    typing                              import Any, ContextManager;
 
 import  torch;
 import  numpy;
@@ -22,12 +23,6 @@ from    HLaSDI.Schemas                     import  BaseTrainerConfig;
 # Setup Logger
 LOGGER : logging.Logger = logging.getLogger(__name__);
 
-# Should we profile a run of Iterate?
-PROFILE_ITERATE : bool  = False
-PROFILE_WAIT    : int   = 10        # Do nothing for this many epochs
-PROFILE_WARMUP  : int   = 1         # Run machinery, but discard results
-PROFILE_ACTIVE  : int   = 10        # Run/log profiler stuff for this many epochs
-PROFILE_REPEAT  : int   = 1         # Repeat this schedule how many times?
 
 
 # -------------------------------------------------------------------------------------------------
@@ -348,7 +343,7 @@ class Trainer:
         structure.
         """
 
-        # Fetch top level directories. 
+        # Fetch top level directories.
         src_dir                 : str   = os.path.dirname(os.path.abspath(__file__));                         # .../Higher-Order-LaSDI/src/HLaSDI/Trainer
         project_dir             : Path  = Path(os.path.abspath(os.path.join(src_dir, os.pardir, os.pardir, os.pardir)));
 
@@ -778,6 +773,20 @@ class Trainer:
         return trainable_params;
 
 
+    def _profile_region(self, name: str) -> ContextManager[Any]:
+        """
+        Return a profiler range context when profiling is enabled, otherwise a no-op context.
+
+        Keeping this guard in one place prevents HLaSDI-level timeline annotations from invoking
+        PyTorch profiler machinery during normal, unprofiled training runs.
+        """
+
+        if self.config.profiler.enabled == False:
+            return contextlib.nullcontext();
+
+        return torch.profiler.record_function(name);
+
+
 
     # ---------------------------------------------------------------------------------------------
     # Checkpointing
@@ -985,22 +994,25 @@ class Trainer:
         assert end_iter >= start_iter;
         LOGGER.info("Training for %d epochs (starting at %d, going to %d) with %d training parameters" % (end_iter - start_iter, start_iter, end_iter, n_train));
 
-        if PROFILE_ITERATE:
+        if self.config.profiler.enabled:
             # Iterate with profiler on
             profiler_activities = [torch.profiler.ProfilerActivity.CPU];
             if torch.cuda.is_available():
                 profiler_activities.append(torch.profiler.ProfilerActivity.CUDA);
+            LOGGER.info("Writing profiler timeline traces to %s" % self.results_dir);
 
             with torch.profiler.profile(
                 activities      = profiler_activities,
                 schedule        = torch.profiler.schedule(
-                    wait        = PROFILE_WAIT,
-                    warmup      = PROFILE_WARMUP,
-                    active      = PROFILE_ACTIVE,
-                    repeat      = PROFILE_REPEAT,
+                    wait        = self.config.profiler.wait_epochs,
+                    warmup      = self.config.profiler.warmup_epochs,
+                    active      = self.config.profiler.active_epochs,
+                    repeat      = self.config.profiler.num_repeats,
                 ),
-                record_shapes   = True,
-                profile_memory  = True,
+                on_trace_ready  = torch.profiler.tensorboard_trace_handler(
+                    dir_name    = self.results_dir,
+                    worker_name = "HLaSDI_train",
+                ),
             ) as prof:
                 self.Iterate(start_iter = start_iter, end_iter = end_iter, profiler = prof);
 
