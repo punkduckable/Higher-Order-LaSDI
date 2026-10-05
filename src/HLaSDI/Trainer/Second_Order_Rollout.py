@@ -780,9 +780,10 @@ class Second_Order_Rollout(Trainer):
 
                         with self._profile_region("HLaSDI/rollout_loss/simulate"):
                             Z_pred_all : list[list[torch.Tensor]] = self.latent_dynamics.simulate(
-                                IC     = [[Z_D0, Z_V0]],
-                                t_Grid = [t_win_np],
-                                params = param_i);
+                                IC          = [[Z_D0, Z_V0]],
+                                t_Grid      = [t_win_np],
+                                params      = param_i,
+                                time_domain = [t_i_np]);
                         Z_D_pred = Z_pred_all[0][0];
                         Z_V_pred = Z_pred_all[0][1];
                         assert Z_D_pred.ndim == 2 and Z_V_pred.ndim == 2;
@@ -881,9 +882,11 @@ class Second_Order_Rollout(Trainer):
 
                     # Simulate the latent dynamics forward in time
                     with self._profile_region("HLaSDI/IC_rollout_loss/simulate"):
-                        Z_IC_Rollout_i    : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(  IC      = [[Z_D_IC_i, Z_V_IC_i]],
-                                                                                                        t_Grid  = [t_Grid_IC_rollout[i]],
-                                                                                                        params  = param_i.reshape(1, -1));
+                        Z_IC_Rollout_i    : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(  
+                            IC          = [[Z_D_IC_i, Z_V_IC_i]],
+                            t_Grid      = [t_Grid_IC_rollout[i]],
+                            params      = param_i.reshape(1, -1),
+                            time_domain = [t_Train_np[i]]);
                     
                     # Extract the predicted trajectory
                     Z_D_IC_Predict_i  : torch.Tensor              = Z_IC_Rollout_i[0][0];  # shape = (n_t_IC_rollout[i], n_z)

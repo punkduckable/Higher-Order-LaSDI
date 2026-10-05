@@ -296,7 +296,7 @@ def test_some_simulate_integrates_constant_uniform_expert_mixture_torch_inputs()
     ld.unmasked_C = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
     ld.unmasked_b = torch.tensor([[[1.0]], [[3.0]]], dtype=torch.float32, requires_grad=True)
 
-    z, dz = ld.simulate(IC=[[z0, dz0]], t_Grid=[t], params=params)[0]
+    z, dz = ld.simulate(IC=[[z0, dz0]], t_Grid=[t], params=params, time_domain=[t])[0]
 
     t_tensor = torch.tensor(t, dtype=z0.dtype).reshape(-1, 1)
     expected_z = z0.reshape(1, 1) + dz0.reshape(1, 1)*t_tensor + t_tensor**2
@@ -309,6 +309,34 @@ def test_some_simulate_integrates_constant_uniform_expert_mixture_torch_inputs()
     assert dz.shape == expected_dz.shape
     assert torch.allclose(z, expected_z)
     assert torch.allclose(dz, expected_dz)
+
+
+def test_some_simulate_uses_reference_time_domain_for_gate_normalization():
+    params = numpy.array([[0.25]])
+    t_window = numpy.array([0.5, 0.75, 1.0])
+    t_domain = numpy.array([0.0, 0.5, 1.0])
+    z0 = torch.tensor([0.0], dtype=torch.float64)
+    dz0 = torch.tensor([0.0], dtype=torch.float64)
+
+    ld = SOME(n_z=1, Uniform_t_Grid=True, n_p=1, config=_some_config_with_settings(hidden_widths=[1]))
+    with torch.no_grad():
+        first, second = ld.w.layers
+        first.weight.zero_()
+        first.bias.zero_()
+        second.weight.zero_()
+        second.bias.zero_()
+        first.weight[0, 0] = 1.0
+        second.weight[0, 0] = 5.0
+        second.weight[1, 0] = -5.0
+    ld.unmasked_K = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_C = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.tensor([[[0.0]], [[1.0]]], dtype=torch.float32, requires_grad=True)
+
+    z_global, _ = ld.simulate(IC=[[z0, dz0]], t_Grid=[t_window], params=params, time_domain=[t_domain])[0]
+    z_local, _ = ld.simulate(IC=[[z0, dz0]], t_Grid=[t_window], params=params, time_domain=[t_window])[0]
+
+    assert not torch.allclose(z_global, z_local)
+    assert z_local[-1, 0] > z_global[-1, 0]
 
 
 def test_sindy_rhs_matches_affine_model_for_strong_and_weak():
@@ -437,7 +465,7 @@ def test_cable_simulate_integrates_constant_uniform_expert_mixture_numpy_inputs(
     ld.unmasked_A = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
     ld.unmasked_b = torch.tensor([[[1.0]], [[3.0]]], dtype=torch.float32, requires_grad=True)
 
-    z = ld.simulate(IC=[[z0]], t_Grid=[t], params=params)[0][0]
+    z = ld.simulate(IC=[[z0]], t_Grid=[t], params=params, time_domain=[t])[0][0]
 
     expected = z0.reshape(1, 1) + 2.0*t.reshape(-1, 1)
     assert isinstance(z, numpy.ndarray)
@@ -455,13 +483,39 @@ def test_cable_simulate_integrates_constant_uniform_expert_mixture_torch_inputs(
     ld.unmasked_A = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
     ld.unmasked_b = torch.tensor([[[1.0]], [[3.0]]], dtype=torch.float32, requires_grad=True)
 
-    z = ld.simulate(IC=[[z0]], t_Grid=[t], params=params)[0][0]
+    z = ld.simulate(IC=[[z0]], t_Grid=[t], params=params, time_domain=[t])[0][0]
 
     expected = z0.reshape(1, 1) + 2.0*torch.tensor(t, dtype=z0.dtype).reshape(-1, 1)
     assert isinstance(z, torch.Tensor)
     assert z.dtype == z0.dtype
     assert z.shape == expected.shape
     assert torch.allclose(z, expected)
+
+
+def test_cable_simulate_uses_reference_time_domain_for_gate_normalization():
+    params = numpy.array([[0.25]])
+    t_window = numpy.array([0.5, 0.75, 1.0])
+    t_domain = numpy.array([0.0, 0.5, 1.0])
+    z0 = torch.tensor([0.0], dtype=torch.float64)
+
+    ld = CABLE(n_z=1, Uniform_t_Grid=True, n_p=1, config=_cable_config_with_settings(hidden_widths=[1]))
+    with torch.no_grad():
+        first, second = ld.w.layers
+        first.weight.zero_()
+        first.bias.zero_()
+        second.weight.zero_()
+        second.bias.zero_()
+        first.weight[0, 0] = 1.0
+        second.weight[0, 0] = 5.0
+        second.weight[1, 0] = -5.0
+    ld.unmasked_A = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.tensor([[[0.0]], [[1.0]]], dtype=torch.float32, requires_grad=True)
+
+    z_global = ld.simulate(IC=[[z0]], t_Grid=[t_window], params=params, time_domain=[t_domain])[0][0]
+    z_local = ld.simulate(IC=[[z0]], t_Grid=[t_window], params=params, time_domain=[t_window])[0][0]
+
+    assert not torch.allclose(z_global, z_local)
+    assert z_local[-1, 0] > z_global[-1, 0]
 
 
 def test_cable_compute_losses_updates_and_applies_hard_coefficient_masks():

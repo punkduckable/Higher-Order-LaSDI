@@ -556,10 +556,11 @@ class SOME(LatentDynamics):
 
 
     def simulate(   self,
-                    IC      : list[list[numpy.ndarray   | torch.Tensor]],
-                    t_Grid  : list[numpy.ndarray        | torch.Tensor],
-                    params  : numpy.ndarray,
-                    sample  : bool = False) -> list[list[numpy.ndarray | torch.Tensor]]:
+                    IC          : list[list[numpy.ndarray   | torch.Tensor]],
+                    t_Grid      : list[numpy.ndarray        | torch.Tensor],
+                    params      : numpy.ndarray,
+                    time_domain : list[numpy.ndarray    | torch.Tensor],
+                    sample      : bool = False) -> list[list[numpy.ndarray | torch.Tensor]]:
         r"""
         Time-integrate the deterministic SOME latent dynamics.
 
@@ -583,6 +584,11 @@ class SOME(LatentDynamics):
         params: numpy.ndarray, shape = (n_param, n_p)
             The i'th row holds the i'th combination of parameter values.
 
+        time_domain : list[numpy.ndarray | torch.Tensor], len = n_param
+            Full/reference time grids used to normalize the gate time input. This may differ from
+            `t_Grid` during cropped frame rollouts; using the full domain keeps gate inputs
+            consistent with training-time RHS evaluations.
+
         sample : bool 
             Ignored. Present only to match the LatentDynamics interface.
 
@@ -601,6 +607,7 @@ class SOME(LatentDynamics):
         n_param : int = params.shape[0];
         assert isinstance(t_Grid, list) and isinstance(IC, list);
         assert len(IC) == n_param and len(t_Grid) == n_param;
+        assert isinstance(time_domain, list) and len(time_domain) == n_param;
 
         # Loop through parameter combinations.
         Z : list[list[numpy.ndarray | torch.Tensor]] = [];
@@ -609,13 +616,19 @@ class SOME(LatentDynamics):
             ith_IC     : list[numpy.ndarray | torch.Tensor]  = IC[i];
             ith_t_Grid : numpy.ndarray | torch.Tensor        = t_Grid[i];
             ith_params : numpy.ndarray                       = params[i, :];
+            ith_time_domain : numpy.ndarray | torch.Tensor   = time_domain[i];
 
             assert isinstance(ith_IC, list) and len(ith_IC) == 2;
             if(isinstance(ith_t_Grid, torch.Tensor)):
                 ith_t_Grid = ith_t_Grid.detach().cpu().numpy();
+            if(isinstance(ith_time_domain, torch.Tensor)):
+                ith_time_domain = ith_time_domain.detach().cpu().numpy();
             assert len(ith_t_Grid.shape) == 1;
-            t0          : float = ith_t_Grid[0];
-            t_span      : float = ith_t_Grid[-1] - ith_t_Grid[0];
+            assert len(ith_time_domain.shape) == 1;
+            assert ith_time_domain.shape[0] >= 2;
+            t0          : float = ith_time_domain[0];
+            t_span      : float = ith_time_domain[-1] - ith_time_domain[0];
+            assert t_span > 0.0;
             ith_Z0      : numpy.ndarray | torch.Tensor = ith_IC[0];
             ith_dZ_dt0  : numpy.ndarray | torch.Tensor = ith_IC[1];
             assert(isinstance(ith_Z0, (numpy.ndarray, torch.Tensor)))
@@ -637,6 +650,8 @@ class SOME(LatentDynamics):
                     f = self._make_time_only_torch_rhs(
                         t_Grid = ith_t_Grid,
                         params = ith_params,
+                        t0     = t0,
+                        t_span = t_span,
                         device = ith_Z0.device,
                         dtype  = ith_Z0.dtype);
                 else:
@@ -1048,6 +1063,8 @@ class SOME(LatentDynamics):
             self,
             t_Grid  : numpy.ndarray,
             params  : numpy.ndarray,
+            t0      : float,
+            t_span  : float,
             device  : torch.device,
             dtype   : torch.dtype) -> Callable[[float, torch.Tensor, torch.Tensor], torch.Tensor]:
         r"""
@@ -1076,6 +1093,12 @@ class SOME(LatentDynamics):
         params : numpy.ndarray, shape = (n_p)
             Parameter vector associated with this rollout.
 
+        t0 : float
+            Reference time origin used to normalize gate inputs.
+
+        t_span : float
+            Reference time span used to normalize gate inputs.
+
         device : torch.device
             Device on which the returned RHS should evaluate latent-state operations.
 
@@ -1096,6 +1119,7 @@ class SOME(LatentDynamics):
         assert isinstance(t_Grid, numpy.ndarray);
         assert len(t_Grid.shape) == 1;
         assert isinstance(params, numpy.ndarray) and params.shape == (self.n_p,);
+        assert t_span > 0.0;
 
         # Build exactly the stage times requested by the generic RK4 implementation. We key the
         # cache by Python floats because RK4 passes scalar NumPy/Python times to the closure.
@@ -1135,8 +1159,8 @@ class SOME(LatentDynamics):
             dummy_Z,
             dummy_dZ_dt,
             params,
-            t0      = t_Grid[0],
-            t_span  = t_Grid[-1] - t_Grid[0]);
+            t0      = t0,
+            t_span  = t_span);
         K_bar, C_bar, b_bar = self._effective_coefficients(weights, device, dtype);
 
         # Split K, C, b into lists (speeds up indexing)

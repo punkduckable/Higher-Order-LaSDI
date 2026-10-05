@@ -157,9 +157,10 @@ class LatentDynamics:
       the current coefficients and return an `LD_Loss_Container` whose loss keys match
       `self.loss_weights`. Values must be be scalar tensors for global losses. 
     
-    - `simulate(IC, t_Grid, params, sample=False)`: integrate the latent ODE from one latent
-      initial condition per parameter value and return latent trajectories in the expected
-      `n_IC`-component format.
+    - `simulate(IC, t_Grid, params, time_domain, sample=False)`: integrate the latent ODE from one
+      latent initial condition per parameter value and return latent trajectories in the expected
+      `n_IC`-component format. `time_domain` is the full/reference time grid used by time-gated
+      models to normalize simulation times.
 
     - `RHS(Z, t_Grid, params, sample=False)`: evaluate the pointwise right-hand side of the latent
       ODE at supplied latent states. Strong and weak forms of the same latent ODE should normally
@@ -563,10 +564,11 @@ class LatentDynamics:
     # ---------------------------------------------------------------------------------------------
 
     def simulate(   self,
-                    IC      : list[list[numpy.ndarray   | torch.Tensor]],
-                    t_Grid  : list[numpy.ndarray        | torch.Tensor],
-                    params  : numpy.ndarray, 
-                    sample  : bool = False) -> list[list[numpy.ndarray | torch.Tensor]]:
+                    IC          : list[list[numpy.ndarray   | torch.Tensor]],
+                    t_Grid      : list[numpy.ndarray        | torch.Tensor],
+                    params      : numpy.ndarray, 
+                    time_domain : list[numpy.ndarray    | torch.Tensor],
+                    sample      : bool = False) -> list[list[numpy.ndarray | torch.Tensor]]:
         """
         Time integrates the latent dynamics from one initial condition for each parameter value.
         Note that if self is not stochastic, we should generally not allow sampling.
@@ -591,6 +593,11 @@ class LatentDynamics:
             The i'th row holds the i'th combination of parameter values. This can be used by latent 
             dynamics models that depend explicitly on parameter values (e.g., for time-varying or 
             parameterized forcing).
+
+        time_domain : list[numpy.ndarray | torch.Tensor], len = n_param
+            i'th entry is the full/reference time domain for the i'th parameter value. Time-gated
+            latent dynamics normalize simulation times using this reference domain, not necessarily
+            the possibly cropped `t_Grid[i]` used for a rollout window.
 
         sample : bool 
             If self is stochastic, setting this to true will sample from the posterior distribution 

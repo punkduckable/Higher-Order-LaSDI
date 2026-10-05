@@ -97,10 +97,11 @@ def Mean_Rollout(   ROM_IC          : list[list[numpy.ndarray]],
     # Simulate the laten dynamics! For each testing parameter, use the mean value of each posterior 
     # distribution to define the coefficients. 
     LOGGER.info("simulating initial conditions for %d combinations of parameters forward in time" % n_param);
-    Zis : list[list[numpy.ndarray]] = latent_dynamics.simulate( IC      = ROM_IC, 
-                                                                t_Grid  = t_Grid_np,
-                                                                params  = param_grid,
-                                                                sample  = False);
+    Zis : list[list[numpy.ndarray]] = latent_dynamics.simulate( IC          = ROM_IC, 
+                                                                t_Grid      = t_Grid_np,
+                                                                params      = param_grid,
+                                                                time_domain = t_Grid_np,
+                                                                sample      = False);
     
     # At this point, Zis[i][j] has shape (n_t_i, n_z).
     for i in range(n_param):
@@ -257,10 +258,11 @@ def Sample_Rollouts(ROM_IC          : list[list[numpy.ndarray]],
                 for sample_idx in range(n_needed):
                     ith_ROM_IC = ROM_IC[i]; 
                     traj = latent_dynamics.simulate( 
-                                            IC      = [ith_ROM_IC], 
-                                            t_Grid  = [t_Grid_np[i]], 
-                                            params  = param_grid[i, :].reshape(1, -1),
-                                            sample  = True);
+                                            IC          = [ith_ROM_IC], 
+                                            t_Grid      = [t_Grid_np[i]], 
+                                            params      = param_grid[i, :].reshape(1, -1),
+                                            time_domain = [t_Grid_np[i]],
+                                            sample      = True);
                     sample_trajectories.append(traj[0]);  # traj[0] is the trajectory for the i-th parameter
                 break;
             
@@ -274,10 +276,11 @@ def Sample_Rollouts(ROM_IC          : list[list[numpy.ndarray]],
                 # Simulate: returns list[list[array]], outer list has 1 element (1 param), 
                 # inner list has n_IC elements
                 traj = latent_dynamics.simulate( 
-                                        IC      = [ith_ROM_IC], 
-                                        t_Grid  = [t_Grid_np[i]], 
-                                        params  = param_grid[i, :].reshape(1, -1),
-                                        sample   = True);
+                                        IC          = [ith_ROM_IC], 
+                                        t_Grid      = [t_Grid_np[i]], 
+                                        params      = param_grid[i, :].reshape(1, -1),
+                                        time_domain = [t_Grid_np[i]],
+                                        sample      = True);
                 
                 # Check if this trajectory diverged (check all ICs for this parameter)
                 is_divergent = False;
