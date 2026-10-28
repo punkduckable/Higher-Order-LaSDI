@@ -621,9 +621,10 @@ class Second_Order_Rollout(Trainer):
                     # and the associated jacobian-vector product. We only keep the latter.
                     with self._profile_region("HLaSDI/chain_rule_loss/jvp_decoder"):
                         d_dz_D_Pred__Z_V_i  : torch.Tensor  = torch.autograd.functional.jvp(
-                                                                    func    = lambda Z_D : encoder_decoder_device.Displacement_Autoencoder.Decode(Z_D)[0],
-                                                                    inputs  = Z_D_i,
-                                                                    v       = Z_V_i)[1];
+                                func            = lambda Z_D : encoder_decoder_device.Displacement_Autoencoder.Decode(Z_D)[0],
+                                inputs          = Z_D_i,
+                                v               = Z_V_i,
+                                create_graph    = True)[1];
                     
                     # Compute difference once
                     diff_U = V_i - d_dz_D_Pred__Z_V_i;
@@ -638,10 +639,11 @@ class Second_Order_Rollout(Trainer):
                     # Here, \phi_E,D is the displacement portion of the encoder.
                     with self._profile_region("HLaSDI/chain_rule_loss/jvp_encoder"):
                         d_dx_Z_D__V         : torch.Tensor  = torch.autograd.functional.jvp(
-                                                                    func    = lambda D : encoder_decoder_device.Displacement_Autoencoder.Encode(D)[0],
-                                                                    inputs  = D_i,
-                                                                    v       = V_i)[1];
-                    
+                                func            = lambda D : encoder_decoder_device.Displacement_Autoencoder.Encode(D)[0],
+                                inputs          = D_i,
+                                v               = V_i,
+                                create_graph    = True)[1];
+                                                                                
                     # Compute difference once
                     diff_Z = Z_V_i - d_dx_Z_D__V;
                     

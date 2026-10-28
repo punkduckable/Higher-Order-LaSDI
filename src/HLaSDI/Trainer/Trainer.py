@@ -86,7 +86,8 @@ class Trainer:
     param_space : ParameterSpace
         Container for current train/test parameter sets used by training and greedy sampling.
     data_mean, data_std : list[torch.Tensor] | None
-        Per-IC scalar normalization statistics when normalization is enabled.
+        Scalar normalization offsets/scales. Higher-order components share the zeroth-order
+        scale, and derivative-component offsets are zero.
 
     Subclassing
     -----------
@@ -287,9 +288,9 @@ class Trainer:
         else:
             LOGGER.info("Noise injection disabled (noise_ratio = 0.0)");
 
-        # Optional normalization (training-only stats).
-        # If enabled, we compute a single mean/std across ALL training trajectories (per IC),
-        # then normalize both training + testing trajectories using these values.
+        # Optional normalization. First-order data use their global mean/std. Higher-order data
+        # use the zeroth-order state's standard deviation as one shared scale and do not center
+        # derivative components, preserving derivative relationships after normalization.
         self.normalization_enabled  : bool                      = trainer_config.normalize;
         self.data_mean              : list[torch.Tensor] | None = None;   # per-IC scalar tensors (CPU)
         self.data_std               : list[torch.Tensor] | None = None;   # per-IC scalar tensors (CPU)
@@ -459,9 +460,18 @@ class Trainer:
 
     def _compute_mean_std_from_U(self, U: list[list[torch.Tensor]], eps: float = 1.0e-12) -> tuple[list[float], list[float]]:
         """
-        Compute mean/std across ALL entries in U for each IC separately (scalar values).
+        Compute scalar normalization statistics without breaking derivative relationships.
 
-        We do this without concatenating everything to avoid large memory spikes.
+        For first-order data, compute the ordinary global mean and standard deviation. For
+        higher-order data, the zeroth-order state supplies one shared scale and only that state is
+        centered:
+
+            U_0_normalized = (U_0 - mean(U_0)) / std(U_0)
+            U_j_normalized = U_j / std(U_0),  j > 0.
+
+        Using one scale and no derivative centering preserves
+        ``d(U_0_normalized)/dt = U_1_normalized`` exactly. Statistics are accumulated without
+        concatenating trajectories to avoid large memory spikes.
         """
         assert isinstance(U, list) and len(U) > 0, "U must be a non-empty list";
         n_IC: int = len(U[0]);
@@ -482,8 +492,8 @@ class Trainer:
                 sum_sq[j] += float((Td * Td).sum().item());
                 count[j]  += int(Td.numel());
 
-        means: list[float] = [];
-        stds : list[float] = [];
+        raw_means : list[float] = [];
+        raw_stds  : list[float] = [];
         for j in range(n_IC):
             assert count[j] > 0, "No elements found for IC %d" % j;
             mean_j: float = sum_[j] / float(count[j]);
@@ -491,9 +501,18 @@ class Trainer:
             if var_j < 0.0:
                 # Numerical guard
                 var_j = 0.0;
-            std_j: float = float(numpy.sqrt(max(var_j, eps)));
-            means.append(mean_j);
-            stds.append(std_j);
+            raw_means.append(mean_j);
+            raw_stds.append(float(numpy.sqrt(max(var_j, eps))));
+
+        if n_IC == 1:
+            return raw_means, raw_stds;
+
+        # All higher derivatives use the displacement scale and are not centered. This is the
+        # normalization convention required to preserve the kinematic derivative identities used
+        # by the higher-order consistency and chain-rule losses.
+        displacement_scale : float = raw_stds[0];
+        means : list[float] = [raw_means[0]] + [0.0]*(n_IC - 1);
+        stds  : list[float] = [displacement_scale]*n_IC;
         return means, stds;
 
 

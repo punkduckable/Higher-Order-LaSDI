@@ -332,7 +332,12 @@ Configuration files are YAML-based and specify:
 - Round scheduling / greedy sampling limits:
   - `trainer.n_iter`, `trainer.max_iter`, `trainer.max_greedy_iter`
 - Normalization:
-  - `trainer.normalize` (if enabled, the library computes global mean/std and normalizes train/test data)
+  - `trainer.normalize` enables scalar normalization of train/test data.
+  - First-order data use their global mean and standard deviation. Higher-order data use the
+    zeroth-order state's standard deviation as one shared scale; only the zeroth-order state is
+    centered. In particular, displacement/velocity pairs use
+    `D_normalized = (D - mean(D))/std(D)` and `V_normalized = V/std(D)`, which preserves
+    `d(D_normalized)/dt = V_normalized`.
 - Device placement:
   - `trainer.device` (optional; `"cpu"` by default)
 - Optional native noise:
