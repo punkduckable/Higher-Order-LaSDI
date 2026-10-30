@@ -291,12 +291,11 @@ class CABLE(LatentDynamics):
         dZ/dt, evaluates the deterministic mixture-of-experts right-hand side at each time sample,
         and compares the two. 
 
-        The coefficient loss penalizes the size of the affine experts. The stability loss is a
-        deterministic load-balancing/diversity surrogate computed from the softmax
-        weights: it accumulates each expert's total dense gate weight across all training
-        parameters and times, then returns the squared coefficient of variation of those totals.
-        This is zero when all experts receive the same total dense load and positive when the dense
-        gate collapses onto a subset of experts.
+        The coefficient loss penalizes the size of the affine experts. The diversity loss is a
+        load-balancing/diversity surrogate computed from the softmax weights: it accumulates each 
+        expert's total dense gate weight across all training parameters and times, then returns the 
+        squared coefficient of variation of those totals. This is zero when all experts receive the 
+        same total dense load and positive when the dense gate collapses onto a subset of experts.
 
         This method also computes a per-parameter tail-mass penalty,
 

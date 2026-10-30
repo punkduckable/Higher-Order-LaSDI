@@ -1053,7 +1053,11 @@ class Second_Order_Rollout(Trainer):
             if(self.loss_weights['rollout'] > 0):       info_str += ", Roll FOM D: %3.6f, Roll FOM V: %3.6f, Roll ROM D: %3.6f, Roll ROM V: %3.6f"  % (flushed_metrics.get('loss/rollout/FOM/D/total', 0.0),    flushed_metrics.get('loss/rollout/FOM/V/total', 0.0),  flushed_metrics.get('loss/rollout/ROM/D/total', 0.0),  flushed_metrics.get('loss/rollout/ROM/V/total', 0.0));
             if(self.loss_weights['IC_rollout'] > 0):    info_str += ", IC Roll D: %3.6f, IC Roll V: %3.6f, IC Roll ZD: %3.6f, IC Roll ZV: %3.6f"    % (flushed_metrics.get('loss/IC_rollout/D/total', 0.0),    flushed_metrics.get('loss/IC_rollout/V/total', 0.0),    flushed_metrics.get('loss/IC_rollout/Z_D/total', 0.0), flushed_metrics.get('loss/IC_rollout/Z_V/total', 0.0));
             for key in LD_losses.losses.keys():
-                info_str += ", %s: %3.6f"   % (key, flushed_metrics.get(f"loss/{key}/total", 0.0));
+                # Some losses may use the complete path `loss/<name>` while others use
+                # `loss/<name>/total`. We support both reporting conventions.
+                metric_key   : str   = f"loss/{key}";
+                metric_value : float = flushed_metrics.get(metric_key, flushed_metrics.get(f"{metric_key}/total", 0.0));
+                info_str += ", %s: %3.6f" % (key, metric_value);
             if isinstance(self.latent_dynamics, InterpolatableLatentDynamics):
                 info_str += ", max|c|: %.3f" % max_train_coef;
             LOGGER.info(info_str);

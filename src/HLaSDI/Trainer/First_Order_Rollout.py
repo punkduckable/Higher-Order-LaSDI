@@ -864,7 +864,11 @@ class First_Order_Rollout(Trainer):
             if(self.loss_weights['rollout'] > 0):       info_str += ", Roll FOM: %3.6f, Roll ROM: %3.6f"        % (flushed_metrics.get('loss/rollout/FOM/total', 0.0),    flushed_metrics.get('loss/rollout/ROM/total', 0.0));
             if(self.loss_weights['IC_rollout'] > 0):    info_str += ", IC Roll FOM: %3.6f, IC Roll ROM: %3.6f"  % (flushed_metrics.get('loss/IC_rollout/FOM/total', 0.0), flushed_metrics.get('loss/IC_rollout/ROM/total', 0.0));
             for key in LD_losses.losses.keys():
-                info_str += ", %s: %3.6f"   % (key, flushed_metrics.get(f"loss/{key}/total", 0.0));
+                # Some losses may use the complete path `loss/<name>` while others use
+                # `loss/<name>/total`. We support both reporting conventions.
+                metric_key   : str   = f"loss/{key}";
+                metric_value : float = flushed_metrics.get(metric_key, flushed_metrics.get(f"{metric_key}/total", 0.0));
+                info_str += ", %s: %3.6f" % (key, metric_value);
             if isinstance(self.latent_dynamics, InterpolatableLatentDynamics):
                 info_str += ", max|c|: %.3f" % max_train_coef;
             LOGGER.info(info_str);
