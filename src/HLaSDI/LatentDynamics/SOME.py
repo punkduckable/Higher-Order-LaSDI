@@ -9,7 +9,7 @@ import  numpy;
 import  torch;
 
 from    HLaSDI.LatentDynamics.LatentDynamics    import  LatentDynamics, LD_Loss_Container;
-from    HLaSDI.Schemas                          import  SOMELatentDynamicsConfig, WeakSOMELatentDynamicsConfig, CABLELatentDynamicsSettings;
+from    HLaSDI.Schemas                          import  SOMELatentDynamicsConfig, WeakSOMELatentDynamicsConfig, SOMELatentDynamicsSettings;
 from    HLaSDI.EncoderDecoder                   import  MultiLayerPerceptron;
 from    HLaSDI.Utilities.FiniteDifference       import  Derivative1_Order4, Derivative1_Order2_NonUniform;
 from    HLaSDI.Utilities.SecondOrderSolvers     import  RK4;
@@ -35,11 +35,13 @@ class SOME(LatentDynamics):
         Initializes a Second Order Mixture of Experts (SOME) latent-dynamics object. This class 
         models second-order latent dynamics in native form as
 
-            z''(t) = \sum_{m = 1}^{N} w_m(t, \theta) [ K_m z(t) + C_m z'(t) + b_m ].
+            z''(t) =    \sum_{m = 1}^{N_D} \alpha_m(t, \theta)[K_m z(t) + b_m]
+                    +   \sum_{m = 1}^{N_V} \beta_m(t, \theta) C_m z'(t)
 
         Here, z is the latent state. For each m \in {1, 2, ... , N}, K_m \in \mathbb{R}^{n x n} 
         and C_m \in \mathbb{R}^{n x n} represent the m'th "stiffness" and "damping" coefficient 
-        matrices, while b_m is an offset/constant forcing vector. 
+        matrices, while b_m is an offset/constant forcing vector. \alpha and \beta are gate 
+        operators for the displacement and velocity experts, respectively.
 
 
         -------------------------------------------------------------------------------------------
@@ -83,9 +85,11 @@ class SOME(LatentDynamics):
             config         = config);
 
         # Extract sub-class specific attributes.
-        sub : CABLELatentDynamicsSettings       = config.some;
-        self.n_experts          : int           = sub.n_experts;
-        self.n_active           : int           = sub.n_active;
+        sub : SOMELatentDynamicsSettings       = config.some;
+        self.n_experts_D        : int           = sub.n_experts_D;
+        self.n_experts_V        : int           = sub.n_experts_V;
+        self.n_active_D         : int           = sub.n_active_D;
+        self.n_active_V         : int           = sub.n_active_V;
         self.hidden_widths      : list[int]     = sub.hidden_widths;
         self.activations        : list[str]     = [sub.activations]*len(self.hidden_widths) if isinstance(sub.activations, str) else sub.activations;
         self.coef_norm          : str           = sub.coef_norm
@@ -99,7 +103,7 @@ class SOME(LatentDynamics):
 
         # Initialize the gate network.
         input_dim   : int       = (n_p + 1 + 2*n_z) if self.use_z_in_gate else (n_p + 1);
-        widths      : list[int] = [input_dim] + self.hidden_widths + [self.n_experts];
+        widths      : list[int] = [input_dim] + self.hidden_widths + [self.n_experts_D + self.n_experts_V];
         self.w                  = MultiLayerPerceptron(widths = widths, activations = self.activations);
         with torch.no_grad():
             for param in self.w.parameters():
@@ -107,11 +111,11 @@ class SOME(LatentDynamics):
 
         # Randomly initialize the experts. These are leaf tensors because the Trainer passes them
         # directly to the optimizer through parameters().
-        self.unmasked_K : torch.Tensor = (0.01*torch.rand((self.n_experts, self.n_z, self.n_z), dtype = torch.float32)).requires_grad_(self.trainable);
-        self.unmasked_C : torch.Tensor = (0.01*torch.rand((self.n_experts, self.n_z, self.n_z), dtype = torch.float32)).requires_grad_(self.trainable);
+        self.unmasked_K : torch.Tensor = (0.01*torch.rand((self.n_experts_D, self.n_z, self.n_z), dtype = torch.float32)).requires_grad_(self.trainable);
+        self.unmasked_C : torch.Tensor = (0.01*torch.rand((self.n_experts_V, self.n_z, self.n_z), dtype = torch.float32)).requires_grad_(self.trainable);
         self.unmasked_b : torch.Tensor | None;
         if self.use_biases:
-            self.unmasked_b = torch.zeros((self.n_experts, 1, self.n_z), dtype = torch.float32).requires_grad_(self.trainable);
+            self.unmasked_b = torch.zeros((self.n_experts_D, 1, self.n_z), dtype = torch.float32).requires_grad_(self.trainable);
         else:
             self.unmasked_b = None;
 
@@ -132,8 +136,10 @@ class SOME(LatentDynamics):
         self.MSE = torch.nn.MSELoss(reduction = 'mean');
         self.MAE = torch.nn.L1Loss(reduction = 'mean');
 
-        self.last_tail_mass_loss : torch.Tensor | None = None;
-        self.last_tail_mass_loss_list : list[torch.Tensor] | None = None;
+        self.last_tail_mass_loss_D      : torch.Tensor | None       = None;
+        self.last_tail_mass_loss_V      : torch.Tensor | None       = None;
+        self.last_tail_mass_loss_D_list : list[torch.Tensor] | None = None;
+        self.last_tail_mass_loss_V_list : list[torch.Tensor] | None = None;
         return;
 
 
@@ -275,11 +281,13 @@ class SOME(LatentDynamics):
 
         For each parameter row, this method evaluates the global SOME mixture-of-experts model
 
-            z''(t) = \sum_{m = 1}^{N} w_m(t, \theta) [ K_m z(t) + C_m z'(t) + b_m ].
+            z''(t) =  \sum_{m = 1}^{N_D} \alpha_m(t, \theta) [K_m z(t) + b_m]
+                    + \sum_{m = 1}^{N_V} \beta_m(t, \theta) C_m z'(t).
 
-        The coefficient loss penalizes the global expert matrices and optional biases. The
-        diversity loss is a squared coefficient-of-variation penalty on total dense expert load,
-        and the tail loss penalizes softmax mass outside the top `n_active` experts.
+        The coefficient loss penalizes the global expert matrices and optional biases. Separate
+        displacement and velocity diversity losses penalize squared coefficients of variation in
+        the two dense expert loads. Separate tail losses penalize softmax mass outside the top
+        `n_active_D` displacement experts and `n_active_V` velocity experts.
 
 
         -------------------------------------------------------------------------------------------
@@ -312,8 +320,11 @@ class SOME(LatentDynamics):
 
             - `LD`: finite-difference residual losses.
             - `coef`: scalar global expert-size penalty.
-            - `diversity`: scalar global squared-CV expert-load penalty.
-            - `tail`: soft top-`n_active` tail-mass penalties.
+            - `diversity/D`: squared-CV displacement expert-load penalty.
+            - `diversity/V`: squared-CV velocity expert-load penalty.
+            - `tail/D`: displacement soft tail-mass penalty.
+            - `tail/V`: velocity soft tail-mass penalty.
+
         """
     
         # Checks.
@@ -333,12 +344,18 @@ class SOME(LatentDynamics):
 
         # Setup
         loss_LD_list        : list[torch.Tensor]        = [];
-        summed_weights      : torch.Tensor              = torch.zeros((self.n_experts), dtype = self.unmasked_K.dtype, device = self.unmasked_K.device);
-        times_engaged       : torch.Tensor              = torch.zeros((self.n_experts), dtype = torch.int64, device = self.unmasked_K.device);
-        n_engaged_list      : list[torch.Tensor]        = [];
-        loss_tail_list      : list[torch.Tensor]        = [];
-        weights_list        : list[torch.Tensor]        = [];
-        tail_mass_list      : list[torch.Tensor]        = [];
+        summed_weights_D    : torch.Tensor              = torch.zeros((self.n_experts_D), dtype = self.unmasked_K.dtype, device = self.unmasked_K.device);
+        summed_weights_V    : torch.Tensor              = torch.zeros((self.n_experts_V), dtype = self.unmasked_K.dtype, device = self.unmasked_K.device);
+        times_engaged_D     : torch.Tensor              = torch.zeros((self.n_experts_D), dtype = torch.int64, device = self.unmasked_K.device);
+        times_engaged_V     : torch.Tensor              = torch.zeros((self.n_experts_V), dtype = torch.int64, device = self.unmasked_K.device);
+        n_engaged_D_list    : list[torch.Tensor]        = [];
+        n_engaged_V_list    : list[torch.Tensor]        = [];
+        loss_tail_D_list    : list[torch.Tensor]        = [];
+        loss_tail_V_list    : list[torch.Tensor]        = [];
+        weights_D_list      : list[torch.Tensor]        = [];
+        weights_V_list      : list[torch.Tensor]        = [];
+        tail_mass_D_list    : list[torch.Tensor]        = [];
+        tail_mass_V_list    : list[torch.Tensor]        = [];
         metrics             : dict[str, torch.Tensor]   = {};
 
         # Periodically update the hard coefficient masks. Masked entries are multiplied out in all
@@ -381,13 +398,17 @@ class SOME(LatentDynamics):
                 ith_d2Z_dt2 = Derivative1_Order2_NonUniform(U = ith_dZ_dt, t_Grid = ith_t_Grid);
 
             # Evaluate expert weights.
-            ith_RHS, ith_weights = self._evaluate_rhs(Z = ith_Z, dZ_dt = ith_dZ_dt, t_Grid = ith_t_Grid, params = ith_params, t0 = ith_t_Grid[0], t_span = ith_t_Grid[-1] - ith_t_Grid[0]);
-            weights_list.append(ith_weights.to(device = self.unmasked_K.device, dtype = self.unmasked_K.dtype));
+            ith_RHS, ith_weights_D, ith_weights_V = self._evaluate_rhs(Z = ith_Z, dZ_dt = ith_dZ_dt, t_Grid = ith_t_Grid, params = ith_params, t0 = ith_t_Grid[0], t_span = ith_t_Grid[-1] - ith_t_Grid[0]);
+            weights_D_list.append(ith_weights_D.to(device = self.unmasked_K.device, dtype = self.unmasked_K.dtype));
+            weights_V_list.append(ith_weights_V.to(device = self.unmasked_K.device, dtype = self.unmasked_K.dtype));
 
             # Record which experts are engaged during each step for this parameter.
-            ith_engaged : torch.Tensor = (ith_weights > self.eps_engaged).to(dtype = torch.bool, device = self.unmasked_K.device)
-            times_engaged += torch.sum(ith_engaged, dim = 0);
-            n_engaged_list.append(torch.sum(ith_engaged, dim = 1).to(device = self.unmasked_K.device, dtype = self.unmasked_K.dtype));
+            ith_engaged_D : torch.Tensor = (ith_weights_D > self.eps_engaged).to(dtype = torch.bool, device = self.unmasked_K.device)
+            ith_engaged_V : torch.Tensor = (ith_weights_V > self.eps_engaged).to(dtype = torch.bool, device = self.unmasked_K.device)
+            times_engaged_D += torch.sum(ith_engaged_D, dim = 0);
+            times_engaged_V += torch.sum(ith_engaged_V, dim = 0);
+            n_engaged_D_list.append(torch.sum(ith_engaged_D, dim = 1).to(device = self.unmasked_K.device, dtype = self.unmasked_K.dtype));
+            n_engaged_V_list.append(torch.sum(ith_engaged_V, dim = 1).to(device = self.unmasked_K.device, dtype = self.unmasked_K.dtype));
 
             # Compute the LD loss for the i'th combination of parameters.
             ith_loss_LD = self.MSE(ith_d2Z_dt2, ith_RHS);
@@ -397,31 +418,50 @@ class SOME(LatentDynamics):
             # deterministic analogue of MoE importance/load diversity: it encourages all
             # experts to be useful somewhere without forcing all experts to be active at 
             # every step.
-            summed_weights = summed_weights + torch.sum(ith_weights.to(device = self.unmasked_K.device, dtype = self.unmasked_K.dtype), dim = 0);
+            summed_weights_D = summed_weights_D + torch.sum(ith_weights_D.to(device = self.unmasked_K.device, dtype = self.unmasked_K.dtype), dim = 0);
+            summed_weights_V = summed_weights_V + torch.sum(ith_weights_V.to(device = self.unmasked_K.device, dtype = self.unmasked_K.dtype), dim = 0);
 
-            # Tail-mass penalty: compute how much softmax mass lies outside the top-n_active 
-            # logits. If this is small, most of the probability mass is in the top n_active 
-            # experts, as intended. 
-            if self.n_active >= self.n_experts:
-                ith_tail_mass : torch.Tensor = torch.zeros((n_t_i), dtype = ith_weights.dtype, device = ith_weights.device);
+            # Tail-mass penalty: compute how much softmax mass lies outside the top-n_active_D 
+            # displacement logits and top-n_active_V velocity logits. If this is small, most of 
+            # the probability mass is in the top n_active_D/n_active_V experts, as intended.
+            if self.n_active_D >= self.n_experts_D:
+                ith_tail_mass_D : torch.Tensor = torch.zeros((n_t_i), dtype = ith_weights_D.dtype, device = ith_weights_D.device);
             else:
-                ith_topk_idx             : torch.Tensor = torch.topk(ith_weights, self.n_active, dim = 1, sorted = False).indices;
-                ith_topk_dense_mass      : torch.Tensor = torch.sum(ith_weights.gather(1, ith_topk_idx), dim = 1);
-                ith_tail_mass            : torch.Tensor = 1.0 - ith_topk_dense_mass;
-            tail_mass_list.append(ith_tail_mass.to(device = self.unmasked_K.device, dtype = self.unmasked_K.dtype));
-            ith_tail_loss : torch.Tensor = torch.mean(torch.pow(ith_tail_mass.to(device = self.unmasked_K.device, dtype = self.unmasked_K.dtype), 2))
-            loss_tail_list.append(ith_tail_loss);
+                ith_topk_idx_D        : torch.Tensor = torch.topk(ith_weights_D, self.n_active_D, dim = 1, sorted = False).indices;
+                ith_topk_dense_mass_D : torch.Tensor = torch.sum(ith_weights_D.gather(1, ith_topk_idx_D), dim = 1);
+                ith_tail_mass_D       : torch.Tensor = 1.0 - ith_topk_dense_mass_D;
+
+            if self.n_active_V >= self.n_experts_V:
+                ith_tail_mass_V : torch.Tensor = torch.zeros((n_t_i), dtype = ith_weights_V.dtype, device = ith_weights_V.device);
+            else:
+                ith_topk_idx_V        : torch.Tensor = torch.topk(ith_weights_V, self.n_active_V, dim = 1, sorted = False).indices;
+                ith_topk_dense_mass_V : torch.Tensor = torch.sum(ith_weights_V.gather(1, ith_topk_idx_V), dim = 1);
+                ith_tail_mass_V       : torch.Tensor = 1.0 - ith_topk_dense_mass_V;
+            tail_mass_D_list.append(ith_tail_mass_D.to(device = self.unmasked_K.device, dtype = self.unmasked_K.dtype));
+            tail_mass_V_list.append(ith_tail_mass_V.to(device = self.unmasked_K.device, dtype = self.unmasked_K.dtype));
+            ith_tail_loss_D : torch.Tensor = torch.mean(torch.pow(ith_tail_mass_D.to(device = self.unmasked_K.device, dtype = self.unmasked_K.dtype), 2))
+            ith_tail_loss_V : torch.Tensor = torch.mean(torch.pow(ith_tail_mass_V.to(device = self.unmasked_K.device, dtype = self.unmasked_K.dtype), 2))
+            loss_tail_D_list.append(ith_tail_loss_D);
+            loss_tail_V_list.append(ith_tail_loss_V);
 
 
         # Evaluate loss statistics (computed across times and parameters).
-        weights         : torch.Tensor = torch.cat(weights_list, dim = 0);
-        tail_masses     : torch.Tensor = torch.cat(tail_mass_list, dim = 0);
-        n_engaged       : torch.Tensor = torch.cat(n_engaged_list, dim = 0);
-        metrics.update(tensor_statistics(prefix = "expert/weights",         values = weights));
-        metrics.update(tensor_statistics(prefix = "mass/tail",              values = tail_masses));
-        metrics.update(tensor_statistics(prefix = "expert/num_engaged",    values = n_engaged));
-        metrics.update(tensor_statistics(prefix = "expert/times_engaged",  values = times_engaged));
-        metrics["expert/num_ever_engaged"] = torch.sum(times_engaged > 0).to(device = self.unmasked_K.device, dtype = self.unmasked_K.dtype).detach();
+        weights_D         : torch.Tensor = torch.cat(weights_D_list, dim = 0);
+        weights_V         : torch.Tensor = torch.cat(weights_V_list, dim = 0);
+        tail_masses_D     : torch.Tensor = torch.cat(tail_mass_D_list, dim = 0);
+        tail_masses_V     : torch.Tensor = torch.cat(tail_mass_V_list, dim = 0);
+        n_engaged_D       : torch.Tensor = torch.cat(n_engaged_D_list, dim = 0);
+        n_engaged_V       : torch.Tensor = torch.cat(n_engaged_V_list, dim = 0);
+        metrics.update(tensor_statistics(prefix = "expert/weights/D",       values = weights_D));
+        metrics.update(tensor_statistics(prefix = "expert/weights/V",       values = weights_V));
+        metrics.update(tensor_statistics(prefix = "mass/tail/D",            values = tail_masses_D));
+        metrics.update(tensor_statistics(prefix = "mass/tail/V",            values = tail_masses_V));
+        metrics.update(tensor_statistics(prefix = "expert/num_engaged/D",   values = n_engaged_D));
+        metrics.update(tensor_statistics(prefix = "expert/num_engaged/V",   values = n_engaged_V));
+        metrics.update(tensor_statistics(prefix = "expert/times_engaged/D", values = times_engaged_D));
+        metrics.update(tensor_statistics(prefix = "expert/times_engaged/V", values = times_engaged_V));
+        metrics["expert/num_ever_engaged/D"] = torch.sum(times_engaged_D > 0).to(device = self.unmasked_K.device, dtype = self.unmasked_K.dtype).detach();
+        metrics["expert/num_ever_engaged/V"] = torch.sum(times_engaged_V > 0).to(device = self.unmasked_K.device, dtype = self.unmasked_K.dtype).detach();
 
         # Coefficient loss is the sum of the selected norms of the matrix portions of each expert,
         # plus the selected norm of each enabled bias. This is a scalar global loss, so the
@@ -430,40 +470,53 @@ class SOME(LatentDynamics):
         C_coef  : torch.Tensor          = self.C;
         b_coef  : torch.Tensor | None   = self.b;
         ord     : int                   = 1 if self.coef_norm == 'l1' else 2;
-        K_norms         : torch.Tensor          = torch.linalg.vector_norm(K_coef.reshape(self.n_experts, -1), ord = ord, dim = 1).sum();
-        C_norms         : torch.Tensor          = torch.linalg.vector_norm(C_coef.reshape(self.n_experts, -1), ord = ord, dim = 1).sum();
+        K_norms             : torch.Tensor          = torch.linalg.vector_norm(K_coef.reshape(self.n_experts_D, -1), ord = ord, dim = 1).sum();
+        C_norms             : torch.Tensor          = torch.linalg.vector_norm(C_coef.reshape(self.n_experts_V, -1), ord = ord, dim = 1).sum();
         if b_coef is None:
-            b_norms     : torch.Tensor          = torch.zeros((), dtype = K_coef.dtype, device = K_coef.device);
+            b_norms         : torch.Tensor          = torch.zeros((), dtype = K_coef.dtype, device = K_coef.device);
         else:
-            b_norms     : torch.Tensor          = torch.linalg.vector_norm(b_coef.reshape(self.n_experts, -1), ord = ord, dim = 1).sum();
-        loss_coef       : torch.Tensor          = K_norms + C_norms + b_norms;
+            b_norms         : torch.Tensor          = torch.linalg.vector_norm(b_coef.reshape(self.n_experts_D, -1), ord = ord, dim = 1).sum();
+        loss_coef           : torch.Tensor          = K_norms + C_norms + b_norms;
 
         # diversity loss is the squared coefficient of variation of expert loads. Use 
-        # the population standard deviation so n_experts = 1 produces zero instead of NaN.
-        metrics.update(tensor_statistics(prefix = "expert/summed_weight", values = summed_weights));
-        eps             : float                 = torch.finfo(summed_weights.dtype).eps;
-        mean_load       : torch.Tensor          = torch.mean(summed_weights);
-        std_load        : torch.Tensor          = torch.std(summed_weights, unbiased = False);
-        loss_diversity  : torch.Tensor          = torch.pow(std_load/(mean_load + eps), 2);
+        # the population standard deviation so n_experts_D = 1, n_experts_V = 1 produces zero 
+        # instead of NaN.
+        metrics.update(tensor_statistics(prefix = "expert/summed_weight/D", values = summed_weights_D));
+        metrics.update(tensor_statistics(prefix = "expert/summed_weight/V", values = summed_weights_V));
+        eps                 : float                 = torch.finfo(summed_weights_D.dtype).eps;
+        mean_D_load         : torch.Tensor          = torch.mean(summed_weights_D);
+        mean_V_load         : torch.Tensor          = torch.mean(summed_weights_V);
+        std_D_load          : torch.Tensor          = torch.std(summed_weights_D, unbiased = False);
+        std_V_load          : torch.Tensor          = torch.std(summed_weights_V, unbiased = False);
+        loss_diversity_D    : torch.Tensor          = torch.pow(std_D_load/(mean_D_load + eps), 2);
+        loss_diversity_V    : torch.Tensor          = torch.pow(std_V_load/(mean_V_load + eps), 2);
 
-        # Store the average tail-mass loss for diagnostics/plotting; the weighted objective and
-        # logged loss metric use the summed scalar returned under the `tail` key.
-        loss_tail : torch.Tensor = torch.mean(torch.stack(loss_tail_list));
-        self.last_tail_mass_loss = loss_tail.detach();
-        self.last_tail_mass_loss_list = [loss.detach() for loss in loss_tail_list];
+        # Preserve per-parameter tail diagnostics separately for the displacement and velocity
+        # gates. The corresponding objective terms also remain separate below.
+        mean_tail_D : torch.Tensor = torch.mean(torch.stack(loss_tail_D_list));
+        mean_tail_V : torch.Tensor = torch.mean(torch.stack(loss_tail_V_list));
+        self.last_tail_mass_loss_D      = mean_tail_D.detach();
+        self.last_tail_mass_loss_V      = mean_tail_V.detach();
+        self.last_tail_mass_loss_D_list = [loss.detach() for loss in loss_tail_D_list];
+        self.last_tail_mass_loss_V_list = [loss.detach() for loss in loss_tail_V_list];
 
-        # All done :)
-        loss_LD     : torch.Tensor      = torch.sum(torch.stack(loss_LD_list));
-        loss_tail   : torch.Tensor      = torch.sum(torch.stack(loss_tail_list));
+        loss_LD        : torch.Tensor = torch.sum(torch.stack(loss_LD_list));
+        loss_tail_D    : torch.Tensor = torch.sum(torch.stack(loss_tail_D_list));
+        loss_tail_V    : torch.Tensor = torch.sum(torch.stack(loss_tail_V_list));
         metrics["loss/LD/total"]        = loss_LD.detach();
         metrics["loss/coef/total"]      = loss_coef.detach();
         metrics["loss/coef/K"]          = K_norms.detach();
         metrics["loss/coef/C"]          = C_norms.detach();
         metrics["loss/coef/b"]          = b_norms.detach();
-        metrics["loss/diversity/total"] = loss_diversity.detach();
-        metrics["loss/tail/total"]      = loss_tail.detach();
+        metrics["loss/diversity/D"]     = loss_diversity_D.detach();
+        metrics["loss/diversity/V"]     = loss_diversity_V.detach();
+        metrics["loss/tail/D"]          = loss_tail_D.detach();
+        metrics["loss/tail/V"]          = loss_tail_V.detach();
 
-        losses_dict = {'LD' : loss_LD, 'coef' : loss_coef, 'diversity' : loss_diversity, 'tail' : loss_tail};
+        losses_dict = {'LD'             : loss_LD, 
+                       'coef'           : loss_coef, 
+                       'diversity/D'    : loss_diversity_D, 'diversity/V'   : loss_diversity_V, 
+                       'tail/D'         : loss_tail_D,      'tail/V'        : loss_tail_V};
 
         return LD_Loss_Container(losses = losses_dict, weights = self.loss_weights, params = params, metrics = metrics);
 
@@ -478,7 +531,8 @@ class SOME(LatentDynamics):
 
         For each parameter value, \theta, we evaluate
 
-            z''(t) = \sum_{m = 1}^{N} w_m(t, \theta) [ K_m z(t) + C_m z'(t) + b_m ].
+            z''(t) =  \sum_{m = 1}^{N_D} \alpha_m(t, \theta) [K_m z(t) + b_m]
+                    + \sum_{m = 1}^{N_V} \beta_m(t, \theta) C_m z'(t).
         
         at each latent displacement/velocity pair in `Z[i]`. SOME is deterministic and owns one
         global expert set, so `sample` is accepted only for interface compatibility and ignored.
@@ -541,7 +595,7 @@ class SOME(LatentDynamics):
             assert ith_Z.shape[0] == ith_t_Grid.shape[0];
             assert ith_dZ_dt.shape[0] == ith_t_Grid.shape[0];
 
-            ith_RHS, _ = self._evaluate_rhs(
+            ith_RHS, _, _ = self._evaluate_rhs(
                                 Z       = ith_Z,
                                 dZ_dt   = ith_dZ_dt,
                                 t_Grid  = ith_t_Grid,
@@ -643,7 +697,7 @@ class SOME(LatentDynamics):
             if isinstance(ith_Z0, numpy.ndarray):
                 def f(t : float, z : numpy.ndarray, dz_dt : numpy.ndarray) -> numpy.ndarray:
                     t_eval  : numpy.ndarray = numpy.asarray([t], dtype = ith_t_Grid.dtype);
-                    RHS, _ = self._evaluate_rhs(Z = z.reshape(1, -1), dZ_dt = dz_dt.reshape(1, -1), t_Grid = t_eval, params = ith_params, t0 = t0, t_span = t_span);
+                    RHS, _, _ = self._evaluate_rhs(Z = z.reshape(1, -1), dZ_dt = dz_dt.reshape(1, -1), t_Grid = t_eval, params = ith_params, t0 = t0, t_span = t_span);
                     return RHS.reshape(-1);
             else:
                 if self.use_z_in_gate == False:
@@ -661,7 +715,7 @@ class SOME(LatentDynamics):
                         gate_dtype  = param.dtype;
 
                         t_eval  : torch.Tensor = torch.tensor([t], dtype = gate_dtype, device = gate_device);
-                        RHS, _  = self._evaluate_rhs(Z = z.reshape(1, -1), dZ_dt = dz_dt.reshape(1, -1), t_Grid = t_eval, params = ith_params, t0 = t0, t_span = t_span);
+                        RHS, _, _  = self._evaluate_rhs(Z = z.reshape(1, -1), dZ_dt = dz_dt.reshape(1, -1), t_Grid = t_eval, params = ith_params, t0 = t0, t_span = t_span);
                         return RHS.reshape(-1);
 
             # Solve the ODE for this single latent initial state.
@@ -708,24 +762,24 @@ class SOME(LatentDynamics):
         # Fetch the unmasked K, C tensors.
         unmasked_K : torch.Tensor = dict_['unmasked_K'];
         unmasked_C : torch.Tensor = dict_['unmasked_C'];
-        assert isinstance(unmasked_K, torch.Tensor) and unmasked_K.shape == (self.n_experts, self.n_z, self.n_z);
-        assert isinstance(unmasked_C, torch.Tensor) and unmasked_C.shape == (self.n_experts, self.n_z, self.n_z);
+        assert isinstance(unmasked_K, torch.Tensor) and unmasked_K.shape == (self.n_experts_D, self.n_z, self.n_z);
+        assert isinstance(unmasked_C, torch.Tensor) and unmasked_C.shape == (self.n_experts_V, self.n_z, self.n_z);
         self.unmasked_K = unmasked_K.detach().clone().requires_grad_(self.trainable);
         self.unmasked_C = unmasked_C.detach().clone().requires_grad_(self.trainable);
 
         # Do the same for unmasked b.
         if self.use_biases:
             unmasked_b = dict_['unmasked_b'];
-            assert isinstance(unmasked_b, torch.Tensor) and unmasked_b.shape == (self.n_experts, 1, self.n_z);
+            assert isinstance(unmasked_b, torch.Tensor) and unmasked_b.shape == (self.n_experts_D, 1, self.n_z);
             self.unmasked_b = unmasked_b.detach().clone().requires_grad_(self.trainable);
         else:
             self.unmasked_b = None;
 
         # Now fetch the K, C mask
         K_mask = dict_.get('K_mask', torch.ones_like(self.unmasked_K));
-        C_mask = dict_.get('C_mask', torch.ones_like(self.unmasked_K));
-        assert isinstance(K_mask, torch.Tensor) and K_mask.shape == (self.n_experts, self.n_z, self.n_z);
-        assert isinstance(C_mask, torch.Tensor) and C_mask.shape == (self.n_experts, self.n_z, self.n_z);
+        C_mask = dict_.get('C_mask', torch.ones_like(self.unmasked_C));
+        assert isinstance(K_mask, torch.Tensor) and K_mask.shape == (self.n_experts_D, self.n_z, self.n_z);
+        assert isinstance(C_mask, torch.Tensor) and C_mask.shape == (self.n_experts_V, self.n_z, self.n_z);
         self.K_mask = K_mask.detach().clone().to(device = self.unmasked_K.device, dtype = self.unmasked_K.dtype);
         self.C_mask = C_mask.detach().clone().to(device = self.unmasked_K.device, dtype = self.unmasked_K.dtype);
 
@@ -733,7 +787,7 @@ class SOME(LatentDynamics):
         if self.use_biases:
             assert self.unmasked_b is not None;
             b_mask = dict_.get('b_mask', torch.ones_like(self.unmasked_b));
-            assert isinstance(b_mask, torch.Tensor) and b_mask.shape == (self.n_experts, 1, self.n_z);
+            assert isinstance(b_mask, torch.Tensor) and b_mask.shape == (self.n_experts_D, 1, self.n_z);
             self.b_mask = b_mask.detach().clone().to(device = self.unmasked_b.device, dtype = self.unmasked_b.dtype);
         else:
             self.b_mask = None;
@@ -759,12 +813,13 @@ class SOME(LatentDynamics):
             params  : numpy.ndarray | torch.Tensor,
             *,
             t0      : float, 
-            t_span  : float) -> torch.Tensor:
+            t_span  : float) -> tuple[torch.Tensor, torch.Tensor]:
         r"""
         Evaluate gate weights on one time/state trajectory and one parameter value.
 
-        The returned tensor has shape (n_t, n_experts) and lives on the same device/dtype as the
-        gate network. Callers can cast it to the latent-state backend before evaluating experts.
+        The returned tensors have shape (n_t, n_experts_D) and (n_t, n_experts_V), respectively.
+        Both live on the same device/dtype as the gate network. Callers can cast it to the 
+        latent-state backend before evaluating experts.
 
 
         -------------------------------------------------------------------------------------------
@@ -802,9 +857,15 @@ class SOME(LatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------
 
-        weights : torch.Tensor, shape = (n_t, n_experts)
-           expert weights evaluated at all (t, params) pairs. The dtype and device match the 
-           gate-network parameters. Each row sums to one.
+        weights_D, weights_V 
+         
+        weights_D : torch.Tensor, shape = (n_t, n_experts_D)
+           displacement expert weights evaluated at all (t, params) pairs. The dtype and device 
+           match the gate-network parameters. Each row sums to one.
+        
+        weights_V : torch.Tensor, shape = (n_t, n_experts_V)
+           velocity expert weights evaluated at all (t, params) pairs. The dtype and device match 
+           the gate-network parameters. Each row sums to one.
         """
 
         # Setup 
@@ -869,20 +930,26 @@ class SOME(LatentDynamics):
         # Evaluate weights
 
         # Compute logits
-        logits : torch.Tensor = self.w(w_inputs);
+        logits : torch.Tensor = self.w(w_inputs);                   # (n_t, n_experts_D + n_experts_V)
+
+        # Split them into displacement, velocity components.
+        logits_D : torch.Tensor = logits[:, :self.n_experts_D]      # (n_t, n_experts_D)
+        logits_V : torch.Tensor = logits[:, -self.n_experts_V:]     # (n_t, n_experts_V)
 
         # Compute weights by applying a soft max to the logits.
-        weights : torch.Tensor = torch.softmax(logits, dim = 1);
+        weights_D : torch.Tensor = torch.softmax(logits_D, dim = 1);
+        weights_V : torch.Tensor = torch.softmax(logits_V, dim = 1);
 
         # All done :) 
-        return weights;
+        return weights_D, weights_V;
 
 
     def _effective_coefficients(
             self,
-            weights : torch.Tensor,
-            device  : torch.device,
-            dtype   : torch.dtype) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+            weights_D   : torch.Tensor,
+            weights_V   : torch.Tensor,
+            device      : torch.device,
+            dtype       : torch.dtype) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         r"""
         Collapse expert coefficients into one affine system per time sample.
 
@@ -897,10 +964,14 @@ class SOME(LatentDynamics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        weights : torch.Tensor, shape = (n_t, n_experts)
-            Expert weights for one trajectory. This tensor may live on a different device/dtype
-            than the requested output; it is cast to `device` and `dtype` internally.
-
+        weights_D : torch.Tensor, shape = (n_t, n_experts_D)
+            Displacement expert weights for one trajectory. This tensor may live on a different 
+            device/dtype than the requested output; it is cast to `device` and `dtype` internally.
+        
+        weights_V : torch.Tensor, shape = (n_t, n_experts_V)
+            Velocity experts weights for one trajectory. This tensor may live on a different 
+            device/dtype than the requested output; it is cast to `device` and `dtype` internally.
+            
         device : torch.device
             Destination device for the returned effective coefficients.
 
@@ -922,24 +993,25 @@ class SOME(LatentDynamics):
             Time-dependent effective affine shifts, on `device` with dtype `dtype`.
         """
 
-        weights = weights.to(device = device, dtype = dtype);
+        weights_D = weights_D.to(device = device, dtype = dtype);
+        weights_V = weights_V.to(device = device, dtype = dtype);
 
         # Compute effective K.
         K       : torch.Tensor = self.K.to(device = device, dtype = dtype);
-        K_flat  : torch.Tensor = K.reshape(self.n_experts, self.n_z*self.n_z);
-        K_bar   : torch.Tensor = (weights @ K_flat).reshape(weights.shape[0], self.n_z, self.n_z);
+        K_flat  : torch.Tensor = K.reshape(self.n_experts_D, self.n_z*self.n_z);
+        K_bar   : torch.Tensor = (weights_D @ K_flat).reshape(weights_D.shape[0], self.n_z, self.n_z);
 
         # Do the same for C.
         C       : torch.Tensor = self.C.to(device = device, dtype = dtype);
-        C_flat  : torch.Tensor = C.reshape(self.n_experts, self.n_z*self.n_z);
-        C_bar   : torch.Tensor = (weights @ C_flat).reshape(weights.shape[0], self.n_z, self.n_z);
+        C_flat  : torch.Tensor = C.reshape(self.n_experts_V, self.n_z*self.n_z);
+        C_bar   : torch.Tensor = (weights_V @ C_flat).reshape(weights_V.shape[0], self.n_z, self.n_z);
 
         # Compute effective b, if we need to.
         if self.b is None:
-            b_bar                  = torch.zeros((weights.shape[0], self.n_z), dtype = dtype, device = device);
+            b_bar                  = torch.zeros((weights_D.shape[0], self.n_z), dtype = dtype, device = device);
         else:
-            b                      = self.b.to(device = device, dtype = dtype).reshape(self.n_experts, self.n_z);
-            b_bar   : torch.Tensor = weights @ b;
+            b                      = self.b.to(device = device, dtype = dtype).reshape(self.n_experts_D, self.n_z);
+            b_bar   : torch.Tensor = weights_D @ b;
 
         # All done :) 
         return K_bar, C_bar, b_bar;
@@ -955,7 +1027,7 @@ class SOME(LatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------
 
-        K : torch.Tensor, shape = (n_experts, n_z, n_z)
+        K : torch.Tensor, shape = (n_experts_D, n_z, n_z)
             Expert matrices with masked entries set to zero.
         """
 
@@ -974,7 +1046,7 @@ class SOME(LatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------
 
-        C : torch.Tensor, shape = (n_experts, n_z, n_z)
+        C : torch.Tensor, shape = (n_experts_V, n_z, n_z)
             Expert matrices with masked entries set to zero.
         """
 
@@ -993,7 +1065,7 @@ class SOME(LatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------
 
-        b : torch.Tensor or None, shape = (n_experts, 1, n_z)
+        b : torch.Tensor or None, shape = (n_experts_D, 1, n_z)
             Expert biases with masked entries set to zero. Returns None when biases are disabled.
         """
 
@@ -1006,7 +1078,7 @@ class SOME(LatentDynamics):
 
 
     @torch.no_grad()
-    def _update_mask(self) -> tuple[int, int]:
+    def _update_mask(self) -> tuple[int, int, int, int]:
         r"""
         Permanently mask small expert coefficients.
 
@@ -1019,7 +1091,16 @@ class SOME(LatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------
 
-        Nothing!
+        n_active_D, n_active_V, n_total_D, n_total_V
+
+        n_active_D : int 
+            The number of `active` components in the displacement experts
+        n_active_V : int 
+            The number of `active` components in the velocity experts
+        n_total_D : int 
+            The total number of components in the displacement experts
+        n_total_V : int 
+            The total number of components in the velocity experts
         """
 
         assert self.mask_threshold is not None;
@@ -1039,8 +1120,10 @@ class SOME(LatentDynamics):
         # Update K, C.
         self.unmasked_K.data.mul_(self.K_mask);
         self.unmasked_C.data.mul_(self.C_mask);
-        n_active : int = int(self.K_mask.sum().item()) + int(self.C_mask.sum().item());
-        n_total  : int = int(self.K_mask.numel()) + int(self.C_mask.numel());
+        n_active_D : int = int(self.K_mask.sum().item());
+        n_active_V : int = int(self.C_mask.sum().item());
+        n_total_D  : int = int(self.K_mask.numel());
+        n_total_V  : int = int(self.C_mask.numel());
 
         # Update b, if it exists
         if self.unmasked_b is not None:
@@ -1051,12 +1134,13 @@ class SOME(LatentDynamics):
             b_keep      : torch.Tensor = (b.abs() >= self.mask_threshold).to(dtype = self.unmasked_b.dtype);
             self.b_mask = (self.b_mask * b_keep).contiguous();
             self.unmasked_b.data.mul_(self.b_mask);
-            n_active   += int(self.b_mask.sum().item());
-            n_total    += int(self.b_mask.numel());
+            n_active_D   += int(self.b_mask.sum().item());
+            n_total_D    += int(self.b_mask.numel());
 
         # Report masking information 
-        LOGGER.info("%d/%d coefficients are still active across %d experts" % (n_active, n_total, self.n_experts));
-        return n_active, n_total;
+        LOGGER.info("%d/%d K coefficients active across %d displacement experts" % (n_active_D, n_total_D, self.n_experts_D));
+        LOGGER.info("%d/%d C coefficients active across %d velocity experts" % (n_active_V, n_total_V, self.n_experts_V));
+        return n_active_D, n_active_V, n_total_D, n_total_V;
 
 
     def _make_time_only_torch_rhs(
@@ -1154,14 +1238,14 @@ class SOME(LatentDynamics):
 
         # Evaluate all gate weights and collapse all effective affine systems in one batched call.
         # Do not use no_grad: training may differentiate through simulated trajectories.
-        weights : torch.Tensor = self._weights(
+        weights_D, weights_V    = self._weights(
             stage_t_Grid,
             dummy_Z,
             dummy_dZ_dt,
             params,
             t0      = t0,
             t_span  = t_span);
-        K_bar, C_bar, b_bar = self._effective_coefficients(weights, device, dtype);
+        K_bar, C_bar, b_bar = self._effective_coefficients(weights_D, weights_V, device, dtype);
 
         # Split K, C, b into lists (speeds up indexing)
         K_slices = list(torch.unbind(K_bar, dim=0))
@@ -1185,7 +1269,7 @@ class SOME(LatentDynamics):
             t_Grid  : numpy.ndarray | torch.Tensor,
             params  : numpy.ndarray | torch.Tensor,
             t0      : float | torch.Tensor,
-            t_span  : float | torch.Tensor) -> tuple[numpy.ndarray | torch.Tensor, torch.Tensor]:
+            t_span  : float | torch.Tensor) -> tuple[numpy.ndarray | torch.Tensor, torch.Tensor, torch.Tensor]:
         r"""
         Evaluate SOME's right-hand side and return the corresponding gate weights.
 
@@ -1229,8 +1313,11 @@ class SOME(LatentDynamics):
         RHS : numpy.ndarray | torch.Tensor, shape = Z.shape
             SOME right-hand-side values; will have the same type as Z. 
 
-        weights : torch.Tensor, shape = (n_t, n_experts)
-            The expert weights at each time step.
+        weights_D : torch.Tensor, shape = (n_t, n_experts_D)
+            The displacement expert weights at each time step. 
+        
+        weights_V : torch.Tensor, shape = (n_t, n_experts_V)
+            The velocity expert weights at each time step.
         """
 
         # Check and normalize the latent-state shape. 
@@ -1244,12 +1331,12 @@ class SOME(LatentDynamics):
 
         if isinstance(Z, numpy.ndarray):
             with torch.no_grad():
-                weights         : torch.Tensor = self._weights(t_Grid = t_Grid, Z = Z, dZ_dt = dZ_dt, params = params, t0 = t0, t_span = t_span);
+                weights_D, weights_V    = self._weights(t_Grid = t_Grid, Z = Z, dZ_dt = dZ_dt, params = params, t0 = t0, t_span = t_span);
                 if Z.dtype == numpy.dtype(numpy.float64):
                     dtype = torch.float64;
                 else:
                     dtype = torch.float32;
-                K_bar, C_bar, b_bar     = self._effective_coefficients(weights, torch.device("cpu"), dtype);
+                K_bar, C_bar, b_bar     = self._effective_coefficients(weights_D, weights_V, torch.device("cpu"), dtype);
                 K_np : numpy.ndarray    = K_bar.detach().cpu().numpy().astype(Z.dtype, copy = False);
                 C_np : numpy.ndarray    = C_bar.detach().cpu().numpy().astype(Z.dtype, copy = False);
                 b_np : numpy.ndarray    = b_bar.detach().cpu().numpy().astype(Z.dtype, copy = False);
@@ -1261,12 +1348,12 @@ class SOME(LatentDynamics):
             #   Z[..., None] : (n_t, n_z, 1)
             # numpy.matmul returns (n_t, n_z, 1), then squeeze gives (n_t, n_z).
             RHS : numpy.ndarray = numpy.matmul(K_np, Z[..., None]).squeeze(-1) + numpy.matmul(C_np, dZ_dt[..., None]).squeeze(-1) + b_np;
-            return RHS, weights;
+            return RHS, weights_D, weights_V;
 
         else: 
             assert isinstance(Z, torch.Tensor);
-            weights         : torch.Tensor  = self._weights(t_Grid = t_Grid, Z = Z, dZ_dt = dZ_dt, params = params, t0 = t0, t_span = t_span);
-            K_bar, C_bar, b_bar             = self._effective_coefficients(weights, Z.device, Z.dtype);
+            weights_D, weights_V    = self._weights(t_Grid = t_Grid, Z = Z, dZ_dt = dZ_dt, params = params, t0 = t0, t_span = t_span);
+            K_bar, C_bar, b_bar     = self._effective_coefficients(weights_D, weights_V, Z.device, Z.dtype);
 
             # For each time t, compute K_bar[t] @ Z[t] + C_bar[t] @ dZ_dt[t] + b. 
             # Shapes:
@@ -1275,4 +1362,4 @@ class SOME(LatentDynamics):
             #   Z[..., None] : (n_t, n_z, 1)
             # torch.bmm returns (n_t, n_z, 1), then squeeze gives (n_t, n_z).
             RHS : torch.Tensor = torch.bmm(K_bar, Z.unsqueeze(-1)).squeeze(-1) + torch.bmm(C_bar, dZ_dt.unsqueeze(-1)).squeeze(-1) + b_bar;
-            return RHS, weights;
+            return RHS, weights_D, weights_V;

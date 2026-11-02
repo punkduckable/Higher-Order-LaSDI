@@ -488,8 +488,8 @@ class LatentDynamicsBaseConfig(ConfigBase):
             "switch_w" : {"LD", "coef", "stab"},
             "cable"    : {"LD", "coef", "diversity", "tail"},
             "cable_w"  : {"LD", "coef", "diversity", "tail"},
-            "some"     : {"LD", "coef", "diversity", "tail"},
-            "some_w"   : {"LD", "coef", "diversity", "tail"},
+            "some"     : {"LD", "coef", "diversity/D", "diversity/V", "tail/D", "tail/V"},
+            "some_w"   : {"LD", "coef", "diversity/D", "diversity/V", "tail/D", "tail/V"},
         };
 
         expected_keys = expected_keys_by_type.get(self.type);
@@ -531,12 +531,12 @@ class WeakLatentDynamicsSettings(ConfigBase):
 
 
 class CABLELatentDynamicsSettings(ConfigBase):
-    """Mixture-of-experts latent dynamics settings shared by CABLE and SOME."""
+    """Mixture-of-experts latent dynamics settings used by CABLE."""
 
     # How many experts should we use?
     n_experts: PositiveInt 
 
-    # Roughly how many experts do we want to be active each step? CABLE/SOME impose soft
+    # Roughly how many experts do we want to be active each step? CABLE impose soft
     # penalties to concentrate all weight in <= n_active experts at each time/parameter. Must 
     # also be <= n_experts
     n_active : PositiveInt 
@@ -602,6 +602,84 @@ class CABLELatentDynamicsSettings(ConfigBase):
         return self;
 
 
+class SOMELatentDynamicsSettings(ConfigBase):
+    """Mixture-of-experts latent dynamics settings used by SOME."""
+
+    # How many displacement ((z, z', t) -> Kz + b) and velocity ((z, z', t) -> Cz') experts should
+    # we use?
+    n_experts_D: PositiveInt 
+    n_experts_V: PositiveInt 
+
+    # Roughly how many displacement, velocity experts do we want to be active each step? SOME 
+    # impose soft penalties to concentrate all weight in <= n_active_D displacement experts and 
+    # <= n_active_V velocity experts at each time/parameter. Must have n_active_D <= n_experts_D
+    # and n_active_V <= n_experts_V.
+    n_active_D : PositiveInt 
+    n_active_V : PositiveInt 
+
+    # Hidden widths of the gate network (input dim is 1 + n_param and the output is n_experts).
+    hidden_widths: list[PositiveInt] = Field(min_length = 1)
+
+    # Activations to use; the i'th activation is applied just after the i'th layer. Note that
+    # we use a soft-max on the final layer.
+    activations: ActivationSpec
+
+    # Should each expert include a bias?
+    use_biases : bool
+
+    # Should we include the LD state in the gate inputs? If not, we only use the time and
+    # parameter values.
+    use_z_in_gate : bool = False
+
+    # Which (vector) norm should we use for the coefficient loss? This is applied to the flattened
+    # expert coefficients for each expert.
+    coef_norm : Literal['l1', 'l2']
+
+    # What expert weight counts as "engaged"? Used for metrics tracking.
+    eps_engaged : PositiveFloat = 1.0e-3
+
+    # Should we periodically mask out coefficients that get too small? If so, once a coefficient
+    # is masked, it will never be unmasked.
+    use_mask : bool
+
+    # If masking is enabled, below what threshold should we mask out a value?
+    mask_threshold : PositiveFloat | None = None
+
+    # If masking is enabled, when should we start computing the mask?
+    first_mask_step : PositiveInt | None = None
+
+    # If masking is enabled, how frequently should we apply it after enabling it?
+    mask_update_freq : PositiveInt | None = None  
+
+    @model_validator(mode = "after")
+    def validate_activations_and_active_count(self) -> "SOMELatentDynamicsSettings":
+        # Ensure the number of activations matches the number of hidden layers.
+        _check_activation_spec(
+            self.activations,
+            n_layers    = len(self.hidden_widths),
+            field_name  = "activations",
+        )
+
+        # Check that n_active_D <= n_experts_D, n_active_V <= n_experts_V
+        if self.n_active_D > self.n_experts_D:
+            raise ValueError("n_active_D = %d, but n_experts_D = %d." % (self.n_active_D, self.n_experts_D));
+        if self.n_active_V > self.n_experts_V:
+            raise ValueError("n_active_V = %d, but n_experts_V = %d." % (self.n_active_V, self.n_experts_V));
+
+        # If masking is enabled, make sure `mask_threshold`, `first_mask_step`, and 
+        # `mask_update_freq` are enabled
+        if self.use_mask:
+            if self.mask_threshold is None:
+                raise ValueError("self.mask_threshold is None, even though masking is enabled.");
+            if self.first_mask_step is None:
+                raise ValueError("self.first_mask_step is None, even though masking is enabled.");
+            if self.mask_update_freq is None:
+                raise ValueError("self.mask_update_freq is None, even though masking is enabled.");
+
+        # All done :) 
+        return self;
+
+
 class SINDyLatentDynamicsConfig(InterpolatableLatentDynamicsConfig):
     type        : Literal["sindy"]
     sindy       : StrongInterpolatableLatentDynamicsSettings
@@ -645,12 +723,12 @@ class WeakCABLELatentDynamicsConfig(LatentDynamicsBaseConfig):
 
 class SOMELatentDynamicsConfig(LatentDynamicsBaseConfig):
     type        : Literal["some"]
-    some        : CABLELatentDynamicsSettings
+    some        : SOMELatentDynamicsSettings
 
 
 class WeakSOMELatentDynamicsConfig(LatentDynamicsBaseConfig):
     type        : Literal["some_w"]
-    some        : CABLELatentDynamicsSettings
+    some        : SOMELatentDynamicsSettings
     weak        : WeakLatentDynamicsSettings
 
 
