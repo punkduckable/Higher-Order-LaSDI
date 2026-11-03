@@ -30,6 +30,21 @@ def test_all_example_configs_validate():
         assert validated.physics.type
 
 
+def test_telegraphers_profile_config_captures_mature_rollout_in_short_run():
+    config = validate_experiment_config(_load_example("Telegraphers_Profile.yml"))
+    profiler = config.trainer.profiler
+    rollout = config.trainer.Second_Order_Rollout
+
+    assert config.trainer.max_iter == 4
+    assert config.trainer.n_iter == 4
+    assert profiler.enabled is True
+    assert profiler.wait_epochs == 1
+    assert profiler.warmup_epochs == 1
+    assert profiler.active_epochs == 1
+    assert profiler.num_repeats == 1
+    assert rollout.p_rollout_init == rollout.max_p_rollout == 0.5
+
+
 def test_schema_rejects_unknown_keys():
     config = _load_example("Burgers2D.yml")
     config["trainer"]["typo_learning_rate"] = 1.0

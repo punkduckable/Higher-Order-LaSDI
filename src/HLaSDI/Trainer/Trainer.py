@@ -1032,6 +1032,10 @@ class Trainer:
                     dir_name    = self.results_dir,
                     worker_name = "HLaSDI_train",
                 ),
+                record_shapes   = True,
+                profile_memory  = True,
+                with_stack      = True,
+                with_flops      = True,
             ) as prof:
                 self.Iterate(start_iter = start_iter, end_iter = end_iter, profiler = prof);
 
@@ -1064,8 +1068,10 @@ class Trainer:
 
             # Write profile results to file.
             profiler_table_str: str = "\n".join(profiler_results_list)
-            with open("./HLaSDI_train_profile.txt", "a", encoding="utf-8") as handle:
+            profiler_table_path: str = os.path.join(self.results_dir, "HLaSDI_train_profile.txt");
+            with open(profiler_table_path, "a", encoding="utf-8") as handle:
                 handle.write(profiler_table_str)
+            LOGGER.info("Wrote profiler summary to %s" % profiler_table_path);
 
             # Now print the profiling results!
             print(profiler_table_str, flush = True);
