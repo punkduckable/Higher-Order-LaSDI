@@ -844,7 +844,7 @@ class First_Order_Rollout(Trainer):
             # intentionally excluded from the round's best-loss comparison.
             if checkpoint_schedule.allows_checkpoint(epochs_in_round):
                 if loss_value < best_loss:
-                    LOGGER.info("Got a new lowest final-curriculum loss (%f) on epoch %d" % (loss_value, iter + 1));
+                    LOGGER.info("Got a new lowest loss (%f) on epoch %d" % (loss_value, iter + 1));
                     self._Save_Checkpoint(encoder_decoder = encoder_decoder_device,
                                           iter            = int(iter));
                     checkpoint_saved      = True;
