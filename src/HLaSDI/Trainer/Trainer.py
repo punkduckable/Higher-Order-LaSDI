@@ -8,6 +8,8 @@ import  time;
 import  contextlib;
 import  json;
 import  logging;
+import  math;
+from    dataclasses                         import  dataclass;
 from    pathlib                             import Path;
 from    typing                              import Any, ContextManager;
 
@@ -22,6 +24,35 @@ from    HLaSDI.Schemas                     import  BaseTrainerConfig;
 
 # Setup Logger
 LOGGER : logging.Logger = logging.getLogger(__name__);
+
+
+
+@dataclass(frozen = True)
+class CheckpointSchedule:
+    r"""Final-curriculum checkpoint eligibility for one training round.
+
+    Epoch offsets are zero based within the current round. For example, an offset of 40 means
+    checkpointing first becomes eligible on the reported round epoch 41.
+    """
+
+    round_epochs            : int
+    warmup_ready_offset     : int
+    rollout_ready_offset    : int
+    IC_rollout_ready_offset : int
+    first_eligible_offset   : int
+    rollout_enabled         : bool
+    IC_rollout_enabled      : bool
+
+    def allows_checkpoint(self, epoch_offset : int) -> bool:
+        r"""Return whether `epoch_offset` belongs to the final curriculum stage."""
+
+        return self.first_eligible_offset <= epoch_offset < self.round_epochs;
+
+    @property
+    def n_eligible_epochs(self) -> int:
+        r"""Return the number of checkpoint-eligible epochs in the round."""
+
+        return max(0, self.round_epochs - self.first_eligible_offset);
 
 
 
@@ -810,6 +841,154 @@ class Trainer:
     # ---------------------------------------------------------------------------------------------
     # Checkpointing
     # ---------------------------------------------------------------------------------------------
+
+    def prepare_checkpoint_schedule(self, start_iter : int, end_iter : int) -> CheckpointSchedule:
+        r"""
+        Build, report, and validate the checkpoint schedule for one training round.
+
+        A training epoch is eligible to produce a checkpoint only after learning-rate warmup is
+        complete and every enabled rollout curriculum has reached its maximum. A rollout
+        curriculum is enabled when its
+        corresponding loss weight is positive. Disabled curricula, and enabled curricula whose
+        initial rollout proportion is already at its configured maximum, impose no delay.
+
+        Curriculum readiness is calculated with the same zero-based epoch offsets used by the
+        rollout trainers. The resulting schedule is logged with one-based round and global epoch
+        numbers for readability. If the round ends before checkpointing can become active, this
+        method reports the empty schedule and raises a ``ValueError`` before optimization begins.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        start_iter : int
+            Zero-based global iteration offset at the start of the training round.
+
+        end_iter : int
+            Exclusive global iteration bound for the training round. Thus, the round contains
+            ``end_iter - start_iter`` epochs. Must be greater than ``start_iter``.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        schedule : CheckpointSchedule
+            The checkpoint eligibility schedule for the training round. Epoch offsets stored in
+            the schedule are zero based within the round.
+
+
+        -------------------------------------------------------------------------------------------
+        Raises
+        -------------------------------------------------------------------------------------------
+
+        AssertionError
+            If the training round does not contain at least one epoch.
+
+        ValueError
+            If warmup or an enabled rollout curriculum prevents checkpointing during every epoch
+            in the round.
+        """
+
+        # -----------------------------------------------------------------------------------------
+        # First, build the checkpoint schedule. 
+
+        # Determine the number of epochs in this round.
+        round_epochs : int = end_iter - start_iter;
+        assert round_epochs > 0, "a training round must contain at least one epoch";
+
+        # Determine if we are using either rollout loss.
+        rollout_enabled    : bool = self.loss_weights.get('rollout', 0.0) > 0.0;
+        IC_rollout_enabled : bool = self.loss_weights.get('IC_rollout', 0.0) > 0.0;
+
+        # Determine the first step when we reach the max rollout duration. 
+        rollout_ready_offset : int = 0;
+        if rollout_enabled and self.p_rollout_init < self.max_p_rollout:
+            rollout_updates_exact   : float = (self.max_p_rollout - self.p_rollout_init)/self.dp_per_update;
+            rollout_tolerance       : float = 1.0e-12*max(1.0, abs(rollout_updates_exact));
+            rollout_n_updates       : int   = int(math.ceil(rollout_updates_exact - rollout_tolerance));
+            rollout_ready_offset            = rollout_n_updates*self.rollout_update_freq;
+
+        # Now do the same for IC rollout.
+        IC_rollout_ready_offset : int = 0;
+        if IC_rollout_enabled and self.p_IC_rollout_init < self.max_p_IC_rollout:
+            IC_rollout_updates_exact    : float = (self.max_p_IC_rollout - self.p_IC_rollout_init)/self.IC_dp_per_update;
+            IC_rollout_tolerance        : float = 1.0e-12*max(1.0, abs(IC_rollout_updates_exact));
+            IC_rollout_n_updates        : int   = int(math.ceil(IC_rollout_updates_exact - IC_rollout_tolerance));
+            IC_rollout_ready_offset             = IC_rollout_n_updates*self.IC_rollout_update_freq;
+
+        # Now, determine the first step beyond the warmup when both rollouts will be at their 
+        # max duration. 
+        first_eligible_offset : int = max(
+            self.warmup_epochs,
+            rollout_ready_offset,
+            IC_rollout_ready_offset,
+        );
+
+        schedule : CheckpointSchedule = CheckpointSchedule(
+            round_epochs            = round_epochs,
+            warmup_ready_offset     = self.warmup_epochs,
+            rollout_ready_offset    = rollout_ready_offset,
+            IC_rollout_ready_offset = IC_rollout_ready_offset,
+            first_eligible_offset   = first_eligible_offset,
+            rollout_enabled         = rollout_enabled,
+            IC_rollout_enabled      = IC_rollout_enabled);
+
+        # -----------------------------------------------------------------------------------------
+        # Next, report the schedule. 
+
+        lines : list[str] = [
+            "Checkpoint curriculum schedule for this training round:",
+            "  Round epochs:                         %d" % schedule.round_epochs,
+            "  Warmup permits checkpointing at:      round epoch %d" % (schedule.warmup_ready_offset + 1),
+        ];
+
+        if schedule.rollout_enabled == False:
+            lines.append("  Rollout:                              disabled; does not restrict checkpointing");
+        elif schedule.rollout_ready_offset == 0:
+            lines.append("  Rollout:                              starts at max %.6f; does not delay checkpointing" % self.max_p_rollout);
+        else:
+            lines.append("  Rollout reaches max %.6f at:      round epoch %d" % (self.max_p_rollout, schedule.rollout_ready_offset + 1));
+
+        if schedule.IC_rollout_enabled == False:
+            lines.append("  IC rollout:                           disabled; does not restrict checkpointing");
+        elif schedule.IC_rollout_ready_offset == 0:
+            lines.append("  IC rollout:                           starts at max %.6f; does not delay checkpointing" % self.max_p_IC_rollout);
+        else:
+            lines.append("  IC rollout reaches max %.6f at:   round epoch %d" % (self.max_p_IC_rollout, schedule.IC_rollout_ready_offset + 1));
+
+        if schedule.n_eligible_epochs > 0:
+            first_round_epoch  : int = schedule.first_eligible_offset + 1;
+            first_global_epoch : int = start_iter + first_round_epoch;
+            lines.extend([
+                "  Checkpointing enabled for:            round epochs %d-%d" % (first_round_epoch, schedule.round_epochs),
+                "  Corresponding global epochs:          %d-%d" % (first_global_epoch, end_iter),
+                "  Number of checkpoint-eligible epochs: %d" % schedule.n_eligible_epochs,
+            ]);
+        else:
+            lines.extend([
+                "  Checkpointing enabled for:            none",
+                "  Corresponding global epochs:          none",
+                "  Number of checkpoint-eligible epochs: 0",
+            ]);
+
+        LOGGER.info("\n".join(lines));
+
+        # -----------------------------------------------------------------------------------------
+        # Wrap up and return the schedule
+        
+        if schedule.n_eligible_epochs == 0:
+            raise ValueError(
+                "Checkpointing cannot become active in this %d-epoch round. The first epoch "
+                "permitted by warmup and all enabled rollout curricula would be round epoch %d. "
+                "Increase the curriculum increment, reduce its update frequency or maximum, "
+                "reduce warmup_epochs, or increase the number of epochs per round."
+                % (schedule.round_epochs, schedule.first_eligible_offset + 1)
+            );
+
+        return schedule;
+
 
     def _Save_Checkpoint(self, encoder_decoder : EncoderDecoder, iter : int) -> str:
         """

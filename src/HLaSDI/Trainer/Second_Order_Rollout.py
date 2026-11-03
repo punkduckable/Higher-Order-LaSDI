@@ -339,6 +339,13 @@ class Second_Order_Rollout(Trainer):
         # -------------------------------------------------------------------------------------
         # Setup. 
 
+        # Only final-curriculum epochs may compete for the best checkpoint. Build and report the
+        # schedule before allocating optimizer/device state so an invalid round fails immediately.
+        checkpoint_schedule = self.prepare_checkpoint_schedule(
+            start_iter = start_iter,
+            end_iter   = end_iter,
+        );
+
         # Map trainable state to self's device before constructing the optimizer.  This keeps
         # checkpoint-restored LD coefficients from staying on CPU during a GPU training round.
         device                  : str                       = self.device;
@@ -360,10 +367,9 @@ class Second_Order_Rollout(Trainer):
         epochs_in_round         : int               = 0;  # Will be updated each iteration
         p_rollout               : float             = min(self.max_p_rollout,    self.p_rollout_init    + self.dp_per_update   *(epochs_in_round//self.rollout_update_freq));
         p_IC_rollout            : float             = min(self.max_p_IC_rollout, self.p_IC_rollout_init + self.IC_dp_per_update*(epochs_in_round//self.IC_rollout_update_freq));
-        best_loss               : float             = numpy.inf;                    # Stores the lowest loss we get in this round of training.
-        checkpoint_saved        : bool              = False;                        # Ensure we save at least one checkpoint per round.
-        
-        last_iter_idx             : int | None         = None;
+        best_loss               : float             = numpy.inf;                    # Lowest final-curriculum loss in this round.
+        checkpoint_saved        : bool              = False;                        # Ensure the eligible window produces a checkpoint.
+
 
         # Strong-form derivative losses are usually not reliable when training data is noisy.
         if(self.noise_ratio > 0):
@@ -966,13 +972,12 @@ class Second_Order_Rollout(Trainer):
 
 
 
-            # Record coefficient scale and the most recent epoch index for fallback checkpointing.
+            # Record coefficient scale for reporting.
             if isinstance(self.latent_dynamics, InterpolatableLatentDynamics):
                 with torch.no_grad():
                     coef_tensors_report = self.latent_dynamics.parameters();
                     train_coefs_flat_report = torch.cat([c.reshape(-1) for c in coef_tensors_report]);
                     max_train_coef = float(torch.abs(train_coefs_flat_report).max().item());
-            last_iter_idx = int(iter);
 
 
 
@@ -1026,22 +1031,24 @@ class Second_Order_Rollout(Trainer):
             flushed_metrics = self._flush_metrics_cache(iter + 1);
             loss_value = flushed_metrics["loss/total"];
 
-            # Check if we hit a new minimum loss. If so, make a checkpoint, record the loss and 
-            # the iteration number. 
-            # NOTE: Skip checkpointing during warmup period to avoid saving "lucky" early epochs
-            # that benefit from distribution shift before encoder_decoder has adapted.
-            if loss_value < best_loss:
-                if epochs_in_round >= self.warmup_epochs:
-                    LOGGER.info("Got a new lowest loss (%f) on epoch %d" % (loss_value, iter + 1));
+            # Compare checkpoints only after every enabled rollout curriculum has reached its
+            # configured maximum. Losses before this point belong to an easier objective and are
+            # intentionally excluded from the round's best-loss comparison.
+            if checkpoint_schedule.allows_checkpoint(epochs_in_round):
+                if loss_value < best_loss:
+                    LOGGER.info("Got a new lowest final-curriculum loss (%f) on epoch %d" % (loss_value, iter + 1));
                     self._Save_Checkpoint(encoder_decoder = encoder_decoder_device,
                                           iter            = int(iter));
                     checkpoint_saved      = True;
 
                     self.best_epoch       = int(iter);
                     best_loss             = loss_value;
-                else:
-                    LOGGER.debug("Skipping checkpoint during warmup period (epoch %d/%d in round, warmup ends at %d)" % 
-                               (epochs_in_round, end_iter - start_iter, self.warmup_epochs));
+            else:
+                LOGGER.debug(
+                    "Skipping checkpoint before the final curriculum stage (round epoch %d/%d; "
+                    "checkpointing starts at round epoch %d)"
+                    % (epochs_in_round + 1, checkpoint_schedule.round_epochs, checkpoint_schedule.first_eligible_offset + 1)
+                );
             # -------------------------------------------------------------------------------------
             # Report Results from this iteration 
 
@@ -1068,14 +1075,12 @@ class Second_Order_Rollout(Trainer):
             if profiler is not None:
                 profiler.step();
         
-        # Ensure we wrote a checkpoint for this round. If warmup prevented checkpointing, fall
-        # back to saving the final epoch of this round.
+        # The schedule guarantees at least one eligible epoch, and the first finite eligible loss
+        # must beat best_loss = infinity. Do not silently save an incomparable fallback model.
         if checkpoint_saved == False:
-            assert last_iter_idx is not None;
-            LOGGER.warning("No checkpoint saved during this round (likely warmup-only). Saving final epoch checkpoint instead.");
-            self._Save_Checkpoint(encoder_decoder = encoder_decoder_device,
-                                  iter            = int(last_iter_idx));
-            self.best_epoch       = int(last_iter_idx);
+            raise RuntimeError(
+                "No checkpoint was saved despite a non-empty final-curriculum checkpoint window."
+            );
 
         # All done!
         return;
