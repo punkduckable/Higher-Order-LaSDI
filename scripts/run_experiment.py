@@ -21,14 +21,14 @@ import  time;
 
 import  numpy;
 
-from    HLaSDI.EncoderDecoder              import  EncoderDecoder;
+from    HLaSDI.EncoderDecoder       import  EncoderDecoder;
 from    HLaSDI.ParameterSpace       import  ParameterSpace;
-from    HLaSDI.Physics                     import  Physics;
+from    HLaSDI.Physics              import  Physics;
 from    HLaSDI.Enums                import  NextStep;
-from    HLaSDI.LatentDynamics              import  LatentDynamics;
-from    HLaSDI.Trainer                     import  Trainer;
+from    HLaSDI.LatentDynamics       import  LatentDynamics;
+from    HLaSDI.Trainer              import  Trainer;
 from    HLaSDI.Initialize           import  Initialize_Trainer;
-from    HLaSDI.Sample                      import  Sampler;
+from    HLaSDI.Sample               import  Sampler;
 from    HLaSDI.Schemas              import  validate_experiment_config;
 from    HLaSDI.Utilities.Logging    import  Initialize_Logger, Log_Dictionary;
 

@@ -303,7 +303,7 @@ def test_damped_spring_weak_simulate_uses_native_K_C_b_names():
     params = numpy.array([[0.25]])
     ld.set_train_coefs(params[0], coefs, torch.device("cpu"))
 
-    D, V = ld.simulate(IC=[[D0, V0]], t_Grid=[t], params=params)[0]
+    D, V = ld.simulate(IC=[[D0, V0]], t_Grid=[t], params=params, time_domain=[t])[0]
 
     assert D.shape == (3, 1)
     assert V.shape == (3, 1)
@@ -321,7 +321,7 @@ def test_sindy_simulate_handles_multiple_parameters_without_recursion():
     for i in range(params.shape[0]):
         ld.set_train_coefs(params[i, :], coefs[i], torch.device("cpu"))
 
-    Z = ld.simulate(IC=IC, t_Grid=t_Grid, params=params)
+    Z = ld.simulate(IC=IC, t_Grid=t_Grid, params=params, time_domain=t_Grid)
 
     assert len(Z) == 2
     assert Z[0][0].shape == (3, 1)
@@ -351,12 +351,12 @@ def test_interpolatable_simulate_uses_train_coefs_before_interpolator():
     train_params = numpy.array([[0.25]])
     ld.set_train_coefs(train_params[0], {"A": torch.zeros(1, 1), "b": 3.0 * torch.ones(1)}, torch.device("cpu"))
 
-    Z_train = ld.simulate(IC=[[torch.zeros(1)]], t_Grid=[torch.tensor([0.0, 0.1])], params=train_params, sample=True)[0][0]
+    Z_train = ld.simulate(IC=[[torch.zeros(1)]], t_Grid=[torch.tensor([0.0, 0.1])], params=train_params, time_domain=[torch.tensor([0.0, 0.1])], sample=True)[0][0]
     assert torch.allclose(Z_train[-1, 0], torch.tensor(0.3), atol=1.0e-6)
     assert dummy.sample_calls == 0
 
     test_params = numpy.array([[0.75]])
-    Z_test = ld.simulate(IC=[[torch.zeros(1)]], t_Grid=[torch.tensor([0.0, 0.1])], params=test_params, sample=False)[0][0]
+    Z_test = ld.simulate(IC=[[torch.zeros(1)]], t_Grid=[torch.tensor([0.0, 0.1])], params=test_params, time_domain=[torch.tensor([0.0, 0.1])], sample=False)[0][0]
     assert torch.allclose(Z_test[-1, 0], torch.tensor(0.7), atol=1.0e-6)
     assert dummy.mean_calls == 1
 
@@ -497,7 +497,7 @@ def test_switch_sindy_weak_simulate_returns_first_order_trajectory_shape():
     params = numpy.array([[0.25]])
     ld.set_train_coefs(params[0], coefs, torch.device("cpu"))
 
-    Z = ld.simulate(IC=[[Z0]], t_Grid=[t], params=params)[0][0]
+    Z = ld.simulate(IC=[[Z0]], t_Grid=[t], params=params, time_domain=[t])[0][0]
 
     assert Z.shape == (5, 1)
 

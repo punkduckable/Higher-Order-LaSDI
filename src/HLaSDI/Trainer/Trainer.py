@@ -5,10 +5,13 @@
 import  os;
 import  time;
 
+import  contextlib;
 import  json;
 import  logging;
+import  math;
+from    dataclasses                         import  dataclass;
 from    pathlib                             import Path;
-from    typing                              import Any;
+from    typing                              import Any, ContextManager;
 
 import  torch;
 import  numpy;
@@ -22,12 +25,35 @@ from    HLaSDI.Schemas                     import  BaseTrainerConfig;
 # Setup Logger
 LOGGER : logging.Logger = logging.getLogger(__name__);
 
-# Should we profile a run of Iterate?
-PROFILE_ITERATE : bool  = False
-PROFILE_WAIT    : int   = 10        # Do nothing for this many epochs
-PROFILE_WARMUP  : int   = 1         # Run machinery, but discard results
-PROFILE_ACTIVE  : int   = 10        # Run/log profiler stuff for this many epochs
-PROFILE_REPEAT  : int   = 1         # Repeat this schedule how many times?
+
+
+@dataclass(frozen = True)
+class CheckpointSchedule:
+    r"""Final-curriculum checkpoint eligibility for one training round.
+
+    Epoch offsets are zero based within the current round. For example, an offset of 40 means
+    checkpointing first becomes eligible on the reported round epoch 41.
+    """
+
+    round_epochs            : int
+    warmup_ready_offset     : int
+    rollout_ready_offset    : int
+    IC_rollout_ready_offset : int
+    first_eligible_offset   : int
+    rollout_enabled         : bool
+    IC_rollout_enabled      : bool
+
+    def allows_checkpoint(self, epoch_offset : int) -> bool:
+        r"""Return whether `epoch_offset` belongs to the final curriculum stage."""
+
+        return self.first_eligible_offset <= epoch_offset < self.round_epochs;
+
+    @property
+    def n_eligible_epochs(self) -> int:
+        r"""Return the number of checkpoint-eligible epochs in the round."""
+
+        return max(0, self.round_epochs - self.first_eligible_offset);
+
 
 
 # -------------------------------------------------------------------------------------------------
@@ -91,7 +117,8 @@ class Trainer:
     param_space : ParameterSpace
         Container for current train/test parameter sets used by training and greedy sampling.
     data_mean, data_std : list[torch.Tensor] | None
-        Per-IC scalar normalization statistics when normalization is enabled.
+        Scalar normalization offsets/scales. Higher-order components share the zeroth-order
+        scale, and derivative-component offsets are zero.
 
     Subclassing
     -----------
@@ -292,9 +319,9 @@ class Trainer:
         else:
             LOGGER.info("Noise injection disabled (noise_ratio = 0.0)");
 
-        # Optional normalization (training-only stats).
-        # If enabled, we compute a single mean/std across ALL training trajectories (per IC),
-        # then normalize both training + testing trajectories using these values.
+        # Optional normalization. First-order data use their global mean/std. Higher-order data
+        # use the zeroth-order state's standard deviation as one shared scale and do not center
+        # derivative components, preserving derivative relationships after normalization.
         self.normalization_enabled  : bool                      = trainer_config.normalize;
         self.data_mean              : list[torch.Tensor] | None = None;   # per-IC scalar tensors (CPU)
         self.data_std               : list[torch.Tensor] | None = None;   # per-IC scalar tensors (CPU)
@@ -348,7 +375,7 @@ class Trainer:
         structure.
         """
 
-        # Fetch top level directories. 
+        # Fetch top level directories.
         src_dir                 : str   = os.path.dirname(os.path.abspath(__file__));                         # .../Higher-Order-LaSDI/src/HLaSDI/Trainer
         project_dir             : Path  = Path(os.path.abspath(os.path.join(src_dir, os.pardir, os.pardir, os.pardir)));
 
@@ -464,9 +491,18 @@ class Trainer:
 
     def _compute_mean_std_from_U(self, U: list[list[torch.Tensor]], eps: float = 1.0e-12) -> tuple[list[float], list[float]]:
         """
-        Compute mean/std across ALL entries in U for each IC separately (scalar values).
+        Compute scalar normalization statistics without breaking derivative relationships.
 
-        We do this without concatenating everything to avoid large memory spikes.
+        For first-order data, compute the ordinary global mean and standard deviation. For
+        higher-order data, the zeroth-order state supplies one shared scale and only that state is
+        centered:
+
+            U_0_normalized = (U_0 - mean(U_0)) / std(U_0)
+            U_j_normalized = U_j / std(U_0),  j > 0.
+
+        Using one scale and no derivative centering preserves
+        ``d(U_0_normalized)/dt = U_1_normalized`` exactly. Statistics are accumulated without
+        concatenating trajectories to avoid large memory spikes.
         """
         assert isinstance(U, list) and len(U) > 0, "U must be a non-empty list";
         n_IC: int = len(U[0]);
@@ -487,8 +523,8 @@ class Trainer:
                 sum_sq[j] += float((Td * Td).sum().item());
                 count[j]  += int(Td.numel());
 
-        means: list[float] = [];
-        stds : list[float] = [];
+        raw_means : list[float] = [];
+        raw_stds  : list[float] = [];
         for j in range(n_IC):
             assert count[j] > 0, "No elements found for IC %d" % j;
             mean_j: float = sum_[j] / float(count[j]);
@@ -496,9 +532,18 @@ class Trainer:
             if var_j < 0.0:
                 # Numerical guard
                 var_j = 0.0;
-            std_j: float = float(numpy.sqrt(max(var_j, eps)));
-            means.append(mean_j);
-            stds.append(std_j);
+            raw_means.append(mean_j);
+            raw_stds.append(float(numpy.sqrt(max(var_j, eps))));
+
+        if n_IC == 1:
+            return raw_means, raw_stds;
+
+        # All higher derivatives use the displacement scale and are not centered. This is the
+        # normalization convention required to preserve the kinematic derivative identities used
+        # by the higher-order consistency and chain-rule losses.
+        displacement_scale : float = raw_stds[0];
+        means : list[float] = [raw_means[0]] + [0.0]*(n_IC - 1);
+        stds  : list[float] = [displacement_scale]*n_IC;
         return means, stds;
 
 
@@ -778,10 +823,172 @@ class Trainer:
         return trainable_params;
 
 
+    def _profile_region(self, name: str) -> ContextManager[Any]:
+        """
+        Return a profiler range context when profiling is enabled, otherwise a no-op context.
+
+        Keeping this guard in one place prevents HLaSDI-level timeline annotations from invoking
+        PyTorch profiler machinery during normal, unprofiled training runs.
+        """
+
+        if self.config.profiler.enabled == False:
+            return contextlib.nullcontext();
+
+        return torch.profiler.record_function(name);
+
+
 
     # ---------------------------------------------------------------------------------------------
     # Checkpointing
     # ---------------------------------------------------------------------------------------------
+
+    def prepare_checkpoint_schedule(self, start_iter : int, end_iter : int) -> CheckpointSchedule:
+        r"""
+        Build, report, and validate the checkpoint schedule for one training round.
+
+        A training epoch is eligible to produce a checkpoint only after learning-rate warmup is
+        complete and every enabled rollout curriculum has reached its maximum. A rollout
+        curriculum is enabled when its
+        corresponding loss weight is positive. Disabled curricula, and enabled curricula whose
+        initial rollout proportion is already at its configured maximum, impose no delay.
+
+        Curriculum readiness is calculated with the same zero-based epoch offsets used by the
+        rollout trainers. The resulting schedule is logged with one-based round and global epoch
+        numbers for readability. If the round ends before checkpointing can become active, this
+        method reports the empty schedule and raises a ``ValueError`` before optimization begins.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        start_iter : int
+            Zero-based global iteration offset at the start of the training round.
+
+        end_iter : int
+            Exclusive global iteration bound for the training round. Thus, the round contains
+            ``end_iter - start_iter`` epochs. Must be greater than ``start_iter``.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        schedule : CheckpointSchedule
+            The checkpoint eligibility schedule for the training round. Epoch offsets stored in
+            the schedule are zero based within the round.
+
+
+        -------------------------------------------------------------------------------------------
+        Raises
+        -------------------------------------------------------------------------------------------
+
+        AssertionError
+            If the training round does not contain at least one epoch.
+
+        ValueError
+            If warmup or an enabled rollout curriculum prevents checkpointing during every epoch
+            in the round.
+        """
+
+        # -----------------------------------------------------------------------------------------
+        # First, build the checkpoint schedule. 
+
+        # Determine the number of epochs in this round.
+        round_epochs : int = end_iter - start_iter;
+        assert round_epochs > 0, "a training round must contain at least one epoch";
+
+        # Determine if we are using either rollout loss.
+        rollout_enabled    : bool = self.loss_weights.get('rollout', 0.0) > 0.0;
+        IC_rollout_enabled : bool = self.loss_weights.get('IC_rollout', 0.0) > 0.0;
+
+        # Determine the first step when we reach the max rollout duration. 
+        rollout_ready_offset : int = 0;
+        if rollout_enabled and self.p_rollout_init < self.max_p_rollout:
+            rollout_updates_exact   : float = (self.max_p_rollout - self.p_rollout_init)/self.dp_per_update;
+            rollout_tolerance       : float = 1.0e-12*max(1.0, abs(rollout_updates_exact));
+            rollout_n_updates       : int   = int(math.ceil(rollout_updates_exact - rollout_tolerance));
+            rollout_ready_offset            = rollout_n_updates*self.rollout_update_freq;
+
+        # Now do the same for IC rollout.
+        IC_rollout_ready_offset : int = 0;
+        if IC_rollout_enabled and self.p_IC_rollout_init < self.max_p_IC_rollout:
+            IC_rollout_updates_exact    : float = (self.max_p_IC_rollout - self.p_IC_rollout_init)/self.IC_dp_per_update;
+            IC_rollout_tolerance        : float = 1.0e-12*max(1.0, abs(IC_rollout_updates_exact));
+            IC_rollout_n_updates        : int   = int(math.ceil(IC_rollout_updates_exact - IC_rollout_tolerance));
+            IC_rollout_ready_offset             = IC_rollout_n_updates*self.IC_rollout_update_freq;
+
+        # Now, determine the first step beyond the warmup when both rollouts will be at their 
+        # max duration. 
+        first_eligible_offset : int = max(
+            self.warmup_epochs,
+            rollout_ready_offset,
+            IC_rollout_ready_offset,
+        );
+
+        schedule : CheckpointSchedule = CheckpointSchedule(
+            round_epochs            = round_epochs,
+            warmup_ready_offset     = self.warmup_epochs,
+            rollout_ready_offset    = rollout_ready_offset,
+            IC_rollout_ready_offset = IC_rollout_ready_offset,
+            first_eligible_offset   = first_eligible_offset,
+            rollout_enabled         = rollout_enabled,
+            IC_rollout_enabled      = IC_rollout_enabled);
+
+        # -----------------------------------------------------------------------------------------
+        # Next, report the schedule. 
+
+        lines : list[str] = [
+            "Checkpoint curriculum schedule for this training round:",
+            "  Round epochs:                         %d" % schedule.round_epochs,
+            "  Warmup permits checkpointing at:      round epoch %d" % (schedule.warmup_ready_offset + 1),
+        ];
+
+        if schedule.rollout_enabled == False:
+            lines.append("  Rollout:                              disabled; does not restrict checkpointing");
+        elif schedule.rollout_ready_offset == 0:
+            lines.append("  Rollout:                              starts at max %.6f; does not delay checkpointing" % self.max_p_rollout);
+        else:
+            lines.append("  Rollout reaches max %.6f at:      round epoch %d" % (self.max_p_rollout, schedule.rollout_ready_offset + 1));
+
+        if schedule.IC_rollout_enabled == False:
+            lines.append("  IC rollout:                           disabled; does not restrict checkpointing");
+        elif schedule.IC_rollout_ready_offset == 0:
+            lines.append("  IC rollout:                           starts at max %.6f; does not delay checkpointing" % self.max_p_IC_rollout);
+        else:
+            lines.append("  IC rollout reaches max %.6f at:   round epoch %d" % (self.max_p_IC_rollout, schedule.IC_rollout_ready_offset + 1));
+
+        if schedule.n_eligible_epochs > 0:
+            first_round_epoch  : int = schedule.first_eligible_offset + 1;
+            first_global_epoch : int = start_iter + first_round_epoch;
+            lines.extend([
+                "  Checkpointing enabled for:            round epochs %d-%d" % (first_round_epoch, schedule.round_epochs),
+                "  Corresponding global epochs:          %d-%d" % (first_global_epoch, end_iter),
+                "  Number of checkpoint-eligible epochs: %d" % schedule.n_eligible_epochs,
+            ]);
+        else:
+            lines.extend([
+                "  Checkpointing enabled for:            none",
+                "  Corresponding global epochs:          none",
+                "  Number of checkpoint-eligible epochs: 0",
+            ]);
+
+        LOGGER.info("\n".join(lines));
+
+        # -----------------------------------------------------------------------------------------
+        # Wrap up and return the schedule
+        
+        if schedule.n_eligible_epochs == 0:
+            raise ValueError(
+                "Checkpointing cannot become active in this %d-epoch round. The first epoch "
+                "permitted by warmup and all enabled rollout curricula would be round epoch %d. "
+                "Increase the curriculum increment, reduce its update frequency or maximum, "
+                "reduce warmup_epochs, or increase the number of epochs per round."
+                % (schedule.round_epochs, schedule.first_eligible_offset + 1)
+            );
+
+        return schedule;
+
 
     def _Save_Checkpoint(self, encoder_decoder : EncoderDecoder, iter : int) -> str:
         """
@@ -985,22 +1192,29 @@ class Trainer:
         assert end_iter >= start_iter;
         LOGGER.info("Training for %d epochs (starting at %d, going to %d) with %d training parameters" % (end_iter - start_iter, start_iter, end_iter, n_train));
 
-        if PROFILE_ITERATE:
+        if self.config.profiler.enabled:
             # Iterate with profiler on
             profiler_activities = [torch.profiler.ProfilerActivity.CPU];
             if torch.cuda.is_available():
                 profiler_activities.append(torch.profiler.ProfilerActivity.CUDA);
+            LOGGER.info("Writing profiler timeline traces to %s" % self.results_dir);
 
             with torch.profiler.profile(
                 activities      = profiler_activities,
                 schedule        = torch.profiler.schedule(
-                    wait        = PROFILE_WAIT,
-                    warmup      = PROFILE_WARMUP,
-                    active      = PROFILE_ACTIVE,
-                    repeat      = PROFILE_REPEAT,
+                    wait        = self.config.profiler.wait_epochs,
+                    warmup      = self.config.profiler.warmup_epochs,
+                    active      = self.config.profiler.active_epochs,
+                    repeat      = self.config.profiler.num_repeats,
+                ),
+                on_trace_ready  = torch.profiler.tensorboard_trace_handler(
+                    dir_name    = self.results_dir,
+                    worker_name = "HLaSDI_train",
                 ),
                 record_shapes   = True,
                 profile_memory  = True,
+                with_stack      = True,
+                with_flops      = True,
             ) as prof:
                 self.Iterate(start_iter = start_iter, end_iter = end_iter, profiler = prof);
 
@@ -1033,8 +1247,10 @@ class Trainer:
 
             # Write profile results to file.
             profiler_table_str: str = "\n".join(profiler_results_list)
-            with open("./HLaSDI_train_profile.txt", "a", encoding="utf-8") as handle:
+            profiler_table_path: str = os.path.join(self.results_dir, "HLaSDI_train_profile.txt");
+            with open(profiler_table_path, "a", encoding="utf-8") as handle:
                 handle.write(profiler_table_str)
+            LOGGER.info("Wrote profiler summary to %s" % profiler_table_path);
 
             # Now print the profiling results!
             print(profiler_table_str, flush = True);

@@ -8,10 +8,12 @@ trainer:
   # If true, compute a single global mean/std from TRAINING data only, and normalize
   # all training/testing trajectories using these values.
   normalize:              true
-
   device:                 'cpu'
-
   noise_ratio:            0.0
+
+  profiler: 
+    enabled:                False
+
   First_Order_Weak:       
     lr:                     0.001
     gradient_clip:          10.0        # Maximum allowable gradient magnitude; will rescale gradients if exceeded.

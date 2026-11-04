@@ -60,12 +60,9 @@ class SwitchSINDy(InterpolatableLatentDynamics):
             A function that takes a numpy.ndarray of parameter values and returns the switch time
             for those parameter values.
 
-        config : dict
-            The latent-dynamics configuration dictionary. It must three keys: `type`, `trainable`,
-            and `switch`. It must have `config.type == "switch"` and `config.switch` should
-            be a dictionary housing sub-class specific settings. The required `lstsq_reg` entry
-            controls ridge regularization used by `initialize_coefficients(...)` when initializing
-            coefficients from encoded trajectories.
+        config : SwitchSINDyLatentDynamicsConfig
+            Config schema for the this latent dynamics object.
+
 
         -------------------------------------------------------------------------------------------
         Returns
@@ -376,10 +373,11 @@ class SwitchSINDy(InterpolatableLatentDynamics):
 
 
     def simulate(   self,
-                    IC      : list[list[numpy.ndarray | torch.Tensor]],
-                    t_Grid  : list[numpy.ndarray      | torch.Tensor],
-                    params  : numpy.ndarray,
-                    sample  : bool = False) -> list[list[numpy.ndarray | torch.Tensor]]:
+                    IC          : list[list[numpy.ndarray | torch.Tensor]],
+                    t_Grid      : list[numpy.ndarray      | torch.Tensor],
+                    params      : numpy.ndarray,
+                    time_domain : list[numpy.ndarray | torch.Tensor],
+                    sample      : bool = False) -> list[list[numpy.ndarray | torch.Tensor]]:
         r"""
         Time integrates the switching SINDy latent dynamics.
 
@@ -402,6 +400,10 @@ class SwitchSINDy(InterpolatableLatentDynamics):
         params : numpy.ndarray, shape = (n_param, n_p)
             Parameter rows used to compute the switch time for each simulation.
 
+        time_domain : list[numpy.ndarray | torch.Tensor], len = n_param
+            Full/reference time grids for API consistency with time-gated latent dynamics. Switch
+            times are parameter-based, so this value is not used.
+
         sample : bool
             If self is stochastic, setting this to true will sample from the posterior distribution
             of the latent dynamics at each parameter value, then solve the latent dynamics using
@@ -422,6 +424,7 @@ class SwitchSINDy(InterpolatableLatentDynamics):
         n_param : int = params.shape[0];
         assert isinstance(t_Grid, list) and isinstance(IC, list);
         assert len(IC) == n_param and len(t_Grid) == n_param;
+        assert isinstance(time_domain, list) and len(time_domain) == n_param;
 
 
         # -----------------------------------------------------------------------------------------

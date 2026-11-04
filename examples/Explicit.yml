@@ -8,10 +8,11 @@ trainer:
   # If true, compute a single global mean/std from TRAINING data only, and normalize
   # all training/testing trajectories using these values.
   normalize:                true
-
   device:                   'cuda:0'
-
   noise_ratio:              0.0
+
+  profiler: 
+    enabled:                False
 
   First_Order_Rollout:
     lr:                     0.001

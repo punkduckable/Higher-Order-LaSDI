@@ -339,6 +339,13 @@ class First_Order_Rollout(Trainer):
         # -------------------------------------------------------------------------------------
         # Setup. 
 
+        # Only final-curriculum epochs may compete for the best checkpoint. Build and report the
+        # schedule before allocating optimizer/device state so an invalid round fails immediately.
+        checkpoint_schedule = self.prepare_checkpoint_schedule(
+            start_iter = start_iter,
+            end_iter   = end_iter,
+        );
+
         # Map trainable state to self's device before constructing the optimizer.  This keeps
         # checkpoint-restored LD coefficients from staying on CPU during a GPU training round.
         device                  : str                       = self.device;
@@ -360,10 +367,9 @@ class First_Order_Rollout(Trainer):
         epochs_in_round         : int               = 0;  # Will be updated each iteration
         p_rollout               : float             = min(self.max_p_rollout,    self.p_rollout_init    + self.dp_per_update   *(epochs_in_round//self.rollout_update_freq));
         p_IC_rollout            : float             = min(self.max_p_IC_rollout, self.p_IC_rollout_init + self.IC_dp_per_update*(epochs_in_round//self.IC_rollout_update_freq));
-        best_loss               : float             = numpy.inf;                    # Stores the lowest loss we get in this round of training.
-        checkpoint_saved        : bool              = False;                        # Ensure we save at least one checkpoint per round.
-        
-        last_iter_idx             : int | None         = None;
+        best_loss               : float             = numpy.inf;                    # Lowest final-curriculum loss in this round.
+        checkpoint_saved        : bool              = False;                        # Ensure the eligible window produces a checkpoint.
+
 
         U_Train_device          : list[list[torch.Tensor]]  = [];
         t_Train_device          : list[torch.Tensor]        = [];
@@ -399,7 +405,7 @@ class First_Order_Rollout(Trainer):
             # Warmup the learning rate for the first few epochs after greedy sampling.
             # NOTE: epochs_in_round will be recalculated later for rollout updates.
 
-            epochs_in_round     : int = iter - self.restart_iter;  # Progress within current training round
+            epochs_in_round     : int = iter - start_iter;  # Progress within current training round
             if self.warmup_epochs > 0 and epochs_in_round < self.warmup_epochs:
                 # Reduce LR for warmup period
                 warmup_scale = 0.1 + 0.9 * (float(epochs_in_round) / float(self.warmup_epochs));
@@ -483,10 +489,12 @@ class First_Order_Rollout(Trainer):
                 # the FOM solution at time t_Grid[i][k] when we use the i'th combination of 
                 # parameter values. Here, n_t(i) is the number of time steps in the solution 
                 # for the i'th combination of parameter values. 
-                Z_i         : torch.Tensor  = encoder_decoder_device.Encode(U_i)[0];
+                with self._profile_region("HLaSDI/forward_encode"):
+                    Z_i = encoder_decoder_device.Encode(U_i)[0];
                 
                 Latent_States.append([Z_i]);
-                U_Pred_i    : torch.Tensor  = encoder_decoder_device.Decode(Z_i)[0];
+                with self._profile_region("HLaSDI/forward_decode"):
+                    U_Pred_i = encoder_decoder_device.Decode(Z_i)[0];
 
                 LOGGER.debug("Forward Pass (Autoencoder) - complete for parameter combination %d" % i);
                 forward_timer += time.perf_counter() - timer;
@@ -504,9 +512,11 @@ class First_Order_Rollout(Trainer):
                     
                     # Compute loss from normalized difference
                     if(self.loss_types['recon'] == "MSE"):
-                        recon_loss_ith_param = torch.mean(diff**2);
+                        with self._profile_region("HLaSDI/reconstruction_loss"):
+                            recon_loss_ith_param = torch.mean(diff**2);
                     elif(self.loss_types['recon'] == "MAE"):
-                        recon_loss_ith_param = torch.mean(torch.abs(diff));
+                        with self._profile_region("HLaSDI/reconstruction_loss"):
+                            recon_loss_ith_param = torch.mean(torch.abs(diff));
                     else:
                         raise ValueError("Invalid reconstruction loss type: %s" % self.loss_types['recon']);
                     
@@ -527,11 +537,12 @@ class First_Order_Rollout(Trainer):
             timer : float = time.perf_counter();
 
             # Compute the latent dynamics losses.
-            LD_losses : LD_Loss_Container = self.latent_dynamics.compute_losses( 
-                                                        Latent_States    = Latent_States, 
-                                                        t_Grid           = t_Train_device,
-                                                        step             = iter,
-                                                        params           = self.param_space.train_space);
+            with self._profile_region("HLaSDI/latent_dynamics_loss"):
+                LD_losses : LD_Loss_Container = self.latent_dynamics.compute_losses(
+                                                            Latent_States    = Latent_States,
+                                                            t_Grid           = t_Train_device,
+                                                            step             = iter,
+                                                            params           = self.param_space.train_space);
 
             # Cache metrics
             for key, value in LD_losses.metrics.items():
@@ -621,10 +632,12 @@ class First_Order_Rollout(Trainer):
 
                         # Simulate latent dynamics using the absolute-time grid slice.
                         # Z_pred_list_all[0][0] has shape (n_t_win, n_z)
-                        Z_pred_list_all : list[list[torch.Tensor]] = self.latent_dynamics.simulate(
-                            IC     = [[Z_0[k_int, :]]],
-                            t_Grid = [t_win_np],
-                            params = param_i);
+                        with self._profile_region("HLaSDI/rollout_loss/simulate"):
+                            Z_pred_list_all : list[list[torch.Tensor]] = self.latent_dynamics.simulate(
+                                IC          = [[Z_0[k_int, :]]],
+                                t_Grid      = [t_win_np],
+                                params      = param_i,
+                                time_domain = [t_i_np]);
 
                         # Prepare trajectory for decoding
                         Z_pred_i = Z_pred_list_all[0][0];
@@ -636,7 +649,8 @@ class First_Order_Rollout(Trainer):
                     assert len(Z_pred_windows) == len(Z_tgt_windows) == len(U_tgt_windows) == len(lengths) == n_roll_i;
                     Z_pred_cat          : torch.Tensor  = torch.cat(Z_pred_windows, dim = 0);
                     assert Z_pred_cat.shape[0] == sum(lengths);
-                    U_pred_cat          : torch.Tensor  = encoder_decoder_device.Decode(Z_pred_cat)[0];
+                    with self._profile_region("HLaSDI/rollout_loss/decode"):
+                        U_pred_cat = encoder_decoder_device.Decode(Z_pred_cat)[0];
                     assert U_pred_cat.shape[0] == Z_pred_cat.shape[0];
 
                     # Finally, compute the losses for each rollout window.
@@ -703,15 +717,19 @@ class First_Order_Rollout(Trainer):
                     Z_IC_i : torch.Tensor = encoder_decoder_device.Encode(U_IC_i)[0].reshape(-1);
                     
                     # Simulate the latent dynamics forward in time
-                    Z_IC_Rollout_i    : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(  IC      = [[Z_IC_i]], 
-                                                                                                    t_Grid  = [t_Grid_IC_rollout[i]], 
-                                                                                                    params  = param_i.reshape(1, -1));
+                    with self._profile_region("HLaSDI/IC_rollout_loss/simulate"):
+                        Z_IC_Rollout_i    : list[list[torch.Tensor]]  = self.latent_dynamics.simulate(  
+                            IC          = [[Z_IC_i]],
+                            t_Grid      = [t_Grid_IC_rollout[i]],
+                            params      = param_i.reshape(1, -1),
+                            time_domain = [t_Train_np[i]]);
                     
                     # Extract the predicted trajectory.
                     Z_IC_Predict_i      : torch.Tensor              = Z_IC_Rollout_i[0][0];    # shape = (n_t_IC_rollout[i], n_z)
 
                     # Decode the predicted trajectory to get FOM predictions
-                    U_IC_Predict_i      : torch.Tensor              = encoder_decoder_device.Decode(Z_IC_Predict_i)[0];
+                    with self._profile_region("HLaSDI/IC_rollout_loss/decode"):
+                        U_IC_Predict_i = encoder_decoder_device.Decode(Z_IC_Predict_i)[0];
                     
                     # Get the corresponding FOM targets
                     U_IC_Target_i       : list[torch.Tensor]        = U_IC_Rollout_Targets[i][0];         # shape = (n_t_IC_rollout[i], physics.Frame_Shape)
@@ -763,13 +781,12 @@ class First_Order_Rollout(Trainer):
 
 
 
-            # Record coefficient scale and the most recent epoch index for fallback checkpointing.
+            # Record coefficient scale for reporting.
             if isinstance(self.latent_dynamics, InterpolatableLatentDynamics):
                 with torch.no_grad():
                     coef_tensors_report = self.latent_dynamics.parameters();
                     train_coefs_flat_report = torch.cat([c.reshape(-1) for c in coef_tensors_report]);
                     max_train_coef = float(torch.abs(train_coefs_flat_report).max().item());
-            last_iter_idx = int(iter);
 
 
             # -------------------------------------------------------------------------------------
@@ -780,7 +797,8 @@ class First_Order_Rollout(Trainer):
 
             #  Run back propagation and update the encoder_decoder parameters. 
             # Note: optimizer.zero_grad() is already called at the start of the iteration (line 373)
-            loss.backward();
+            with self._profile_region("HLaSDI/backward"):
+                loss.backward();
 
             # Record the gradient in the LD and encoder_decoder
             grad_sq_encoder_decoder = torch.zeros((), device = device);
@@ -810,7 +828,8 @@ class First_Order_Rollout(Trainer):
                 LOGGER.warning("Gradient norm %.2f exceeded threshold, clipped to %f (iter %d)" % (grad_norm, self.gradient_clip, iter + 1));
             
             LOGGER.debug("Backward Pass - backward() complete, calling optimizer.step()");
-            self.optimizer.step();
+            with self._profile_region("HLaSDI/optimizer_step"):
+                self.optimizer.step();
             LOGGER.debug("Backward Pass - complete (iteration %d)" % (iter + 1));
             self._cache_metric("time/backwards", time.perf_counter() - timer);
             self._cache_metric("time/step", time.perf_counter() - step_timer);
@@ -820,26 +839,24 @@ class First_Order_Rollout(Trainer):
             flushed_metrics : dict[str, float ] = self._flush_metrics_cache(iter + 1);
             loss_value      : float             = flushed_metrics["loss/total"];
 
-            # Check if we hit a new minimum loss. If so, make a checkpoint, record the loss and 
-            # the iteration number. 
-            # NOTE: Skip checkpointing during warmup period to avoid saving "lucky" early epochs
-            # that benefit from distribution shift before encoder_decoder has adapted.
-            
-            if loss_value < best_loss:
-                if epochs_in_round >= self.warmup_epochs:
+            # Compare checkpoints only after every enabled rollout curriculum has reached its
+            # configured maximum. Losses before this point belong to an easier objective and are
+            # intentionally excluded from the round's best-loss comparison.
+            if checkpoint_schedule.allows_checkpoint(epochs_in_round):
+                if loss_value < best_loss:
                     LOGGER.info("Got a new lowest loss (%f) on epoch %d" % (loss_value, iter + 1));
-
-                    # Save the full checkpoint (model state + train/test coefficients).
                     self._Save_Checkpoint(encoder_decoder = encoder_decoder_device,
                                           iter            = int(iter));
-                    checkpoint_saved        = True;
+                    checkpoint_saved      = True;
 
-                    # Update the best set of parameters. 
-                    self.best_epoch         = int(iter);
-                    best_loss               = loss_value;
-                else:
-                    LOGGER.debug("Skipping checkpoint during warmup period (epoch %d/%d in round, warmup ends at %d)" % 
-                               (epochs_in_round, end_iter - start_iter, self.warmup_epochs));
+                    self.best_epoch       = int(iter);
+                    best_loss             = loss_value;
+            else:
+                LOGGER.debug(
+                    "Skipping checkpoint before the final curriculum stage (round epoch %d/%d; "
+                    "checkpointing starts at round epoch %d)"
+                    % (epochs_in_round + 1, checkpoint_schedule.round_epochs, checkpoint_schedule.first_eligible_offset + 1)
+                );
 
             # -------------------------------------------------------------------------------------
             # Report Results from this iteration 
@@ -850,8 +867,12 @@ class First_Order_Rollout(Trainer):
             if(self.loss_weights['rollout'] > 0):       info_str += ", Roll FOM: %3.6f, Roll ROM: %3.6f"        % (flushed_metrics.get('loss/rollout/FOM/total', 0.0),    flushed_metrics.get('loss/rollout/ROM/total', 0.0));
             if(self.loss_weights['IC_rollout'] > 0):    info_str += ", IC Roll FOM: %3.6f, IC Roll ROM: %3.6f"  % (flushed_metrics.get('loss/IC_rollout/FOM/total', 0.0), flushed_metrics.get('loss/IC_rollout/ROM/total', 0.0));
             for key in LD_losses.losses.keys():
-                info_str += ", %s: %3.6f"   % (key, flushed_metrics.get(f"loss/{key}/total", 0.0));
-            if isinstance(self.latent_dynamics, InterpolatableLatentDynamics): 
+                # Some losses may use the complete path `loss/<name>` while others use
+                # `loss/<name>/total`. We support both reporting conventions.
+                metric_key   : str   = f"loss/{key}";
+                metric_value : float = flushed_metrics.get(metric_key, flushed_metrics.get(f"{metric_key}/total", 0.0));
+                info_str += ", %s: %3.6f" % (key, metric_value);
+            if isinstance(self.latent_dynamics, InterpolatableLatentDynamics):
                 info_str += ", max|c|: %.3f" % max_train_coef;
             LOGGER.info(info_str);
 
@@ -862,14 +883,12 @@ class First_Order_Rollout(Trainer):
                 profiler.step();
 
         
-        # Ensure we wrote a checkpoint for this round. If warmup prevented checkpointing, fall
-        # back to saving the final epoch of this round.
+        # The schedule guarantees at least one eligible epoch, and the first finite eligible loss
+        # must beat best_loss = infinity. Do not silently save an incomparable fallback model.
         if checkpoint_saved == False:
-            assert last_iter_idx is not None;
-            LOGGER.warning("No checkpoint saved during this round (likely warmup-only). Saving final epoch checkpoint instead.");
-            self._Save_Checkpoint(encoder_decoder = encoder_decoder_device,
-                                  iter            = int(last_iter_idx));
-            self.best_epoch       = int(last_iter_idx);
+            raise RuntimeError(
+                "No checkpoint was saved despite a non-empty final-curriculum checkpoint window."
+            );
 
         # All done!
         return;

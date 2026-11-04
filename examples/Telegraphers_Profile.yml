@@ -1,0 +1,120 @@
+trainer:
+  type:                     "Second_Order_Rollout"
+
+  # Short diagnostic run: profile one warmed-up epoch with the mature rollout workload.
+  max_iter:                 4
+  n_iter:                   4
+  max_greedy_iter:          4
+
+  # If true, compute a single global mean/std from TRAINING data only, and normalize
+  # all training/testing trajectories using these values.
+  normalize:                false
+  device:                   'cuda:0'
+  noise_ratio:              0.0
+
+  profiler: 
+    enabled:                true
+    wait_epochs:            1
+    warmup_epochs:          1
+    active_epochs:          1
+    num_repeats:            1
+
+  Second_Order_Rollout:
+    lr:                     0.001
+    gradient_clip:          10.0        # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
+
+    # p_rollout grows from p_rollout_init by dp_per_update every rollout_update_freq epochs, capped at max_p_rollout.
+    # Start at the production curriculum cap so the captured epoch represents late-run cost.
+    p_rollout_init:         0.5
+    rollout_update_freq:    10
+    dp_per_update:          0.005
+    max_p_rollout:          0.5         # Maximum proportion of the time window used for rollout loss.
+    n_rollouts:             4           # Number of rollable start frames to rollout per training parameter per epoch.
+
+    p_IC_rollout_init:      0.01
+    IC_rollout_update_freq: 10
+    IC_dp_per_update:       0.01
+    max_p_IC_rollout:       1.0         # Maximum proportion of the time window used for IC rollout loss.
+
+    warmup_epochs:          40          # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
+
+    loss_weights:
+      recon:                1.0
+      chain_rule:           1.0
+      rollout:              0.25
+      IC_rollout:           0.0
+      consistency:          1.0
+
+    loss_types:
+      recon:                "MSE"
+      chain_rule:           "MSE"
+      rollout:              "MAE"
+      IC_rollout:           "MAE"
+      consistency:          "MSE"
+
+workflow:
+  use_restart:              False
+  restart_file:             
+
+sampler:
+  type:                     'ROM_Discrepancy'
+
+parameter_space:
+  parameters:
+    - name:                 alpha
+      min:                  0.09
+      max:                  0.11
+      test_space_type:      uniform
+      sample_size:          11
+      log_scale:            false
+    - name:                 w
+      min:                  0.9
+      max:                  1.1
+      test_space_type:      uniform
+      sample_size:          11
+      log_scale:            false
+  test_space:
+    type:                   grid
+
+EncoderDecoder:
+  type:                     pair
+  trainable:                true
+  pair:
+    n_Decoders:             1
+    hidden_widths:          [250, 100, 100, 100]
+    latent_dimension:       20
+    activations:            ["sin", "sin", "sin", "sin"]
+
+
+latent_dynamics:
+  type:                     some
+  trainable:                true
+  loss_weights: 
+    LD:                     1.0
+    diversity/D:            0.001
+    diversity/V:            0.001
+    coef:                   0.001
+    tail/D:                 0.01
+    tail/V:                 0.01
+  some:
+    n_experts_D:            16
+    n_experts_V:            12
+    n_active_D:             8
+    n_active_V:             8
+    hidden_widths:          [64, 64]
+    activations:            ['tanh', 'tanh']
+    use_biases:             true 
+    use_z_in_gate:          false
+    coef_norm:              'l2'
+    eps_engaged:            0.001
+    use_mask:               true
+    mask_threshold:         0.0005
+    first_mask_step:        1500
+    mask_update_freq:       250
+
+physics:
+  type:                     Telegraphers
+  Telegraphers:
+    n_t:                    501
+    t_max:                  5.0
+    uniform_t_grid:         false

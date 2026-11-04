@@ -206,10 +206,11 @@ class FOM_Variance(Sampler):
             # Simulate one sample at a time; store the resulting frames.           
             for j in range(self.n_samples):
                 LatentState_ij : list[list[numpy.ndarray]] = trainer.latent_dynamics.simulate( 
-                                                                    IC      = [ROM_IC[i]], 
-                                                                    t_Grid  = [t_Grid], 
-                                                                    params  = candidate_parameters[i, :].reshape(1, -1),
-                                                                    sample  = True);
+                                                                    IC          = [ROM_IC[i]], 
+                                                                    t_Grid      = [t_Grid], 
+                                                                    params      = candidate_parameters[i, :].reshape(1, -1),
+                                                                    time_domain = [t_Grid],
+                                                                    sample      = True);
                 for k in range(trainer.n_IC):
                     LatentStates[i][k][j, :, :] = LatentState_ij[0][k];
         rollout_time : float = time.perf_counter() - rollout_timer;

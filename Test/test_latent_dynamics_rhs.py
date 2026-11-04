@@ -7,8 +7,9 @@ import torch
 SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.append(SRC)
 
-from HLaSDI.LatentDynamics import CABLE, CABLE_weak, DampedSpring, DampedSpring_weak, SINDy, SINDy_weak, SwitchSINDy, SwitchSINDy_weak
+from HLaSDI.LatentDynamics import SOME, SOME_weak, CABLE, CABLE_weak, DampedSpring, DampedSpring_weak, SINDy, SINDy_weak, SwitchSINDy, SwitchSINDy_weak
 from HLaSDI.Schemas import (
+    SOMELatentDynamicsConfig,
     CABLELatentDynamicsConfig,
     DampedSpringLatentDynamicsConfig,
     DampedSpringWeakLatentDynamicsConfig,
@@ -17,6 +18,7 @@ from HLaSDI.Schemas import (
     SwitchSINDyLatentDynamicsConfig,
     SwitchSINDyWeakLatentDynamicsConfig,
     WeakCABLELatentDynamicsConfig,
+    WeakSOMELatentDynamicsConfig,
 )
 
 
@@ -135,6 +137,49 @@ def _cable_config_with_settings(trainable=True, n_active=2, **settings):
     })
 
 
+def _some_config_with_settings(trainable=True, n_active=2, **settings):
+    some_settings = {
+        "n_experts_D": 2,
+        "n_experts_V": 2,
+        "n_active_D": n_active,
+        "n_active_V": n_active,
+        "hidden_widths": [2],
+        "activations": ["tanh"],
+        "use_biases": True,
+        "coef_norm": "l2",
+        "use_mask": False,
+    }
+    some_settings.update(settings)
+    return SOMELatentDynamicsConfig.model_validate({
+        "type": "some",
+        "trainable": trainable,
+        "loss_weights": {"LD": 1.0, "coef": 1.0, "diversity/D": 1.0, "diversity/V": 1.0, "tail/D": 1.0, "tail/V": 1.0},
+        "some": some_settings,
+    })
+
+
+def _some_w_config(trainable=True, n_active=2, **settings):
+    some_settings = {
+        "n_experts_D": 2,
+        "n_experts_V": 2,
+        "n_active_D": n_active,
+        "n_active_V": n_active,
+        "hidden_widths": [2],
+        "activations": ["tanh"],
+        "use_biases": True,
+        "coef_norm": "l2",
+        "use_mask": False,
+    }
+    some_settings.update(settings)
+    return WeakSOMELatentDynamicsConfig.model_validate({
+        "type": "some_w",
+        "trainable": trainable,
+        "loss_weights": {"LD": 1.0, "coef": 1.0, "diversity/D": 1.0, "diversity/V": 1.0, "tail/D": 1.0, "tail/V": 1.0},
+        "some": some_settings,
+        "weak": {"test_func_type": "PC-poly", "test_func_width": 0.5, "overlap": 0.5},
+    })
+
+
 def _cable_w_config(trainable=True, n_active=2):
     return WeakCABLELatentDynamicsConfig.model_validate({
         "type": "cable_w",
@@ -157,6 +202,10 @@ def _zero_cable_gate(ld):
     for layer in ld.w.layers:
         torch.nn.init.zeros_(layer.weight)
         torch.nn.init.zeros_(layer.bias)
+
+
+def _zero_some_gate(ld):
+    _zero_cable_gate(ld)
 
 
 def _loss_metric_keys(metrics):
@@ -201,6 +250,180 @@ def test_cable_rhs_can_use_latent_state_in_gate_inputs():
     assert rhs.shape == z.shape
     assert torch.allclose(rhs, expected)
     assert rhs[0, 0] > rhs[1, 0]
+
+
+def test_some_rhs_matches_uniform_mixture_of_second_order_experts():
+    params = numpy.array([[0.25]])
+    t = torch.tensor([0.0, 0.5, 1.0], dtype=torch.float64)
+    z = torch.tensor([[0.0], [1.0], [2.0]], dtype=torch.float64)
+    dz = torch.tensor([[3.0], [4.0], [5.0]], dtype=torch.float64)
+
+    ld = SOME(n_z=1, Uniform_t_Grid=True, n_p=1, config=_some_config_with_settings())
+    _zero_some_gate(ld)
+    ld.unmasked_K = torch.tensor([[[1.0]], [[3.0]]], dtype=torch.float32, requires_grad=True)
+    ld.unmasked_C = torch.tensor([[[5.0]], [[7.0]]], dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.tensor([[[10.0]], [[20.0]]], dtype=torch.float32, requires_grad=True)
+
+    rhs = ld.RHS(Z=[[z, dz]], t_Grid=[t], params=params)[0]
+
+    expected = 2.0*z + 6.0*dz + 15.0
+    assert isinstance(rhs, torch.Tensor)
+    assert rhs.dtype == z.dtype
+    assert rhs.shape == z.shape
+    assert torch.allclose(rhs, expected)
+
+
+def test_some_rhs_uses_independent_displacement_and_velocity_gates():
+    params = numpy.array([[0.25]])
+    t = torch.tensor([0.0], dtype=torch.float64)
+    z = torch.tensor([[7.0]], dtype=torch.float64)
+    dz = torch.tensor([[11.0]], dtype=torch.float64)
+
+    ld = SOME(
+        n_z=1,
+        Uniform_t_Grid=True,
+        n_p=1,
+        config=_some_config_with_settings(
+            n_experts_D=2,
+            n_experts_V=3,
+            n_active_D=1,
+            n_active_V=1,
+            hidden_widths=[1],
+        ),
+    )
+    _zero_some_gate(ld)
+    with torch.no_grad():
+        ld.w.layers[-1].bias.copy_(torch.tensor([20.0, -20.0, -20.0, 20.0, -20.0]))
+    ld.unmasked_K = torch.tensor([[[2.0]], [[100.0]]], dtype=torch.float32, requires_grad=True)
+    ld.unmasked_C = torch.tensor([[[100.0]], [[5.0]], [[100.0]]], dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.tensor([[[3.0]], [[100.0]]], dtype=torch.float32, requires_grad=True)
+
+    rhs, weights_D, weights_V = ld._evaluate_rhs(
+        Z=z,
+        dZ_dt=dz,
+        t_Grid=t,
+        params=params[0],
+        t0=0.0,
+        t_span=1.0,
+    )
+
+    assert weights_D.shape == (1, 2)
+    assert weights_V.shape == (1, 3)
+    assert torch.argmax(weights_D, dim=1).item() == 0
+    assert torch.argmax(weights_V, dim=1).item() == 1
+    assert torch.allclose(rhs, torch.tensor([[72.0]], dtype=torch.float64))
+
+
+def test_some_tail_losses_handle_displacement_and_velocity_pools_independently():
+    params = numpy.array([[0.25]])
+    t = torch.linspace(0.0, 1.0, 5)
+    z = torch.zeros((5, 1))
+    dz = torch.zeros((5, 1))
+
+    ld = SOME(
+        n_z=1,
+        Uniform_t_Grid=True,
+        n_p=1,
+        config=_some_config_with_settings(
+            n_experts_D=2,
+            n_experts_V=3,
+            n_active_D=2,
+            n_active_V=1,
+        ),
+    )
+    _zero_some_gate(ld)
+    ld.unmasked_K = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_C = torch.zeros((3, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+
+    result = ld.compute_losses(
+        Latent_States=[[z, dz]],
+        t_Grid=[t],
+        step=0,
+        params=params,
+    )
+
+    # All displacement experts are active, so that pool has no tail. The uniform velocity gate
+    # leaves mass 2/3 outside its top-one set, giving a squared tail penalty of 4/9. The public
+    # The two pool penalties remain independent objective terms.
+    assert torch.allclose(result.losses["tail/D"], torch.tensor(0.0))
+    assert torch.allclose(result.losses["tail/V"], torch.tensor(4.0/9.0))
+    assert torch.allclose(result.metrics["loss/tail/D"], torch.tensor(0.0))
+    assert torch.allclose(result.metrics["loss/tail/V"], torch.tensor(4.0/9.0))
+    assert torch.allclose(ld.last_tail_mass_loss_D, torch.tensor(0.0))
+    assert torch.allclose(ld.last_tail_mass_loss_V, torch.tensor(4.0/9.0))
+
+
+def test_some_compute_losses_differentiates_velocity_on_nonuniform_grid():
+    params = numpy.array([[0.25]])
+    t = torch.tensor([0.0, 0.1, 0.4, 1.0], dtype=torch.float64)
+    z = t.reshape(-1, 1)
+    dz = torch.zeros((4, 1), dtype=torch.float64)
+
+    ld = SOME(n_z=1, Uniform_t_Grid=False, n_p=1, config=_some_config_with_settings())
+    _zero_some_gate(ld)
+    ld.unmasked_K = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_C = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+
+    losses = ld.compute_losses(Latent_States=[[z, dz]], t_Grid=[t], step=0, params=params).losses
+
+    assert torch.allclose(losses["LD"], torch.tensor(0.0, dtype=torch.float64), atol=1.0e-14)
+
+
+def test_some_simulate_integrates_constant_uniform_expert_mixture_torch_inputs():
+    params = numpy.array([[0.25]])
+    t = numpy.array([0.0, 0.25, 0.5])
+    z0 = torch.tensor([1.0], dtype=torch.float64)
+    dz0 = torch.tensor([2.0], dtype=torch.float64)
+
+    ld = SOME(n_z=1, Uniform_t_Grid=True, n_p=1, config=_some_config_with_settings())
+    _zero_some_gate(ld)
+    ld.unmasked_K = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_C = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.tensor([[[1.0]], [[3.0]]], dtype=torch.float32, requires_grad=True)
+
+    z, dz = ld.simulate(IC=[[z0, dz0]], t_Grid=[t], params=params, time_domain=[t])[0]
+
+    t_tensor = torch.tensor(t, dtype=z0.dtype).reshape(-1, 1)
+    expected_z = z0.reshape(1, 1) + dz0.reshape(1, 1)*t_tensor + t_tensor**2
+    expected_dz = dz0.reshape(1, 1) + 2.0*t_tensor
+    assert isinstance(z, torch.Tensor)
+    assert isinstance(dz, torch.Tensor)
+    assert z.dtype == z0.dtype
+    assert dz.dtype == dz0.dtype
+    assert z.shape == expected_z.shape
+    assert dz.shape == expected_dz.shape
+    assert torch.allclose(z, expected_z)
+    assert torch.allclose(dz, expected_dz)
+
+
+def test_some_simulate_uses_reference_time_domain_for_gate_normalization():
+    params = numpy.array([[0.25]])
+    t_window = numpy.array([0.5, 0.75, 1.0])
+    t_domain = numpy.array([0.0, 0.5, 1.0])
+    z0 = torch.tensor([0.0], dtype=torch.float64)
+    dz0 = torch.tensor([0.0], dtype=torch.float64)
+
+    ld = SOME(n_z=1, Uniform_t_Grid=True, n_p=1, config=_some_config_with_settings(hidden_widths=[1]))
+    with torch.no_grad():
+        first, second = ld.w.layers
+        first.weight.zero_()
+        first.bias.zero_()
+        second.weight.zero_()
+        second.bias.zero_()
+        first.weight[0, 0] = 1.0
+        second.weight[0, 0] = 5.0
+        second.weight[1, 0] = -5.0
+    ld.unmasked_K = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_C = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.tensor([[[0.0]], [[1.0]]], dtype=torch.float32, requires_grad=True)
+
+    z_global, _ = ld.simulate(IC=[[z0, dz0]], t_Grid=[t_window], params=params, time_domain=[t_domain])[0]
+    z_local, _ = ld.simulate(IC=[[z0, dz0]], t_Grid=[t_window], params=params, time_domain=[t_window])[0]
+
+    assert not torch.allclose(z_global, z_local)
+    assert z_local[-1, 0] > z_global[-1, 0]
 
 
 def test_sindy_rhs_matches_affine_model_for_strong_and_weak():
@@ -329,7 +552,7 @@ def test_cable_simulate_integrates_constant_uniform_expert_mixture_numpy_inputs(
     ld.unmasked_A = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
     ld.unmasked_b = torch.tensor([[[1.0]], [[3.0]]], dtype=torch.float32, requires_grad=True)
 
-    z = ld.simulate(IC=[[z0]], t_Grid=[t], params=params)[0][0]
+    z = ld.simulate(IC=[[z0]], t_Grid=[t], params=params, time_domain=[t])[0][0]
 
     expected = z0.reshape(1, 1) + 2.0*t.reshape(-1, 1)
     assert isinstance(z, numpy.ndarray)
@@ -347,13 +570,39 @@ def test_cable_simulate_integrates_constant_uniform_expert_mixture_torch_inputs(
     ld.unmasked_A = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
     ld.unmasked_b = torch.tensor([[[1.0]], [[3.0]]], dtype=torch.float32, requires_grad=True)
 
-    z = ld.simulate(IC=[[z0]], t_Grid=[t], params=params)[0][0]
+    z = ld.simulate(IC=[[z0]], t_Grid=[t], params=params, time_domain=[t])[0][0]
 
     expected = z0.reshape(1, 1) + 2.0*torch.tensor(t, dtype=z0.dtype).reshape(-1, 1)
     assert isinstance(z, torch.Tensor)
     assert z.dtype == z0.dtype
     assert z.shape == expected.shape
     assert torch.allclose(z, expected)
+
+
+def test_cable_simulate_uses_reference_time_domain_for_gate_normalization():
+    params = numpy.array([[0.25]])
+    t_window = numpy.array([0.5, 0.75, 1.0])
+    t_domain = numpy.array([0.0, 0.5, 1.0])
+    z0 = torch.tensor([0.0], dtype=torch.float64)
+
+    ld = CABLE(n_z=1, Uniform_t_Grid=True, n_p=1, config=_cable_config_with_settings(hidden_widths=[1]))
+    with torch.no_grad():
+        first, second = ld.w.layers
+        first.weight.zero_()
+        first.bias.zero_()
+        second.weight.zero_()
+        second.bias.zero_()
+        first.weight[0, 0] = 1.0
+        second.weight[0, 0] = 5.0
+        second.weight[1, 0] = -5.0
+    ld.unmasked_A = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.tensor([[[0.0]], [[1.0]]], dtype=torch.float32, requires_grad=True)
+
+    z_global = ld.simulate(IC=[[z0]], t_Grid=[t_window], params=params, time_domain=[t_domain])[0][0]
+    z_local = ld.simulate(IC=[[z0]], t_Grid=[t_window], params=params, time_domain=[t_window])[0][0]
+
+    assert not torch.allclose(z_global, z_local)
+    assert z_local[-1, 0] > z_global[-1, 0]
 
 
 def test_cable_compute_losses_updates_and_applies_hard_coefficient_masks():
@@ -431,6 +680,48 @@ def test_cable_export_load_restores_unmasked_coefficients_and_masks():
     assert ld2.unmasked_b.requires_grad and ld2.unmasked_b.is_leaf
 
 
+def test_some_export_load_restores_unequal_expert_pools_and_masks():
+    config = _some_config_with_settings(
+        n_experts_D=2,
+        n_experts_V=3,
+        n_active_D=1,
+        n_active_V=2,
+        use_mask=True,
+        mask_threshold=0.5,
+        first_mask_step=1,
+        mask_update_freq=1,
+    )
+    ld = SOME(n_z=1, Uniform_t_Grid=True, n_p=1, config=config)
+    ld.unmasked_K = torch.tensor([[[1.0]], [[2.0]]], dtype=torch.float32, requires_grad=True)
+    ld.unmasked_C = torch.tensor([[[3.0]], [[4.0]], [[5.0]]], dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.tensor([[[6.0]], [[7.0]]], dtype=torch.float32, requires_grad=True)
+    ld.K_mask = torch.tensor([[[0.0]], [[1.0]]])
+    ld.C_mask = torch.tensor([[[1.0]], [[0.0]], [[1.0]]])
+    ld.b_mask = torch.tensor([[[1.0]], [[0.0]]])
+    with torch.no_grad():
+        ld.w.layers[-1].bias.copy_(torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0]))
+
+    exported = ld.export()
+    ld2 = SOME(n_z=1, Uniform_t_Grid=True, n_p=1, config=config)
+    ld2.load(exported)
+
+    assert ld2.unmasked_K.shape == (2, 1, 1)
+    assert ld2.unmasked_C.shape == (3, 1, 1)
+    assert torch.allclose(ld2.unmasked_K, ld.unmasked_K)
+    assert torch.allclose(ld2.unmasked_C, ld.unmasked_C)
+    assert torch.allclose(ld2.unmasked_b, ld.unmasked_b)
+    assert torch.allclose(ld2.K_mask, ld.K_mask)
+    assert torch.allclose(ld2.C_mask, ld.C_mask)
+    assert torch.allclose(ld2.b_mask, ld.b_mask)
+    assert torch.allclose(ld2.K, torch.tensor([[[0.0]], [[2.0]]]))
+    assert torch.allclose(ld2.C, torch.tensor([[[3.0]], [[0.0]], [[5.0]]]))
+    assert torch.allclose(ld2.b, torch.tensor([[[6.0]], [[0.0]]]))
+    assert torch.allclose(ld2.w.layers[-1].bias, ld.w.layers[-1].bias)
+    assert ld2.unmasked_K.requires_grad and ld2.unmasked_K.is_leaf
+    assert ld2.unmasked_C.requires_grad and ld2.unmasked_C.is_leaf
+    assert ld2.unmasked_b.requires_grad and ld2.unmasked_b.is_leaf
+
+
 def test_cable_compute_losses_uses_dense_pre_topk_weights_for_diversity_and_tail_diagnostic():
     params = numpy.array([[0.25]])
     t = torch.linspace(0.0, 1.0, 5)
@@ -476,7 +767,6 @@ def test_cable_compute_losses_uses_dense_pre_topk_weights_for_diversity_and_tail
         "loss/diversity/total",
         "loss/tail/total",
     }
-    _assert_loss_metrics_have_total_suffix(result.metrics)
     assert torch.allclose(ld.last_tail_mass_loss, torch.tensor(0.25))
     assert len(ld.last_tail_mass_loss_list) == 1
     assert torch.allclose(ld.last_tail_mass_loss_list[0], torch.tensor(0.25))
@@ -564,8 +854,59 @@ def test_cable_weak_compute_losses_returns_scalar_totals_and_metrics():
     assert torch.allclose(result.metrics["expert/num_ever_engaged"], torch.tensor(2.0))
     assert _loss_metric_keys(result.metrics) == {
         "loss/LD/total",
+        "loss/coef/A",
+        "loss/coef/b",
         "loss/coef/total",
         "loss/diversity/total",
         "loss/tail/total",
     }
-    _assert_loss_metrics_have_total_suffix(result.metrics)
+
+
+def test_some_weak_compute_losses_returns_scalar_totals_and_separate_weak_metrics():
+    params = numpy.array([[0.25]])
+    t = torch.linspace(0.0, 1.0, 9)
+    z = torch.zeros((9, 1))
+    dz = t.reshape(-1, 1)
+
+    ld = SOME_weak(
+        n_z=1,
+        Uniform_t_Grid=True,
+        n_p=1,
+        config=_some_w_config(
+            n_experts_V=3,
+            n_active_D=2,
+            n_active_V=1,
+        ),
+    )
+    _zero_some_gate(ld)
+    ld.unmasked_K = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_C = torch.zeros((3, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.unmasked_b = torch.zeros((2, 1, 1), dtype=torch.float32, requires_grad=True)
+    ld.add_weight_functions(params[0], t)
+
+    result = ld.compute_losses(
+        Latent_States=[[z, dz]],
+        t_Grid=[t],
+        step=0,
+        params=params,
+    )
+
+    assert set(result.losses.keys()) == {
+        "LD", "coef", "diversity/D", "diversity/V", "tail/D", "tail/V",
+    }
+    assert all(loss.ndim == 0 for loss in result.losses.values())
+    assert torch.allclose(result.metrics["weak/weight_fun_residuals_D/mean"], torch.tensor(0.0))
+    assert result.metrics["weak/weight_fun_residuals_V/mean"] > 0.0
+    assert torch.allclose(result.losses["tail/D"], torch.tensor(0.0))
+    assert torch.allclose(result.losses["tail/V"], torch.tensor(4.0/9.0))
+    assert _loss_metric_keys(result.metrics) == {
+        "loss/LD/total",
+        "loss/coef/K",
+        "loss/coef/C",
+        "loss/coef/b",
+        "loss/coef/total",
+        "loss/diversity/D",
+        "loss/diversity/V",
+        "loss/tail/D",
+        "loss/tail/V",
+    }

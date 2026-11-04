@@ -332,7 +332,12 @@ Configuration files are YAML-based and specify:
 - Round scheduling / greedy sampling limits:
   - `trainer.n_iter`, `trainer.max_iter`, `trainer.max_greedy_iter`
 - Normalization:
-  - `trainer.normalize` (if enabled, the library computes global mean/std and normalizes train/test data)
+  - `trainer.normalize` enables scalar normalization of train/test data.
+  - First-order data use their global mean and standard deviation. Higher-order data use the
+    zeroth-order state's standard deviation as one shared scale; only the zeroth-order state is
+    centered. In particular, displacement/velocity pairs use
+    `D_normalized = (D - mean(D))/std(D)` and `V_normalized = V/std(D)`, which preserves
+    `d(D_normalized)/dt = V_normalized`.
 - Device placement:
   - `trainer.device` (optional; `"cpu"` by default)
 - Optional native noise:
@@ -355,6 +360,44 @@ Configuration files are YAML-based and specify:
     - weights: `loss_weights` for trainer-owned losses (e.g. `recon`, `rollout`, `IC_rollout`, plus `chain_rule` and `consistency` for second-order trainers)
     - types: `loss_types` (`"MSE"` or `"MAE"`) for those same trainer-owned losses
     - latent-dynamics loss weights live separately in `latent_dynamics.loss_weights`
+
+#### Final-curriculum checkpointing
+
+Rollout trainers compare checkpoint losses only after every enabled rollout curriculum has reached
+its configured maximum. This prevents an early short-horizon epoch from setting a numerically tiny
+`best_loss` that later, harder long-horizon epochs cannot beat. Once the final curriculum stage is
+reached, ordinary lowest-total-loss checkpointing applies; no test-set or additional validation
+solutions are used.
+
+A curriculum is enabled when its corresponding `loss_weights` entry is positive. Disabled rollout
+or IC-rollout losses do not delay checkpointing, nor does a curriculum whose initial value already
+equals its maximum. For an enabled curriculum that must grow, its first zero-based eligible round
+offset is
+
+```text
+ceil((maximum - initial) / increment) * update_frequency
+```
+
+The checkpoint window starts at the largest of the regular-rollout offset, IC-rollout offset, and
+`warmup_epochs`. At the start of every training round, the trainer reports when each curriculum
+reaches its maximum, the eligible round/global epoch range, and the number of eligible epochs. For
+example:
+
+```text
+Checkpoint curriculum schedule for this training round:
+  Round epochs:                         1500
+  Warmup permits checkpointing at:      round epoch 41
+  Rollout reaches max 0.500000 at:      round epoch 981
+  IC rollout:                           disabled; does not restrict checkpointing
+  Checkpointing enabled for:            round epochs 981-1500
+  Corresponding global epochs:          2481-3000
+  Number of checkpoint-eligible epochs: 520
+```
+
+Each round must contain at least one final-curriculum epoch. If the configured curriculum cannot
+reach its maximum before the round ends, training raises a `ValueError` before optimization begins.
+Adjust the increment, update frequency, maximum, warmup, or `trainer.n_iter` so that a non-empty
+checkpoint window remains.
 
 ### Sampler Settings (`sampler`)
 - `sampler.type` selects a sampler implementation (e.g., `FOM_Variance` or `FOM_Rollout`).
@@ -383,11 +426,13 @@ Configuration files are YAML-based and specify:
 - Number of decoder stages: `n_Decoders`
 
 ### Latent Dynamics (`latent_dynamics`)
-- Type: `sindy`, `spring`, `switch`, `sindy_w`, `spring_w`, `switch_w`, or `cable`.
+- Type: `sindy`, `spring`, `switch`, `sindy_w`, `spring_w`, `switch_w`, `cable`,
+  `cable_w`, `some`, or `some_w`.
 - `interpolator`: required for interpolatable models; currently supports `type: GP` with `Matern`
   or `RBF` kernels.
-- `loss_weights`: LD-owned losses. Interpolatable affine models use `LD`, `coef`, and `stab`; CABLE uses `LD`, `coef`, `diversity`, and `tail`.
-- CABLE-specific settings include `n_experts`, `n_active`, `hidden_widths`, and `activations`.
+- `loss_weights`: LD-owned losses. Interpolatable affine models use `LD`, `coef`, and `stab`;
+  CABLE/SOME use `LD`, `coef`, `diversity`, and `tail`.
+- CABLE/SOME settings include `n_experts`, `n_active`, `hidden_widths`, and `activations`.
 
 ### Physics (`physics`)
 - Physics type (must match a key in `physics_dict`)

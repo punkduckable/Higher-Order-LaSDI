@@ -57,12 +57,9 @@ class SINDy(InterpolatableLatentDynamics):
         n_p : int 
             The number of (scalar) parameters in the parameter space.
 
-        config : dict
-            The latent-dynamics configuration dictionary. It must three keys: `type`, `trainable`,
-            and `sindy`. It must have `config.type == "sindy"` and `config.sindy` should be a 
-            dictionary housing sub-class specific settings. The required `lstsq_reg` entry controls
-            ridge regularization used by `initialize_coefficients(...)` when initializing 
-            coefficients from encoded trajectories.
+        config : SINDyLatentDynamicsConfig
+            Config schema for the this latent dynamics object.
+
 
 
         -------------------------------------------------------------------------------------------
@@ -438,10 +435,11 @@ class SINDy(InterpolatableLatentDynamics):
 
 
     def simulate(   self,
-                    IC      : list[list[numpy.ndarray | torch.Tensor]],
-                    t_Grid  : list[numpy.ndarray      | torch.Tensor],
-                    params  : numpy.ndarray,
-                    sample  : bool = False) -> list[list[numpy.ndarray | torch.Tensor]]:
+                    IC          : list[list[numpy.ndarray | torch.Tensor]],
+                    t_Grid      : list[numpy.ndarray      | torch.Tensor],
+                    params      : numpy.ndarray,
+                    time_domain : list[numpy.ndarray | torch.Tensor],
+                    sample      : bool = False) -> list[list[numpy.ndarray | torch.Tensor]]:
         r"""
         Time-integrate the native SINDy latent dynamics.
 
@@ -461,6 +459,10 @@ class SINDy(InterpolatableLatentDynamics):
 
         params : numpy.ndarray, shape = (n_param, n_p)
             The i'th row holds the i'th combination of parameter values.
+
+        time_domain : list[numpy.ndarray | torch.Tensor], len = n_param
+            Full/reference time grids for API consistency with time-gated latent dynamics. SINDy is
+            autonomous and does not use this value.
         
         sample : bool 
             If self is stochastic, setting this to true will sample from the posterior distribution 
@@ -483,6 +485,7 @@ class SINDy(InterpolatableLatentDynamics):
         n_param : int = params.shape[0];
         assert isinstance(t_Grid, list) and isinstance(IC, list);
         assert len(IC) == n_param and len(t_Grid) == n_param;
+        assert isinstance(time_domain, list) and len(time_domain) == n_param;
 
 
         # -----------------------------------------------------------------------------------------

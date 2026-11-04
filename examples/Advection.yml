@@ -8,33 +8,38 @@ trainer:
   # If true, compute a single global mean/std from TRAINING data only, and normalize
   # all training/testing trajectories using these values.
   normalize:                true
-  
   device:                   'cuda:0'
-
   noise_ratio:              0.0
+
+  profiler: 
+    enabled:                False 
+    wait_epochs:            50
+    warmup_epochs:          1
+    active_epochs:          1
+    num_repeats:            1
 
   First_Order_Rollout:
     lr:                     0.001
-    gradient_clip:          25.0      # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
+    gradient_clip:          10.0      # Maximum allowable gradient magnitude; will rescale gradients if exceeded.
 
     # p_rollout grows from p_rollout_init by dp_per_update every rollout_update_freq epochs, capped at max_p_rollout.
     p_rollout_init:         0.01
-    rollout_update_freq:    20
+    rollout_update_freq:    10
     dp_per_update:          0.01
     max_p_rollout:          0.75      # Maximum proportion of the time window used for rollout loss.
-    n_rollouts:             4         # Number of rollable start frames to rollout per training parameter per epoch.
+    n_rollouts:             8         # Number of rollable start frames to rollout per training parameter per epoch.
 
     p_IC_rollout_init:      0.01
     IC_rollout_update_freq: 10
     IC_dp_per_update:       0.01
     max_p_IC_rollout:       1.0       # Maximum proportion of the time window used for IC rollout loss.
 
-    warmup_epochs:          80        # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
+    warmup_epochs:          100       # Number of epochs to warmup the learning rate after greedy sampling; checkpointing is disabled during warmup.
 
     loss_weights:
       recon:                1.0
-      rollout:              0.0
-      IC_rollout:           0.25
+      rollout:              0.25
+      IC_rollout:           0.0
 
     loss_types:
       recon:                "MSE"
@@ -83,8 +88,8 @@ latent_dynamics:
     coef:                   0.0001
     tail:                   0.1
   cable: 
-    n_experts:              16
-    n_active:               4
+    n_experts:              50
+    n_active:               10
     hidden_widths:          [64, 64]
     activations:            ['tanh', 'tanh']
     use_biases:             true 

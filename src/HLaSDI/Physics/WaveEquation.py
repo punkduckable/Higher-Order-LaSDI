@@ -76,7 +76,7 @@ class WaveEquation(Physics):
                          X_Positions    = numpy.copy(X),
                          Frame_Shape    = list(U.shape[1:]),
                          param_names    = param_names,
-                         Uniform_t_Grid = False,
+                         Uniform_t_Grid = config.WaveEquation.uniform_t_grid,
                          n_IC           = 2);
 
         # Determine which index corresponds to c (wave speed) and which to k (decay rate in the IC).
