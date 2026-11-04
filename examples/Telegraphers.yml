@@ -35,16 +35,16 @@ trainer:
     loss_weights:
       recon:                1.0
       chain_rule:           1.0
-      rollout:              0.25
-      IC_rollout:           0.0
+      rollout:              0.0
+      IC_rollout:           0.25
       consistency:          1.0
 
     loss_types:
-      recon:                "MAE"
-      chain_rule:           "MAE"
+      recon:                "MSE"
+      chain_rule:           "MSE"
       rollout:              "MAE"
       IC_rollout:           "MAE"
-      consistency:          "MAE"
+      consistency:          "MSE"
 
 workflow:
   use_restart:              False
@@ -91,10 +91,10 @@ latent_dynamics:
     tail/D:                 0.01
     tail/V:                 0.01
   some:
-    n_experts_D:            50
-    n_experts_V:            50
-    n_active_D:             10
-    n_active_V:             10
+    n_experts_D:            16
+    n_experts_V:            12
+    n_active_D:             8
+    n_active_V:             5
     hidden_widths:          [64, 64]
     activations:            ['tanh', 'tanh']
     use_biases:             true 
@@ -103,7 +103,7 @@ latent_dynamics:
     eps_engaged:            0.001
     use_mask:               true
     mask_threshold:         0.0005
-    first_mask_step:        1000
+    first_mask_step:        1500
     mask_update_freq:       250
 
 physics:
@@ -112,4 +112,3 @@ physics:
     n_t:                    501
     t_max:                  5.0
     uniform_t_grid:         false
-
