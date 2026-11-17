@@ -2,7 +2,7 @@
 
 ## Goal
 
-Replace the per-rollout Python/RK4 execution path used by the sampled second-order rollout loss with one padded, batched simulation. The primary objective is to reduce CPU/autograd dispatch overhead and the number of tiny CUDA kernel launches while preserving the current numerical method, gate behavior, time normalization, gradients, and loss-reduction semantics.
+Replace the per-window Python/RK4 execution path with padded, batched simulation, beginning with the profiled second-order SOME rollout loss. Retain the existing scalar RK4 solvers as readable CPU/NumPy references while developing a tensor-only batched implementation and, if profiling warrants it, a specialized GPU implementation. The objective is to reduce CPU/autograd dispatch overhead and tiny CUDA launches without changing RK4, time normalization, gradients, or loss-reduction semantics. Extend the batched contract to first-order rollout models after validating the second-order path; consider `torch.compile` only after the data flow is GPU-friendly.
 
 ## Motivation and baseline
 
@@ -26,42 +26,45 @@ indicates a launch-bound workload rather than a compute- or memory-bound workloa
   - 32,000 calls with `[20, 1] @ [1, 20]`
 - Peak allocation is about 368 MB on an 80 GB H100, so memory capacity is not the limiting resource.
 
-The current rollout path serializes independent trajectories in Python and unrolls RK4 separately for each trajectory. Batching changes the dominant expert operations from many `[1, n_z]` matrix multiplications into fewer `[B, n_z]` operations and builds one larger autograd graph per time step instead of many nearly identical scalar-batch graphs.
+The current rollout path serializes independent trajectories in Python and unrolls RK4 separately for each trajectory. Batching changes the dominant expert operations from many `[1, n_z]` matrix multiplications into fewer `[B, n_z]` operations and builds one larger autograd graph per time step instead of many nearly identical scalar-batch graphs. The 603 ms figure is summed kernel execution, not an unprofiled wall-time lower bound; profiler overhead and host-side autograd work also matter.
+
+The profiled SOME configuration already has a time/parameter-only gate. Its scalar torch path already evaluates gate weights and effective affine coefficients at RK stage times before integrating *each window*. Removing `use_z_in_gate` does not by itself accelerate that workload. The additional opportunity is to form those coefficients in larger batches, reuse time/parameter evaluations across windows where appropriate, and remove the float-keyed RHS closure from the future GPU hot path.
 
 ## Assumptions
 
 - Different parameter values may use different time-step sizes and rollout durations.
 - Sampled rollouts will usually have similar frame counts, so padding overhead should be moderate.
 - Time grids may be nonuniform and must be represented per rollout.
-- The SOME gate may depend on displacement and velocity (`use_z_in_gate=True`). Therefore, gate weights must be evaluated from the actual state at every RK stage; they cannot be precomputed in the general implementation.
-- The existing scalar `simulate()` path remains the reference behavior and continues to support inference and callers that do not construct batches.
+- SOME and SOME_weak gates depend only on reference-normalized time and parameters. CABLE's separate `use_z_in_gate` option remains unchanged.
+- Stage-time gate weights and effective coefficients retain autograd connections to the current gate and expert parameters. They must be recomputed after each optimizer update, not cached across training steps.
+- The existing scalar first- and second-order RK4 solvers and `simulate()` paths remain reference behavior for CPU/NumPy inference and equivalence tests.
 
 ## Scope
 
 ### Included
 
-1. A differentiable, tensor-only, padded batched second-order RK4 solver.
-2. Batched SOME gate/RHS evaluation for shared or per-rollout parameters and time domains.
-3. A `simulate_batched()` latent-dynamics interface and SOME implementation.
-4. Packing sampled rollout windows into one padded batch.
-5. Batched latent simulation, decoder evaluation, masking, and loss reduction in the second-order rollout trainers.
-6. Numerical, gradient, loss-invariance, and trainer smoke tests.
-7. Profiler ranges and lightweight batching metrics needed to validate the optimization.
+1. Remove `use_z_in_gate` from SOME/SOME_weak schemas and implementation; retain the existing differentiable stage-time precomputation for tensor rollouts.
+2. Define a shared batch/time-grid contract for first- and second-order RK4; implement and validate the second-order tensor path first.
+3. Batch SOME stage-time gate weights and effective affine coefficients for selected rollout windows while preserving gradients.
+4. Add a `simulate_batched()` interface and integrate sampled second-order rollout losses in both strong and weak trainers.
+5. Validate trajectories, gradients, loss weighting, and unprofiled CPU/GPU performance against the scalar reference.
+6. Extend the same contract to first-order solvers/models in a separately reviewable phase.
 
 ### Initially excluded
 
 - Batching the initial-condition rollout loss.
-- Changes to first-order trainers or first-order ODE solvers.
-- Precomputing gate coefficients for `use_z_in_gate=False`.
 - Replacing RK4 with a different integrator.
-- CUDA graphs, `torch.compile`, or custom/fused CUDA kernels.
-- Broad changes to the existing scalar simulation API.
+- CUDA graphs, `torch.compile`, or custom/fused CUDA kernels in the initial patches.
+- Removing CABLE's independent state-dependent gate option.
+- Replacing or deleting the existing scalar/reference RK4 and simulation APIs.
 
 These can be considered after the padded batched path is correct and profiled.
 
 ## Proposed tensor contract
 
 Let `B` be the number of sampled rollout windows in the epoch batch, `T_max` the longest window, `n_z` the latent dimension, and `n_p` the parameter dimension.
+
+The first-order solver uses one state tensor `[B, n_z]`; the second-order solver uses displacement and velocity tensors of that shape. Both use the same `[B, T_max]` grid and `[B]` lengths. A generic batched RHS must evaluate all `B` states at once. The SOME-specific fast path may instead receive precomputed stage coefficients.
 
 | Value | Shape | Meaning |
 |---|---:|---|
@@ -77,15 +80,27 @@ Let `B` be the number of sampled rollout windows in the epoch batch, `T_max` the
 | valid-frame mask | `[B, T_max]` | `frame_index < lengths[:, None]` |
 | parameter index | `[B]` | Maps each rollout back to its training parameter |
 
+For one second-order interval, RK4 evaluates the affine RHS at `t_n`, `t_n + h_n/2` (twice, at two different intermediate states), and `t_n + h_n`. Thus the time-only gate needs **three distinct stage-time coefficient sets per interval**. For each selected interval, the precomputed effective matrices and bias are `K_start/K_mid/K_end`, `C_start/C_mid/C_end`, and `b_start/b_mid/b_end`; the two midpoint RHS calls share coefficients but not state. Initial implementation may retain a generic batched RHS for clarity, then specialize this coefficient layout after correctness tests.
+
 Time grids are padded by repeating the final valid timestamp for each rollout. Targets are padded to `T_max`, but padded target values are never included in a loss.
 
 ## Detailed implementation
 
-### 1. Add a batched second-order RK4 solver
+### 1. Remove the SOME/SOME_weak state-dependent gate option
+
+**Files:** `src/HLaSDI/Schemas.py`, `src/HLaSDI/LatentDynamics/SOME.py`, SOME example YAML files, and focused tests.
+
+- Remove `use_z_in_gate` from `SOMELatentDynamicsSettings` (shared by SOME and SOME_weak) and from the SOME implementation. Do not change CABLE.
+- Make the gate input unconditionally `[reference_normalized_time, parameters]`. Remove latent-state dummy arguments from the gate-weight helper.
+- Keep the existing torch scalar-rollout precomputation of gate weights and effective `K`, `C`, and `b`; make this path unconditional. This is simplification and a prerequisite for batched precomputation, not an expected standalone speedup on the profiled configuration.
+- Remove the obsolete key from SOME example YAML files. The schema forbids unknown keys, so existing SOME YAML/checkpoint configs containing even `use_z_in_gate: false` require that key to be removed before validation. Checkpoints with a state-dependent gate have an incompatible first gate-layer shape and cannot be loaded as the new model without an explicit conversion strategy.
+- Test schema rejection of the removed SOME key, CABLE's unchanged support, and time-dependent SOME forward/gradient behavior.
+
+### 2. Add a batched second-order RK4 solver
 
 **File:** `src/HLaSDI/Utilities/SecondOrderSolvers.py`
 
-Add an explicitly named tensor-only function such as `RK4_batched`. Keep the existing `RK4` unchanged so it remains a stable scalar/NumPy reference path.
+Add an explicitly named tensor-only function such as `RK4_batched`. Keep the existing `RK4` unchanged as the independent, readable scalar/NumPy reference. A batched tensor implementation should run on CPU as well as GPU; introduce a GPU-only fused implementation and device dispatch only when measured performance justifies the additional code. Moving the per-window loop into one function without batching the RHS is not sufficient.
 
 Suggested callable contract:
 
@@ -117,9 +132,9 @@ Requirements:
   active = (n + 1 < lengths)[:, None]        # [B, 1]
   ```
 
-- Evaluate all four RK stages on `[B, n_z]` state tensors. In particular, the RHS receives the actual intermediate stage displacement and velocity. This is required when the gate uses `z`.
+- Evaluate all four RK stages on `[B, n_z]` state tensors. The RHS receives actual intermediate displacement and velocity even though the SOME gate weights no longer depend on those states.
 - Compute the candidate next displacement and velocity using the same second-order RK4 equations as the scalar implementation.
-- Freeze completed trajectories without host synchronization:
+- Freeze completed trajectories without host synchronization. Repeating the final time makes `h_n == 0` for padded steps, which may already make the RK4 update an exact no-op when RHS values are finite. Use an explicit mask if required for correctness; benchmark its extra cost rather than assuming it is free:
 
   ```python
   y_next = torch.where(active, y_candidate, y_current)
@@ -128,20 +143,19 @@ Requirements:
 
 - Do not use `if active.any():`, `.item()`, or another data-dependent CPU/GPU synchronization in the time loop.
 - Stack the per-step tensors at the end and transpose/stack into `[B, T_max, n_z]`.
-- Preserve autograd through every valid stage and through the selected branch of `torch.where`.
+- Preserve autograd through every valid stage and, if an explicit mask is used, through its selected branch.
 
-Repeating the final timestamp makes padded `h_n` values zero. The explicit active mask still documents and enforces the invariant that completed states remain unchanged, independent of padded values.
+Keep the completed-state invariant in tests. Avoid synchronizing validation (`.item()`, `active.any()`) inside the time loop.
 
-### 2. Generalize SOME gate and RHS evaluation
+### 3. Batch SOME gate and effective-coefficient precomputation
 
 **File:** `src/HLaSDI/LatentDynamics/SOME.py`
 
-Refactor the private weight/RHS machinery narrowly enough to support both the existing scalar trajectory path and the new rollout-batch path.
+Keep the existing scalar path as the oracle. For the new path, evaluate gate weights at all selected windows' RK stage times in one or a small number of batched tensor calls. From those weights, form effective `K`, `C`, and optional `b` for each stage time. Pass those coefficients to the batched affine RK4 step or to a batched RHS closure; do not perform a gate-network call at every RK stage in the time loop.
 
 The batched evaluation must accept:
 
-- `t`: scalar, `[N]`, or `[B]` as appropriate for the caller.
-- displacement and velocity: `[n_z]`, `[N, n_z]`, or `[B, n_z]`.
+- `t`: scalar, `[N]`, or `[B, T_max - 1, 3]` stage times (flattened to `[N]` for a gate-network call) as appropriate for the caller.
 - parameters:
   - a shared row `[n_p]`, expanded across samples, or
   - one row per sample `[N, n_p]` / `[B, n_p]`.
@@ -150,21 +164,20 @@ The batched evaluation must accept:
 For a batched RK stage, time normalization is elementwise:
 
 ```python
-tau = (t - reference_t0) / reference_t_span       # [B]
+tau = (t - reference_t0) / reference_t_span       # [B] per stage, then flatten for the gate
 ```
 
-The gate input is then:
+The gate input is always:
 
 ```text
-[tau[:, None], params]                              if use_z_in_gate=False
-[tau[:, None], params, displacement, velocity]      if use_z_in_gate=True
+[tau[:, None], params]
 ```
 
 Important invariants:
 
 - Normalize using the full trajectory's reference domain, not the sampled/cropped rollout window. Otherwise the same physical time receives different gate inputs depending on the sampled window.
-- If `use_z_in_gate=True`, call the gate independently for all four RK stages using each stage's intermediate displacement and velocity.
-- Do not detach, convert through NumPy, or copy tensors to CPU in the batched training path.
+- Preserve the exact RK4 stage-time arithmetic on nonuniform grids. Stages 2 and 3 share midpoint coefficients, not intermediate states.
+- Do not detach, convert through NumPy, or copy tensors to CPU in the batched training path. Recompute differentiable coefficients after each optimizer update; never reuse a stale autograd graph across epochs.
 - Keep expert coefficients shared across the batch while gate weights vary by rollout and RK stage.
 - Use batched operations (`einsum`, `matmul`, or the repository's clearest existing pattern) so effective `K`, `C`, and optional `b` contributions are computed without a loop over rollout rows.
 - Continue to apply coefficient masks and optional biases exactly as in the scalar RHS.
@@ -176,9 +189,9 @@ acceleration[b] = sum_m alpha[b, m] * (K[m] @ z[b] + b[m])
                 + sum_m beta[b, m]  * (C[m] @ velocity[b])
 ```
 
-Choose the contraction form based first on clarity and exact gradient behavior. Use profiling, rather than intuition, to decide whether collapsing effective matrices or directly contracting expert outputs is faster on the target H100 workload.
+Choose the contraction form based first on clarity and exact gradient behavior. Use profiling, rather than intuition, to decide whether precomputed effective matrices or directly weighted expert outputs are faster on the target H100 workload. Reuse repeated stage-time/parameter evaluations across overlapping windows only if doing so preserves exact time values and gradients.
 
-### 3. Add an explicit batched simulation interface
+### 4. Add an explicit batched simulation interface
 
 **Files:**
 
@@ -207,12 +220,12 @@ Design notes:
 
 - Keep this API tensor-only. NumPy/list adaptation remains the responsibility of the existing scalar `simulate()` API.
 - Return two tensors with shape `[B, T_max, n_z]`.
-- Create an RHS closure over `params`, `reference_t0`, and `reference_t_span`, then call `RK4_batched`.
+- Form stage-time coefficients from `params`, `reference_t0`, and `reference_t_span` before integration; the batched RK4 core consumes these tensors through an affine RHS or an explicit affine-step interface. Keep a generic batched-RHS solver separately for non-SOME models.
 - `SOME_weak` should inherit this implementation unless it truly changes rollout dynamics.
 - The base interface should fail clearly for latent-dynamics classes that do not implement batched simulation. If capability detection is needed, prefer an explicit interface method/property over concrete-type checks.
 - Do not rewrite scalar `simulate()` in the first patch. Keeping independent scalar and batched paths makes equivalence testing meaningful and limits the regression surface.
 
-### 4. Pack all sampled rollout windows before simulation
+### 5. Pack all sampled rollout windows before simulation
 
 **File:** `src/HLaSDI/Trainer/Second_Order_Rollout.py`
 
@@ -233,7 +246,7 @@ Replace the nested “sample one window, simulate it, decode it, accumulate its 
 4. Repeat each final valid timestamp through the padded portion of its time grid.
 5. Stack initial states, parameter rows, lengths, and reference-domain values.
 6. Call `latent_dynamics.simulate_batched(...)` once.
-7. Decode the entire predicted batch with one encoder-decoder call:
+7. Decode predicted states in one encoder-decoder call. Benchmark a padded flatten against gathering only valid frames first; the latter avoids running a potentially expensive full-order decoder on padding:
 
    ```python
    flat_D = predicted_D.reshape(B * T_max, n_z)
@@ -243,14 +256,14 @@ Replace the nested “sample one window, simulate it, decode it, accumulate its 
    decoded_V = decoded_V.reshape(B, T_max, *frame_shape)
    ```
 
-   Adapt the exact call and output handling to the existing `EncoderDecoder` interface.
+   This snippet shows the simple padded variant. Adapt the exact call and output handling to the existing `EncoderDecoder` interface, and retain the faster measured choice.
 8. Compute masked latent-space and full-order losses.
 
 Keep window selection behavior unchanged in this first optimization. This isolates batching from curriculum/random-sampling changes and makes fixed-seed scalar-vs-batched comparison possible.
 
 If directly padding high-dimensional full-order targets creates excessive copies, first attempt to stack slices into preallocated `[B, T_max, ...]` tensors. Peak memory from the profile leaves substantial headroom, but target packing should still be measured rather than assumed free.
 
-### 5. Preserve the current loss reduction exactly
+### 6. Preserve the current loss reduction exactly
 
 The current sampled rollout loss has three reduction levels:
 
@@ -285,7 +298,7 @@ loss = (per_parameter_sum / rollouts_per_parameter).sum()
 
 Use absolute error for MAE and squared error for MSE. Construct counts in a dtype/device-compatible way and assert through packing logic that every included training parameter has at least one sampled rollout before division.
 
-### 6. Apply the same sampled-rollout path to the weak trainer
+### 7. Apply the same sampled-rollout path to the weak trainer
 
 **File:** `src/HLaSDI/Trainer/Second_Order_Weak.py`
 
@@ -351,8 +364,7 @@ Use deterministic analytic or linear RHS functions so failures identify the inte
 
 For fixed model weights and rollout windows, compare batched valid frames against the existing scalar `SOME.simulate()` path for:
 
-- `use_z_in_gate=False`,
-- `use_z_in_gate=True`,
+- time/parameter-varying gate weights,
 - biases enabled and disabled,
 - masking enabled where practical,
 - heterogeneous parameter rows and reference time domains.
@@ -370,7 +382,7 @@ Compute the same scalar objective from scalar and batched simulations, backpropa
 - `b` when enabled,
 - all gate-network parameters.
 
-Run both `use_z_in_gate=False` and `use_z_in_gate=True`. The latter is essential because it verifies that every RK-stage gate evaluation receives the correct intermediate state.
+Verify gradients through precomputed gate weights and effective coefficients. In particular, neither precomputation nor reuse across overlapping windows may detach the gate network or expert tensors.
 
 Use float64 for the strictest small deterministic tests when supported, and document `rtol`/`atol`. Also retain a float32 smoke case representative of training.
 
@@ -442,11 +454,11 @@ The exact end-to-end speedup will be lower than the reduction in rollout launch 
 
 **Mitigation:** Pass `reference_t0` and `reference_t_span` explicitly and add the cropped-window regression test.
 
-### `use_z_in_gate=True` is handled incorrectly
+### Stage coefficients are stale or misaligned
 
-**Risk:** Reusing weights across RK stages silently changes the numerical model.
+**Risk:** Reusing coefficients across optimizer steps, or mixing up start/midpoint/end coefficients, silently changes the numerical model or breaks gradients.
 
-**Mitigation:** Evaluate the gate at all four intermediate stage states and require forward/gradient equivalence tests with `use_z_in_gate=True`.
+**Mitigation:** Compute coefficients anew in each training forward pass, preserve exact stage-time arithmetic, and require scalar-vs-batched trajectory and gradient equivalence on nonuniform/cropped windows.
 
 ### Loss weighting silently changes
 
@@ -468,7 +480,31 @@ The exact end-to-end speedup will be lower than the reduction in rollout launch 
 
 ## Implementation sequence
 
-### Patch 1: Numerical foundation
+### Patch 1: Remove the SOME state-dependent gate option
+
+Expected files:
+
+```text
+src/HLaSDI/Schemas.py
+src/HLaSDI/LatentDynamics/SOME.py
+examples/KleinGordon.yml
+examples/Telegraphers.yml
+examples/Telegraphers_Profile.yml
+examples/WaveEquation.yml
+Test/test_latent_dynamics_rhs.py
+Test/test_config_schemas.py
+```
+
+Work:
+
+1. Remove `use_z_in_gate` from the shared SOME settings and implementation, but leave CABLE unchanged.
+2. Make time/parameter-only gate evaluation and existing scalar-torch stage precomputation unconditional.
+3. Remove the obsolete field from SOME example YAML files and document the saved-config migration.
+4. Verify gate/RHS/simulation behavior and gradients for SOME and SOME_weak.
+
+This patch does **not** claim a GPU speedup: the profiled run already uses the precomputed scalar-torch path.
+
+### Patch 2: Batched numerical foundation
 
 Expected files:
 
@@ -481,14 +517,13 @@ Test/test_latent_dynamics_rhs.py
 
 Work:
 
-1. Add `RK4_batched`.
-2. Generalize the SOME private gate/RHS operations for batched tensors.
-3. Add the explicit `simulate_batched()` interface and SOME implementation.
-4. Add solver, scalar-vs-batched, time-normalization, and gradient tests.
+1. Define the shared first-/second-order batch contract and add the second-order tensor `RK4_batched` without replacing scalar `RK4`.
+2. Add batched SOME stage-time gate/effective-coefficient precomputation and `simulate_batched()`.
+3. Add solver, scalar-vs-batched, time-normalization, and gradient tests on CPU.
 
 Stop after this patch and review numerical/gradient equivalence before changing trainer behavior.
 
-### Patch 2: Trainer integration and profiling
+### Patch 3: Second-order trainer integration and profiling
 
 Expected files:
 
@@ -508,12 +543,16 @@ Work:
 6. Add loss-invariance and trainer smoke tests.
 7. Produce an equivalent before/after profile and unprofiled timing comparison.
 
+### Patch 4: First-order extension and backend optimization
+
+Add a first-order batched RK4 implementation and migrate first-order rollout models/trainers using the same batch contract, while retaining the scalar reference. First-order CABLE still supports a state-dependent gate, so its batched RHS must evaluate the gate on each intermediate RK stage state; it cannot use SOME's time-only coefficient precomputation. Benchmark CPU scalar versus batched execution as well as GPU execution; batching may reduce CPU dispatch but padding may lose for small/heterogeneous workloads. Select a GPU-only fused RK4 implementation by configured device only if profiling demonstrates a worthwhile speedup and it passes the same trajectory/gradient tests. Keep a pure tensor batched solver usable on both devices. Any less-transparent GPU-specialized kernel/step must have detailed, human-readable comments explaining its state layout, each RK stage, synchronization assumptions, gradient path, and padding behavior.
+
 ## Follow-up optimizations (only after re-profiling)
 
 1. **Length bucketing:** Use if padding efficiency is poor.
-2. **Conditional coefficient precomputation:** For `use_z_in_gate=False`, gate weights depend only on normalized time and parameters. Precomputation may help, but should be a separate specialized path with equivalence tests; it must never be used when the gate consumes stage states.
-3. **`torch.compile`:** Consider compiling the batched RHS/step after graph breaks and shape stability are understood.
+2. **More coefficient reuse:** Evaluate shared stage times/parameters only once across overlapping windows when this is measurably useful and numerically equivalent.
+3. **`torch.compile`:** Consider compiling a fixed-shape batched RK4 step after graph breaks and shape stability are understood; keep CPU eager or benchmark a separate CPU-compiled path.
 4. **IC rollout batching:** Apply the same padded interface if the new profile shows IC rollouts are material.
 5. **Expert contraction tuning:** Benchmark `einsum`, effective-matrix construction, and direct expert-output weighting on representative `B`, `n_z`, and expert counts.
 
-The immediate optimization should remain focused: remove the rollout-level Python loop and expose useful batch dimensions to PyTorch/CUDA without changing the model or its loss semantics.
+The immediate optimization should remain focused: remove the obsolete SOME gate option, then remove the rollout-level Python loop and expose useful batch dimensions to PyTorch/CUDA without changing the RK4 method or loss semantics.
