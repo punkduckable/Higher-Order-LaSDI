@@ -10,7 +10,7 @@ from pydantic import ValidationError
 SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.append(SRC)
 
-from HLaSDI.Schemas import validate_experiment_config
+from HLaSDI.Schemas import WeakSOMELatentDynamicsConfig, validate_experiment_config
 
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
@@ -51,6 +51,24 @@ def test_schema_rejects_unknown_keys():
 
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         validate_experiment_config(config)
+
+
+def test_some_schema_rejects_removed_state_gate_option():
+    config = _load_example("Telegraphers.yml")
+    config["latent_dynamics"]["some"]["use_z_in_gate"] = False
+
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        validate_experiment_config(config)
+
+    weak_config = copy.deepcopy(config["latent_dynamics"])
+    weak_config["type"] = "some_w"
+    weak_config["weak"] = {
+        "test_func_type": "PC-poly",
+        "test_func_width": 0.5,
+        "overlap": 0.5,
+    }
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        WeakSOMELatentDynamicsConfig.model_validate(weak_config)
 
 
 def test_schema_rejects_nonpositive_learning_rate():

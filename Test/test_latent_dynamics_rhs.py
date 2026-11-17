@@ -1,5 +1,6 @@
 import os
 import sys
+from unittest.mock import patch
 
 import numpy
 import torch
@@ -396,6 +397,41 @@ def test_some_simulate_integrates_constant_uniform_expert_mixture_torch_inputs()
     assert dz.shape == expected_dz.shape
     assert torch.allclose(z, expected_z)
     assert torch.allclose(dz, expected_dz)
+
+    # NumPy/CPU inference retains the readable scalar RK4 reference path.
+    z_np, dz_np = ld.simulate(
+        IC=[[z0.numpy(), dz0.numpy()]], t_Grid=[t], params=params, time_domain=[t]
+    )[0]
+    numpy.testing.assert_allclose(z_np, expected_z.numpy(), rtol=1.0e-6, atol=1.0e-6)
+    numpy.testing.assert_allclose(dz_np, expected_dz.numpy(), rtol=1.0e-6, atol=1.0e-6)
+
+
+def test_some_and_some_weak_precompute_gate_once_per_tensor_rollout_with_gradients():
+    params = numpy.array([[0.25]])
+    t = numpy.array([0.0, 0.25, 0.5])
+
+    for model, config in (
+        (SOME, _some_config_with_settings(hidden_widths=[1])),
+        (SOME_weak, _some_w_config(hidden_widths=[1])),
+    ):
+        ld = model(n_z=1, Uniform_t_Grid=True, n_p=1, config=config)
+        _zero_some_gate(ld)
+        ld.unmasked_K = torch.zeros((2, 1, 1), requires_grad=True)
+        ld.unmasked_C = torch.zeros((2, 1, 1), requires_grad=True)
+        ld.unmasked_b = torch.tensor([[[1.0]], [[3.0]]], requires_grad=True)
+        z0 = torch.tensor([1.0], requires_grad=True)
+        dz0 = torch.tensor([2.0], requires_grad=True)
+
+        assert ld.w.layers[0].weight.shape[1] == 2  # normalized time and one parameter
+        with patch.object(ld.w, "forward", wraps=ld.w.forward) as gate_forward:
+            z, dz = ld.simulate(IC=[[z0, dz0]], t_Grid=[t], params=params, time_domain=[t])[0]
+
+        assert gate_forward.call_count == 1
+        assert gate_forward.call_args.args[0].shape == (5, 2)  # start/mid/end stage times
+        (z.sum() + dz.sum()).backward()
+        gate_grad = ld.w.layers[-1].bias.grad
+        assert gate_grad is not None and torch.isfinite(gate_grad).all()
+        assert torch.count_nonzero(gate_grad) > 0
 
 
 def test_some_simulate_uses_reference_time_domain_for_gate_normalization():

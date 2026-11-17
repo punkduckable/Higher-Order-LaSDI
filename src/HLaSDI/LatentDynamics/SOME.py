@@ -94,7 +94,6 @@ class SOME(LatentDynamics):
         self.activations        : list[str]     = [sub.activations]*len(self.hidden_widths) if isinstance(sub.activations, str) else sub.activations;
         self.coef_norm          : str           = sub.coef_norm
         self.use_biases         : bool          = sub.use_biases;
-        self.use_z_in_gate      : bool          = sub.use_z_in_gate;
         self.eps_engaged        : float         = sub.eps_engaged;
         self.use_mask           : bool          = sub.use_mask;
         self.mask_threshold     : float | None  = sub.mask_threshold;
@@ -102,7 +101,7 @@ class SOME(LatentDynamics):
         self.mask_update_freq   : int   | None  = sub.mask_update_freq;
 
         # Initialize the gate network.
-        input_dim   : int       = (n_p + 1 + 2*n_z) if self.use_z_in_gate else (n_p + 1);
+        input_dim   : int       = n_p + 1;
         widths      : list[int] = [input_dim] + self.hidden_widths + [self.n_experts_D + self.n_experts_V];
         self.w                  = MultiLayerPerceptron(widths = widths, activations = self.activations);
         with torch.no_grad():
@@ -691,32 +690,22 @@ class SOME(LatentDynamics):
             assert len(ith_dZ_dt0.shape) == 1   and ith_dZ_dt0.shape[0] == self.n_z;
 
             # Define the right-hand side in either NumPy or PyTorch. The solver backend follows the
-            # initial-condition backend; this preserves differentiability for tensor rollouts. When
-            # the gate is time/parameter-only, precompute its stage-time effective coefficients
-            # once and let the generic RK4 solver use a cheap closure.
+            # initial-condition backend; this preserves differentiability for tensor rollouts.
+            # The gate depends only on time and parameters, so precompute all stage-time effective
+            # coefficients for tensor rollouts before entering the RK4 loop.
             if isinstance(ith_Z0, numpy.ndarray):
                 def f(t : float, z : numpy.ndarray, dz_dt : numpy.ndarray) -> numpy.ndarray:
                     t_eval  : numpy.ndarray = numpy.asarray([t], dtype = ith_t_Grid.dtype);
                     RHS, _, _ = self._evaluate_rhs(Z = z.reshape(1, -1), dZ_dt = dz_dt.reshape(1, -1), t_Grid = t_eval, params = ith_params, t0 = t0, t_span = t_span);
                     return RHS.reshape(-1);
             else:
-                if self.use_z_in_gate == False:
-                    f = self._make_time_only_torch_rhs(
-                        t_Grid = ith_t_Grid,
-                        params = ith_params,
-                        t0     = t0,
-                        t_span = t_span,
-                        device = ith_Z0.device,
-                        dtype  = ith_Z0.dtype);
-                else:
-                    def f(t : float, z : torch.Tensor, dz_dt : torch.Tensor) -> torch.Tensor:
-                        param : torch.Tensor = next(self.w.parameters());
-                        gate_device = param.device
-                        gate_dtype  = param.dtype;
-
-                        t_eval  : torch.Tensor = torch.tensor([t], dtype = gate_dtype, device = gate_device);
-                        RHS, _, _  = self._evaluate_rhs(Z = z.reshape(1, -1), dZ_dt = dz_dt.reshape(1, -1), t_Grid = t_eval, params = ith_params, t0 = t0, t_span = t_span);
-                        return RHS.reshape(-1);
+                f = self._make_time_only_torch_rhs(
+                    t_Grid = ith_t_Grid,
+                    params = ith_params,
+                    t0     = t0,
+                    t_span = t_span,
+                    device = ith_Z0.device,
+                    dtype  = ith_Z0.dtype);
 
             # Solve the ODE for this single latent initial state.
             ith_Z, ith_dZ_dt = RK4(f = f, y0 = ith_Z0, Dy0 = ith_dZ_dt0, t_Grid = ith_t_Grid);
@@ -808,14 +797,12 @@ class SOME(LatentDynamics):
     def _weights(
             self,
             t_Grid  : numpy.ndarray | torch.Tensor,
-            Z       : numpy.ndarray | torch.Tensor,
-            dZ_dt    : numpy.ndarray | torch.Tensor,
             params  : numpy.ndarray | torch.Tensor,
             *,
-            t0      : float, 
-            t_span  : float) -> tuple[torch.Tensor, torch.Tensor]:
+            t0      : float | torch.Tensor,
+            t_span  : float | torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         r"""
-        Evaluate gate weights on one time/state trajectory and one parameter value.
+        Evaluate gate weights from times and one parameter value, independently of latent states.
 
         The returned tensors have shape (n_t, n_experts_D) and (n_t, n_experts_V), respectively.
         Both live on the same device/dtype as the gate network. Callers can cast it to the 
@@ -831,24 +818,14 @@ class SOME(LatentDynamics):
             floating dtype. Torch inputs may live on any device. The values are cast to the gate
             network's dtype/device before forming gate inputs. 
 
-        Z : numpy.ndarray or torch.Tensor, shape = (n_t, n_z) or (n_z)
-            Latent states corresponding to `t_Grid`. One-dimensional inputs are accepted only for
-            one time sample. These values are concatenated to the gate input only when
-            `self.use_z_in_gate` is enabled.
-
-        dZ_dt : numpy.ndarray or torch.Tensor, shape = (n_t, n_z) or (n_z)
-            Time derivatives of the latent states corresponding to `t_Grid`. One-dimensional 
-            inputs are accepted only for one time sample. These values are concatenated to the 
-            gate input only when `self.use_z_in_gate` is enabled.
-        
         params : numpy.ndarray | torch.Tensor, shape = (n_p)
             Parameter vector for the same trajectory. The values are cast to the gate network's
             dtype/device and broadcast to shape (n_t, n_p).
 
-        t0 : float 
+        t0 : float or torch.Tensor
             The starting time for this parameter value; used to scale time inputs to gate network.
         
-        t_span : float
+        t_span : float or torch.Tensor
             The difference between the minimum and maximum time for this parameter value; used to 
             scale time inputs to gate network.
 
@@ -887,21 +864,6 @@ class SOME(LatentDynamics):
             tau_tensor = tau_Grid.to(device = gate_device, dtype = gate_dtype);
         assert len(tau_tensor.shape) == 1;
 
-        # Check that the latent states correspond to the same number of time samples.
-        if len(Z.shape) == 1:
-            assert Z.shape[0] == self.n_z;
-            assert tau_tensor.shape[0] == 1;
-        else:
-            assert len(Z.shape) == 2 and Z.shape[1] == self.n_z;
-            assert Z.shape[0] == tau_tensor.shape[0];
-        
-        if len(dZ_dt.shape) == 1:
-            assert dZ_dt.shape[0] == self.n_z;
-            assert tau_tensor.shape[0] == 1;
-        else:
-            assert len(dZ_dt.shape) == 2 and dZ_dt.shape[1] == self.n_z;
-            assert dZ_dt.shape[0] == tau_tensor.shape[0];
-
         # Broadcast n_t copies of the parameter tensor to build inputs for the gate network.
         if isinstance(params, numpy.ndarray):
             param_tensor : torch.Tensor = torch.tensor(params, dtype = gate_dtype, device = gate_device);
@@ -909,22 +871,8 @@ class SOME(LatentDynamics):
             param_tensor = params.to(device = gate_device, dtype = gate_dtype);
         param_tensor = param_tensor.reshape(1, self.n_p).expand(tau_tensor.shape[0], self.n_p);
 
-        # Build the gate network inputs
+        # The time/parameter-only gate can be evaluated before the RK4 state loop.
         w_inputs : torch.Tensor = torch.cat([tau_tensor.reshape(-1, 1), param_tensor], dim = 1);
-        if self.use_z_in_gate:
-            if isinstance(Z, numpy.ndarray):
-                z_tensor : torch.Tensor = torch.tensor(Z, dtype = gate_dtype, device = gate_device);
-            else:
-                z_tensor = Z.to(device = gate_device, dtype = gate_dtype);
-            if isinstance(dZ_dt, numpy.ndarray):
-                dzdt_tensor : torch.Tensor = torch.tensor(dZ_dt, dtype = gate_dtype, device = gate_device);
-            else:
-                dzdt_tensor = dZ_dt.to(device = gate_device, dtype = gate_dtype);
-            
-            z_tensor    = z_tensor.reshape(tau_tensor.shape[0], self.n_z);
-            dzdt_tensor = dzdt_tensor.reshape(tau_tensor.shape[0], self.n_z);
-
-            w_inputs = torch.cat([w_inputs, z_tensor, dzdt_tensor], dim = 1);
 
         # -----------------------------------------------------------------------------------------
         # Evaluate weights
@@ -1154,10 +1102,10 @@ class SOME(LatentDynamics):
         r"""
         Build a cached torch RHS closure for time/parameter-only gates.
 
-        When `self.use_z_in_gate` is False, the gate weights depend only on the RK stage time and
-        the parameter value. In that case, all gate weights and effective affine coefficients used
-        by RK4 can be evaluated once before time stepping. The returned closure still has the
-        generic solver signature `f(t, z, z')`, but each call only performs the affine map 
+        The gate weights depend only on the RK stage time and parameter value, so all gate weights
+        and effective affine coefficients used by RK4 are evaluated before time stepping. The
+        returned closure still has the generic solver signature `f(t, z, z')`, but each call only
+        performs the affine map
         associated with that stage time:
 
             f(t, z, z') = K_bar(t) z + C_bar(t) dz_dt + b_bar(t).
@@ -1199,7 +1147,6 @@ class SOME(LatentDynamics):
             as `z`.
         """
 
-        assert self.use_z_in_gate == False;
         assert isinstance(t_Grid, numpy.ndarray);
         assert len(t_Grid.shape) == 1;
         assert isinstance(params, numpy.ndarray) and params.shape == (self.n_p,);
@@ -1226,22 +1173,10 @@ class SOME(LatentDynamics):
 
         stage_t_Grid : numpy.ndarray = numpy.asarray(stage_times, dtype = t_Grid.dtype);
 
-        # `_weights` ignores Z and dZ_dt when `use_z_in_gate` is False, but it still validates
-        # compatible shapes. Use empty tensors on the gate device to avoid needless host/device
-        # copies.
-        w_param : torch.Tensor = next(self.w.parameters());
-        dummy_Z : torch.Tensor = torch.empty(
-            (stage_t_Grid.shape[0], self.n_z),
-            dtype  = w_param.dtype,
-            device = w_param.device);
-        dummy_dZ_dt : torch.Tensor = torch.empty_like(dummy_Z);
-
         # Evaluate all gate weights and collapse all effective affine systems in one batched call.
         # Do not use no_grad: training may differentiate through simulated trajectories.
         weights_D, weights_V    = self._weights(
             stage_t_Grid,
-            dummy_Z,
-            dummy_dZ_dt,
             params,
             t0      = t0,
             t_span  = t_span);
@@ -1327,11 +1262,11 @@ class SOME(LatentDynamics):
         assert len(Z.shape)         == 2    and Z.shape[1]      == self.n_z;
         assert len(dZ_dt.shape)     == 2    and dZ_dt.shape[1]  == self.n_z;
         assert len(t_Grid.shape)    == 1;
-        assert t_Grid.shape[0]      == dZ_dt.shape[0];
+        assert t_Grid.shape[0]      == Z.shape[0] == dZ_dt.shape[0];
 
         if isinstance(Z, numpy.ndarray):
             with torch.no_grad():
-                weights_D, weights_V    = self._weights(t_Grid = t_Grid, Z = Z, dZ_dt = dZ_dt, params = params, t0 = t0, t_span = t_span);
+                weights_D, weights_V    = self._weights(t_Grid = t_Grid, params = params, t0 = t0, t_span = t_span);
                 if Z.dtype == numpy.dtype(numpy.float64):
                     dtype = torch.float64;
                 else:
@@ -1352,7 +1287,7 @@ class SOME(LatentDynamics):
 
         else: 
             assert isinstance(Z, torch.Tensor);
-            weights_D, weights_V    = self._weights(t_Grid = t_Grid, Z = Z, dZ_dt = dZ_dt, params = params, t0 = t0, t_span = t_span);
+            weights_D, weights_V    = self._weights(t_Grid = t_Grid, params = params, t0 = t0, t_span = t_span);
             K_bar, C_bar, b_bar     = self._effective_coefficients(weights_D, weights_V, Z.device, Z.dtype);
 
             # For each time t, compute K_bar[t] @ Z[t] + C_bar[t] @ dZ_dt[t] + b. 
