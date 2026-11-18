@@ -30,6 +30,17 @@ The current rollout path serializes independent trajectories in Python and unrol
 
 The profiled SOME configuration already has a time/parameter-only gate. Its scalar torch path already evaluates gate weights and effective affine coefficients at RK stage times before integrating *each window*. Removing `use_z_in_gate` does not by itself accelerate that workload. The additional opportunity is to form those coefficients in larger batches, reuse time/parameter evaluations across windows where appropriate, and remove the float-keyed RHS closure from the future GPU hot path.
 
+### Measured sampled-rollout result (November 17)
+
+The new run `results/Telegraphers_11_17_18_14_14_906981` uses sampled rollout (`rollout: 0.25`, `IC_rollout: 0.0`). At saturated rollout depth, the unprofiled metrics give the following medians over epochs 1100--1200:
+
+| Run | `time/step` | `time/Rollout` | `time/backwards` |
+|---|---:|---:|---:|
+| New batched path (November 17) | 0.413 s | 0.101 s | 0.287 s |
+| Scalar path, `results/Telegraphers_11_02_16_12_08_3402724` | 4.419 s | 1.604 s | 2.618 s |
+
+This is a **10.7x reduction in measured step wall time**. The new run reports 16 sampled windows, 251 frames per window, and essentially 100% padding efficiency at this stage. The November 2 baseline is closer than the October 31 run: both use 16 displacement and 12 velocity experts and the same sampled-rollout weight. They are not identical configurations (`n_active_V` changed from 8 to 5, and the obsolete `use_z_in_gate: false` key was removed), so the ratio is strong practical evidence rather than an isolated solver-only measurement. The October 31 run used 50/50 experts but had a similar saturated step time (4.429 s). Phase timers are host-side and CUDA-asynchronous; use a matched profiler comparison to attribute the gain among simulation, decoding, and backward, rather than treating their ratios as independent GPU timings.
+
 ## Assumptions
 
 - Different parameter values may use different time-step sizes and rollout durations.
@@ -48,17 +59,17 @@ The profiled SOME configuration already has a time/parameter-only gate. Its scal
 3. Batch SOME stage-time gate weights and effective affine coefficients for selected rollout windows while preserving gradients.
 4. Keep one public `simulate()` interface, with private CUDA batching in SOME, and integrate sampled second-order rollout losses in both strong and weak trainers.
 5. Validate trajectories, gradients, loss weighting, and unprofiled CPU/GPU performance against the scalar reference.
-6. Extend the same contract to first-order solvers/models in a separately reviewable phase.
+6. Batch initial-condition (IC) rollout across training parameters in the second-order strong and weak trainers, preserving the current per-parameter loss reduction.
+7. Extend the same contract to first-order solvers/models and trainers in a separately reviewable phase.
 
 ### Initially excluded
 
-- Batching the initial-condition rollout loss.
 - Replacing RK4 with a different integrator.
 - CUDA graphs, `torch.compile`, or custom/fused CUDA kernels in the initial patches.
 - Removing CABLE's independent state-dependent gate option.
 - Replacing or deleting the existing scalar/reference RK4 and simulation APIs.
 
-These can be considered after the padded batched path is correct and profiled.
+These backend changes can be considered after the padded batched path is correct and profiled.
 
 ## Proposed tensor contract
 
@@ -501,18 +512,25 @@ Work:
 4. Reuse the path from the weak trainer.
 5. Add profiler ranges and batch/padding metrics.
 6. Add loss-invariance and public-interface tests, including conditional CUDA dispatch coverage.
-7. On an available GPU, produce an equivalent before/after profile and unprofiled timing comparison. This remains a follow-up measurement, not a claimed speedup.
+7. Record an unprofiled before/after timing comparison at saturated rollout depth (see measured result above). A matched before/after GPU profile remains necessary to explain where the time was saved and to check memory and launch counts.
 
-### Patch 4: First-order extension and backend optimization
+### Patch 4: Batch second-order IC rollout
 
-Add a first-order batched RK4 implementation and migrate first-order rollout models/trainers using the same batch contract, while retaining the scalar reference. First-order CABLE still supports a state-dependent gate, so its batched RHS must evaluate the gate on each intermediate RK stage state; it cannot use SOME's time-only coefficient precomputation. Benchmark CPU scalar versus batched execution as well as GPU execution; batching may reduce CPU dispatch but padding may lose for small/heterogeneous workloads. Select a GPU-only fused RK4 implementation by configured device only if profiling demonstrates a worthwhile speedup and it passes the same trajectory/gradient tests. Keep a pure tensor batched solver usable on both devices. Any less-transparent GPU-specialized kernel/step must have detailed, human-readable comments explaining its state layout, each RK stage, synchronization assumptions, gradient path, and padding behavior.
+Update the separate IC-rollout loops in `Second_Order_Rollout` and `Second_Order_Weak` to collect the encoded initial conditions, per-parameter rollout grids, parameter rows, and full reference time domains before calling the existing public `simulate()` interface **once**. On CUDA, SOME will then pad and solve these trajectories as one batch; retain the scalar CPU behavior as the readable reference. There is one IC trajectory per training parameter, rather than many sampled windows, so measure this phase independently rather than assuming the sampled-rollout speedup will repeat.
+
+Keep the current IC objective: compute a mean error over valid frames and features **for each parameter**, then sum those per-parameter means, separately for latent displacement/velocity and decoded displacement/velocity. Do not replace this with a global mean or include padded frames. First batch simulation with the existing encode/decode/loss computations for a small, reviewable change; batch/flatten decoding and target encoding only if profiling shows those calls are material. Test unequal IC horizons, both MAE and MSE, full-domain gate normalization, valid-frame trajectories, parameter gradients, and CPU/CUDA dispatch. Compare a representative IC-only run with the previous path at the same curriculum depth and hardware.
+
+### Patch 5: First-order extension and backend optimization
+
+Add a first-order batched RK4 implementation and migrate `First_Order_Rollout` (and `First_Order_Weak`, which inherits its training loop) to gather sampled windows before one public `simulate()` call. Start with CABLE's CUDA simulation path while retaining scalar CPU/NumPy simulation as the reference. CABLE supports both a time/parameter-only gate, which can use precomputed affine stage coefficients, and a state-dependent gate, which **must** evaluate the gate at each intermediate RK stage state; do not silently apply the SOME shortcut to the latter. Preserve the existing per-window/per-parameter loss reduction, nonuniform-grid behavior, and full-domain gate normalization, and require trajectory, loss, and gradient equivalence tests for both gate modes. Then apply the same interface to first-order IC rollout and benchmark each loss separately. Other first-order latent-dynamics models may keep their existing `simulate()` behavior until a model-specific batched implementation is validated; trainer batching alone must not change their outputs.
+
+Benchmark CPU scalar versus batched execution as well as GPU execution; batching may reduce CPU dispatch but padding may lose for small/heterogeneous workloads. Select a GPU-only fused RK4 implementation by configured device only if profiling demonstrates a worthwhile speedup and it passes the same trajectory/gradient tests. Keep a pure tensor batched solver usable on both devices. Any less-transparent GPU-specialized kernel/step must have detailed, human-readable comments explaining its state layout, each RK stage, synchronization assumptions, gradient path, and padding behavior.
 
 ## Follow-up optimizations (only after re-profiling)
 
 1. **Length bucketing:** Use if padding efficiency is poor.
 2. **More coefficient reuse:** Evaluate shared stage times/parameters only once across overlapping windows when this is measurably useful and numerically equivalent.
 3. **`torch.compile`:** Consider compiling a fixed-shape batched RK4 step after graph breaks and shape stability are understood; keep CPU eager or benchmark a separate CPU-compiled path.
-4. **IC rollout batching:** Apply the same padded interface if the new profile shows IC rollouts are material.
-5. **Expert contraction tuning:** Benchmark `einsum`, effective-matrix construction, and direct expert-output weighting on representative `B`, `n_z`, and expert counts.
+4. **Expert contraction tuning:** Benchmark `einsum`, effective-matrix construction, and direct expert-output weighting on representative `B`, `n_z`, and expert counts.
 
-The immediate optimization should remain focused: remove the obsolete SOME gate option, then remove the rollout-level Python loop and expose useful batch dimensions to PyTorch/CUDA without changing the RK4 method or loss semantics.
+The next implementation step is second-order IC batching, followed by the first-order solver/trainer extension. Keep both separately reviewable and benchmarked against their scalar references before exploring compilation or fused kernels.
