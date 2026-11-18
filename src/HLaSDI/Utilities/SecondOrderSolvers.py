@@ -550,9 +550,19 @@ def RK4_affine_batched(
     active  : torch.Tensor = torch.arange(n_steps, device=y0.device)[None, :] < (lengths[:, None] - 1); # [B, T-1]
     h_all   : torch.Tensor = torch.where(active, t_grid[:, 1:] - t_grid[:, :-1], 0);                    # [B, T-1]
 
+    # Unbind time and stage views once. Repeated K[:, n, stage] indexing creates
+    # separate select/slice backward nodes that scatter into full-size zeros.
+    K_steps : tuple[tuple[torch.Tensor, ...], ...] = tuple(step.unbind(dim=1) for step in K.unbind(dim=1));
+    C_steps : tuple[tuple[torch.Tensor, ...], ...] = tuple(step.unbind(dim=1) for step in C.unbind(dim=1));
+    b_steps : tuple[tuple[torch.Tensor, ...], ...] = tuple(step.unbind(dim=1) for step in b.unbind(dim=1));
+
     D_list : list[torch.Tensor] = [y0];  # Each entry has shape [B, d].
     V_list : list[torch.Tensor] = [Dy0]; # Each entry has shape [B, d].
     for n in range(n_steps):
+        K_start, K_mid, K_end = K_steps[n];
+        C_start, C_mid, C_end = C_steps[n];
+        b_start, b_mid, b_end = b_steps[n];
+
         # Fetch y, y' (v) from the previous time step
         yn          : torch.Tensor  = D_list[-1];           # [B, d]
         vn          : torch.Tensor  = V_list[-1];           # [B, d]
@@ -564,29 +574,29 @@ def RK4_affine_batched(
 
         # Each batched matrix-vector product handles all windows. For item i,
         # stage 1 is l1_i = K_start,i @ y_n,i + C_start,i @ v_n,i + b_start,i.
-        l1          : torch.Tensor = (torch.bmm(K[:, n, 0], yn.unsqueeze(-1)).squeeze(-1)
-                                    + torch.bmm(C[:, n, 0], vn.unsqueeze(-1)).squeeze(-1) + b[:, n, 0]); # [B, d]
+        l1          : torch.Tensor = (torch.bmm(K_start, yn.unsqueeze(-1)).squeeze(-1)
+                                    + torch.bmm(C_start, vn.unsqueeze(-1)).squeeze(-1) + b_start); # [B, d]
 
         # Stage 2: y2_i = y_n,i + h_i*v_n,i/2, v2_i = v_n,i + h_i*l1_i/2,
         # then l2_i = K_mid,i @ y2_i + C_mid,i @ v2_i + b_mid,i.
         y2  : torch.Tensor  = yn + h_half * vn;             # [B, d]
         v2  : torch.Tensor  = vn + h_half * l1;             # [B, d]
-        l2  : torch.Tensor  = (torch.bmm(K[:, n, 1], y2.unsqueeze(-1)).squeeze(-1)
-                            + torch.bmm(C[:, n, 1], v2.unsqueeze(-1)).squeeze(-1) + b[:, n, 1]); # [B, d]
+        l2  : torch.Tensor  = (torch.bmm(K_mid, y2.unsqueeze(-1)).squeeze(-1)
+                            + torch.bmm(C_mid, v2.unsqueeze(-1)).squeeze(-1) + b_mid); # [B, d]
 
         # Stage 3: y3_i = y2_i + h_i^2*l1_i/4, v3_i = v_n,i + h_i*l2_i/2.
         # It reuses midpoint K/C/b, but l3_i = K_mid,i @ y3_i + C_mid,i @ v3_i + b_mid,i.
         y3  : torch.Tensor  = y2 + (h_squared / 4) * l1;    # [B, d]
         v3  : torch.Tensor  = vn + h_half * l2;             # [B, d]
-        l3  : torch.Tensor  = (torch.bmm(K[:, n, 1], y3.unsqueeze(-1)).squeeze(-1)
-                            + torch.bmm(C[:, n, 1], v3.unsqueeze(-1)).squeeze(-1) + b[:, n, 1]); # [B, d]
+        l3  : torch.Tensor  = (torch.bmm(K_mid, y3.unsqueeze(-1)).squeeze(-1)
+                            + torch.bmm(C_mid, v3.unsqueeze(-1)).squeeze(-1) + b_mid); # [B, d]
 
         # Stage 4: y4_i = y_n,i + h_i*v_n,i + h_i^2*l2_i/2,
         # v4_i = v_n,i + h_i*l3_i; l4_i = K_end,i @ y4_i + C_end,i @ v4_i + b_end,i.
         y4 : torch.Tensor   = yn + h * vn + (h_squared / 2) * l2;   # [B, d]
         v4 : torch.Tensor   = vn + h * l3;                          # [B, d]
-        l4 : torch.Tensor   = (torch.bmm(K[:, n, 2], y4.unsqueeze(-1)).squeeze(-1)
-                            + torch.bmm(C[:, n, 2], v4.unsqueeze(-1)).squeeze(-1) + b[:, n, 2]); # [B, d]
+        l4 : torch.Tensor   = (torch.bmm(K_end, y4.unsqueeze(-1)).squeeze(-1)
+                            + torch.bmm(C_end, v4.unsqueeze(-1)).squeeze(-1) + b_end); # [B, d]
 
         # For each item, append y_{n+1} = y_n + h*v_n + h^2*(l1+l2+l3)/6
         # and v_{n+1} = v_n + h*(l1+2*l2+2*l3+l4)/6.

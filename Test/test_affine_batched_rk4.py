@@ -122,6 +122,54 @@ def test_affine_batched_rk4_gradients_match_scalar_reference(device: str) -> Non
         torch.testing.assert_close(actual, expected, rtol=1.0e-12, atol=1.0e-12)
 
 
+@pytest.mark.parametrize("device", ["cpu", pytest.param(
+    "cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable"))])
+def test_affine_batched_rk4_dense_time_dependent_coefficients_match_scalar_reference(
+        device: str) -> None:
+    """Non-symmetric stage matrices and their gradients match independent scalar RK4."""
+    dtype = torch.float64
+    grid = torch.tensor([[0.1, 0.25, 0.5, 0.9], [0.0, 0.35, 0.8, 0.8]], dtype=dtype, device=device)
+    lengths = torch.tensor([4, 3], device=device)
+    values = (
+        torch.tensor([[0.3, -0.2], [-0.4, 0.5]], dtype=dtype, device=device),
+        torch.tensor([[0.1, 0.4], [0.2, -0.3]], dtype=dtype, device=device),
+        torch.tensor([[[0.2, -0.3], [0.1, -0.1]], [[-0.1, 0.2], [0.3, 0.1]]], dtype=dtype, device=device),
+        torch.tensor([[[0.1, 0.2], [-0.2, 0.05]], [[0.03, -0.1], [0.2, -0.04]]], dtype=dtype, device=device),
+        torch.tensor([[[-0.2, 0.1], [0.05, -0.1]], [[0.1, 0.04], [-0.2, 0.03]]], dtype=dtype, device=device),
+        torch.tensor([[[0.03, -0.08], [0.06, 0.02]], [[-0.05, 0.07], [0.01, -0.03]]], dtype=dtype, device=device),
+        torch.tensor([[0.04, -0.07], [0.08, 0.02]], dtype=dtype, device=device),
+        torch.tensor([[-0.03, 0.05], [0.02, -0.06]], dtype=dtype, device=device),
+    )
+    y0, v0, K0, K1, C0, C1, b0, b1 = (value.clone().requires_grad_() for value in values)
+
+    start = grid[:, :-1]
+    h = grid[:, 1:] - start
+    stage_times = torch.stack((start, start + h / 2, start + h), dim=2)
+    K = K0[:, None, None] + stage_times[..., None, None] * K1[:, None, None]
+    C = C0[:, None, None] + stage_times[..., None, None] * C1[:, None, None]
+    b = b0[:, None, None] + stage_times[..., None] * b1[:, None, None]
+    y_batch, v_batch = RK4_affine_batched(y0, v0, grid, lengths, K, C, b)
+
+    valid = (torch.arange(grid.shape[1], device=device)[None, :] < lengths[:, None])[..., None]
+    loss_batch = ((y_batch.square() + 0.37 * v_batch.square()) * valid).sum()
+    grads_batch = torch.autograd.grad(loss_batch, (y0, v0, K0, K1, C0, C1, b0, b1))
+
+    ys, vs, Ks0, Ks1, Cs0, Cs1, bs0, bs1 = (value.clone().requires_grad_() for value in values)
+    loss_scalar = torch.zeros((), dtype=dtype, device=device)
+    for row, length in enumerate(lengths.tolist()):
+        def rhs(t: float, y: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+            return ((Ks0[row] + t * Ks1[row]) @ y
+                    + (Cs0[row] + t * Cs1[row]) @ v + bs0[row] + t * bs1[row])
+
+        y_ref, v_ref = RK4(rhs, ys[row], vs[row], grid[row, :length].cpu().numpy())
+        torch.testing.assert_close(y_batch[row, :length], y_ref, rtol=1.0e-11, atol=1.0e-12)
+        torch.testing.assert_close(v_batch[row, :length], v_ref, rtol=1.0e-11, atol=1.0e-12)
+        loss_scalar = loss_scalar + y_ref.square().sum() + 0.37 * v_ref.square().sum()
+    grads_scalar = torch.autograd.grad(loss_scalar, (ys, vs, Ks0, Ks1, Cs0, Cs1, bs0, bs1))
+    for actual, expected in zip(grads_batch, grads_scalar):
+        torch.testing.assert_close(actual, expected, rtol=1.0e-11, atol=1.0e-12)
+
+
 def test_some_batched_single_frame_returns_initial_state() -> None:
     """A one-frame window needs no gate evaluation or RK stages."""
     model = SOME(n_z=1, Uniform_t_Grid=True, n_p=1, config=_some_config(False, True))
