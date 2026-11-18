@@ -80,7 +80,7 @@ The first-order solver uses one state tensor `[B, n_z]`; the second-order solver
 | valid-frame mask | `[B, T_max]` | `frame_index < lengths[:, None]` |
 | parameter index | `[B]` | Maps each rollout back to its training parameter |
 
-For one second-order interval, RK4 evaluates the affine RHS at `t_n`, `t_n + h_n/2` (twice, at two different intermediate states), and `t_n + h_n`. Thus the time-only gate needs **three distinct stage-time coefficient sets per interval**. For each selected interval, the precomputed effective matrices and bias are `K_start/K_mid/K_end`, `C_start/C_mid/C_end`, and `b_start/b_mid/b_end`; the two midpoint RHS calls share coefficients but not state. Initial implementation may retain a generic batched RHS for clarity, then specialize this coefficient layout after correctness tests.
+For one second-order interval, RK4 evaluates the affine RHS at `t_n`, `t_n + h_n/2` (twice, at two different intermediate states), and `t_n + h_n`. Thus the time-only gate needs **three distinct stage-time coefficient sets per interval**. For each selected interval, the precomputed effective matrices and bias are `K_start/K_mid/K_end`, `C_start/C_mid/C_end`, and `b_start/b_mid/b_end`; the two midpoint RHS calls share coefficients but not state. The initial batched solver is affine-specific and consumes these coefficient tensors directly, rather than accepting an arbitrary RHS callable.
 
 Time grids are padded by repeating the final valid timestamp for each rollout. Targets are padded to `T_max`, but padded target values are never included in a loss.
 
@@ -100,19 +100,21 @@ Time grids are padded by repeating the final valid timestamp for each rollout. T
 
 **File:** `src/HLaSDI/Utilities/SecondOrderSolvers.py`
 
-Add an explicitly named tensor-only function such as `RK4_batched`. Keep the existing `RK4` unchanged as the independent, readable scalar/NumPy reference. A batched tensor implementation should run on CPU as well as GPU; introduce a GPU-only fused implementation and device dispatch only when measured performance justifies the additional code. Moving the per-window loop into one function without batching the RHS is not sufficient.
+Add a tensor-only affine-specific `RK4_affine_batched`. Keep the existing `RK4` unchanged as the independent, readable scalar/NumPy reference and leave CPU training on that path for now. The new tensor solver can run on CPU for equivalence tests, but is designed for batched CUDA execution. Add a GPU-only fused implementation only when measured performance justifies its complexity.
 
-Suggested callable contract:
+Coefficient-aware contract:
 
 ```python
-def RK4_batched(
-    f: Callable[[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor],
+def RK4_affine_batched(
     y0: torch.Tensor,
     Dy0: torch.Tensor,
     t_grid: torch.Tensor,
     lengths: torch.Tensor,
+    K: torch.Tensor,  # [B, T-1, 3, n_z, n_z]
+    C: torch.Tensor,  # [B, T-1, 3, n_z, n_z]
+    b: torch.Tensor,  # [B, T-1, 3, n_z]
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Integrate a padded batch of second-order systems with classical RK4."""
+    """Integrate a padded batch of affine second-order systems with classical RK4."""
 ```
 
 Requirements:
@@ -132,18 +134,18 @@ Requirements:
   active = (n + 1 < lengths)[:, None]        # [B, 1]
   ```
 
-- Evaluate all four RK stages on `[B, n_z]` state tensors. The RHS receives actual intermediate displacement and velocity even though the SOME gate weights no longer depend on those states.
+- Evaluate all four RK stages on `[B, n_z]` state tensors. Stages 2 and 3 reuse the midpoint `K`, `C`, and `b` but must compute separate accelerations from their different intermediate states.
 - Compute the candidate next displacement and velocity using the same second-order RK4 equations as the scalar implementation.
-- Freeze completed trajectories without host synchronization. Repeating the final time makes `h_n == 0` for padded steps, which may already make the RK4 update an exact no-op when RHS values are finite. Use an explicit mask if required for correctness; benchmark its extra cost rather than assuming it is free:
+- Freeze completed trajectories without host synchronization. Mask all interval step sizes once before the loop so inactive intervals have `h_n == 0`; with finite coefficients, the RK4 update is then an exact no-op. An additional per-step state mask is unnecessary:
 
   ```python
-  y_next = torch.where(active, y_candidate, y_current)
-  v_next = torch.where(active, v_candidate, v_current)
+  active = torch.arange(T_max - 1, device=t_grid.device)[None, :] < lengths[:, None] - 1
+  h_all = torch.where(active, t_grid[:, 1:] - t_grid[:, :-1], 0)
   ```
 
 - Do not use `if active.any():`, `.item()`, or another data-dependent CPU/GPU synchronization in the time loop.
 - Stack the per-step tensors at the end and transpose/stack into `[B, T_max, n_z]`.
-- Preserve autograd through every valid stage and, if an explicit mask is used, through its selected branch.
+- Preserve autograd through every valid stage and the precomputed coefficient tensors.
 
 Keep the completed-state invariant in tests. Avoid synchronizing validation (`.item()`, `active.any()`) inside the time loop.
 
@@ -151,7 +153,7 @@ Keep the completed-state invariant in tests. Avoid synchronizing validation (`.i
 
 **File:** `src/HLaSDI/LatentDynamics/SOME.py`
 
-Keep the existing scalar path as the oracle. For the new path, evaluate gate weights at all selected windows' RK stage times in one or a small number of batched tensor calls. From those weights, form effective `K`, `C`, and optional `b` for each stage time. Pass those coefficients to the batched affine RK4 step or to a batched RHS closure; do not perform a gate-network call at every RK stage in the time loop.
+Keep the existing scalar path as the oracle. For the new path, evaluate gate weights at all selected windows' RK stage times in one batched tensor call. From those weights, form effective `K`, `C`, and optional `b` for each stage time. Pass those tensors directly to `RK4_affine_batched`; do not perform a gate-network call at every RK stage in the time loop.
 
 The batched evaluation must accept:
 
@@ -193,10 +195,7 @@ Choose the contraction form based first on clarity and exact gradient behavior. 
 
 ### 4. Add an explicit batched simulation interface
 
-**Files:**
-
-- `src/HLaSDI/LatentDynamics/LatentDynamics.py`
-- `src/HLaSDI/LatentDynamics/SOME.py`
+**File:** `src/HLaSDI/LatentDynamics/SOME.py`
 
 Add a batched-simulation capability to the latent-dynamics interface rather than coupling a trainer to `isinstance(latent_dynamics, SOME)`.
 
@@ -220,9 +219,9 @@ Design notes:
 
 - Keep this API tensor-only. NumPy/list adaptation remains the responsibility of the existing scalar `simulate()` API.
 - Return two tensors with shape `[B, T_max, n_z]`.
-- Form stage-time coefficients from `params`, `reference_t0`, and `reference_t_span` before integration; the batched RK4 core consumes these tensors through an affine RHS or an explicit affine-step interface. Keep a generic batched-RHS solver separately for non-SOME models.
+- Form stage-time coefficients from `params`, `reference_t0`, and `reference_t_span` before integration; the batched RK4 core consumes them through its explicit affine interface. A general batched-RHS solver for other models is not part of this phase.
 - `SOME_weak` should inherit this implementation unless it truly changes rollout dynamics.
-- The base interface should fail clearly for latent-dynamics classes that do not implement batched simulation. If capability detection is needed, prefer an explicit interface method/property over concrete-type checks.
+- Add the base-interface capability/failure contract when integrating the trainer, so unsupported latent-dynamics models fail clearly without a concrete-type check.
 - Do not rewrite scalar `simulate()` in the first patch. Keeping independent scalar and batched paths makes equivalence testing meaningful and limits the regression surface.
 
 ### 5. Pack all sampled rollout windows before simulation
@@ -510,14 +509,13 @@ Expected files:
 
 ```text
 src/HLaSDI/Utilities/SecondOrderSolvers.py
-src/HLaSDI/LatentDynamics/LatentDynamics.py
 src/HLaSDI/LatentDynamics/SOME.py
-Test/test_latent_dynamics_rhs.py
+Test/test_affine_batched_rk4.py
 ```
 
 Work:
 
-1. Define the shared first-/second-order batch contract and add the second-order tensor `RK4_batched` without replacing scalar `RK4`.
+1. Define the batch contract and add the second-order tensor `RK4_affine_batched` without replacing scalar `RK4`.
 2. Add batched SOME stage-time gate/effective-coefficient precomputation and `simulate_batched()`.
 3. Add solver, scalar-vs-batched, time-normalization, and gradient tests on CPU.
 

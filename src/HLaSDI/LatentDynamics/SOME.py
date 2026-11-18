@@ -12,7 +12,7 @@ from    HLaSDI.LatentDynamics.LatentDynamics    import  LatentDynamics, LD_Loss_
 from    HLaSDI.Schemas                          import  SOMELatentDynamicsConfig, WeakSOMELatentDynamicsConfig, SOMELatentDynamicsSettings;
 from    HLaSDI.EncoderDecoder                   import  MultiLayerPerceptron;
 from    HLaSDI.Utilities.FiniteDifference       import  Derivative1_Order4, Derivative1_Order2_NonUniform;
-from    HLaSDI.Utilities.SecondOrderSolvers     import  RK4;
+from    HLaSDI.Utilities.SecondOrderSolvers     import  RK4, RK4_affine_batched;
 from    HLaSDI.Utilities.Statistics             import  tensor_statistics;
 
 
@@ -715,6 +715,223 @@ class SOME(LatentDynamics):
 
         # All done!
         return Z;
+
+
+    def precompute_affine_stage_coefficients(
+            self,
+            t_grid           : torch.Tensor,
+            lengths          : torch.Tensor,
+            params           : torch.Tensor,
+            reference_t0     : torch.Tensor,
+            reference_t_span : torch.Tensor,
+            *,
+            state_dtype      : torch.dtype) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        r"""Precompute the affine RHS coefficients at every batched RK4 stage time.
+
+        The time/parameter-only gate is evaluated for all intervals in one call.
+        For each interval, stage axis 2 stores coefficients at its start,
+        midpoint, and end. The two midpoint RK4 evaluations share coefficients
+        but use different intermediate latent states.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        t_grid : torch.Tensor, shape = (B, T)
+            Padded, per-window time grids. Valid times increase strictly. If window i has
+            L_i = lengths[i] valid times, then t_grid[i, L_i:] repeats its final valid time,
+            t_grid[i, L_i - 1].
+
+        lengths : torch.Tensor, shape = (B,)
+            Integer number of valid time points in each window; lengths[i] is L_i.
+
+        params : torch.Tensor, shape = (B, n_p)
+            Parameter row for each rollout window; params[i, :] belongs to window i.
+
+        reference_t0 : torch.Tensor, shape = (B,)
+            Start of each *full* trajectory's time domain, not the window start.
+
+        reference_t_span : torch.Tensor, shape = (B,)
+            Positive span of each full trajectory's time domain. Gate times
+            are normalized as ``(stage_time - reference_t0) / reference_t_span``.
+
+        state_dtype : torch.dtype
+            Floating dtype of the latent states that will be integrated.
+            Effective coefficients are cast to this dtype.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        K, C : torch.Tensor, shape = (B, T - 1, 3, n_z, n_z)
+            Effective displacement and velocity matrices for each interval. K[i, j, s, :, :]
+            belongs to window i and interval j; stage index s = 0, 1, or 2 selects the
+            start, midpoint, or end time. C has the same indexing convention.
+
+        b : torch.Tensor, shape = (B, T - 1, 3, n_z)
+            Effective affine bias at the same stage times. b[i, j, s, :] belongs to window i,
+            interval j, and stage s. The tensor is zero when expert biases are disabled.
+
+        For a padded interval j >= lengths[i] - 1, the masked step size is zero and all
+        three stage times equal t_grid[i, lengths[i] - 1]. Its K/C/b entries are therefore
+        the ordinary effective coefficients at that final valid time, not zeros. They are
+        still computed, but a finite RHS cannot change the state when RK4 uses h = 0.
+        If T = 1, there are no intervals and the returned tensors have a zero-length
+        interval dimension.
+
+        Outputs retain autograd connections to gate and expert parameters. Recompute them
+        on every training forward pass; do not detach or cache them across optimizer
+        updates. Value checks that synchronize a GPU remain the caller's responsibility.
+        """
+
+        # Checks
+        if t_grid.ndim != 2 or t_grid.shape[1] < 1:
+            raise ValueError("t_grid must have shape [B, T] with T >= 1");
+        batch_size : int = t_grid.shape[0];
+        n_times    : int = t_grid.shape[1];
+        if lengths.shape != (batch_size,) or lengths.dtype not in (torch.int32, torch.int64):
+            raise ValueError("lengths must have shape [B] and an integer dtype");
+        if params.shape != (batch_size, self.n_p):
+            raise ValueError("params must have shape [B, n_p]");
+        if reference_t0.shape != (batch_size,) or reference_t_span.shape != (batch_size,):
+            raise ValueError("reference_t0 and reference_t_span must have shape [B]");
+        if not t_grid.is_floating_point() or not params.is_floating_point():
+            raise ValueError("time grid and parameters must be floating tensors");
+        if any(t.device != t_grid.device for t in (lengths, params, reference_t0, reference_t_span)):
+            raise ValueError("all rollout inputs must share a device");
+        if reference_t0.dtype != t_grid.dtype or reference_t_span.dtype != t_grid.dtype:
+            raise ValueError("reference times must have the time grid dtype");
+        gate_param : torch.Tensor = next(self.w.parameters());
+        if gate_param.device != t_grid.device or self.unmasked_K.device != t_grid.device or self.unmasked_C.device != t_grid.device:
+            raise ValueError("SOME gate and experts must be on the rollout device");
+        if self.unmasked_b is not None and self.unmasked_b.device != t_grid.device:
+            raise ValueError("SOME biases must be on the rollout device");
+
+        # Return if there are no steps.
+        n_steps : int = n_times - 1;
+        if n_steps == 0:
+            empty_matrices : torch.Tensor = t_grid.new_empty((batch_size, 0, 3, self.n_z, self.n_z), dtype=state_dtype);
+            empty_biases   : torch.Tensor = t_grid.new_empty((batch_size, 0, 3, self.n_z), dtype=state_dtype);
+            return empty_matrices, empty_matrices.clone(), empty_biases;
+
+        # Construct stage times using the same t_n + h/2 and t_n + h arithmetic
+        # as scalar RK4, including on nonuniform grids. The mask sets h to zero
+        # on padded intervals without a GPU-to-CPU synchronization.
+        t_start : torch.Tensor = t_grid[:, :-1];                                        # [B, T-1]
+        active  : torch.Tensor = (torch.arange(n_steps, device=t_grid.device)[None, :]
+                                  < (lengths[:, None] - 1));                            # [B, T-1]
+        h       : torch.Tensor = torch.where(active, t_grid[:, 1:] - t_start, 0);       # [B, T-1]
+        stage_times : torch.Tensor = torch.stack(
+            (t_start, t_start + h / 2, t_start + h), dim=2);                            # [B, T-1, 3]
+
+        # Build gate inputs: Compute scaled times and fetch parameter values
+        tau : torch.Tensor = ((stage_times - reference_t0[:, None, None])
+                              / reference_t_span[:, None, None]);                       # [B, T-1, 3]
+        param_grid : torch.Tensor = params[:, None, None, :].expand(
+            batch_size, n_steps, 3, self.n_p);                                          # [B, T-1, 3, n_p]
+        gate_inputs : torch.Tensor = torch.cat(
+            (tau.unsqueeze(-1), param_grid), dim=-1)                                    # [B, T-1, 3, n_p+1]
+        gate_inputs = gate_inputs.reshape(-1, self.n_p + 1).to(dtype=gate_param.dtype)  # [B*(T-1)*3, n_p+1]
+
+        # Evaluate gate and fetch velocity/displacement weights.
+        logits     : torch.Tensor = self.w(gate_inputs)                                 # [B*(T-1)*3, n_experts_D+n_experts_V]
+        weights_D : torch.Tensor = torch.softmax(logits[:, :self.n_experts_D], dim=1)   # [B*(T-1)*3, n_experts_D]
+        weights_V : torch.Tensor = torch.softmax(logits[:, self.n_experts_D:], dim=1)   # [B*(T-1)*3, n_experts_V]
+
+        # Compute effective coefficients.
+        K_flat, C_flat, b_flat = self._effective_coefficients(
+            weights_D, weights_V, t_grid.device, state_dtype);
+
+        # Reshape and return.
+        K : torch.Tensor = K_flat.reshape(batch_size, n_steps, 3, self.n_z, self.n_z);  # [B, T-1, 3, n_z, n_z]
+        C : torch.Tensor = C_flat.reshape(batch_size, n_steps, 3, self.n_z, self.n_z);  # [B, T-1, 3, n_z, n_z]
+        b : torch.Tensor = b_flat.reshape(batch_size, n_steps, 3, self.n_z);            # [B, T-1, 3, n_z]
+        return K, C, b;
+
+
+    def simulate_batched(
+            self,
+            initial_displacement : torch.Tensor,
+            initial_velocity     : torch.Tensor,
+            t_grid              : torch.Tensor,
+            lengths             : torch.Tensor,
+            params              : torch.Tensor,
+            reference_t0        : torch.Tensor,
+            reference_t_span    : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        r"""Integrate a batch of SOME latent trajectories with affine RK4.
+
+        This method first computes differentiable effective coefficients at each
+        interval's start, midpoint, and end time, then integrates all windows
+        together. SOME_weak inherits this method. The current trainers still
+        use the scalar ``simulate`` path; this method is the numerical foundation
+        for a future batched GPU rollout path.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        initial_displacement : torch.Tensor, shape = (B, n_z)
+            Initial latent displacement for each window; initial_displacement[i, :]
+            is the state of window i at t_grid[i, 0].
+
+        initial_velocity : torch.Tensor, shape = (B, n_z)
+            Initial latent velocity for each window; initial_velocity[i, :]
+            belongs to the same initial time as initial_displacement[i, :]. Both
+            states must share dtype and device with t_grid.
+
+        t_grid : torch.Tensor, shape = (B, T)
+            Per-window time grids. Window i has lengths[i] strictly increasing
+            valid times; t_grid[i, lengths[i]:] repeats its final valid time.
+
+        lengths : torch.Tensor, shape = (B,)
+            Integer number of valid time points in each window, with
+            1 <= lengths[i] <= T.
+
+        params : torch.Tensor, shape = (B, n_p)
+            Parameter row for each window; params[i, :] belongs to window i.
+
+        reference_t0 : torch.Tensor, shape = (B,)
+            Origin of the full time domain associated with each window. For
+            window i, this may precede t_grid[i, 0] if the window is cropped.
+
+        reference_t_span : torch.Tensor, shape = (B,)
+            Positive span of that full time domain. Gate inputs for window i
+            use (stage_time - reference_t0[i]) / reference_t_span[i].
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        D, V : tuple[torch.Tensor, torch.Tensor], each shape = (B, T, n_z)
+            Latent displacement and velocity trajectories. D[i, j, :] and
+            V[i, j, :] describe window i at t_grid[i, j]. For j >= lengths[i],
+            both repeat the last valid state because padded intervals use a
+            zero step size, assuming finite stage RHS values. Valid frames retain
+            gradients to initial states, gate parameters, and expert coefficients.
+        """
+
+        # Fetch staged coefficients
+        K, C, b = self.precompute_affine_stage_coefficients(
+            t_grid=t_grid,
+            lengths=lengths,
+            params=params,
+            reference_t0=reference_t0,
+            reference_t_span=reference_t_span,
+            state_dtype=initial_displacement.dtype)
+
+        # Run batched RK4 solve and return.
+        return RK4_affine_batched(
+            y0=initial_displacement,
+            Dy0=initial_velocity,
+            t_grid=t_grid,
+            lengths=lengths,
+            K=K,
+            C=C,
+            b=b)
 
 
     # ---------------------------------------------------------------------------------------------

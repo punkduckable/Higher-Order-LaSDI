@@ -461,4 +461,137 @@ def RK4(f       : Callable,
 
     # All done!
     return (D, V);
-    
+
+
+def RK4_affine_batched(
+        y0      : torch.Tensor,
+        Dy0     : torch.Tensor,
+        t_grid  : torch.Tensor,
+        lengths : torch.Tensor,
+        K       : torch.Tensor,
+        C       : torch.Tensor,
+        b       : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    r"""Integrate a batch of affine second-order ODEs using classical RK4.
+
+    Each batch item solves ``y''(t) = K(t) @ y(t) + C(t) @ y'(t) + b(t)``. The
+    three coefficient sets for each interval correspond to its start, midpoint,
+    and end. RK stages 2 and 3 reuse the midpoint coefficients, but evaluate
+    them at different intermediate states, so their accelerations differ.
+
+    The tensor-only batch layout is intended to reduce small GPU launches. The
+    existing scalar RK4 remains the independent CPU/NumPy reference.
+
+    -----------------------------------------------------------------------------------------------
+    Arguments
+    -----------------------------------------------------------------------------------------------
+
+    y0 : torch.Tensor, shape = (B, d)
+        Initial displacement for each batch item.
+
+    Dy0 : torch.Tensor, shape = (B, d)
+        Initial velocity for each batch item.
+
+    t_grid : torch.Tensor, shape = (B, T)
+        Time grid for each item. Valid times increase strictly; after the final
+        valid time, padding repeats that time through column T - 1.
+
+    lengths : torch.Tensor, shape = (B,)
+        Integer number of valid time points per item, satisfying 1 <= lengths <= T.
+
+    K : torch.Tensor, shape = (B, T - 1, 3, d, d)
+        Effective displacement matrices at each interval's start, midpoint, and end. Specifically,
+        K[i, j, :, :, :] contains three effective K matrices for the i'th batch item during its
+        j'th RK4 step. They represent K at the step's start, midpoint, and end, in that order.
+
+    C : torch.Tensor, shape = (B, T - 1, 3, d, d)
+        Effective velocity matrices with the same stage ordering as K.
+
+    b : torch.Tensor, shape = (B, T - 1, 3, d)
+        Effective affine biases with the same stage ordering as K.
+
+    -----------------------------------------------------------------------------------------------
+    Returns
+    -----------------------------------------------------------------------------------------------
+
+    D, V : tuple[torch.Tensor, torch.Tensor], each shape = (B, T, d)
+        Displacement and velocity trajectories, including frozen padded frames. Specifically,
+        D[i, j, :] gives the solved displacement at the j'th time step for the i'th batch item.
+        Both retain gradients through the initial states and coefficients.
+
+    All floating inputs must have the same dtype and device; lengths must be on
+    that device. Value checks for lengths, times, and finite coefficients are
+    left to the caller to avoid GPU synchronization. Inactive intervals use a
+    zero step size, so finite RHS values leave their states unchanged.
+    """
+
+    # Checks.
+    if y0.ndim != 2 or Dy0.shape != y0.shape:
+        raise ValueError("y0 and Dy0 must have matching shape [B, d]");
+    batch_size : int = y0.shape[0];
+    state_size : int = y0.shape[1];
+    if t_grid.ndim != 2 or t_grid.shape[0] != batch_size or t_grid.shape[1] < 1:
+        raise ValueError("t_grid must have shape [B, T] with T >= 1");
+    if lengths.shape != (batch_size,) or lengths.dtype not in (torch.int32, torch.int64):
+        raise ValueError("lengths must have shape [B] and an integer dtype");
+    n_steps : int = t_grid.shape[1] - 1;
+    if K.shape != (batch_size, n_steps, 3, state_size, state_size):
+        raise ValueError("K must have shape [B, T-1, 3, d, d]");
+    if C.shape != K.shape or b.shape != (batch_size, n_steps, 3, state_size):
+        raise ValueError("C and b must have shapes [B, T-1, 3, d, d] and [B, T-1, 3, d]");
+    floating_tensors : tuple[torch.Tensor, ...] = (y0, Dy0, t_grid, K, C, b);
+    if not y0.is_floating_point() or any(t.dtype != y0.dtype or t.device != y0.device for t in floating_tensors):
+        raise ValueError("states, time grid, and coefficients must share floating dtype and device");
+    if lengths.device != y0.device:
+        raise ValueError("lengths must be on the state device");
+
+    # Mask every invalid interval once, outside the sequential RK loop. A zero h
+    # makes the RK update exactly retain the last valid state; no per-row Python
+    # branch or per-step torch.where kernel is needed.
+    active  : torch.Tensor = torch.arange(n_steps, device=y0.device)[None, :] < (lengths[:, None] - 1); # [B, T-1]
+    h_all   : torch.Tensor = torch.where(active, t_grid[:, 1:] - t_grid[:, :-1], 0);                    # [B, T-1]
+
+    D_list : list[torch.Tensor] = [y0];  # Each entry has shape [B, d].
+    V_list : list[torch.Tensor] = [Dy0]; # Each entry has shape [B, d].
+    for n in range(n_steps):
+        # Fetch y, y' (v) from the previous time step
+        yn          : torch.Tensor  = D_list[-1];           # [B, d]
+        vn          : torch.Tensor  = V_list[-1];           # [B, d]
+
+        # Fetch each batch's step size, then compute h/2 and h^2 for each one (we need these).
+        h           : torch.Tensor  = h_all[:, n:n + 1];    # [B, 1], broadcasts across latent coordinates.
+        h_half      : torch.Tensor  = h / 2;                # [B, 1]
+        h_squared   : torch.Tensor  = h * h;                # [B, 1]
+
+        # Each batched matrix-vector product handles all windows. For item i,
+        # stage 1 is l1_i = K_start,i @ y_n,i + C_start,i @ v_n,i + b_start,i.
+        l1          : torch.Tensor = (torch.bmm(K[:, n, 0], yn.unsqueeze(-1)).squeeze(-1)
+                                    + torch.bmm(C[:, n, 0], vn.unsqueeze(-1)).squeeze(-1) + b[:, n, 0]); # [B, d]
+
+        # Stage 2: y2_i = y_n,i + h_i*v_n,i/2, v2_i = v_n,i + h_i*l1_i/2,
+        # then l2_i = K_mid,i @ y2_i + C_mid,i @ v2_i + b_mid,i.
+        y2  : torch.Tensor  = yn + h_half * vn;             # [B, d]
+        v2  : torch.Tensor  = vn + h_half * l1;             # [B, d]
+        l2  : torch.Tensor  = (torch.bmm(K[:, n, 1], y2.unsqueeze(-1)).squeeze(-1)
+                            + torch.bmm(C[:, n, 1], v2.unsqueeze(-1)).squeeze(-1) + b[:, n, 1]); # [B, d]
+
+        # Stage 3: y3_i = y2_i + h_i^2*l1_i/4, v3_i = v_n,i + h_i*l2_i/2.
+        # It reuses midpoint K/C/b, but l3_i = K_mid,i @ y3_i + C_mid,i @ v3_i + b_mid,i.
+        y3  : torch.Tensor  = y2 + (h_squared / 4) * l1;    # [B, d]
+        v3  : torch.Tensor  = vn + h_half * l2;             # [B, d]
+        l3  : torch.Tensor  = (torch.bmm(K[:, n, 1], y3.unsqueeze(-1)).squeeze(-1)
+                            + torch.bmm(C[:, n, 1], v3.unsqueeze(-1)).squeeze(-1) + b[:, n, 1]); # [B, d]
+
+        # Stage 4: y4_i = y_n,i + h_i*v_n,i + h_i^2*l2_i/2,
+        # v4_i = v_n,i + h_i*l3_i; l4_i = K_end,i @ y4_i + C_end,i @ v4_i + b_end,i.
+        y4 : torch.Tensor   = yn + h * vn + (h_squared / 2) * l2;   # [B, d]
+        v4 : torch.Tensor   = vn + h * l3;                          # [B, d]
+        l4 : torch.Tensor   = (torch.bmm(K[:, n, 2], y4.unsqueeze(-1)).squeeze(-1)
+                            + torch.bmm(C[:, n, 2], v4.unsqueeze(-1)).squeeze(-1) + b[:, n, 2]); # [B, d]
+
+        # For each item, append y_{n+1} = y_n + h*v_n + h^2*(l1+l2+l3)/6
+        # and v_{n+1} = v_n + h*(l1+2*l2+2*l3+l4)/6.
+        D_list.append(yn + h * vn + (h_squared / 6) * (l1 + l2 + l3));
+        V_list.append(vn + (h / 6) * (l1 + 2 * l2 + 2 * l3 + l4));
+
+    # All done :)
+    return torch.stack(D_list, dim=1), torch.stack(V_list, dim=1);
