@@ -32,17 +32,29 @@ def test_all_example_configs_validate():
 
 def test_telegraphers_profile_config_captures_mature_rollout_in_short_run():
     config = validate_experiment_config(_load_example("Telegraphers_Profile.yml"))
-    profiler = config.trainer.profiler
     rollout = config.trainer.Second_Order_Rollout
 
     assert config.trainer.max_iter == 4
     assert config.trainer.n_iter == 4
-    assert profiler.enabled is True
-    assert profiler.wait_epochs == 1
-    assert profiler.warmup_epochs == 1
-    assert profiler.active_epochs == 1
-    assert profiler.num_repeats == 1
+    assert config.trainer.profiler_epoch == 2
     assert rollout.p_rollout_init == rollout.max_p_rollout == 0.5
+
+
+@pytest.mark.parametrize("profiler_epoch", [0, -1, 5])
+def test_schema_rejects_invalid_profiler_epoch(profiler_epoch: int):
+    config = _load_example("Telegraphers_Profile.yml")
+    config["trainer"]["profiler_epoch"] = profiler_epoch
+
+    with pytest.raises(ValidationError, match="profiler_epoch|greater than or equal to 1"):
+        validate_experiment_config(config)
+
+
+def test_schema_requires_explicit_profiler_epoch():
+    config = _load_example("Burgers2D.yml")
+    del config["trainer"]["profiler_epoch"]
+
+    with pytest.raises(ValidationError, match="Field required"):
+        validate_experiment_config(config)
 
 
 def test_schema_rejects_unknown_keys():

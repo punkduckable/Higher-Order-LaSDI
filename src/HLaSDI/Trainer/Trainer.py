@@ -831,7 +831,7 @@ class Trainer:
         PyTorch profiler machinery during normal, unprofiled training runs.
         """
 
-        if self.config.profiler.enabled == False:
+        if self.config.profiler_epoch is None:
             return contextlib.nullcontext();
 
         return torch.profiler.record_function(name);
@@ -1125,7 +1125,9 @@ class Trainer:
             The index of the last training iteration. Must have start_iter <= end_iter.
 
         profiler : torch.profiler.profile
-            An optional torch profiler that can be used to profile Iterate.
+            An optional torch profiler that can be used to profile Iterate. Subclasses must call
+            `profiler.step()` once after round setup and once after each training epoch so that
+            setup is not included when profiling the first epoch of a round.
 
 
         -------------------------------------------------------------------------------------------
@@ -1192,20 +1194,31 @@ class Trainer:
         assert end_iter >= start_iter;
         LOGGER.info("Training for %d epochs (starting at %d, going to %d) with %d training parameters" % (end_iter - start_iter, start_iter, end_iter, n_train));
 
-        if self.config.profiler.enabled:
+        # Profile only the one-based configured epoch.
+        profiler_epoch: int | None = self.config.profiler_epoch
+        profile_this_round: bool = (
+            profiler_epoch is not None
+            and start_iter < profiler_epoch <= end_iter
+        )
+
+        if profile_this_round:
             # Iterate with profiler on
             profiler_activities = [torch.profiler.ProfilerActivity.CPU];
             if torch.cuda.is_available():
                 profiler_activities.append(torch.profiler.ProfilerActivity.CUDA);
             LOGGER.info("Writing profiler timeline traces to %s" % self.results_dir);
 
+            # Set up the profiler and run iterations.
+            # The first profiler step covers round setup; Iterate advances past it before
+            # starting the epoch loop.
+            wait_epoch: int = profiler_epoch - start_iter
             with torch.profiler.profile(
                 activities      = profiler_activities,
                 schedule        = torch.profiler.schedule(
-                    wait        = self.config.profiler.wait_epochs,
-                    warmup      = self.config.profiler.warmup_epochs,
-                    active      = self.config.profiler.active_epochs,
-                    repeat      = self.config.profiler.num_repeats,
+                    wait        = wait_epoch,
+                    warmup      = 0,
+                    active      = 1,
+                    repeat      = 1,
                 ),
                 on_trace_ready  = torch.profiler.tensorboard_trace_handler(
                     dir_name    = self.results_dir,

@@ -34,8 +34,7 @@ trainer:
   device:                 'cpu'
   noise_ratio:            0.05
 
-  profiler: 
-    enabled:                False
+  profiler_epoch:          null
 
   Second_Order_Weak:
     lr:                     0.001

@@ -11,12 +11,7 @@ trainer:
   device:                   'cuda:0'
   noise_ratio:              0.0
 
-  profiler: 
-    enabled:                False 
-    wait_epochs:            50
-    warmup_epochs:          1
-    active_epochs:          1
-    num_repeats:            1
+  profiler_epoch:            null
 
   First_Order_Rollout:
     lr:                     0.001

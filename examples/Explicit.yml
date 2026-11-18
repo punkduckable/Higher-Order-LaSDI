@@ -11,8 +11,7 @@ trainer:
   device:                   'cuda:0'
   noise_ratio:              0.0
 
-  profiler: 
-    enabled:                False
+  profiler_epoch:            null
 
   First_Order_Rollout:
     lr:                     0.001

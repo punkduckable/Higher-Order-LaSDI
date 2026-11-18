@@ -251,6 +251,9 @@ class Second_Order_Weak(Second_Order_Rollout):
         # -----------------------------------------------------------------------------------------
         # Run the iterations!
 
+        if profiler is not None:
+            profiler.step();  # End round setup before profiling an epoch.
+
         for iter in range(start_iter, end_iter):
             step_timer : float = time.perf_counter();
             LOGGER.debug("=" * 80);

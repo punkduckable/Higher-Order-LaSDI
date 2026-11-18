@@ -11,8 +11,7 @@ trainer:
   device:                   'cuda:0'
   noise_ratio:              0.0
 
-  profiler: 
-    enabled:                False
+  profiler_epoch:            null
 
   Second_Order_Rollout:
     lr:                     0.001
@@ -35,8 +34,8 @@ trainer:
     loss_weights:
       recon:                1.0
       chain_rule:           1.0
-      rollout:              0.0
-      IC_rollout:           0.25
+      rollout:              0.25
+      IC_rollout:           0.0
       consistency:          1.0
 
     loss_types:
