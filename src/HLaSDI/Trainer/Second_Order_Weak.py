@@ -545,151 +545,16 @@ class Second_Order_Weak(Second_Order_Rollout):
                 timer : float = time.perf_counter();
                 LOGGER.debug("Rollout Loss (Autoencoder_Pair) - start");
 
-                # For each training parameter combination, randomly select a small number of
-                # rollable start frames, rollout each one on the *true* absolute time grid,
-                # and compare full trajectories (no interpolation / no random target points).
-                for i in range(n_train):
-                    t_i   : torch.Tensor = t_Train_device[i];
-                    n_t_i : int          = t_i.shape[0];
-                    if n_t_i < 2:
-                        continue;
-
-                    # Rollout duration for this parameter combination.
-                    t_i_np : numpy.ndarray = t_Train_np[i];
-                    t0  : float = float(t_i_np[0]);
-                    tf  : float = float(t_i_np[-1]);
-                    dur : float = float(p_rollout * (tf - t0));
-                    if dur <= 0.0:
-                        continue;
-
-                    # Find the set of rollable frames.
-                    rollable    = numpy.where(t_i_np + dur <= tf)[0];
-                    if rollable.size == 0:
-                        continue;
-                    
-                    # Pick out which frames we will roll out.
-                    n_roll_i  = min(int(self.n_rollouts), int(rollable.size));
-                    start_idx = numpy.random.choice(rollable, size = n_roll_i, replace = False);
-
-                    param_i = self.param_space.train_space[i, :].reshape(1, -1);
-
-                    Z_D_i : torch.Tensor = Latent_States[i][0];
-                    Z_V_i : torch.Tensor = Latent_States[i][1];
-                    D_i   : torch.Tensor = U_Train_device[i][0];
-                    V_i   : torch.Tensor = U_Train_device[i][1];
-
-                    # Set up buffers to hold rolled out Z's (along with the associated latent and
-                    # FOM targets) and associated bookkeeping.  We decode once per parameter by
-                    # concatenating all rollout windows, then split the decoded output back into
-                    # windows before computing the per-window mean losses.
-                    Z_D_pred_windows : list[torch.Tensor] = [];
-                    Z_V_pred_windows : list[torch.Tensor] = [];
-                    Z_D_tgt_windows  : list[torch.Tensor] = [];
-                    Z_V_tgt_windows  : list[torch.Tensor] = [];
-                    D_tgt_windows    : list[torch.Tensor] = [];
-                    V_tgt_windows    : list[torch.Tensor] = [];
-                    lengths          : list[int]          = [];
-                    
-                    # Cycle through the frames we plan to rollout.
-                    for k in start_idx:
-                        k_int           : int   = int(k);
-                        t_start         : float = float(t_i_np[k_int]);
-                        t_end_target    : float = t_start + dur;
-
-                        # Find j: index of time closest to t_end_target; the time closest to 
-                        # t_end_target will have the smallest absolute distance from 
-                        # t_end_target, so j for which t_i_np[j] - t_end_target is smallest
-                        # is the index we want. Ensure j > k when possible.
-                        j_int = int(numpy.argmin(numpy.abs(t_i_np - t_end_target)));
-                        if j_int < k_int:
-                            j_int = k_int;
-                        if j_int == k_int and (k_int + 1) < n_t_i:
-                            j_int = k_int + 1;
-
-                        # Pick out the times we will rollout over (we do this with the np 
-                        # time grid since simulate uses CPU).
-                        t_win_np : numpy.ndarray = t_i_np[k_int:(j_int + 1)];
-
-                        # Fetch the targets
-                        Z_D_tgt : torch.Tensor = Z_D_i[k_int:(j_int + 1), :];
-                        Z_V_tgt : torch.Tensor = Z_V_i[k_int:(j_int + 1), :];
-                        D_tgt   : torch.Tensor = D_i[k_int:(j_int + 1), ...];
-                        V_tgt   : torch.Tensor = V_i[k_int:(j_int + 1), ...];
-                        Z_D_tgt_windows.append(Z_D_tgt);
-                        Z_V_tgt_windows.append(Z_V_tgt);
-                        D_tgt_windows.append(D_tgt);
-                        V_tgt_windows.append(V_tgt);
-
-                        # Get the model's prediction (in the latent space)
-                        Z_D0 : torch.Tensor = Z_D_i[k_int, :];
-                        Z_V0 : torch.Tensor = Z_V_i[k_int, :];
-
-                        with self._profile_region("HLaSDI/rollout_loss/simulate"):
-                            Z_pred_all : list[list[torch.Tensor]] = self.latent_dynamics.simulate(
-                                IC          = [[Z_D0, Z_V0]],
-                                t_Grid      = [t_win_np],
-                                params      = param_i,
-                                time_domain = [t_i_np]);
-                        Z_D_pred = Z_pred_all[0][0];
-                        Z_V_pred = Z_pred_all[0][1];
-                        assert Z_D_pred.ndim == 2 and Z_V_pred.ndim == 2;
-                        assert Z_D_pred.shape[0] == Z_V_pred.shape[0] == t_win_np.shape[0];
-                        Z_D_pred_windows.append(Z_D_pred);
-                        Z_V_pred_windows.append(Z_V_pred);
-                        lengths.append(Z_D_pred.shape[0]);
-
-                    # Decode all rollout windows for this parameter in one batched call.
-                    assert len(Z_D_pred_windows) == len(Z_V_pred_windows) == len(Z_D_tgt_windows) == len(Z_V_tgt_windows) == len(D_tgt_windows) == len(V_tgt_windows) == len(lengths) == n_roll_i;
-                    Z_D_pred_cat : torch.Tensor = torch.cat(Z_D_pred_windows, dim = 0);
-                    Z_V_pred_cat : torch.Tensor = torch.cat(Z_V_pred_windows, dim = 0);
-                    assert Z_D_pred_cat.shape[0] == Z_V_pred_cat.shape[0] == sum(lengths);
-                    with self._profile_region("HLaSDI/rollout_loss/decode"):
-                        D_pred_cat, V_pred_cat = encoder_decoder_device.Decode(Z_D_pred_cat, Z_V_pred_cat);
-                    assert D_pred_cat.shape[0] == V_pred_cat.shape[0] == Z_D_pred_cat.shape[0];
-
-                    # Compute losses window-by-window to preserve the old per-rollout weighting.
-                    loss_ROM_i_D : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
-                    loss_ROM_i_V : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
-                    loss_FOM_i_D : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
-                    loss_FOM_i_V : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
-                    offset       : int          = 0;
-                    for len_i, Z_D_tgt, Z_V_tgt, D_tgt, V_tgt, Z_D_pred, Z_V_pred in zip(lengths, Z_D_tgt_windows, Z_V_tgt_windows, D_tgt_windows, V_tgt_windows, Z_D_pred_windows, Z_V_pred_windows):
-                        D_pred = D_pred_cat[offset:(offset + len_i), ...];
-                        V_pred = V_pred_cat[offset:(offset + len_i), ...];
-                        offset += len_i;
-
-                        assert Z_D_tgt.shape[0] == Z_V_tgt.shape[0] == D_tgt.shape[0] == V_tgt.shape[0] == Z_D_pred.shape[0] == Z_V_pred.shape[0] == D_pred.shape[0] == V_pred.shape[0];
-
-                        diff_Z_D = Z_D_tgt - Z_D_pred;
-                        diff_Z_V = Z_V_tgt - Z_V_pred;
-                        diff_D   = D_pred - D_tgt;
-                        diff_V   = V_pred - V_tgt;
-
-                        if self.loss_types['rollout'] == "MSE":
-                            loss_ROM_i_D = loss_ROM_i_D + torch.mean(diff_Z_D**2);
-                            loss_ROM_i_V = loss_ROM_i_V + torch.mean(diff_Z_V**2);
-                            loss_FOM_i_D = loss_FOM_i_D + torch.mean(diff_D**2);
-                            loss_FOM_i_V = loss_FOM_i_V + torch.mean(diff_V**2);
-                        elif self.loss_types['rollout'] == "MAE":
-                            loss_ROM_i_D = loss_ROM_i_D + torch.mean(torch.abs(diff_Z_D));
-                            loss_ROM_i_V = loss_ROM_i_V + torch.mean(torch.abs(diff_Z_V));
-                            loss_FOM_i_D = loss_FOM_i_D + torch.mean(torch.abs(diff_D));
-                            loss_FOM_i_V = loss_FOM_i_V + torch.mean(torch.abs(diff_V));
-                        else:
-                            raise ValueError("Invalid rollout loss type: %s" % self.loss_types['rollout']);
-                    assert offset == D_pred_cat.shape[0];
-
-                    # Normalize losses based on number of rollouts.
-                    rollout_ROM_D_loss_ith_param = loss_ROM_i_D / float(n_roll_i);
-                    rollout_ROM_V_loss_ith_param = loss_ROM_i_V / float(n_roll_i);
-                    rollout_FOM_D_loss_ith_param = loss_FOM_i_D / float(n_roll_i);
-                    rollout_FOM_V_loss_ith_param = loss_FOM_i_V / float(n_roll_i);
-
-                    # Update total.
-                    loss_rollout_ROM_D += rollout_ROM_D_loss_ith_param;
-                    loss_rollout_ROM_V += rollout_ROM_V_loss_ith_param;
-                    loss_rollout_FOM_D += rollout_FOM_D_loss_ith_param;
-                    loss_rollout_FOM_V += rollout_FOM_V_loss_ith_param;
+                # Keep sampling and loss weighting shared across the strong and weak trainers.
+                (loss_rollout_ROM_D, loss_rollout_ROM_V,
+                 loss_rollout_FOM_D, loss_rollout_FOM_V) = self._sampled_rollout_losses(
+                    Latent_States=Latent_States,
+                    U_Train_device=U_Train_device,
+                    t_Train_device=t_Train_device,
+                    t_Train_np=t_Train_np,
+                    encoder_decoder_device=encoder_decoder_device,
+                    p_rollout=p_rollout,
+                    device=device);
 
                 # Store total rollout loss.
                 self._cache_metric('loss/rollout/ROM/D/total', loss_rollout_ROM_D.detach());

@@ -46,7 +46,7 @@ The profiled SOME configuration already has a time/parameter-only gate. Its scal
 1. Remove `use_z_in_gate` from SOME/SOME_weak schemas and implementation; retain the existing differentiable stage-time precomputation for tensor rollouts.
 2. Define a shared batch/time-grid contract for first- and second-order RK4; implement and validate the second-order tensor path first.
 3. Batch SOME stage-time gate weights and effective affine coefficients for selected rollout windows while preserving gradients.
-4. Add a `simulate_batched()` interface and integrate sampled second-order rollout losses in both strong and weak trainers.
+4. Keep one public `simulate()` interface, with private CUDA batching in SOME, and integrate sampled second-order rollout losses in both strong and weak trainers.
 5. Validate trajectories, gradients, loss weighting, and unprofiled CPU/GPU performance against the scalar reference.
 6. Extend the same contract to first-order solvers/models in a separately reviewable phase.
 
@@ -82,7 +82,7 @@ The first-order solver uses one state tensor `[B, n_z]`; the second-order solver
 
 For one second-order interval, RK4 evaluates the affine RHS at `t_n`, `t_n + h_n/2` (twice, at two different intermediate states), and `t_n + h_n`. Thus the time-only gate needs **three distinct stage-time coefficient sets per interval**. For each selected interval, the precomputed effective matrices and bias are `K_start/K_mid/K_end`, `C_start/C_mid/C_end`, and `b_start/b_mid/b_end`; the two midpoint RHS calls share coefficients but not state. The initial batched solver is affine-specific and consumes these coefficient tensors directly, rather than accepting an arbitrary RHS callable.
 
-Time grids are padded by repeating the final valid timestamp for each rollout. Targets are padded to `T_max`, but padded target values are never included in a loss.
+Inside SOME's CUDA path, time grids are padded by repeating each final valid timestamp. The public result is sliced back to valid frames, so trainer targets are never padded.
 
 ## Detailed implementation
 
@@ -193,36 +193,19 @@ acceleration[b] = sum_m alpha[b, m] * (K[m] @ z[b] + b[m])
 
 Choose the contraction form based first on clarity and exact gradient behavior. Use profiling, rather than intuition, to decide whether precomputed effective matrices or directly weighted expert outputs are faster on the target H100 workload. Reuse repeated stage-time/parameter evaluations across overlapping windows only if doing so preserves exact time values and gradients.
 
-### 4. Add an explicit batched simulation interface
+### 4. Keep one public simulation interface
 
 **File:** `src/HLaSDI/LatentDynamics/SOME.py`
 
-Add a batched-simulation capability to the latent-dynamics interface rather than coupling a trainer to `isinstance(latent_dynamics, SOME)`.
-
-Suggested SOME API:
-
-```python
-def simulate_batched(
-    self,
-    initial_displacement: torch.Tensor,
-    initial_velocity: torch.Tensor,
-    t_grid: torch.Tensor,
-    lengths: torch.Tensor,
-    params: torch.Tensor,
-    reference_t0: torch.Tensor,
-    reference_t_span: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Simulate a padded batch of second-order latent trajectories."""
-```
+Keep `simulate(...)` as the only trainer-facing method. Trainers pass a list of all sampled windows, including one parameter row and full reference domain per window. Within `simulate`, a CUDA section packs and pads tensor windows, calls `_precompute_affine_stage_coefficients(...)` and `RK4_affine_batched(...)`, then slices the result back to valid frames. A separate CPU section retains scalar RK4.
 
 Design notes:
 
-- Keep this API tensor-only. NumPy/list adaptation remains the responsibility of the existing scalar `simulate()` API.
-- Return two tensors with shape `[B, T_max, n_z]`.
+- Keep the CUDA solver inputs tensor-only. `simulate()` packs variable-length CUDA windows and unpads the results; its return format remains a list of trajectory pairs.
+- Return two internal tensors with shape `[B, T_max, n_z]`.
 - Form stage-time coefficients from `params`, `reference_t0`, and `reference_t_span` before integration; the batched RK4 core consumes them through its explicit affine interface. A general batched-RHS solver for other models is not part of this phase.
 - `SOME_weak` should inherit this implementation unless it truly changes rollout dynamics.
-- Add the base-interface capability/failure contract when integrating the trainer, so unsupported latent-dynamics models fail clearly without a concrete-type check.
-- Do not rewrite scalar `simulate()` in the first patch. Keeping independent scalar and batched paths makes equivalence testing meaningful and limits the regression surface.
+- CPU/NumPy inputs continue through the independent scalar `RK4` path, so users can switch devices and still have a readable reference implementation. Other latent-dynamics models retain their existing `simulate()` behavior.
 
 ### 5. Pack all sampled rollout windows before simulation
 
@@ -241,26 +224,13 @@ Replace the nested “sample one window, simulate it, decode it, accumulate its 
    - full-order targets,
    - parameter row,
    - full/reference-domain `t0` and `t_span`.
-3. Compute `T_max` and allocate/construct padded tensors.
-4. Repeat each final valid timestamp through the padded portion of its time grid.
-5. Stack initial states, parameter rows, lengths, and reference-domain values.
-6. Call `latent_dynamics.simulate_batched(...)` once.
-7. Decode predicted states in one encoder-decoder call. Benchmark a padded flatten against gathering only valid frames first; the latter avoids running a potentially expensive full-order decoder on padding:
-
-   ```python
-   flat_D = predicted_D.reshape(B * T_max, n_z)
-   flat_V = predicted_V.reshape(B * T_max, n_z)
-   decoded_D, decoded_V = encoder_decoder.Decode(flat_D, flat_V)
-   decoded_D = decoded_D.reshape(B, T_max, *frame_shape)
-   decoded_V = decoded_V.reshape(B, T_max, *frame_shape)
-   ```
-
-   This snippet shows the simple padded variant. Adapt the exact call and output handling to the existing `EncoderDecoder` interface, and retain the faster measured choice.
-8. Compute masked latent-space and full-order losses.
+3. Call `latent_dynamics.simulate(...)` once with all windows. SOME privately handles CUDA padding; the trainer does not know the padded tensor layout.
+4. Concatenate only valid predicted frames and decode them in one encoder-decoder call. This avoids decoding padding.
+5. Compute latent-space and full-order losses with an indexed window/parameter reduction.
 
 Keep window selection behavior unchanged in this first optimization. This isolates batching from curriculum/random-sampling changes and makes fixed-seed scalar-vs-batched comparison possible.
 
-If directly padding high-dimensional full-order targets creates excessive copies, first attempt to stack slices into preallocated `[B, T_max, ...]` tensors. Peak memory from the profile leaves substantial headroom, but target packing should still be measured rather than assumed free.
+Full-order targets remain unpadded. The trainer concatenates valid target slices only, avoiding high-dimensional padded copies.
 
 ### 6. Preserve the current loss reduction exactly
 
@@ -280,22 +250,14 @@ A single global masked mean is not equivalent when rollout lengths or per-parame
 For each term:
 
 ```python
-# element_error has shape [B, T_max, ...]
-# valid has shape [B, T_max, 1, ...] after adding feature dimensions.
-masked_sum = (element_error * valid).sum(dim=all_non_batch_dims)
-valid_count = valid.expand_as(element_error).sum(dim=all_non_batch_dims)
-per_rollout = masked_sum / valid_count
-
-per_parameter_sum = torch.zeros(n_train, ...).index_add(
-    0, parameter_index, per_rollout
-)
-rollouts_per_parameter = torch.zeros(n_train, ...).index_add(
-    0, parameter_index, torch.ones_like(per_rollout)
-)
-loss = (per_parameter_sum / rollouts_per_parameter).sum()
+# frame_errors has shape [N_valid, 4], averaged over each frame's features.
+window_sum = torch.zeros(B, 4).index_add(0, window_index, frame_errors)
+window_mean = window_sum / window_lengths[:, None]
+parameter_sum = torch.zeros(n_train, 4).index_add(0, parameter_index, window_mean)
+losses = (parameter_sum / rollout_counts.clamp_min(1)[:, None]).sum(dim=0)
 ```
 
-Use absolute error for MAE and squared error for MSE. Construct counts in a dtype/device-compatible way and assert through packing logic that every included training parameter has at least one sampled rollout before division.
+Use absolute error for MAE and squared error for MSE. Parameters with no rollable windows contribute zero; the clamped divisor avoids dividing their zero sums by zero. GPU `index_add` may accumulate floating values in a different order from the scalar loop, so compare with explicit numerical tolerances.
 
 ### 7. Apply the same sampled-rollout path to the weak trainer
 
@@ -306,8 +268,8 @@ Determine whether the weak trainer inherits the relevant rollout implementation 
 The helper boundary should be based on a coherent operation, for example:
 
 ```text
-collect sampled windows -> padded rollout batch
-batched predictions + padded targets -> semantics-preserving rollout losses
+collect sampled windows -> one public simulate call
+valid predicted frames + unpadded targets -> semantics-preserving rollout losses
 ```
 
 Avoid a broad trainer refactor. Only extract code required to share the new behavior between the two second-order trainers.
@@ -318,9 +280,9 @@ Add profiler regions around the new phases so a follow-up trace distinguishes pa
 
 ```text
 HLaSDI/rollout_loss/pack
-HLaSDI/rollout_loss/simulate_batched
-HLaSDI/rollout_loss/decode_batched
-HLaSDI/rollout_loss/masked_loss
+HLaSDI/rollout_loss/simulate
+HLaSDI/rollout_loss/decode
+HLaSDI/rollout_loss/loss
 ```
 
 Log/cache at least:
@@ -387,15 +349,15 @@ Use float64 for the strictest small deterministic tests when supported, and docu
 
 ### D. Loss-reduction invariance
 
-**File:** `Test/test_second_order_training_invariants.py`
+**File:** `Test/test_batched_rollout_integration.py`
 
-Construct synthetic padded predictions/targets with:
+Construct synthetic sampled windows/targets with:
 
 - unequal rollout lengths,
 - unequal numbers of rollouts per training parameter,
-- deliberately large padded target values that must not affect the result.
+- different per-frame errors, so a global frame mean gives a detectably different result.
 
-Compare the batched masked result to an explicit nested-loop reference for both MAE and MSE and all four rollout terms. This test must fail if the implementation accidentally uses a global masked mean.
+Compare the indexed reduction to an explicit nested-loop reference for both MAE and MSE and all four rollout terms. This test must fail if the implementation accidentally uses a global frame mean.
 
 ### E. Trainer smoke tests
 
@@ -421,7 +383,7 @@ Do not evaluate speedup until all of the following hold:
 - scalar and batched valid trajectories agree within declared tolerances,
 - gradients agree within declared tolerances,
 - full-domain gate normalization is covered by a regression test,
-- padded frames do not contribute to any loss,
+- padded frames are omitted from public trajectories and do not contribute to any loss,
 - per-rollout/per-parameter loss reduction matches existing behavior,
 - existing unit tests remain green.
 
@@ -467,7 +429,7 @@ The exact end-to-end speedup will be lower than the reduction in rollout launch 
 
 ### Packing or decoding becomes the new bottleneck
 
-**Risk:** Python packing and padded full-order tensors consume the simulation savings.
+**Risk:** Python packing and full-order decoding consume the simulation savings.
 
 **Mitigation:** Add separate profiler ranges. Flatten and decode once. Optimize packing only if the new profile identifies it as material.
 
@@ -516,7 +478,7 @@ Test/test_affine_batched_rk4.py
 Work:
 
 1. Define the batch contract and add the second-order tensor `RK4_affine_batched` without replacing scalar `RK4`.
-2. Add batched SOME stage-time gate/effective-coefficient precomputation and `simulate_batched()`.
+2. Add batched SOME stage-time gate/effective-coefficient precomputation and call the affine solver from the CUDA section of `simulate()`.
 3. Add solver, scalar-vs-batched, time-normalization, and gradient tests on CPU.
 
 Stop after this patch and review numerical/gradient equivalence before changing trainer behavior.
@@ -528,18 +490,18 @@ Expected files:
 ```text
 src/HLaSDI/Trainer/Second_Order_Rollout.py
 src/HLaSDI/Trainer/Second_Order_Weak.py
-Test/test_second_order_training_invariants.py
+Test/test_batched_rollout_integration.py
 ```
 
 Work:
 
-1. Gather and pad all sampled rollout windows.
-2. Run one batched simulation and one flattened batched decode.
-3. Add masked loss aggregation that preserves current semantics.
+1. Gather all sampled rollout windows in the trainer; let SOME privately pad CUDA windows.
+2. Run one public `simulate()` call and one flattened, valid-frames-only decode.
+3. Add indexed window/parameter loss aggregation that preserves current semantics.
 4. Reuse the path from the weak trainer.
 5. Add profiler ranges and batch/padding metrics.
-6. Add loss-invariance and trainer smoke tests.
-7. Produce an equivalent before/after profile and unprofiled timing comparison.
+6. Add loss-invariance and public-interface tests, including conditional CUDA dispatch coverage.
+7. On an available GPU, produce an equivalent before/after profile and unprofiled timing comparison. This remains a follow-up measurement, not a claimed speedup.
 
 ### Patch 4: First-order extension and backend optimization
 

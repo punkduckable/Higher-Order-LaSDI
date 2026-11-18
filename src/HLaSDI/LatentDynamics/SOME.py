@@ -620,6 +620,8 @@ class SOME(LatentDynamics):
         The gate is evaluated at the RK stage time and parameter value, so the integrated system is
         generally non-autonomous even though each expert is affine in z. The model is
         deterministic, so `sample` is accepted for interface compatibility but ignored.
+        CUDA tensor initial states use one padded affine solve for all input windows;
+        CPU/NumPy initial states use the readable scalar RK4 implementation.
 
 
         -------------------------------------------------------------------------------------------
@@ -629,13 +631,15 @@ class SOME(LatentDynamics):
         IC : list[list[numpy.ndarray]] or list[list[torch.Tensor]], len = n_param
             i'th element is a two-element list `[D0, V0]`. Both `D0` and `V0` must be
             one-dimensional arrays/tensors of shape (n_z), holding the initial displacement and
-            velocity for the i'th parameter value.
+            velocity for the i'th parameter value. CUDA states must share device and dtype.
 
         t_Grid : list[numpy.ndarray] or list[torch.Tensor], len = n_param
-            i'th entry is a one-dimensional time grid of shape (n_t(i)).
+            i'th entry is a one-dimensional time grid of shape (n_t(i)). CUDA
+            grids must have the same dtype as the initial states.
 
         params: numpy.ndarray, shape = (n_param, n_p)
-            The i'th row holds the i'th combination of parameter values.
+            The i'th row holds the parameters for the i'th trajectory. Rows may
+            repeat when several rollout windows belong to one training parameter.
 
         time_domain : list[numpy.ndarray | torch.Tensor], len = n_param
             Full/reference time grids used to normalize the gate time input. This may differ from
@@ -649,11 +653,13 @@ class SOME(LatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------
 
-        Z : list[list[numpy.ndarray]] or list[list[torch.Tensor]], len = n_parm
+        Z : list[list[numpy.ndarray]] or list[list[torch.Tensor]], len = n_param
             i'th element is `[D, V]`. Both `D` and `V` have shape (n_t(i), n_z).
         """
 
-        # Checks.
+        # -----------------------------------------------------------------------------------------
+        # Checks shared by the CUDA and scalar CPU paths.
+
         assert isinstance(params, numpy.ndarray);
         assert len(params.shape) == 2;
         assert params.shape[1] == self.n_p;
@@ -661,6 +667,113 @@ class SOME(LatentDynamics):
         assert isinstance(t_Grid, list) and isinstance(IC, list);
         assert len(IC) == n_param and len(t_Grid) == n_param;
         assert isinstance(time_domain, list) and len(time_domain) == n_param;
+        for i in range(n_param):
+            # Fetch the i'th IC, time domain, and time grid.
+            ith_IC          = IC[i]
+            ith_time_domain = time_domain[i]
+            ith_t_Grid      = t_Grid[i];
+
+            # Check ith IC
+            assert isinstance(ith_IC, list) and len(ith_IC) == 2;
+            D0, V0 = ith_IC;
+            assert isinstance(D0, (numpy.ndarray, torch.Tensor));
+            assert type(V0) is type(D0);
+            assert D0.shape == (self.n_z,) and V0.shape == (self.n_z,);
+
+            # Check i'th time domain/grid
+            assert isinstance(ith_time_domain, (numpy.ndarray, torch.Tensor));
+            assert isinstance(ith_t_Grid, (numpy.ndarray, torch.Tensor));
+            assert len(ith_t_Grid.shape) == 1;
+            assert len(ith_time_domain.shape) == 1;
+            if ith_t_Grid.shape[0] < 1 or ith_time_domain.shape[0] < 2:
+                raise ValueError("rollout grid must be nonempty and reference time domain must have at least two values");
+        
+        # Make sure all elements of IC use the same device type.
+        first_is_cuda : bool = (n_param > 0 and isinstance(IC[0][0], torch.Tensor)
+                                and IC[0][0].device.type == "cuda");
+        if any((isinstance(ith_IC[0], torch.Tensor) and ith_IC[0].device.type == "cuda")
+               != first_is_cuda for ith_IC in IC):
+            raise ValueError("CUDA initial states cannot be mixed with CPU or NumPy initial states");
+
+
+        # -----------------------------------------------------------------------------------------
+        # CUDA path: pad the windows, precompute affine stages, and solve as one batch.
+
+        if first_is_cuda:
+            state_device        : torch.device          = IC[0][0].device;
+            state_dtype         : torch.dtype           = IC[0][0].dtype;
+            D0                  : list[torch.Tensor]    = [];
+            V0                  : list[torch.Tensor]    = [];
+            Tensor_t_Grid       : list[torch.Tensor]    = [];
+            Tensor_time_domain  : list[torch.Tensor]    = [];
+            lengths             : list[int]             = [];
+
+            # Check CUDA-specific dtype/device constraints and collect the window inputs.
+            for i in range(n_param):
+                # Decompose i'th IC, make sure both are cuda tensors.
+                D0_i, V0_i = IC[i];
+                if (    not isinstance(D0_i, torch.Tensor)  or not isinstance(V0_i, torch.Tensor)
+                        or D0_i.device != state_device      or  V0_i.device != state_device
+                        or D0_i.dtype != state_dtype        or  V0_i.dtype != state_dtype):
+                    raise ValueError("all CUDA initial states must share dtype and device");
+
+                # Fetch the t_Grid, time_domain for this parameter, map them to tensors.
+                Tensor_t_Grid_i      : torch.Tensor = torch.as_tensor(t_Grid[i], device=state_device);
+                Tensor_time_domain_i : torch.Tensor = torch.as_tensor(time_domain[i], device=state_device);
+                if Tensor_t_Grid_i.dtype != state_dtype or Tensor_time_domain_i.dtype != state_dtype:
+                    raise ValueError("CUDA time grids must have the latent-state dtype");
+
+                # Record the validated initial states, grids, and window length.
+                D0.append(D0_i);
+                V0.append(V0_i);
+                Tensor_t_Grid.append(Tensor_t_Grid_i);
+                Tensor_time_domain.append(Tensor_time_domain_i);
+                lengths.append(Tensor_t_Grid_i.shape[0]);
+
+            # Determine the time window with the most time steps.
+            max_length  : int = max(lengths);
+
+            # Pad the t_Grids
+            padded_t_Grid : torch.Tensor = torch.stack([
+                torch.cat((grid, grid[-1].expand(max_length - length)))
+                for grid, length in zip(Tensor_t_Grid, lengths)
+            ]);  # [B, T_max]; padding repeats each final valid time.
+
+            # Batch up t_Grid lengths, parameters, initial times, time spans, and ICs.
+            lengths_tensor  : torch.Tensor  = torch.tensor(lengths, dtype = torch.long, device = state_device); # [B]
+            params_tensor   : torch.Tensor  = torch.as_tensor(params, dtype = state_dtype, device = state_device); # [B, n_p]
+            reference_t0    : torch.Tensor  = torch.stack([domain[0] for domain in Tensor_time_domain]); # [B]
+            reference_tf    : torch.Tensor  = torch.stack([domain[-1] for domain in Tensor_time_domain]); # [B]
+            reference_span  : torch.Tensor  = reference_tf - reference_t0; # [B]
+            if not bool(torch.all(reference_span > 0.0).item()):
+                raise ValueError("reference time domain must have a positive span");
+            D0_batch        : torch.Tensor  = torch.stack(D0); # [B, n_z]
+            V0_batch        : torch.Tensor  = torch.stack(V0); # [B, n_z]
+
+            # Fetch the effective K, C, and b matrices the RK4 solver will use.
+            K, C, b = self._precompute_affine_stage_coefficients(
+                t_grid              = padded_t_Grid,
+                lengths             = lengths_tensor,
+                params              = params_tensor,
+                reference_t0        = reference_t0,
+                reference_t_span    = reference_span,
+                state_dtype         = state_dtype);
+
+            # Execute the batched RK4 solve.
+            D, V = RK4_affine_batched(
+                y0      = D0_batch,
+                Dy0     = V0_batch,
+                t_grid  = padded_t_Grid,
+                lengths = lengths_tensor,
+                K       = K,
+                C       = C,
+                b       = b);
+
+            # Exclude padded frames without detaching valid trajectories.
+            return [[D[i, :length], V[i, :length]] for i, length in enumerate(lengths)];
+
+        # -----------------------------------------------------------------------------------------
+        # CPU path: independent scalar RK4 solves remain the readable reference.
 
         # Loop through parameter combinations.
         Z : list[list[numpy.ndarray | torch.Tensor]] = [];
@@ -671,24 +784,19 @@ class SOME(LatentDynamics):
             ith_params : numpy.ndarray                       = params[i, :];
             ith_time_domain : numpy.ndarray | torch.Tensor   = time_domain[i];
 
-            assert isinstance(ith_IC, list) and len(ith_IC) == 2;
+            # Map ith_t_Grid, ith_time_domain to numpy arrays if they are tensor.s
             if(isinstance(ith_t_Grid, torch.Tensor)):
                 ith_t_Grid = ith_t_Grid.detach().cpu().numpy();
             if(isinstance(ith_time_domain, torch.Tensor)):
                 ith_time_domain = ith_time_domain.detach().cpu().numpy();
-            assert len(ith_t_Grid.shape) == 1;
-            assert len(ith_time_domain.shape) == 1;
-            assert ith_time_domain.shape[0] >= 2;
+
+            # Fetch initial time, range for i'th parameter value.
             t0          : float = ith_time_domain[0];
             t_span      : float = ith_time_domain[-1] - ith_time_domain[0];
-            assert t_span > 0.0;
+            if not bool(t_span > 0.0):
+                raise ValueError("reference time domain must have a positive span");
             ith_Z0      : numpy.ndarray | torch.Tensor = ith_IC[0];
             ith_dZ_dt0  : numpy.ndarray | torch.Tensor = ith_IC[1];
-            assert(isinstance(ith_Z0, (numpy.ndarray, torch.Tensor)))
-            assert(type(ith_dZ_dt0) == type(ith_Z0))
-            assert len(ith_Z0.shape) == 1       and ith_Z0.shape[0]     == self.n_z;
-            assert len(ith_dZ_dt0.shape) == 1   and ith_dZ_dt0.shape[0] == self.n_z;
-
             # Define the right-hand side in either NumPy or PyTorch. The solver backend follows the
             # initial-condition backend; this preserves differentiability for tensor rollouts.
             # The gate depends only on time and parameters, so precompute all stage-time effective
@@ -717,7 +825,7 @@ class SOME(LatentDynamics):
         return Z;
 
 
-    def precompute_affine_stage_coefficients(
+    def _precompute_affine_stage_coefficients(
             self,
             t_grid           : torch.Tensor,
             lengths          : torch.Tensor,
@@ -849,89 +957,6 @@ class SOME(LatentDynamics):
         C : torch.Tensor = C_flat.reshape(batch_size, n_steps, 3, self.n_z, self.n_z);  # [B, T-1, 3, n_z, n_z]
         b : torch.Tensor = b_flat.reshape(batch_size, n_steps, 3, self.n_z);            # [B, T-1, 3, n_z]
         return K, C, b;
-
-
-    def simulate_batched(
-            self,
-            initial_displacement : torch.Tensor,
-            initial_velocity     : torch.Tensor,
-            t_grid              : torch.Tensor,
-            lengths             : torch.Tensor,
-            params              : torch.Tensor,
-            reference_t0        : torch.Tensor,
-            reference_t_span    : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        r"""Integrate a batch of SOME latent trajectories with affine RK4.
-
-        This method first computes differentiable effective coefficients at each
-        interval's start, midpoint, and end time, then integrates all windows
-        together. SOME_weak inherits this method. The current trainers still
-        use the scalar ``simulate`` path; this method is the numerical foundation
-        for a future batched GPU rollout path.
-
-
-        -------------------------------------------------------------------------------------------
-        Arguments
-        -------------------------------------------------------------------------------------------
-
-        initial_displacement : torch.Tensor, shape = (B, n_z)
-            Initial latent displacement for each window; initial_displacement[i, :]
-            is the state of window i at t_grid[i, 0].
-
-        initial_velocity : torch.Tensor, shape = (B, n_z)
-            Initial latent velocity for each window; initial_velocity[i, :]
-            belongs to the same initial time as initial_displacement[i, :]. Both
-            states must share dtype and device with t_grid.
-
-        t_grid : torch.Tensor, shape = (B, T)
-            Per-window time grids. Window i has lengths[i] strictly increasing
-            valid times; t_grid[i, lengths[i]:] repeats its final valid time.
-
-        lengths : torch.Tensor, shape = (B,)
-            Integer number of valid time points in each window, with
-            1 <= lengths[i] <= T.
-
-        params : torch.Tensor, shape = (B, n_p)
-            Parameter row for each window; params[i, :] belongs to window i.
-
-        reference_t0 : torch.Tensor, shape = (B,)
-            Origin of the full time domain associated with each window. For
-            window i, this may precede t_grid[i, 0] if the window is cropped.
-
-        reference_t_span : torch.Tensor, shape = (B,)
-            Positive span of that full time domain. Gate inputs for window i
-            use (stage_time - reference_t0[i]) / reference_t_span[i].
-
-
-        -------------------------------------------------------------------------------------------
-        Returns
-        -------------------------------------------------------------------------------------------
-
-        D, V : tuple[torch.Tensor, torch.Tensor], each shape = (B, T, n_z)
-            Latent displacement and velocity trajectories. D[i, j, :] and
-            V[i, j, :] describe window i at t_grid[i, j]. For j >= lengths[i],
-            both repeat the last valid state because padded intervals use a
-            zero step size, assuming finite stage RHS values. Valid frames retain
-            gradients to initial states, gate parameters, and expert coefficients.
-        """
-
-        # Fetch staged coefficients
-        K, C, b = self.precompute_affine_stage_coefficients(
-            t_grid=t_grid,
-            lengths=lengths,
-            params=params,
-            reference_t0=reference_t0,
-            reference_t_span=reference_t_span,
-            state_dtype=initial_displacement.dtype)
-
-        # Run batched RK4 solve and return.
-        return RK4_affine_batched(
-            y0=initial_displacement,
-            Dy0=initial_velocity,
-            t_grid=t_grid,
-            lengths=lengths,
-            K=K,
-            C=C,
-            b=b)
 
 
     # ---------------------------------------------------------------------------------------------

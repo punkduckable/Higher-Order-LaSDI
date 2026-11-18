@@ -158,6 +158,262 @@ class Second_Order_Rollout(Trainer):
         return;
 
 
+    def _sampled_rollout_losses(
+            self,
+            Latent_States         : list[list[torch.Tensor]],
+            U_Train_device        : list[list[torch.Tensor]],
+            t_Train_device        : list[torch.Tensor],
+            t_Train_np            : list[numpy.ndarray],
+            encoder_decoder_device: EncoderDecoder,
+            p_rollout            : float,
+            device               : torch.device | str) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        r"""Simulate all sampled windows once and compute the four rollout losses.
+
+        Sampling follows the original parameter-then-window order. For training
+        parameter i, n_t(i) is its number of frames, n_z is the latent dimension,
+        and frame_shape is the shape of one full-order frame. Each window
+        contributes its own mean error; those means are averaged within each
+        training parameter and then summed over parameters. Thus long windows
+        do not gain extra weight. The latent dynamics owns any CUDA padding.
+
+
+        -------------------------------------------------------------------------------------------
+        Arguments
+        -------------------------------------------------------------------------------------------
+
+        Latent_States : list[list[torch.Tensor]], len = n_train
+            Encoded training trajectories. Latent_States[i] is ``[Z_D_i, Z_V_i]``;
+            both tensors have shape (n_t(i), n_z). Element [k, j] of Z_D_i or
+            Z_V_i is latent displacement or velocity coordinate j at the k'th
+            time in t_Train_device[i].
+
+        U_Train_device : list[list[torch.Tensor]], len = n_train
+            Full-order training trajectories on `device`. U_Train_device[i] is
+            ``[D_i, V_i]``; both tensors have shape (n_t(i), *frame_shape).
+            D_i[k, ...] and V_i[k, ...] are the displacement and velocity
+            targets at t_Train_device[i][k], in the trainer's target space
+            (normalized when training normalization is enabled).
+
+        t_Train_device : list[torch.Tensor], len = n_train
+            Full time grids on `device`. Tensor i has shape (n_t(i),), and
+            t_Train_device[i][k] is the absolute time of frame k for parameter i.
+
+        t_Train_np : list[numpy.ndarray], len = n_train
+            CPU copies of the same full time grids. Array i has shape (n_t(i),),
+            and t_Train_np[i][k] equals t_Train_device[i][k]. It is used for
+            sampling, endpoint selection, and the scalar CPU solver.
+
+        encoder_decoder_device : EncoderDecoder
+            Autoencoder on `device`. Its Decode method maps all concatenated
+            valid latent predictions to displacement and velocity frames in
+            the same target space as U_Train_device.
+
+        p_rollout : float
+            Fraction of each parameter's full time span requested for a
+            rollout window: duration_i = p_rollout * (t_i[-1] - t_i[0]).
+
+        device : torch.device | str
+            Device for the returned losses, encoded states, and FOM targets.
+            CUDA uses device-resident time-grid slices; CPU uses NumPy slices.
+
+
+        -------------------------------------------------------------------------------------------
+        Returns
+        -------------------------------------------------------------------------------------------
+
+        loss_ROM_D, loss_ROM_V, loss_FOM_D, loss_FOM_V : torch.Tensor
+            Single-element losses for latent displacement, latent velocity,
+            decoded displacement, and decoded velocity, respectively. For
+            each term, mean errors over a window's valid frames and features,
+            mean the windows for each training parameter, then sum parameters.
+        """
+
+        # -----------------------------------------------------------------------------------------
+        # Select rollout windows for each parameter. . 
+
+        n_train                 : int                                   = len(Latent_States);
+        initial_conditions      : list[list[torch.Tensor]]              = []; # [Z_D(start), Z_V(start)] per window.
+        time_windows            : list[numpy.ndarray | torch.Tensor]    = []; # Absolute times from start through end, inclusive.
+        reference_domains       : list[numpy.ndarray | torch.Tensor]    = []; # Full grids, not cropped window grids.
+        parameter_rows          : list[numpy.ndarray]                   = []; # Repeated parameter row for each sampled window.
+        parameter_indices       : list[int]                             = []; # Training-parameter index for each window.
+        lengths                 : list[int]                             = []; # Number of valid frames per window.
+        target_Z_D              : list[torch.Tensor]                    = []; # Entry b has shape [lengths[b], n_z].
+        target_Z_V              : list[torch.Tensor]                    = []; # Entry b has shape [lengths[b], n_z].
+        target_D                : list[torch.Tensor]                    = []; # Entry b has shape [lengths[b], *frame_shape].
+        target_V                : list[torch.Tensor]                    = []; # Entry b has shape [lengths[b], *frame_shape].
+        rollouts_per_parameter  : list[int]                             = [0] * n_train; # Count of sampled windows for parameter i.
+        use_device_grids        : bool                                  = torch.device(device).type == "cuda";
+
+        with self._profile_region("HLaSDI/rollout_loss/pack"):
+            for i in range(n_train):
+                # First, we need to pick frames to rollout. To do this, we first need to idenfity
+                # which frames even can be rolled out.
+                t_i         : torch.Tensor  = t_Train_device[i];
+                t_i_np      : numpy.ndarray = t_Train_np[i];
+                n_t_i       : int           = t_i.shape[0];
+                if n_t_i < 2:
+                    continue;
+
+                # A frame is rollable only if the requested physical-time duration fits before the 
+                # final time of this full trajectory.
+                tf          : float         = float(t_i_np[-1]);
+                duration    : float         = float(p_rollout * (tf - float(t_i_np[0])));
+                if duration <= 0.0:
+                    continue;
+                rollable    : numpy.ndarray = numpy.where(t_i_np + duration <= tf)[0];
+                if rollable.size == 0:
+                    continue;
+
+                # Select fames to rollout. 
+                n_roll_i : int = min(int(self.n_rollouts), int(rollable.size));
+                start_indices : numpy.ndarray = numpy.random.choice(
+                    rollable, size = n_roll_i, replace = False);
+                
+                # Fetch the complete latent and FOM trajectories for parameter i.
+                Z_D_i, Z_V_i    = Latent_States[i];
+                D_i, V_i        = U_Train_device[i];
+                for k in start_indices:
+                    # Identify the stopping frame for each rollout window. To do this, we select 
+                    # the frame closest to the desired endpoint. Keep j at/after k and include 
+                    # at least one RK4 interval when a later frame exists; [k:end] is the full 
+                    # supervised window.
+                    k_int : int = int(k);
+                    end_target : float = float(t_i_np[k_int]) + duration;
+                    j_int : int = int(numpy.argmin(numpy.abs(t_i_np - end_target)));
+                    if j_int < k_int:
+                        j_int = k_int;
+                    if j_int == k_int and k_int + 1 < n_t_i:
+                        j_int = k_int + 1;
+                    end : int = j_int + 1;
+
+                    # Record the time values + reference domain for each rollout.
+                    time_windows.append(t_i[k_int:end] if use_device_grids else t_i_np[k_int:end]);
+                    reference_domains.append(t_i if use_device_grids else t_i_np);
+
+                    # Fetch initial conditions, parameter values.
+                    initial_conditions.append([Z_D_i[k_int, :], Z_V_i[k_int, :]]);
+                    parameter_rows.append(self.param_space.train_space[i, :]);
+                    parameter_indices.append(i);
+                    lengths.append(end - k_int);
+
+                    # Record target latent, real states.
+                    target_Z_D.append(Z_D_i[k_int:end, :]);
+                    target_Z_V.append(Z_V_i[k_int:end, :]);
+                    target_D.append(D_i[k_int:end, ...]);
+                    target_V.append(V_i[k_int:end, ...]);
+                    rollouts_per_parameter[i] += 1;
+
+        # Some parameters may have no rollable windows. If all are empty,
+        # their contribution is zero and there is nothing to simulate/decode.
+        n_windows   : int           = len(lengths);
+        zero        : torch.Tensor  = torch.zeros(1, dtype = torch.float32, device = device);
+        self._cache_metric("rollout/batch_size", n_windows);
+        if n_windows == 0:
+            return zero, zero.clone(), zero.clone(), zero.clone();
+
+        # Record metrics.
+        total_frames    : int = sum(lengths);
+        max_length      : int = max(lengths);
+        self._cache_metric("rollout/min_frames", min(lengths));
+        self._cache_metric("rollout/mean_frames", total_frames / n_windows);
+        self._cache_metric("rollout/max_frames", max_length);
+        self._cache_metric("rollout/T_max", max_length);
+        self._cache_metric("rollout/padding_efficiency", total_frames / (n_windows * max_length));
+
+        # -----------------------------------------------------------------------------------------
+        # Call simulate to generate all rollouts
+
+        with self._profile_region("HLaSDI/rollout_loss/simulate"):
+            predictions : list[list[torch.Tensor]] = self.latent_dynamics.simulate(
+                IC=initial_conditions,
+                t_Grid=time_windows,
+                params=numpy.stack(parameter_rows, axis=0),
+                time_domain=reference_domains);
+        assert len(predictions) == n_windows;
+        for prediction, length in zip(predictions, lengths):
+            assert prediction[0].shape[0] == prediction[1].shape[0] == length;
+
+        # Stack predictions along their 0 axis so that we only need to execute a single decode.
+        Z_D_pred : torch.Tensor = torch.cat([prediction[0] for prediction in predictions], dim = 0); # [N, n_z]
+        Z_V_pred : torch.Tensor = torch.cat([prediction[1] for prediction in predictions], dim = 0); # [N, n_z]
+        with self._profile_region("HLaSDI/rollout_loss/decode"):
+            D_pred, V_pred = encoder_decoder_device.Decode(Z_D_pred, Z_V_pred);
+        assert D_pred.shape[0] == V_pred.shape[0] == total_frames;
+
+        # -----------------------------------------------------------------------------------------
+        # Compute losses
+        # 
+        #    loss = \sum_{\theta} 
+        #               \frac{1}{# rollouts per parameter}
+        #               \sum_{rollout windows for \theta}
+        #                   \frac{1}{number of frames in rollout}
+        #                   \sum_{frame in rollout}
+        #                           error between prediction, target for this frame.
+
+        with self._profile_region("HLaSDI/rollout_loss/loss"):
+            # Concatenate targets in exactly the same order.
+            Z_D_tgt     : torch.Tensor = torch.cat(target_Z_D, dim = 0);    # [N, n_z]
+            Z_V_tgt     : torch.Tensor = torch.cat(target_Z_V, dim = 0);    # [N, n_z]
+            D_tgt       : torch.Tensor = torch.cat(target_D, dim = 0);      # [N, *frame_shape]
+            V_tgt       : torch.Tensor = torch.cat(target_V, dim = 0);      # [N, *frame_shape]
+            
+            # Compute differences between targets, predictions
+            differences : tuple[torch.Tensor, ...] = (
+                Z_D_tgt - Z_D_pred, Z_V_tgt - Z_V_pred,
+                D_pred - D_tgt, V_pred - V_tgt);
+
+            # Determine how to evaluate differences
+            if self.loss_types['rollout'] == "MSE":
+                frame_errors : torch.Tensor = torch.stack([
+                    difference.square().reshape(total_frames, -1).mean(dim=1)
+                    for difference in differences], dim=1);        # [N, 4]
+            elif self.loss_types['rollout'] == "MAE":
+                frame_errors = torch.stack([
+                    difference.abs().reshape(total_frames, -1).mean(dim=1)
+                    for difference in differences], dim=1);        # [N, 4]
+            else:
+                raise ValueError("Invalid rollout loss type: %s" % self.loss_types['rollout']);
+
+            # First compute a mean loss for EACH window. The frames were concatenated in window 
+            # order above. `window_index` tells us which window each row of the errors belong to.
+            length_tensor   : torch.Tensor = torch.tensor(lengths, dtype=torch.long, device=device); # [B]
+            window_index    : torch.Tensor = torch.repeat_interleave(
+                torch.arange(n_windows, device=device), length_tensor,
+                output_size=total_frames);                           # [N]
+
+            # Find sum of error for each rollout window.
+            # index_add puts each row of frame_errors into the row of window_sums selected by 
+            # window_index. Thus window_sums[b, c] is the sum of frame errors for window b and 
+            # loss component c.
+            window_sums     : torch.Tensor = torch.zeros(
+                (n_windows, 4), dtype=frame_errors.dtype, device=device).index_add(
+                    0, window_index, frame_errors);                  # [B, 4]
+
+            # Compute mean error for each rollout window.
+            # Divide each window's sum by its own frame count. Every window now contributes one 
+            # mean, regardless of how many frames it contains.
+            window_means    : torch.Tensor = window_sums / length_tensor[:, None]; # [B, 4]
+
+            # Sum mean rollout by each parameter
+            # index_add sums the window means into one row per training parameter.
+            parameter_index : torch.Tensor = torch.tensor(parameter_indices, dtype=torch.long, device=device); # [B]
+            parameter_sums  : torch.Tensor = torch.zeros(
+                (n_train, 4), dtype=frame_errors.dtype, device=device).index_add(
+                    0, parameter_index, window_means);              # [n_train, 4]
+
+            # Find mean error per parameter; this is the loss.
+            # Divide by the number of rollouts for each parameter, then SUM the per-parameter 
+            # means. A parameter with no windows has a zero sum; clamping its divisor to one 
+            # keeps that contribution at zero.
+            counts : torch.Tensor = torch.tensor(
+                rollouts_per_parameter, dtype=frame_errors.dtype, device=device).clamp_min(1); # [n_train]
+            losses : torch.Tensor = (parameter_sums / counts[:, None]).sum(dim=0); # [4]
+
+        # All done :) 
+        return losses[0], losses[1], losses[2], losses[3];
+
+
 
     # ---------------------------------------------------------------------------------------------
     # _IC_rollout_setup
@@ -707,151 +963,16 @@ class Second_Order_Rollout(Trainer):
                 timer : float = time.perf_counter();
                 LOGGER.debug("Rollout Loss (Autoencoder_Pair) - start");
 
-                # For each training parameter combination, randomly select a small number of
-                # rollable start frames, rollout each one on the *true* absolute time grid,
-                # and compare full trajectories (no interpolation / no random target points).
-                for i in range(n_train):
-                    t_i   : torch.Tensor = t_Train_device[i];
-                    n_t_i : int          = t_i.shape[0];
-                    if n_t_i < 2:
-                        continue;
-
-                    # Rollout duration for this parameter combination.
-                    t_i_np : numpy.ndarray = t_Train_np[i];
-                    t0  : float = float(t_i_np[0]);
-                    tf  : float = float(t_i_np[-1]);
-                    dur : float = float(p_rollout * (tf - t0));
-                    if dur <= 0.0:
-                        continue;
-
-                    # Find the set of rollable frames.
-                    rollable    = numpy.where(t_i_np + dur <= tf)[0];
-                    if rollable.size == 0:
-                        continue;
-                    
-                    # Pick out which frames we will roll out.
-                    n_roll_i  = min(int(self.n_rollouts), int(rollable.size));
-                    start_idx = numpy.random.choice(rollable, size = n_roll_i, replace = False);
-
-                    param_i = self.param_space.train_space[i, :].reshape(1, -1);
-
-                    Z_D_i : torch.Tensor = Latent_States[i][0];
-                    Z_V_i : torch.Tensor = Latent_States[i][1];
-                    D_i   : torch.Tensor = U_Train_device[i][0];
-                    V_i   : torch.Tensor = U_Train_device[i][1];
-
-                    # Set up buffers to hold rolled out Z's (along with the associated latent and
-                    # FOM targets) and associated bookkeeping.  We decode once per parameter by
-                    # concatenating all rollout windows, then split the decoded output back into
-                    # windows before computing the per-window mean losses.
-                    Z_D_pred_windows : list[torch.Tensor] = [];
-                    Z_V_pred_windows : list[torch.Tensor] = [];
-                    Z_D_tgt_windows  : list[torch.Tensor] = [];
-                    Z_V_tgt_windows  : list[torch.Tensor] = [];
-                    D_tgt_windows    : list[torch.Tensor] = [];
-                    V_tgt_windows    : list[torch.Tensor] = [];
-                    lengths          : list[int]          = [];
-                    
-                    # Cycle through the frames we plan to rollout.
-                    for k in start_idx:
-                        k_int           : int   = int(k);
-                        t_start         : float = float(t_i_np[k_int]);
-                        t_end_target    : float = t_start + dur;
-
-                        # Find j: index of time closest to t_end_target; the time closest to 
-                        # t_end_target will have the smallest absolute distance from 
-                        # t_end_target, so j for which t_i_np[j] - t_end_target is smallest
-                        # is the index we want. Ensure j > k when possible.
-                        j_int = int(numpy.argmin(numpy.abs(t_i_np - t_end_target)));
-                        if j_int < k_int:
-                            j_int = k_int;
-                        if j_int == k_int and (k_int + 1) < n_t_i:
-                            j_int = k_int + 1;
-
-                        # Pick out the times we will rollout over (we do this with the np 
-                        # time grid since simulate uses CPU).
-                        t_win_np : numpy.ndarray = t_i_np[k_int:(j_int + 1)];
-
-                        # Fetch the targets
-                        Z_D_tgt : torch.Tensor = Z_D_i[k_int:(j_int + 1), :];
-                        Z_V_tgt : torch.Tensor = Z_V_i[k_int:(j_int + 1), :];
-                        D_tgt   : torch.Tensor = D_i[k_int:(j_int + 1), ...];
-                        V_tgt   : torch.Tensor = V_i[k_int:(j_int + 1), ...];
-                        Z_D_tgt_windows.append(Z_D_tgt);
-                        Z_V_tgt_windows.append(Z_V_tgt);
-                        D_tgt_windows.append(D_tgt);
-                        V_tgt_windows.append(V_tgt);
-
-                        # Get the model's prediction (in the latent space)
-                        Z_D0 : torch.Tensor = Z_D_i[k_int, :];
-                        Z_V0 : torch.Tensor = Z_V_i[k_int, :];
-
-                        with self._profile_region("HLaSDI/rollout_loss/simulate"):
-                            Z_pred_all : list[list[torch.Tensor]] = self.latent_dynamics.simulate(
-                                IC          = [[Z_D0, Z_V0]],
-                                t_Grid      = [t_win_np],
-                                params      = param_i,
-                                time_domain = [t_i_np]);
-                        Z_D_pred = Z_pred_all[0][0];
-                        Z_V_pred = Z_pred_all[0][1];
-                        assert Z_D_pred.ndim == 2 and Z_V_pred.ndim == 2;
-                        assert Z_D_pred.shape[0] == Z_V_pred.shape[0] == t_win_np.shape[0];
-                        Z_D_pred_windows.append(Z_D_pred);
-                        Z_V_pred_windows.append(Z_V_pred);
-                        lengths.append(Z_D_pred.shape[0]);
-
-                    # Decode all rollout windows for this parameter in one batched call.
-                    assert len(Z_D_pred_windows) == len(Z_V_pred_windows) == len(Z_D_tgt_windows) == len(Z_V_tgt_windows) == len(D_tgt_windows) == len(V_tgt_windows) == len(lengths) == n_roll_i;
-                    Z_D_pred_cat : torch.Tensor = torch.cat(Z_D_pred_windows, dim = 0);
-                    Z_V_pred_cat : torch.Tensor = torch.cat(Z_V_pred_windows, dim = 0);
-                    assert Z_D_pred_cat.shape[0] == Z_V_pred_cat.shape[0] == sum(lengths);
-                    with self._profile_region("HLaSDI/rollout_loss/decode"):
-                        D_pred_cat, V_pred_cat = encoder_decoder_device.Decode(Z_D_pred_cat, Z_V_pred_cat);
-                    assert D_pred_cat.shape[0] == V_pred_cat.shape[0] == Z_D_pred_cat.shape[0];
-
-                    # Compute losses window-by-window to preserve the old per-rollout weighting.
-                    loss_ROM_i_D : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
-                    loss_ROM_i_V : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
-                    loss_FOM_i_D : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
-                    loss_FOM_i_V : torch.Tensor = torch.zeros(1, dtype = torch.float32, device = device);
-                    offset       : int          = 0;
-                    for len_i, Z_D_tgt, Z_V_tgt, D_tgt, V_tgt, Z_D_pred, Z_V_pred in zip(lengths, Z_D_tgt_windows, Z_V_tgt_windows, D_tgt_windows, V_tgt_windows, Z_D_pred_windows, Z_V_pred_windows):
-                        D_pred = D_pred_cat[offset:(offset + len_i), ...];
-                        V_pred = V_pred_cat[offset:(offset + len_i), ...];
-                        offset += len_i;
-
-                        assert Z_D_tgt.shape[0] == Z_V_tgt.shape[0] == D_tgt.shape[0] == V_tgt.shape[0] == Z_D_pred.shape[0] == Z_V_pred.shape[0] == D_pred.shape[0] == V_pred.shape[0];
-
-                        diff_Z_D = Z_D_tgt - Z_D_pred;
-                        diff_Z_V = Z_V_tgt - Z_V_pred;
-                        diff_D   = D_pred - D_tgt;
-                        diff_V   = V_pred - V_tgt;
-
-                        if self.loss_types['rollout'] == "MSE":
-                            loss_ROM_i_D = loss_ROM_i_D + torch.mean(diff_Z_D**2);
-                            loss_ROM_i_V = loss_ROM_i_V + torch.mean(diff_Z_V**2);
-                            loss_FOM_i_D = loss_FOM_i_D + torch.mean(diff_D**2);
-                            loss_FOM_i_V = loss_FOM_i_V + torch.mean(diff_V**2);
-                        elif self.loss_types['rollout'] == "MAE":
-                            loss_ROM_i_D = loss_ROM_i_D + torch.mean(torch.abs(diff_Z_D));
-                            loss_ROM_i_V = loss_ROM_i_V + torch.mean(torch.abs(diff_Z_V));
-                            loss_FOM_i_D = loss_FOM_i_D + torch.mean(torch.abs(diff_D));
-                            loss_FOM_i_V = loss_FOM_i_V + torch.mean(torch.abs(diff_V));
-                        else:
-                            raise ValueError("Invalid rollout loss type: %s" % self.loss_types['rollout']);
-                    assert offset == D_pred_cat.shape[0];
-
-                    # Normalize losses based on number of rollouts.
-                    rollout_ROM_D_loss_ith_param = loss_ROM_i_D / float(n_roll_i);
-                    rollout_ROM_V_loss_ith_param = loss_ROM_i_V / float(n_roll_i);
-                    rollout_FOM_D_loss_ith_param = loss_FOM_i_D / float(n_roll_i);
-                    rollout_FOM_V_loss_ith_param = loss_FOM_i_V / float(n_roll_i);
-
-                    # Update total.
-                    loss_rollout_ROM_D += rollout_ROM_D_loss_ith_param;
-                    loss_rollout_ROM_V += rollout_ROM_V_loss_ith_param;
-                    loss_rollout_FOM_D += rollout_FOM_D_loss_ith_param;
-                    loss_rollout_FOM_V += rollout_FOM_V_loss_ith_param;
+                # Keep sampling and loss weighting shared across the strong and weak trainers.
+                (loss_rollout_ROM_D, loss_rollout_ROM_V,
+                 loss_rollout_FOM_D, loss_rollout_FOM_V) = self._sampled_rollout_losses(
+                    Latent_States=Latent_States,
+                    U_Train_device=U_Train_device,
+                    t_Train_device=t_Train_device,
+                    t_Train_np=t_Train_np,
+                    encoder_decoder_device=encoder_decoder_device,
+                    p_rollout=p_rollout,
+                    device=device);
 
                 # Store total rollout loss.
                 self._cache_metric('loss/rollout/ROM/D/total', loss_rollout_ROM_D.detach());
