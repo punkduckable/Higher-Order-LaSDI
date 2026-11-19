@@ -471,12 +471,9 @@ def RK4(f       : Callable,
 def _rk4_affine_step(
         yn                : torch.Tensor,  # [B, d, 1]
         vn                : torch.Tensor,  # [B, d, 1]
-        K_start           : torch.Tensor,  # [B, d, d]
-        K_mid             : torch.Tensor,  # [B, d, d]
-        K_end             : torch.Tensor,  # [B, d, d]
-        C_start           : torch.Tensor,  # [B, d, d]
-        C_mid             : torch.Tensor,  # [B, d, d]
-        C_end             : torch.Tensor,  # [B, d, d]
+        KC_start          : torch.Tensor,  # [B, d, 2d]
+        KC_mid            : torch.Tensor,  # [B, d, 2d]
+        KC_end            : torch.Tensor,  # [B, d, 2d]
         b_start           : torch.Tensor,  # [B, d]
         b_mid             : torch.Tensor,  # [B, d]
         b_end             : torch.Tensor,  # [B, d]
@@ -492,29 +489,29 @@ def _rk4_affine_step(
     h, h_half, h_squared_quarter, h_squared_half, h_squared_sixth, h_sixth = (
         step_factors_n[:, :yn.shape[0], None, None].unbind(dim=0));
 
-    # Each batched matrix-vector product handles all windows. For item i,
-    # stage 1 is l1_i = K_start,i @ y_n,i + C_start,i @ v_n,i + b_start,i.
-    l1 : torch.Tensor = (torch.bmm(K_start, yn)
-                         + torch.bmm(C_start, vn) + b_start.unsqueeze(-1));
+    # Each packed matrix-vector product evaluates K @ y + C @ v + b for all windows.
+    # Packing K and C once outside the loop avoids two BMMs at every RK4 stage.
+    l1 : torch.Tensor = torch.baddbmm(
+        b_start.unsqueeze(-1), KC_start, torch.cat((yn, vn), dim=1));
 
     # Stage 2: y2_i = y_n,i + h_i*v_n,i/2, v2_i = v_n,i + h_i*l1_i/2,
     # then l2_i = K_mid,i @ y2_i + C_mid,i @ v2_i + b_mid,i.
     y2 : torch.Tensor = yn + h_half * vn;
     v2 : torch.Tensor = vn + h_half * l1;
-    l2 : torch.Tensor = (torch.bmm(K_mid, y2)
-                         + torch.bmm(C_mid, v2) + b_mid.unsqueeze(-1));
+    l2 : torch.Tensor = torch.baddbmm(
+        b_mid.unsqueeze(-1), KC_mid, torch.cat((y2, v2), dim=1));
 
     # Stage 3 reuses midpoint coefficients, but evaluates them at a new state.
     y3 : torch.Tensor = y2 + h_squared_quarter * l1;
     v3 : torch.Tensor = vn + h_half * l2;
-    l3 : torch.Tensor = (torch.bmm(K_mid, y3)
-                         + torch.bmm(C_mid, v3) + b_mid.unsqueeze(-1));
+    l3 : torch.Tensor = torch.baddbmm(
+        b_mid.unsqueeze(-1), KC_mid, torch.cat((y3, v3), dim=1));
 
     # Stage 4 uses the end coefficients.
     y4 : torch.Tensor = yn + h * vn + h_squared_half * l2;
     v4 : torch.Tensor = vn + h * l3;
-    l4 : torch.Tensor = (torch.bmm(K_end, y4)
-                         + torch.bmm(C_end, v4) + b_end.unsqueeze(-1));
+    l4 : torch.Tensor = torch.baddbmm(
+        b_end.unsqueeze(-1), KC_end, torch.cat((y4, v4), dim=1));
 
     # Classical second-order RK4 update.
     yn1 : torch.Tensor = yn + h * vn + h_squared_sixth * (l1 + l2 + l3);
@@ -643,14 +640,12 @@ def RK4_affine_batched(
     step_factors = step_factors.contiguous();                           # [T-1, 6, padded B]
 
     # ---------------------------------------------------------------------------------------------
-    # Next, unpack the K, C, and b tensors.
+    # Pack the displacement and velocity matrices once for the whole rollout,
+    # then unpack time and stage views. The packed batch stride is independent
+    # of rollout duration, and autograd splits its gradients back into K and C.
 
-    # Coefficients arrive contiguous and time-major, so every [B, d, d] stage
-    # view has a batch stride independent of rollout duration. Unbind once
-    # rather than indexing each stage, which creates expensive select/slice
-    # backward nodes that scatter into full-size zeros.
-    K_steps : tuple[tuple[torch.Tensor, ...], ...] = tuple(step.unbind(dim=0) for step in K.unbind(dim=0));
-    C_steps : tuple[tuple[torch.Tensor, ...], ...] = tuple(step.unbind(dim=0) for step in C.unbind(dim=0));
+    KC : torch.Tensor = torch.cat((K, C), dim=-1);  # [T-1, 3, B, d, 2d]
+    KC_steps : tuple[tuple[torch.Tensor, ...], ...] = tuple(step.unbind(dim=0) for step in KC.unbind(dim=0));
     b_steps : tuple[tuple[torch.Tensor, ...], ...] = tuple(step.unbind(dim=0) for step in b.unbind(dim=0));
 
     D_list : list[torch.Tensor] = [y0.unsqueeze(-1)];  # Each entry has shape [B, d, 1].
@@ -661,8 +656,7 @@ def RK4_affine_batched(
 
     step = _compiled_rk4_affine_step if y0.is_cuda else _rk4_affine_step;
     for n in range(n_steps):
-        K_start, K_mid, K_end = K_steps[n];
-        C_start, C_mid, C_end = C_steps[n];
+        KC_start, KC_mid, KC_end = KC_steps[n];
         b_start, b_mid, b_end = b_steps[n];
 
         # Fetch y, y' (v) from the previous time step
@@ -673,7 +667,7 @@ def RK4_affine_batched(
         step_factors_n : torch.Tensor = step_factors[n];
 
         yn1, vn1 = step(
-            yn, vn, K_start, K_mid, K_end, C_start, C_mid, C_end,
+            yn, vn, KC_start, KC_mid, KC_end,
             b_start, b_mid, b_end, step_factors_n);
         D_list.append(yn1);
         V_list.append(vn1);
