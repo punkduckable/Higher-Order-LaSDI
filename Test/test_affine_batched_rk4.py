@@ -12,6 +12,7 @@ sys.path.append(SRC)
 
 from HLaSDI.LatentDynamics import SOME, SOME_weak
 from HLaSDI.Schemas import SOMELatentDynamicsConfig, WeakSOMELatentDynamicsConfig
+from HLaSDI.Utilities import SecondOrderSolvers as second_order_solvers
 from HLaSDI.Utilities.SecondOrderSolvers import RK4, RK4_affine_batched
 
 
@@ -168,6 +169,44 @@ def test_affine_batched_rk4_dense_time_dependent_coefficients_match_scalar_refer
     grads_scalar = torch.autograd.grad(loss_scalar, (ys, vs, Ks0, Ks1, Cs0, Cs1, bs0, bs1))
     for actual, expected in zip(grads_batch, grads_scalar):
         torch.testing.assert_close(actual, expected, rtol=1.0e-11, atol=1.0e-12)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
+def test_affine_batched_rk4_compiled_step_matches_eager(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """CUDA compilation preserves padded trajectories and all input gradients."""
+    torch.manual_seed(21)
+    device = "cuda"
+    dtype = torch.float32
+    grid = torch.tensor([[0.0, 0.1, 0.23, 0.4], [0.0, 0.18, 0.3, 0.3]],
+                        device=device, dtype=dtype)
+    lengths = torch.tensor([4, 3], device=device)
+    values = (
+        torch.randn(2, 3, device=device, dtype=dtype),
+        torch.randn(2, 3, device=device, dtype=dtype),
+        0.1 * torch.randn(2, 3, 3, 3, 3, device=device, dtype=dtype),
+        0.1 * torch.randn(2, 3, 3, 3, 3, device=device, dtype=dtype),
+        0.1 * torch.randn(2, 3, 3, 3, device=device, dtype=dtype),
+    )
+
+    def solve() -> tuple[tuple[torch.Tensor, torch.Tensor], tuple[torch.Tensor, ...]]:
+        """Run one solve with fresh leaves so both backends have independent graphs."""
+        y0, v0, K, C, b = (value.detach().clone().requires_grad_() for value in values)
+        y, v = RK4_affine_batched(y0, v0, grid, lengths, K, C, b)
+        gradients = torch.autograd.grad(y.square().sum() + v.square().sum(),
+                                        (y0, v0, K, C, b))
+        return (y, v), gradients
+
+    compiled_outputs, compiled_gradients = solve()
+    monkeypatch.setattr(second_order_solvers, "_compiled_rk4_affine_step",
+                        second_order_solvers._rk4_affine_step)
+    eager_outputs, eager_gradients = solve()
+
+    for actual, expected in zip(compiled_outputs + compiled_gradients,
+                                eager_outputs + eager_gradients):
+        torch.testing.assert_close(actual, expected, rtol=2.0e-5, atol=2.0e-6)
+    for trajectory in compiled_outputs:
+        assert torch.equal(trajectory[1, 3], trajectory[1, 2])
 
 
 def test_some_batched_single_frame_returns_initial_state() -> None:

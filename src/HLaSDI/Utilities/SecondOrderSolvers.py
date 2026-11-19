@@ -463,6 +463,67 @@ def RK4(f       : Callable,
     return (D, V);
 
 
+# -------------------------------------------------------------------------------------------------
+# Batched RK4
+# -------------------------------------------------------------------------------------------------
+
+
+def _rk4_affine_step(
+        yn                : torch.Tensor,
+        vn                : torch.Tensor,
+        K_start           : torch.Tensor,
+        K_mid             : torch.Tensor,
+        K_end             : torch.Tensor,
+        C_start           : torch.Tensor,
+        C_mid             : torch.Tensor,
+        C_end             : torch.Tensor,
+        b_start           : torch.Tensor,
+        b_mid             : torch.Tensor,
+        b_end             : torch.Tensor,
+        h                 : torch.Tensor,
+        h_half            : torch.Tensor,
+        h_squared_quarter : torch.Tensor,
+        h_squared_half    : torch.Tensor,
+        h_squared_sixth   : torch.Tensor,
+        h_sixth           : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    r"""Advance one batched affine RK4 interval, preserving the eager equations."""
+
+    # Each batched matrix-vector product handles all windows. For item i,
+    # stage 1 is l1_i = K_start,i @ y_n,i + C_start,i @ v_n,i + b_start,i.
+    l1 : torch.Tensor = (torch.bmm(K_start, yn.unsqueeze(-1)).squeeze(-1)
+                         + torch.bmm(C_start, vn.unsqueeze(-1)).squeeze(-1) + b_start);
+
+    # Stage 2: y2_i = y_n,i + h_i*v_n,i/2, v2_i = v_n,i + h_i*l1_i/2,
+    # then l2_i = K_mid,i @ y2_i + C_mid,i @ v2_i + b_mid,i.
+    y2 : torch.Tensor = yn + h_half * vn;
+    v2 : torch.Tensor = vn + h_half * l1;
+    l2 : torch.Tensor = (torch.bmm(K_mid, y2.unsqueeze(-1)).squeeze(-1)
+                         + torch.bmm(C_mid, v2.unsqueeze(-1)).squeeze(-1) + b_mid);
+
+    # Stage 3 reuses midpoint coefficients, but evaluates them at a new state.
+    y3 : torch.Tensor = y2 + h_squared_quarter * l1;
+    v3 : torch.Tensor = vn + h_half * l2;
+    l3 : torch.Tensor = (torch.bmm(K_mid, y3.unsqueeze(-1)).squeeze(-1)
+                         + torch.bmm(C_mid, v3.unsqueeze(-1)).squeeze(-1) + b_mid);
+
+    # Stage 4 uses the end coefficients.
+    y4 : torch.Tensor = yn + h * vn + h_squared_half * l2;
+    v4 : torch.Tensor = vn + h * l3;
+    l4 : torch.Tensor = (torch.bmm(K_end, y4.unsqueeze(-1)).squeeze(-1)
+                         + torch.bmm(C_end, v4.unsqueeze(-1)).squeeze(-1) + b_end);
+
+    # Classical second-order RK4 update.
+    yn1 : torch.Tensor = yn + h * vn + h_squared_sixth * (l1 + l2 + l3);
+    vn1 : torch.Tensor = vn + h_sixth * (l1 + 2 * l2 + 2 * l3 + l4);
+    return yn1, vn1;
+
+
+# Compile only one interval. Compiling the 250-interval loop would create a very
+# large graph; reusing this callable also lets AOTAutograd fuse pointwise backward
+# work without changing the reference CPU path.
+_compiled_rk4_affine_step = torch.compile(_rk4_affine_step, fullgraph=True);
+
+
 def RK4_affine_batched(
         y0      : torch.Tensor,
         Dy0     : torch.Tensor,
@@ -478,8 +539,9 @@ def RK4_affine_batched(
     and end. RK stages 2 and 3 reuse the midpoint coefficients, but evaluate
     them at different intermediate states, so their accelerations differ.
 
-    The tensor-only batch layout is intended to reduce small GPU launches. The
-    existing scalar RK4 remains the independent CPU/NumPy reference.
+    CUDA compiles one RK4 interval to fuse tiny pointwise operations; CPU uses
+    the same equations eagerly. The existing scalar RK4 remains the independent
+    CPU/NumPy reference.
 
     -----------------------------------------------------------------------------------------------
     Arguments
@@ -567,6 +629,7 @@ def RK4_affine_batched(
 
     D_list : list[torch.Tensor] = [y0];  # Each entry has shape [B, d].
     V_list : list[torch.Tensor] = [Dy0]; # Each entry has shape [B, d].
+    step = _compiled_rk4_affine_step if y0.is_cuda else _rk4_affine_step;
     for n in range(n_steps):
         K_start, K_mid, K_end = K_steps[n];
         C_start, C_mid, C_end = C_steps[n];
@@ -584,36 +647,12 @@ def RK4_affine_batched(
         h_squared_sixth   : torch.Tensor = h_squared_sixth_all[:, n:n + 1];
         h_sixth           : torch.Tensor = h_sixth_all[:, n:n + 1];
 
-        # Each batched matrix-vector product handles all windows. For item i,
-        # stage 1 is l1_i = K_start,i @ y_n,i + C_start,i @ v_n,i + b_start,i.
-        l1          : torch.Tensor = (torch.bmm(K_start, yn.unsqueeze(-1)).squeeze(-1)
-                                    + torch.bmm(C_start, vn.unsqueeze(-1)).squeeze(-1) + b_start); # [B, d]
-
-        # Stage 2: y2_i = y_n,i + h_i*v_n,i/2, v2_i = v_n,i + h_i*l1_i/2,
-        # then l2_i = K_mid,i @ y2_i + C_mid,i @ v2_i + b_mid,i.
-        y2  : torch.Tensor  = yn + h_half * vn;             # [B, d]
-        v2  : torch.Tensor  = vn + h_half * l1;             # [B, d]
-        l2  : torch.Tensor  = (torch.bmm(K_mid, y2.unsqueeze(-1)).squeeze(-1)
-                            + torch.bmm(C_mid, v2.unsqueeze(-1)).squeeze(-1) + b_mid); # [B, d]
-
-        # Stage 3: y3_i = y2_i + h_i^2*l1_i/4, v3_i = v_n,i + h_i*l2_i/2.
-        # It reuses midpoint K/C/b, but l3_i = K_mid,i @ y3_i + C_mid,i @ v3_i + b_mid,i.
-        y3  : torch.Tensor  = y2 + h_squared_quarter * l1;  # [B, d]
-        v3  : torch.Tensor  = vn + h_half * l2;             # [B, d]
-        l3  : torch.Tensor  = (torch.bmm(K_mid, y3.unsqueeze(-1)).squeeze(-1)
-                            + torch.bmm(C_mid, v3.unsqueeze(-1)).squeeze(-1) + b_mid); # [B, d]
-
-        # Stage 4: y4_i = y_n,i + h_i*v_n,i + h_i^2*l2_i/2,
-        # v4_i = v_n,i + h_i*l3_i; l4_i = K_end,i @ y4_i + C_end,i @ v4_i + b_end,i.
-        y4 : torch.Tensor   = yn + h * vn + h_squared_half * l2;   # [B, d]
-        v4 : torch.Tensor   = vn + h * l3;                          # [B, d]
-        l4 : torch.Tensor   = (torch.bmm(K_end, y4.unsqueeze(-1)).squeeze(-1)
-                            + torch.bmm(C_end, v4.unsqueeze(-1)).squeeze(-1) + b_end); # [B, d]
-
-        # For each item, append y_{n+1} = y_n + h*v_n + h^2*(l1+l2+l3)/6
-        # and v_{n+1} = v_n + h*(l1+2*l2+2*l3+l4)/6.
-        D_list.append(yn + h * vn + h_squared_sixth * (l1 + l2 + l3));
-        V_list.append(vn + h_sixth * (l1 + 2 * l2 + 2 * l3 + l4));
+        yn1, vn1 = step(
+            yn, vn, K_start, K_mid, K_end, C_start, C_mid, C_end,
+            b_start, b_mid, b_end, h, h_half, h_squared_quarter,
+            h_squared_half, h_squared_sixth, h_sixth);
+        D_list.append(yn1);
+        V_list.append(vn1);
 
     # All done :)
     return torch.stack(D_list, dim=1), torch.stack(V_list, dim=1);
