@@ -469,71 +469,63 @@ def RK4(f       : Callable,
 
 
 def _rk4_affine_step(
-        yn                : torch.Tensor,
-        vn                : torch.Tensor,
-        K_start           : torch.Tensor,
-        K_mid             : torch.Tensor,
-        K_end             : torch.Tensor,
-        C_start           : torch.Tensor,
-        C_mid             : torch.Tensor,
-        C_end             : torch.Tensor,
-        b_start           : torch.Tensor,
-        b_mid             : torch.Tensor,
-        b_end             : torch.Tensor,
-        h                 : torch.Tensor,
-        h_half            : torch.Tensor,
-        h_squared_quarter : torch.Tensor,
-        h_squared_half    : torch.Tensor,
-        h_squared_sixth   : torch.Tensor,
-        h_sixth           : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    r"""Advance one batched affine RK4 interval with column-vector stage states."""
+        yn                : torch.Tensor,  # [B, d, 1]
+        vn                : torch.Tensor,  # [B, d, 1]
+        K_start           : torch.Tensor,  # [B, d, d]
+        K_mid             : torch.Tensor,  # [B, d, d]
+        K_end             : torch.Tensor,  # [B, d, d]
+        C_start           : torch.Tensor,  # [B, d, d]
+        C_mid             : torch.Tensor,  # [B, d, d]
+        C_end             : torch.Tensor,  # [B, d, d]
+        b_start           : torch.Tensor,  # [B, d]
+        b_mid             : torch.Tensor,  # [B, d]
+        b_end             : torch.Tensor,  # [B, d]
+        h                 : torch.Tensor,  # [B, 1, 1]
+        h_half            : torch.Tensor,  # [B, 1, 1]
+        h_squared_quarter : torch.Tensor,  # [B, 1, 1]
+        h_squared_half    : torch.Tensor,  # [B, 1, 1]
+        h_squared_sixth   : torch.Tensor,  # [B, 1, 1]
+        h_sixth           : torch.Tensor,  # [B, 1, 1]
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+    r"""Advance one batched affine RK4 interval with [B, d, 1] states."""
 
     # Keep every intermediate state and acceleration in [B, d, 1] form so
-    # the compiled BMMs receive column vectors directly, without repeatedly
-    # squeezing and expanding their pointwise-produced operands.
-    y : torch.Tensor = yn.unsqueeze(-1);
-    v : torch.Tensor = vn.unsqueeze(-1);
-    h_col                 : torch.Tensor = h.unsqueeze(-1);
-    h_half_col            : torch.Tensor = h_half.unsqueeze(-1);
-    h_squared_quarter_col : torch.Tensor = h_squared_quarter.unsqueeze(-1);
-    h_squared_half_col    : torch.Tensor = h_squared_half.unsqueeze(-1);
-    h_squared_sixth_col   : torch.Tensor = h_squared_sixth.unsqueeze(-1);
-    h_sixth_col           : torch.Tensor = h_sixth.unsqueeze(-1);
-
+    # the compiled BMMs receive column vectors directly. The caller passes
+    # the previous displacement and velocity in this layout as well.
     # Each batched matrix-vector product handles all windows. For item i,
     # stage 1 is l1_i = K_start,i @ y_n,i + C_start,i @ v_n,i + b_start,i.
-    l1 : torch.Tensor = (torch.bmm(K_start, y)
-                         + torch.bmm(C_start, v) + b_start.unsqueeze(-1));
+    l1 : torch.Tensor = (torch.bmm(K_start, yn)
+                         + torch.bmm(C_start, vn) + b_start.unsqueeze(-1));
 
     # Stage 2: y2_i = y_n,i + h_i*v_n,i/2, v2_i = v_n,i + h_i*l1_i/2,
     # then l2_i = K_mid,i @ y2_i + C_mid,i @ v2_i + b_mid,i.
-    y2 : torch.Tensor = y + h_half_col * v;
-    v2 : torch.Tensor = v + h_half_col * l1;
+    y2 : torch.Tensor = yn + h_half * vn;
+    v2 : torch.Tensor = vn + h_half * l1;
     l2 : torch.Tensor = (torch.bmm(K_mid, y2)
                          + torch.bmm(C_mid, v2) + b_mid.unsqueeze(-1));
 
     # Stage 3 reuses midpoint coefficients, but evaluates them at a new state.
-    y3 : torch.Tensor = y2 + h_squared_quarter_col * l1;
-    v3 : torch.Tensor = v + h_half_col * l2;
+    y3 : torch.Tensor = y2 + h_squared_quarter * l1;
+    v3 : torch.Tensor = vn + h_half * l2;
     l3 : torch.Tensor = (torch.bmm(K_mid, y3)
                          + torch.bmm(C_mid, v3) + b_mid.unsqueeze(-1));
 
     # Stage 4 uses the end coefficients.
-    y4 : torch.Tensor = y + h_col * v + h_squared_half_col * l2;
-    v4 : torch.Tensor = v + h_col * l3;
+    y4 : torch.Tensor = yn + h * vn + h_squared_half * l2;
+    v4 : torch.Tensor = vn + h * l3;
     l4 : torch.Tensor = (torch.bmm(K_end, y4)
                          + torch.bmm(C_end, v4) + b_end.unsqueeze(-1));
 
     # Classical second-order RK4 update.
-    yn1 : torch.Tensor = y + h_col * v + h_squared_sixth_col * (l1 + l2 + l3);
-    vn1 : torch.Tensor = v + h_sixth_col * (l1 + 2 * l2 + 2 * l3 + l4);
-    return yn1.squeeze(-1), vn1.squeeze(-1);
+    yn1 : torch.Tensor = yn + h * vn + h_squared_sixth * (l1 + l2 + l3);
+    vn1 : torch.Tensor = vn + h_sixth * (l1 + 2 * l2 + 2 * l3 + l4);
+    return yn1, vn1;
 
 
 # Compile only one interval. Compiling the 250-interval loop would create a very
 # large graph; reusing this callable also lets AOTAutograd fuse pointwise backward
 # work without changing the reference CPU path.
-_compiled_rk4_affine_step = torch.compile(_rk4_affine_step, fullgraph=True);
+_compiled_rk4_affine_step = torch.compile(_rk4_affine_step, mode="reduce-overhead", fullgraph=True);
 
 
 def RK4_affine_batched(
@@ -660,8 +652,8 @@ def RK4_affine_batched(
     C_steps : tuple[tuple[torch.Tensor, ...], ...] = tuple(step.unbind(dim=1) for step in C.unbind(dim=1));
     b_steps : tuple[tuple[torch.Tensor, ...], ...] = tuple(step.unbind(dim=1) for step in b.unbind(dim=1));
 
-    D_list : list[torch.Tensor] = [y0];  # Each entry has shape [B, d].
-    V_list : list[torch.Tensor] = [Dy0]; # Each entry has shape [B, d].
+    D_list : list[torch.Tensor] = [y0.unsqueeze(-1)];  # Each entry has shape [B, d, 1].
+    V_list : list[torch.Tensor] = [Dy0.unsqueeze(-1)]; # Each entry has shape [B, d, 1].
 
     # ---------------------------------------------------------------------------------------------
     # Apply RK4 steps 
@@ -673,12 +665,12 @@ def RK4_affine_batched(
         b_start, b_mid, b_end = b_steps[n];
 
         # Fetch y, y' (v) from the previous time step
-        yn          : torch.Tensor  = D_list[-1];           # [B, d]
-        vn          : torch.Tensor  = V_list[-1];           # [B, d]
+        yn          : torch.Tensor  = D_list[-1];           # [B, d, 1]
+        vn          : torch.Tensor  = V_list[-1];           # [B, d, 1]
 
-        # Fetch aligned [B, 1] views to avoid per-step misalignment copies.
+        # Fetch aligned [B, 1, 1] views to avoid per-step misalignment copies.
         h, h_half, h_squared_quarter, h_squared_half, h_squared_sixth, h_sixth = (
-            factor.unsqueeze(-1) for factor in step_factors[n, :, :B].unbind(dim=0));
+            factor[:, None, None] for factor in step_factors[n, :, :B].unbind(dim=0));
 
         yn1, vn1 = step(
             yn, vn, K_start, K_mid, K_end, C_start, C_mid, C_end,
@@ -688,4 +680,4 @@ def RK4_affine_batched(
         V_list.append(vn1);
 
     # All done :)
-    return torch.stack(D_list, dim=1), torch.stack(V_list, dim=1);
+    return torch.stack(D_list, dim=1).squeeze(-1), torch.stack(V_list, dim=1).squeeze(-1);

@@ -174,11 +174,11 @@ def test_affine_batched_rk4_dense_time_dependent_coefficients_match_scalar_refer
 def test_affine_rk4_step_uses_column_vectors_for_bmm(monkeypatch: pytest.MonkeyPatch) -> None:
     """Each RK stage passes a contiguous [B, d, 1] state to its two BMMs."""
     batch_size, state_size = 3, 2
-    y = torch.randn(batch_size, state_size)
-    v = torch.randn(batch_size, state_size)
+    y = torch.randn(batch_size, state_size, 1)
+    v = torch.randn(batch_size, state_size, 1)
     matrix = torch.eye(state_size).expand(batch_size, -1, -1)
     bias = torch.zeros(batch_size, state_size)
-    h = torch.full((batch_size, 1), 0.1)
+    h = torch.full((batch_size, 1, 1), 0.1)
     original_bmm = torch.bmm
     bmm_calls = 0
 
@@ -191,11 +191,12 @@ def test_affine_rk4_step_uses_column_vectors_for_bmm(monkeypatch: pytest.MonkeyP
         return original_bmm(left, right)
 
     monkeypatch.setattr(torch, "bmm", check_bmm)
-    second_order_solvers._rk4_affine_step(
+    next_y, next_v = second_order_solvers._rk4_affine_step(
         y, v, matrix, matrix, matrix, matrix, matrix, matrix,
         bias, bias, bias, h, h / 2, h.square() / 4,
         h.square() / 2, h.square() / 6, h / 6)
     assert bmm_calls == 8
+    assert next_y.shape == next_v.shape == (batch_size, state_size, 1)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
@@ -262,10 +263,10 @@ def test_affine_batched_rk4_step_factors_are_aligned(
         expected = (h, h / 2, h.square() / 4, h.square() / 2,
                     h.square() / 6, h / 6)
         for actual, reference in zip(factors, expected):
-            assert actual.shape == (batch_size, 1)
+            assert actual.shape == (batch_size, 1, 1)
             assert actual.is_contiguous()
             assert actual.data_ptr() % 16 == 0
-            torch.testing.assert_close(actual[:, 0], reference, rtol=0, atol=0)
+            torch.testing.assert_close(actual[:, 0, 0], reference, rtol=0, atol=0)
         checked_steps += 1
         return original_step(*args)
 
