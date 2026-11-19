@@ -131,10 +131,13 @@ def test_affine_batched_rk4_gradients_match_scalar_reference(device: str) -> Non
     "cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable"))])
 def test_affine_batched_rk4_dense_time_dependent_coefficients_match_scalar_reference(
         device: str) -> None:
-    """Non-symmetric stage matrices and their gradients match independent scalar RK4."""
+    """Non-symmetric stages and gradients match scalar RK4 across a chunk boundary."""
     dtype = torch.float64
-    grid = torch.tensor([[0.1, 0.25, 0.5, 0.9], [0.0, 0.35, 0.8, 0.8]], dtype=dtype, device=device)
-    lengths = torch.tensor([4, 3], device=device)
+    grid = torch.tensor([
+        [0.1, 0.17, 0.25, 0.31, 0.40, 0.48, 0.55, 0.66, 0.75, 0.82, 0.9, 1.0],
+        [0.0, 0.08, 0.16, 0.24, 0.35, 0.48, 0.60, 0.72, 0.8, 0.8, 0.8, 0.8],
+    ], dtype=dtype, device=device)
+    lengths = torch.tensor([12, 9], device=device)
     values = (
         torch.tensor([[0.3, -0.2], [-0.4, 0.5]], dtype=dtype, device=device),
         torch.tensor([[0.1, 0.4], [0.2, -0.3]], dtype=dtype, device=device),
@@ -179,9 +182,9 @@ def test_affine_batched_rk4_dense_time_dependent_coefficients_match_scalar_refer
         torch.testing.assert_close(actual, expected, rtol=1.0e-11, atol=1.0e-12)
 
 
-def test_affine_rk4_step_uses_one_packed_baddbmm_per_stage(
+def test_affine_rk4_chunk_uses_one_packed_baddbmm_per_stage(
         monkeypatch: pytest.MonkeyPatch) -> None:
-    """Each RK stage evaluates packed K/C with one contiguous column vector."""
+    """Each RK stage in the chunk evaluates packed K/C with one column vector."""
     batch_size, state_size = 3, 2
     y = torch.randn(batch_size, state_size, 1)
     v = torch.randn(batch_size, state_size, 1)
@@ -206,32 +209,90 @@ def test_affine_rk4_step_uses_one_packed_baddbmm_per_stage(
         return original_baddbmm(bias, left, right)
 
     monkeypatch.setattr(torch, "baddbmm", check_baddbmm)
-    next_y, next_v = second_order_solvers._rk4_affine_step(
-        y, v, packed_matrix, packed_matrix, packed_matrix,
-        bias, bias, bias, step_factors)
-    assert baddbmm_calls == 4
-    assert next_y.shape == next_v.shape == (batch_size, state_size, 1)
+    n_steps = second_order_solvers._RK4_AFFINE_CHUNK_SIZE
+    KC_chunk = packed_matrix.expand(n_steps, 3, -1, -1, -1)
+    b_chunk = bias.expand(n_steps, 3, -1, -1)
+    factors_chunk = step_factors.expand(n_steps, -1, -1)
+    D, V = second_order_solvers._rk4_affine_chunk(y, v, KC_chunk, b_chunk, factors_chunk)
+    assert baddbmm_calls == 4 * n_steps
+    assert D.shape == V.shape == (n_steps, batch_size, state_size, 1)
+
+
+def test_affine_rk4_chunk_matches_classical_rk4_and_gradients() -> None:
+    """The chunk matches independent first-order RK4 and freezes zero-step padding."""
+    torch.manual_seed(19)
+    batch_size, state_size = 3, 2
+    n_steps = second_order_solvers._RK4_AFFINE_CHUNK_SIZE
+    values = (
+        torch.randn(batch_size, state_size, 1, dtype=torch.float64),
+        torch.randn(batch_size, state_size, 1, dtype=torch.float64),
+        0.1 * torch.randn(n_steps, 3, batch_size, state_size, 2 * state_size,
+                          dtype=torch.float64),
+        0.1 * torch.randn(n_steps, 3, batch_size, state_size, dtype=torch.float64),
+        torch.full((n_steps, 4), 0.02, dtype=torch.float64),
+    )
+    values[-1][5:] = 0.0
+    values[-1][:, batch_size:] = 0.0
+
+    def solve(use_chunk: bool) -> tuple[torch.Tensor, torch.Tensor, tuple[torch.Tensor, ...]]:
+        """Evaluate the chunk or classical RK4 on independent differentiable inputs."""
+        y0, v0, KC, b, h = (value.detach().clone().requires_grad_() for value in values)
+        factors = torch.stack((h, h / 2, h.square() / 4, h.square() / 2,
+                               h.square() / 6, h / 6), dim=1)
+        if use_chunk:
+            D, V = second_order_solvers._rk4_affine_chunk(y0, v0, KC, b, factors)
+        else:
+            D_list: list[torch.Tensor] = []
+            V_list: list[torch.Tensor] = []
+            y, v = y0, v0
+            for n in range(n_steps):
+                h_n = h[n, :batch_size, None, None]
+                l1 = torch.baddbmm(b[n, 0].unsqueeze(-1), KC[n, 0], torch.cat((y, v), dim=1))
+                y2, v2 = y + h_n / 2 * v, v + h_n / 2 * l1
+                l2 = torch.baddbmm(b[n, 1].unsqueeze(-1), KC[n, 1], torch.cat((y2, v2), dim=1))
+                y3, v3 = y + h_n / 2 * v2, v + h_n / 2 * l2
+                l3 = torch.baddbmm(b[n, 1].unsqueeze(-1), KC[n, 1], torch.cat((y3, v3), dim=1))
+                y4, v4 = y + h_n * v3, v + h_n * l3
+                l4 = torch.baddbmm(b[n, 2].unsqueeze(-1), KC[n, 2], torch.cat((y4, v4), dim=1))
+                y = y + h_n / 6 * (v + 2 * v2 + 2 * v3 + v4)
+                v = v + h_n / 6 * (l1 + 2 * l2 + 2 * l3 + l4)
+                D_list.append(y)
+                V_list.append(v)
+            D = torch.stack(D_list, dim=0)
+            V = torch.stack(V_list, dim=0)
+        loss = D[:5].square().sum() + 0.37 * V[:5].square().sum()
+        gradients = torch.autograd.grad(loss, (y0, v0, KC, b, h))
+        return D, V, gradients
+
+    chunk_outputs = solve(True)
+    eager_outputs = solve(False)
+    for actual, expected in zip(chunk_outputs[:2], eager_outputs[:2]):
+        torch.testing.assert_close(actual, expected, rtol=1.0e-12, atol=1.0e-12)
+        assert torch.equal(actual[5:], actual[4].expand_as(actual[5:]))
+    for actual, expected in zip(chunk_outputs[2], eager_outputs[2]):
+        torch.testing.assert_close(actual, expected, rtol=1.0e-12, atol=1.0e-12)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
-def test_affine_batched_rk4_compiled_step_matches_eager(
-        monkeypatch: pytest.MonkeyPatch) -> None:
-    """CUDA compilation preserves trajectories and gradients at the profiled B/d."""
+@pytest.mark.parametrize("n_steps", [8, 11])
+def test_affine_batched_rk4_compiled_chunk_matches_eager(
+        n_steps: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Full and padded CUDA chunks preserve trajectories and gradients at the profiled B/d."""
     torch.manual_seed(21)
     device = "cuda"
     dtype = torch.float32
     batch_size, state_size = 16, 20
-    grid = torch.tensor([[0.0, 0.1, 0.23, 0.4]], device=device, dtype=dtype).expand(
-        batch_size, -1).T.contiguous()
-    grid[3, 1] = grid[2, 1]
-    lengths = torch.full((batch_size,), 4, dtype=torch.long, device=device)
-    lengths[1] = 3
+    grid = (0.03 * torch.arange(n_steps + 1, device=device, dtype=dtype)[:, None]).expand(
+        -1, batch_size).contiguous()
+    grid[n_steps - 2:, 1] = grid[n_steps - 3, 1]
+    lengths = torch.full((batch_size,), n_steps + 1, dtype=torch.long, device=device)
+    lengths[1] = n_steps - 2
     values = (
         torch.randn(batch_size, state_size, device=device, dtype=dtype),
         torch.randn(batch_size, state_size, device=device, dtype=dtype),
-        0.1 * torch.randn(3, 3, batch_size, state_size, state_size, device=device, dtype=dtype),
-        0.1 * torch.randn(3, 3, batch_size, state_size, state_size, device=device, dtype=dtype),
-        0.1 * torch.randn(3, 3, batch_size, state_size, device=device, dtype=dtype),
+        0.1 * torch.randn(n_steps, 3, batch_size, state_size, state_size, device=device, dtype=dtype),
+        0.1 * torch.randn(n_steps, 3, batch_size, state_size, state_size, device=device, dtype=dtype),
+        0.1 * torch.randn(n_steps, 3, batch_size, state_size, device=device, dtype=dtype),
     )
 
     def solve() -> tuple[tuple[torch.Tensor, torch.Tensor], tuple[torch.Tensor, ...]]:
@@ -243,21 +304,22 @@ def test_affine_batched_rk4_compiled_step_matches_eager(
         return (y, v), gradients
 
     compiled_outputs, compiled_gradients = solve()
-    monkeypatch.setattr(second_order_solvers, "_compiled_rk4_affine_step",
-                        second_order_solvers._rk4_affine_step)
+    monkeypatch.setattr(second_order_solvers, "_compiled_rk4_affine_chunk",
+                        second_order_solvers._rk4_affine_chunk)
     eager_outputs, eager_gradients = solve()
 
     for actual, expected in zip(compiled_outputs + compiled_gradients,
                                 eager_outputs + eager_gradients):
         torch.testing.assert_close(actual, expected, rtol=2.0e-5, atol=2.0e-6)
     for trajectory in compiled_outputs:
-        assert torch.equal(trajectory[3, 1], trajectory[2, 1])
+        assert torch.equal(trajectory[n_steps - 2:, 1],
+                           trajectory[n_steps - 3, 1].expand_as(trajectory[n_steps - 2:, 1]))
 
 
 @pytest.mark.parametrize("batch_size", [3, 16])
-def test_affine_batched_rk4_step_factors_are_aligned(
+def test_affine_batched_rk4_chunk_factors_are_aligned(
         batch_size: int, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every step receives one contiguous factor tensor with aligned rows."""
+    """Every chunk receives contiguous factors with aligned step rows."""
     grid = torch.tensor([[0.0, 0.1, 0.3, 0.6, 1.0]]).expand(batch_size, -1).T.contiguous()
     lengths = torch.full((batch_size,), 5, dtype=torch.long)
     lengths[-1] = 3
@@ -265,54 +327,58 @@ def test_affine_batched_rk4_step_factors_are_aligned(
     coefficients = torch.zeros(n_steps, 3, batch_size, 2, 2)
     biases = torch.zeros(n_steps, 3, batch_size, 2)
     initial = torch.zeros(batch_size, 2)
-    original_step = second_order_solvers._rk4_affine_step
-    checked_steps = 0
+    original_chunk = second_order_solvers._rk4_affine_chunk
+    checked_chunks = 0
 
-    def check_step(*args: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Inspect the packed factors before running the unchanged RK4 step."""
-        nonlocal checked_steps
-        factors = args[-1]
-        h = grid[checked_steps + 1] - grid[checked_steps]
-        h = torch.where(checked_steps < lengths - 1, h, 0)
-        expected = (h, h / 2, h.square() / 4, h.square() / 2,
-                    h.square() / 6, h / 6)
+    def check_chunk(y: torch.Tensor, v: torch.Tensor, KC: torch.Tensor,
+                    b: torch.Tensor, factors: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Inspect the packed factors before running the eager RK4 chunk."""
+        nonlocal checked_chunks
         padded_size = batch_size + (-batch_size) % 4
-        assert factors.shape == (6, padded_size)
+        assert factors.shape == (second_order_solvers._RK4_AFFINE_CHUNK_SIZE, 6, padded_size)
         assert factors.is_contiguous()
-        for actual, reference in zip(factors.unbind(dim=0), expected):
-            assert actual.data_ptr() % 16 == 0
-            torch.testing.assert_close(actual[:batch_size], reference, rtol=0, atol=0)
-            assert torch.count_nonzero(actual[batch_size:]) == 0
-        checked_steps += 1
-        return original_step(*args)
+        for n in range(n_steps):
+            h = grid[n + 1] - grid[n]
+            h = torch.where(n < lengths - 1, h, 0)
+            expected = (h, h / 2, h.square() / 4, h.square() / 2,
+                        h.square() / 6, h / 6)
+            for actual, reference in zip(factors[n].unbind(dim=0), expected):
+                assert actual.data_ptr() % 16 == 0
+                torch.testing.assert_close(actual[:batch_size], reference, rtol=0, atol=0)
+                assert torch.count_nonzero(actual[batch_size:]) == 0
+        assert torch.count_nonzero(factors[n_steps:]) == 0
+        checked_chunks += 1
+        return original_chunk(y, v, KC, b, factors)
 
-    monkeypatch.setattr(second_order_solvers, "_rk4_affine_step", check_step)
+    monkeypatch.setattr(second_order_solvers, "_rk4_affine_chunk", check_chunk)
     RK4_affine_batched(initial, initial, grid, lengths, coefficients, coefficients, biases)
-    assert checked_steps == n_steps
+    assert checked_chunks == 1
 
 
 @pytest.mark.parametrize("batch_size", [3, 16])
 def test_affine_batched_rk4_stage_strides_do_not_depend_on_duration(
         batch_size: int, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Compiled-step coefficient inputs have the same contiguous layout for different T."""
+    """Chunk coefficient inputs have the same contiguous layout for different T."""
     state_size = 2
-    original_step = second_order_solvers._rk4_affine_step
-    checked_steps = 0
+    original_chunk = second_order_solvers._rk4_affine_chunk
+    checked_chunks = 0
 
-    def check_step(*args: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Check all coefficient-stage views before evaluating the eager RK4 step."""
-        nonlocal checked_steps
-        for matrix in args[2:5]:
-            assert matrix.is_contiguous()
-            assert matrix.stride() == (2 * state_size * state_size, 2 * state_size, 1)
-        for bias in args[5:8]:
-            assert bias.is_contiguous()
-            assert bias.stride() == (state_size, 1)
-        checked_steps += 1
-        return original_step(*args)
+    def check_chunk(y: torch.Tensor, v: torch.Tensor, KC: torch.Tensor,
+                    b: torch.Tensor, factors: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Check all coefficient-stage views before evaluating the eager chunk."""
+        nonlocal checked_chunks
+        for KC_n, b_n in zip(KC.unbind(dim=0), b.unbind(dim=0)):
+            for matrix in KC_n.unbind(dim=0):
+                assert matrix.is_contiguous()
+                assert matrix.stride() == (2 * state_size * state_size, 2 * state_size, 1)
+            for bias in b_n.unbind(dim=0):
+                assert bias.is_contiguous()
+                assert bias.stride() == (state_size, 1)
+        checked_chunks += 1
+        return original_chunk(y, v, KC, b, factors)
 
-    monkeypatch.setattr(second_order_solvers, "_rk4_affine_step", check_step)
-    for n_steps in (2, 5):
+    monkeypatch.setattr(second_order_solvers, "_rk4_affine_chunk", check_chunk)
+    for n_steps in (2, 8, 11):
         grid = torch.arange(n_steps + 1, dtype=torch.float32)[:, None].expand(-1, batch_size)
         lengths = torch.full((batch_size,), n_steps + 1, dtype=torch.long)
         matrices = torch.zeros(n_steps, 3, batch_size, state_size, state_size)
@@ -320,25 +386,26 @@ def test_affine_batched_rk4_stage_strides_do_not_depend_on_duration(
         initial = torch.zeros(batch_size, state_size)
         RK4_affine_batched(initial, initial, grid, lengths, matrices, matrices, biases)
 
-    assert checked_steps == 7
+    assert checked_chunks == 4
 
 
-def test_affine_batched_rk4_backward_step_strides_do_not_depend_on_duration(
+def test_affine_batched_rk4_backward_chunk_strides_do_not_depend_on_duration(
         monkeypatch: pytest.MonkeyPatch) -> None:
-    """Per-window losses send contiguous, duration-independent gradients to RK4 steps."""
+    """Per-window losses send duration-independent gradients to RK4 chunks."""
     batch_size, state_size = 3, 2
-    original_step = second_order_solvers._rk4_affine_step
+    original_chunk = second_order_solvers._rk4_affine_chunk
     observed_strides: list[tuple[int, ...]] = []
 
-    def check_step(*args: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Record the gradient layouts received by each eager RK4 step output."""
-        y, v = original_step(*args)
-        y.register_hook(lambda grad: observed_strides.append(grad.stride()))
-        v.register_hook(lambda grad: observed_strides.append(grad.stride()))
-        return y, v
+    def check_chunk(y: torch.Tensor, v: torch.Tensor, KC: torch.Tensor,
+                    b: torch.Tensor, factors: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Record the gradient layouts received by each eager chunk output."""
+        D, V = original_chunk(y, v, KC, b, factors)
+        D.register_hook(lambda grad: observed_strides.append(grad.stride()))
+        V.register_hook(lambda grad: observed_strides.append(grad.stride()))
+        return D, V
 
-    monkeypatch.setattr(second_order_solvers, "_rk4_affine_step", check_step)
-    for n_steps in (2, 5):
+    monkeypatch.setattr(second_order_solvers, "_rk4_affine_chunk", check_chunk)
+    for n_steps in (2, 8, 11):
         grid = torch.arange(n_steps + 1, dtype=torch.float32)[:, None].expand(-1, batch_size)
         lengths = torch.tensor([n_steps + 1, n_steps, n_steps - 1])
         matrices = torch.zeros(n_steps, 3, batch_size, state_size, state_size)
@@ -350,8 +417,8 @@ def test_affine_batched_rk4_backward_step_strides_do_not_depend_on_duration(
                    for i, length in enumerate(lengths.tolist())]
         torch.cat(windows, dim=0).square().sum().backward()
 
-    assert len(observed_strides) == 14
-    assert set(observed_strides) == {(state_size, 1, 1)}
+    assert len(observed_strides) == 8
+    assert set(observed_strides) == {(batch_size * state_size, state_size, 1, 1)}
 
 
 def test_affine_batched_rk4_rejects_noncontiguous_coefficients() -> None:
@@ -367,6 +434,22 @@ def test_affine_batched_rk4_rejects_noncontiguous_coefficients() -> None:
     with pytest.raises(ValueError, match="contiguous time-major"):
         RK4_affine_batched(initial, initial, grid, lengths,
                            noncontiguous, noncontiguous, biases)
+
+
+def test_affine_batched_rk4_rejects_invalid_ranks_with_value_error() -> None:
+    """Shape validation must run before indexing a missing tensor dimension."""
+    initial = torch.zeros(1, 1)
+    grid = torch.zeros(2, 1)
+    lengths = torch.ones(1, dtype=torch.long)
+    matrices = torch.zeros(1, 3, 1, 1, 1)
+    biases = torch.zeros(1, 3, 1, 1)
+
+    with pytest.raises(ValueError, match="y0 and Dy0 must have matching shape"):
+        RK4_affine_batched(initial[0], initial[0], grid, lengths,
+                           matrices, matrices, biases)
+    with pytest.raises(ValueError, match="t_grid must have shape"):
+        RK4_affine_batched(initial, initial, grid[0, 0], lengths,
+                           matrices, matrices, biases)
 
 
 def test_some_batched_single_frame_returns_initial_state() -> None:

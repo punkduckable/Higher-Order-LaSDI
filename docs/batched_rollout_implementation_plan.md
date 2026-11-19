@@ -2,7 +2,25 @@
 
 ## Goal
 
-Replace the per-window Python/RK4 execution path with padded, batched simulation, beginning with the profiled second-order SOME rollout loss. Retain the existing scalar RK4 solvers as readable CPU/NumPy references while developing a tensor-only batched implementation and, if profiling warrants it, a specialized GPU implementation. The objective is to reduce CPU/autograd dispatch overhead and tiny CUDA launches without changing RK4, time normalization, gradients, or loss-reduction semantics. Extend the batched contract to first-order rollout models after validating the second-order path; consider `torch.compile` only after the data flow is GPU-friendly.
+Replace the per-window Python/RK4 execution path with padded, batched simulation, beginning with the profiled second-order SOME sampled-rollout loss. Retain scalar RK4 as a readable CPU/NumPy reference. The objective is to reduce CPU/autograd dispatch overhead and tiny CUDA launches without changing RK4, time normalization, gradients, or loss-reduction semantics. The sampled second-order path is now implemented and optimized; second-order IC rollout and first-order rollout remain separate extensions.
+
+## Current status and November 19 findings
+
+The sampled second-order SOME/SOME_weak CUDA path batches rollout windows, precomputes affine RK4 stage coefficients in time-major order, packs `K` and `C` for one batched matvec per stage, and uses a fixed eight-step `torch.compile(..., fullgraph=True)` chunk. The CPU batched solver executes the same chunk eagerly; the separate scalar `RK4` remains the independent numerical reference. Only the final partial chunk is padded with zero coefficients and step factors. Every intermediate frame is returned for the rollout loss, and valid-frame/parameter loss weighting is unchanged.
+
+The matched November 19 `Telegraphers_Profile.yml` chunk-size runs used 16 rollout windows, `T_max=251`, and 100% window-padding efficiency. Step times below are medians of **epochs 5--24 before the profiling epoch**, not the heavily instrumented profiled step; GPU kernel durations are summed raw kernel events from each trace.
+
+| Compiled RK4 chunk length | Results directory | Median `time/step` | Compiled calls | Kernel events | Kernel execution |
+|---:|---|---:|---:|---:|---:|
+| 4 | `Telegraphers_11_19_13_19_07_1987776` | 110.6 ms | 63 | 9,976 | 21.99 ms |
+| **8 (selected)** | `Telegraphers_11_19_12_57_43_1978536` | **104.0 ms** | **32** | **9,808** | **21.96 ms** |
+| 16 | `Telegraphers_11_19_13_12_52_1983039` | 111.8 ms | 16 | 10,160 | 22.26 ms |
+
+The earlier packed **one-step compiled** trace (`Telegraphers_11_19_11_56_55_2950838`) had 250 compiled calls, 11,182 kernels, and 23.72 ms of kernel execution; a separate production measurement was about 149 ms/step. The eight-step version measured about 106 ms/step in a separate production run. These production measurements support the short-run comparison, but are not a single matched long-run benchmark. For eight-step chunks, 250 real intervals require 32 calls (256 evaluated intervals, including six zero-step pads).
+
+The speedup comes mainly from **less host/launch spacing**, not faster matrix arithmetic: in the matched traces, the summed inter-kernel gaps within rollout simulation fell from about 84.8 ms (one-step) to 53.1 ms (eight-step), while simulation kernel execution was nearly unchanged. Backward gaps fell from about 155.5 to 119.4 ms. Going from eight to 16 steps increased backward Triton kernel count despite fewer compiled calls, so larger chunks are not automatically better. The chunk-size traces' profiled epochs contain anomalous 0.66--0.81 s host stalls in gradient clipping's `_foreach_mul_` call; do not use their total wall times as production throughput.
+
+The sampled second-order optimization is a reasonable stopping point. An earlier **one-step compiled callable** using `mode="reduce-overhead"` recompiled when rollout duration changed, despite having fixed-size per-step inputs, so that mode was abandoned. Retrying it on the eight-step chunk is an untested optional follow-up, not a guaranteed fix; a custom fused forward/backward kernel is substantially more involved and not currently justified by the measured ~104 ms step. The rest of this document retains the original implementation rationale and the independent IC/first-order milestones.
 
 ## Motivation and baseline
 
@@ -26,7 +44,7 @@ indicates a launch-bound workload rather than a compute- or memory-bound workloa
   - 32,000 calls with `[20, 1] @ [1, 20]`
 - Peak allocation is about 368 MB on an 80 GB H100, so memory capacity is not the limiting resource.
 
-The current rollout path serializes independent trajectories in Python and unrolls RK4 separately for each trajectory. Batching changes the dominant expert operations from many `[1, n_z]` matrix multiplications into fewer `[B, n_z]` operations and builds one larger autograd graph per time step instead of many nearly identical scalar-batch graphs. The 603 ms figure is summed kernel execution, not an unprofiled wall-time lower bound; profiler overhead and host-side autograd work also matter.
+The original rollout path serialized independent trajectories in Python and unrolled RK4 separately for each trajectory. Batching changes the dominant expert operations from many `[1, n_z]` matrix multiplications into fewer `[B, n_z]` operations. Fixed-size compilation then groups several consecutive time steps without specializing the graph to the full rollout duration. The 603 ms figure is summed kernel execution, not an unprofiled wall-time lower bound; profiler overhead and host-side autograd work also matter.
 
 The profiled SOME configuration already has a time/parameter-only gate. Its scalar torch path already evaluates gate weights and effective affine coefficients at RK stage times before integrating *each window*. Removing `use_z_in_gate` does not by itself accelerate that workload. The additional opportunity is to form those coefficients in larger batches, reuse time/parameter evaluations across windows where appropriate, and remove the float-keyed RHS closure from the future GPU hot path.
 
@@ -53,7 +71,7 @@ These three `Telegraphers_Profile.yml` runs use the same configuration and each 
 
 "CUDA launch calls" counts both `cudaLaunchKernel` and `cudaLaunchKernelExC`; "GPU activity" sums kernel, copy, and memset durations, not elapsed step time. Unbinding left the 12,313 forward-simulation kernels unchanged but reduced backward kernels from 32,672 to 16,181. It replaced thousands of select/slice backward scatters: `aten::zeros` fell from 9,317 to 317 and device-to-device copies from 3,462 to 462. Step-size-factor precomputation then removed another 1,494 launches, all from forward simulation, with essentially unchanged backward work. The roughly 10% rollout-timer improvement in this last comparison is promising but based on only two unprofiled steps per run; measure more warmed-up steps before treating it as a stable speedup.
 
-The latest trace still has 20,707 elementwise kernels (71.7% of kernel events; 27.2 ms of its 49.3 ms of kernel execution), mostly tiny add/multiply operations. Its 6,024 `aten::bmm` calls are expected: 250 intervals × four RK stages × two affine matrix-vector products = 2,000 forward BMMs, approximately 4,000 BMMs in backward, plus 24 outside the RK loop. There is no evidence of missing RK stages. The recurring largest GPU-idle gap is instead inside the *profiled* gradient-clipping Python call, before `aten::_foreach_mul_` begins; it varies from 712 ms in the unbind-only run to 1,073 ms in the step-size run. Together with per-operation profiler overhead, this makes profiled step wall time unsuitable for estimating production runtime. Keep using matched traces for operation counts and unprofiled mature steps for speed comparisons.
+The November 18 step-size-factor trace still had 20,707 elementwise kernels (71.7% of kernel events; 27.2 ms of its 49.3 ms of kernel execution), mostly tiny add/multiply operations. Its 6,024 `aten::bmm` calls were expected: 250 intervals × four RK stages × two affine matrix-vector products = 2,000 forward BMMs, approximately 4,000 BMMs in backward, plus 24 outside the RK loop. There was no evidence of missing RK stages. The recurring largest GPU-idle gap was instead inside the *profiled* gradient-clipping Python call, before `aten::_foreach_mul_` began; it varied from 712 ms in the unbind-only run to 1,073 ms in the step-size run. Together with per-operation profiler overhead, this makes profiled step wall time unsuitable for estimating production runtime. Keep using matched traces for operation counts and ordinary mature steps for speed comparisons.
 
 ## Assumptions
 
@@ -83,26 +101,26 @@ The latest trace still has 20,707 elementwise kernels (71.7% of kernel events; 2
 - Removing CABLE's independent state-dependent gate option.
 - Replacing or deleting the existing scalar/reference RK4 and simulation APIs.
 
-These backend changes can be considered after the padded batched path is correct and profiled.
+These were exclusions from the *initial* patches. Fixed-size `torch.compile` was subsequently adopted after the batched path was validated and profiled; CUDA graphs and custom kernels have not been adopted.
 
-## Proposed tensor contract
+## Current second-order tensor contract and proposed first-order analogue
 
 Let `B` be the number of sampled rollout windows in the epoch batch, `T_max` the longest window, `n_z` the latent dimension, and `n_p` the parameter dimension.
 
-The first-order solver uses one state tensor `[B, n_z]`; the second-order solver uses displacement and velocity tensors of that shape. Both use the same `[B, T_max]` grid and `[B]` lengths. A generic batched RHS must evaluate all `B` states at once. The SOME-specific fast path may instead receive precomputed stage coefficients.
+The implemented second-order solver uses initial displacement and velocity tensors `[B, n_z]`, a **time-major** `[T_max, B]` grid, and `[B]` lengths. Its stage coefficients are contiguous `[T_max-1, 3, B, n_z, n_z]` matrices and `[T_max-1, 3, B, n_z]` biases. The first-order extension should consider the same time-major contract, but is not yet implemented. A generic batched RHS must evaluate all `B` states at once; SOME's affine fast path receives precomputed stage coefficients.
 
 | Value | Shape | Meaning |
 |---|---:|---|
 | `initial_displacement` | `[B, n_z]` | Latent displacement at the first valid frame |
 | `initial_velocity` | `[B, n_z]` | Latent velocity at the first valid frame |
-| `t_grid` | `[B, T_max]` | Per-rollout padded time grids |
+| `t_grid` | `[T_max, B]` | Per-rollout padded time grids, time-major |
 | `lengths` | `[B]` | Number of valid frames in each rollout |
 | `params` | `[B, n_p]` | Parameter row associated with each rollout |
 | `reference_t0` | `[B]` | Beginning of each trajectory's full/reference time domain |
 | `reference_t_span` | `[B]` | Span of each trajectory's full/reference time domain |
-| displacement output | `[B, T_max, n_z]` | Predicted displacement, frozen after each valid length |
-| velocity output | `[B, T_max, n_z]` | Predicted velocity, frozen after each valid length |
-| valid-frame mask | `[B, T_max]` | `frame_index < lengths[:, None]` |
+| displacement output | `[T_max, B, n_z]` | Predicted displacement, frozen after each valid length |
+| velocity output | `[T_max, B, n_z]` | Predicted velocity, frozen after each valid length |
+| valid-frame mask | `[T_max, B]` | `frame_index[:, None] < lengths[None, :]` |
 | parameter index | `[B]` | Maps each rollout back to its training parameter |
 
 For one second-order interval, RK4 evaluates the affine RHS at `t_n`, `t_n + h_n/2` (twice, at two different intermediate states), and `t_n + h_n`. Thus the time-only gate needs **three distinct stage-time coefficient sets per interval**. For each selected interval, the precomputed effective matrices and bias are `K_start/K_mid/K_end`, `C_start/C_mid/C_end`, and `b_start/b_mid/b_end`; the two midpoint RHS calls share coefficients but not state. The initial batched solver is affine-specific and consumes these coefficient tensors directly, rather than accepting an arbitrary RHS callable.
@@ -144,22 +162,22 @@ def RK4_affine_batched(
 
 Requirements:
 
-- Validate that:
+- Validate without device synchronization that:
   - `y0` and `Dy0` have shape `[B, n_z]` and matching dtype/device.
   - `t_grid` has shape `[T_max, B]`.
-  - `lengths` has shape `[B]`, is integral, and satisfies `1 <= lengths <= T_max`.
-  - Valid portions of each time grid are strictly increasing. Expensive validation may be limited to tests/debug assertions if it would synchronize the GPU in normal training.
-- Use one Python loop over `range(T_max - 1)`, not a Python loop over `B`.
-- At step `n`, use vectors:
+  - `lengths` has shape `[B]` and an integral dtype.
+  - Coefficients are contiguous, time-major, and on the same device/dtype as the states.
+- The caller guarantees `1 <= lengths <= T_max` and strictly increasing valid grids; checking these values on CUDA in every training step would synchronize the device. Cover them with construction invariants and tests rather than claiming the solver validates their values.
+- Use an outer Python loop over fixed-size chunks, not over `B` or a compiled graph of all `T_max - 1` steps. The compiled/eager chunk contains eight sequential RK4 steps and returns all eight intermediate frames.
+- With time-major input, interval `n` uses:
 
   ```python
-  t_n = t_grid[:, n]                         # [B]
-  h_n = t_grid[:, n + 1] - t_grid[:, n]     # [B]
-  h = h_n[:, None]                           # [B, 1]
-  active = (n + 1 < lengths)[:, None]        # [B, 1]
+  t_n = t_grid[n, :]                         # [B]
+  h_n = t_grid[n + 1, :] - t_n              # [B]
+  active = n < lengths - 1                  # [B]
   ```
 
-- Evaluate all four RK stages on `[B, n_z]` state tensors. Stages 2 and 3 reuse the midpoint `K`, `C`, and `b` but must compute separate accelerations from their different intermediate states.
+- Evaluate all four RK stages on `[B, n_z, 1]` column-vector states. Stages 2 and 3 reuse the midpoint `K`, `C`, and `b` but must compute separate accelerations from their different intermediate states. Packing `K` and `C` along the final axis gives one `baddbmm` per forward stage instead of two matrix-vector products.
 - Compute the candidate next displacement and velocity using the same second-order RK4 equations as the scalar implementation.
 - Freeze completed trajectories without host synchronization. Mask all interval step sizes once before the loop so inactive intervals have `h_n == 0`; with finite coefficients, the RK4 update is then an exact no-op. An additional per-step state mask is unnecessary:
 
@@ -169,7 +187,7 @@ Requirements:
   ```
 
 - Do not use `if active.any():`, `.item()`, or another data-dependent CPU/GPU synchronization in the time loop.
-- Stack the per-step tensors at the end into `[T_max, B, n_z]`.
+- Precompute step-size factors in `[T_max-1, 6, padded_B]` layout, with 16-byte-aligned factor-row strides. Keep coefficient and factor chunk inputs fixed at eight steps by padding only a short final chunk; zero factors make its extra steps no-ops. Concatenate chunk outputs, discard extra final-chunk frames, and return `[T_max, B, n_z]`.
 - Preserve autograd through every valid stage and the precomputed coefficient tensors.
 
 Keep the completed-state invariant in tests. Avoid synchronizing validation (`.item()`, `active.any()`) inside the time loop.
@@ -538,14 +556,13 @@ Keep the current IC objective: compute a mean error over valid frames and featur
 
 Add a first-order batched RK4 implementation and migrate `First_Order_Rollout` (and `First_Order_Weak`, which inherits its training loop) to gather sampled windows before one public `simulate()` call. Start with CABLE's CUDA simulation path while retaining scalar CPU/NumPy simulation as the reference. CABLE supports both a time/parameter-only gate, which can use precomputed affine stage coefficients, and a state-dependent gate, which **must** evaluate the gate at each intermediate RK stage state; do not silently apply the SOME shortcut to the latter. Preserve the existing per-window/per-parameter loss reduction, nonuniform-grid behavior, and full-domain gate normalization, and require trajectory, loss, and gradient equivalence tests for both gate modes. Then apply the same interface to first-order IC rollout and benchmark each loss separately. Other first-order latent-dynamics models may keep their existing `simulate()` behavior until a model-specific batched implementation is validated; trainer batching alone must not change their outputs.
 
-Benchmark CPU scalar versus batched execution as well as GPU execution; batching may reduce CPU dispatch but padding may lose for small/heterogeneous workloads. Select a GPU-only fused RK4 implementation by configured device only if profiling demonstrates a worthwhile speedup and it passes the same trajectory/gradient tests. Keep a pure tensor batched solver usable on both devices. Any less-transparent GPU-specialized kernel/step must have detailed, human-readable comments explaining its state layout, each RK stage, synchronization assumptions, gradient path, and padding behavior.
+Benchmark CPU scalar versus batched execution as well as GPU execution; batching may reduce CPU dispatch but padding may lose for small/heterogeneous workloads. Use the second-order path as a blueprint—time-major layout, batched coefficient construction where mathematically valid, fixed-size compilation, valid-frame reduction, and independent trajectory/gradient tests—but do not assume the same chunk length or speedup transfers to first order. Select a custom fused RK4 implementation only if profiling demonstrates a worthwhile additional speedup and it passes the same trajectory/gradient tests. Keep a pure tensor batched solver usable on both devices. Any less-transparent GPU-specialized kernel must have detailed, human-readable comments explaining its state layout, each RK stage, synchronization assumptions, gradient path, and padding behavior.
 
-## Follow-up optimizations (only after re-profiling)
+## Optional performance follow-ups
 
-1. **Compile one RK4 step (next sampled-rollout performance experiment):** Extract a small, reusable step function and benchmark `torch.compile` on that function, rather than compiling an unrolled 250-step graph. Measure compilation cost, graph breaks, launch counts, and at least 20 warmed-up *unprofiled* full-step times on the H100. Compare trajectories and gradients against eager batched RK4 and independent scalar `RK4`, including nonuniform and padded windows. Keep an eager fallback; fusion may change floating-point evaluation order, and cuBLAS BMMs may remain separate kernels. Do not assume a speedup until measured.
-2. **Reduce launch spacing if fusion is insufficient:** Eager dispatch leaves roughly 13-microsecond median gaps between kernels in the latest trace, while many kernels run for only 1--2 microseconds. A capture-safe CUDA Graph of a fixed-shape step or solve could reduce host launch overhead without necessarily reducing kernel count, but dynamic inputs, autograd, and CPU synchronizations make this a separate, higher-risk experiment. A custom fused forward/backward kernel is a later option only if compiler-based approaches fail and the numerical/maintenance cost is justified.
-3. **Length bucketing:** Use if padding efficiency is poor; the measured 16-window workload currently has 100% efficiency.
-4. **More coefficient reuse:** Evaluate shared stage times/parameters only once across overlapping windows when this is measurably useful and numerically equivalent.
-5. **Expert contraction tuning:** Benchmark `einsum`, effective-matrix construction, and direct expert-output weighting on representative `B`, `n_z`, and expert counts.
+1. **Optionally retry `mode="reduce-overhead"` on the eight-step chunk.** The previous one-step use recompiled as duration changed even though its per-step inputs were fixed-size. Chunking might alter that behavior, but fixed chunk shapes alone do not establish it. Check compilation counts, CUDA-graph capture/replay, backward memory behavior, warm-up cost, and changing-duration production performance in an H100 A/B test; do not adopt it solely on a single short trace.
+2. **Custom fused forward/backward RK4 kernel:** This could reduce remaining launch gaps, but it is a much larger numerical and maintenance commitment. The current ~104 ms step is already a good stopping point; pursue this only if an application needs more speed and profiling identifies a realistic payoff.
+3. **Length bucketing:** Use only if padding efficiency becomes poor; the measured 16-window sampled-rollout workload has 100% efficiency.
+4. **Coefficient reuse or expert contraction tuning:** Reuse shared stage times/parameters or benchmark alternate contractions only when measured, preserving exact stage times and gradients.
 
-Second-order IC batching and the first-order solver/trainer extension remain separate functional milestones. For the current sampled-rollout performance path, the next experiment is compiling one RK4 step; do not conflate its effect with those functional changes.
+Second-order IC batching and the first-order solver/trainer extension remain separate functional milestones. Their baselines, loss reductions, model assumptions, and numerical tests must be established independently; the eight-step choice is not automatically optimal for them.

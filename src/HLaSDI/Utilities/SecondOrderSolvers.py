@@ -468,61 +468,83 @@ def RK4(f       : Callable,
 # -------------------------------------------------------------------------------------------------
 
 
-def _rk4_affine_step(
-        yn                : torch.Tensor,  # [B, d, 1]
-        vn                : torch.Tensor,  # [B, d, 1]
-        KC_start          : torch.Tensor,  # [B, d, 2d]
-        KC_mid            : torch.Tensor,  # [B, d, 2d]
-        KC_end            : torch.Tensor,  # [B, d, 2d]
-        b_start           : torch.Tensor,  # [B, d]
-        b_mid             : torch.Tensor,  # [B, d]
-        b_end             : torch.Tensor,  # [B, d]
-        step_factors_n    : torch.Tensor,  # [6, padded B]
+# How many RK4 steps should we batch into a single compiled chunk?
+_RK4_AFFINE_CHUNK_SIZE : int = 8;
+
+
+def _rk4_affine_chunk(
+        yn                 : torch.Tensor,  # [B, d, 1]
+        vn                 : torch.Tensor,  # [B, d, 1]
+        KC_chunk           : torch.Tensor,  # [8, 3, B, d, 2d]
+        b_chunk            : torch.Tensor,  # [8, 3, B, d]
+        step_factors_chunk : torch.Tensor,  # [8, 6, padded B]
         ) -> tuple[torch.Tensor, torch.Tensor]:
-    r"""Advance one batched affine RK4 interval with [B, d, 1] states."""
+    r"""Advance eight affine RK4 intervals, retaining every intermediate state."""
 
-    # Keep every intermediate state and acceleration in [B, d, 1] form so
-    # the compiled BMMs receive column vectors directly. The caller passes
-    # the previous displacement and velocity in this layout as well.
-    # Each factor row is 16-byte aligned; select its active entries and add
-    # singleton axes so it broadcasts over the column-vector states.
-    h, h_half, h_squared_quarter, h_squared_half, h_squared_sixth, h_sixth = (
-        step_factors_n[:, :yn.shape[0], None, None].unbind(dim=0));
+    # Initialize lists to hold the D, V computed at each step in this chunk.
+    D_list : list[torch.Tensor] = [];
+    V_list : list[torch.Tensor] = [];
 
-    # Each packed matrix-vector product evaluates K @ y + C @ v + b for all windows.
-    # Packing K and C once outside the loop avoids two BMMs at every RK4 stage.
-    l1 : torch.Tensor = torch.baddbmm(
-        b_start.unsqueeze(-1), KC_start, torch.cat((yn, vn), dim=1));
+    # Loop through the steps in this chunk.
+    for KC_n, b_n, step_factors_n in zip(
+            KC_chunk.unbind(dim=0), b_chunk.unbind(dim=0), step_factors_chunk.unbind(dim=0)):
+        # KC_n.shape = [3, B, d, 2d], and b_n.shape = [3, B, d]. The leading axis specifies
+        # the stage. Unbinding along this axis gives us the KC and b coefficients for the
+        # start, mid, and end stages.
+        KC_start, KC_mid, KC_end    = KC_n.unbind(dim=0);
+        b_start, b_mid, b_end       = b_n.unbind(dim=0);
 
-    # Stage 2: y2_i = y_n,i + h_i*v_n,i/2, v2_i = v_n,i + h_i*l1_i/2,
-    # then l2_i = K_mid,i @ y2_i + C_mid,i @ v2_i + b_mid,i.
-    y2 : torch.Tensor = yn + h_half * vn;
-    v2 : torch.Tensor = vn + h_half * l1;
-    l2 : torch.Tensor = torch.baddbmm(
-        b_mid.unsqueeze(-1), KC_mid, torch.cat((y2, v2), dim=1));
+        # Keep states and accelerations as column vectors for the batched matmuls.
+        # Each factor row has a 16-byte-aligned start; select the active batch entries.
+        h, h_half, h_squared_quarter, h_squared_half, h_squared_sixth, h_sixth = (
+            step_factors_n[:, :yn.shape[0], None, None].unbind(dim=0));
 
-    # Stage 3 reuses midpoint coefficients, but evaluates them at a new state.
-    y3 : torch.Tensor = y2 + h_squared_quarter * l1;
-    v3 : torch.Tensor = vn + h_half * l2;
-    l3 : torch.Tensor = torch.baddbmm(
-        b_mid.unsqueeze(-1), KC_mid, torch.cat((y3, v3), dim=1));
+        # Stage 1:
+        #   l_1 = K(t_n)y_n + C(t_n)y'_n + b(t_n)
+        # The "start" stage coefficients hold K(t_n), C(t_n), and b(t_n).
+        # baddbmm adds the bias to the batched matrix-vector product.
+        l1 : torch.Tensor = torch.baddbmm(
+            b_start.unsqueeze(-1), KC_start, torch.cat((yn, vn), dim=1));
 
-    # Stage 4 uses the end coefficients.
-    y4 : torch.Tensor = yn + h * vn + h_squared_half * l2;
-    v4 : torch.Tensor = vn + h * l3;
-    l4 : torch.Tensor = torch.baddbmm(
-        b_end.unsqueeze(-1), KC_end, torch.cat((y4, v4), dim=1));
+        # Stage 2:
+        #   l_2 = K(t_n + h/2)[y_n + (h/2)y'_n] + C(t_n + h/2)[y'_n + (h/2)l_1] + b(t_n + h/2)
+        # The "midpoint" stage coefficients hold K(t_n + h/2), C(t_n + h/2), and b(t_n + h/2).
+        y2 : torch.Tensor = yn + h_half * vn;
+        v2 : torch.Tensor = vn + h_half * l1;
+        l2 : torch.Tensor = torch.baddbmm(
+            b_mid.unsqueeze(-1), KC_mid, torch.cat((y2, v2), dim=1));
 
-    # Classical second-order RK4 update.
-    yn1 : torch.Tensor = yn + h * vn + h_squared_sixth * (l1 + l2 + l3);
-    vn1 : torch.Tensor = vn + h_sixth * (l1 + 2 * l2 + 2 * l3 + l4);
-    return yn1, vn1;
+        # Stage 3:
+        #   l_3 = K(t_n + h/2)[y_n + (h/2)y'_n + (h^2/4)l_1] + C(t_n + h/2)[y'_n + (h/2)l_2] + b(t_n + h/2)
+        # This stage reuses midpoint coefficients at the updated half-step state.
+        y3 : torch.Tensor = y2 + h_squared_quarter * l1;
+        v3 : torch.Tensor = vn + h_half * l2;
+        l3 : torch.Tensor = torch.baddbmm(
+            b_mid.unsqueeze(-1), KC_mid, torch.cat((y3, v3), dim=1));
+
+        # Stage 4:
+        #   l_4 = K(t_n + h)[y_n + h y'_n + (h^2/2) l_2] + C(t_n + h)[y'_n + h l_3] + b(t_n + h)
+        # The "end" stage coefficients hold K(t_n + h), C(t_n + h), and b(t_n + h)
+        y4 : torch.Tensor = yn + h * vn + h_squared_half * l2;
+        v4 : torch.Tensor = vn + h * l3;
+        l4 : torch.Tensor = torch.baddbmm(
+            b_end.unsqueeze(-1), KC_end, torch.cat((y4, v4), dim=1));
+
+        # Compute the second-order RK4 update for this step.
+        yn = yn + h * vn + h_squared_sixth * (l1 + l2 + l3);
+        vn = vn + h_sixth * (l1 + 2 * l2 + 2 * l3 + l4);
+
+        # Append the solved displacement, velocity from the end of this step to the lists.
+        D_list.append(yn);
+        V_list.append(vn);
+
+    # All done :)
+    return torch.stack(D_list, dim=0), torch.stack(V_list, dim=0);
 
 
-# Compile only one interval. Compiling the 250-interval loop would create a very
-# large graph; reusing this callable also lets AOTAutograd fuse pointwise backward
-# work without changing the reference CPU path.
-_compiled_rk4_affine_step = torch.compile(_rk4_affine_step, fullgraph = True);
+# Compile a fixed-size chunk rather than specializing the full rollout by its
+# changing duration. The CPU path calls this same chunk eagerly.
+_compiled_rk4_affine_chunk = torch.compile(_rk4_affine_chunk, fullgraph = True);
 
 def RK4_affine_batched(
         y0      : torch.Tensor,
@@ -539,7 +561,7 @@ def RK4_affine_batched(
     The caller supplies K, C, and b at the start, midpoint, and end of each interval. A grid
     with T time points has T - 1 RK4 intervals.
 
-    CUDA uses a compiled RK4 step to fuse tiny pointwise operations; CPU uses the same step eagerly.
+    CUDA compiles eight RK4 intervals together; CPU evaluates the same intervals eagerly.
 
     Assumptions:
         - all floating point tensor inputs have the same dtype and device
@@ -593,9 +615,9 @@ def RK4_affine_batched(
     d : int = y0.shape[1];
     if t_grid.ndim != 2 or t_grid.shape[1] != B or t_grid.shape[0] < 1:
         raise ValueError("t_grid must have shape [T, B] with T >= 1");
+    n_steps : int = t_grid.shape[0] - 1;
     if lengths.shape != (B,) or lengths.dtype not in (torch.int32, torch.int64):
         raise ValueError("lengths must have shape [B] and an integer dtype");
-    n_steps : int = t_grid.shape[0] - 1;
     if K.shape != (n_steps, 3, B, d, d):
         raise ValueError("K must have shape [T-1, 3, B, d, d]");
     if C.shape != K.shape or b.shape != (n_steps, 3, B, d):
@@ -607,6 +629,8 @@ def RK4_affine_batched(
         raise ValueError("states, time grid, and coefficients must share floating dtype and device");
     if lengths.device != y0.device:
         raise ValueError("lengths must be on the state device");
+    if n_steps == 0:
+        return y0.unsqueeze(0), Dy0.unsqueeze(0);
 
     # ---------------------------------------------------------------------------------------------
     # Compute, pad the "step factors" (step size and values derived from them)
@@ -616,9 +640,8 @@ def RK4_affine_batched(
     active  : torch.Tensor = torch.arange(n_steps, device = y0.device)[:, None] < (lengths[None, :] - 1); # [T-1, B]
     h_all   : torch.Tensor = torch.where(active, t_grid[1:, :] - t_grid[:-1, :], 0);                       # [T-1, B]
 
-    # Pad each time row of h to a multiple of 16 bytes. Why do we do this? Because 
-    # otherwise the compile Inductor views each row of h_all as "misaligned" and makes
-    # a bunch of device-to-device clones. Padding solves this. 
+    # Pad each time row of h to a multiple of 16 bytes. In the CUDA/Inductor path, an unaligned
+    # row stride caused extra device-to-device copies; padding avoids them.
     elements_per_16_bytes : int = max(1, 16 // y0.element_size());
     num_padding_columns   : int = (-B) % elements_per_16_bytes;
     if num_padding_columns:
@@ -640,37 +663,60 @@ def RK4_affine_batched(
     step_factors = step_factors.contiguous();                           # [T-1, 6, padded B]
 
     # ---------------------------------------------------------------------------------------------
-    # Pack the displacement and velocity matrices once for the whole rollout,
-    # then unpack time and stage views. The packed batch stride is independent
-    # of rollout duration, and autograd splits its gradients back into K and C.
+    # Execute RK4 solve in chunks of steps.
 
+    # Pack K and C so each forward RK stage uses one rather than two batched matvecs.
     KC : torch.Tensor = torch.cat((K, C), dim=-1);  # [T-1, 3, B, d, 2d]
-    KC_steps : tuple[tuple[torch.Tensor, ...], ...] = tuple(step.unbind(dim=0) for step in KC.unbind(dim=0));
-    b_steps : tuple[tuple[torch.Tensor, ...], ...] = tuple(step.unbind(dim=0) for step in b.unbind(dim=0));
 
-    D_list : list[torch.Tensor] = [y0.unsqueeze(-1)];  # Each entry has shape [B, d, 1].
-    V_list : list[torch.Tensor] = [Dy0.unsqueeze(-1)]; # Each entry has shape [B, d, 1].
+    # Use the compiled chunk method on CUDA and the same method eagerly on CPU.
+    solve_chunk : Callable[
+        [torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+        tuple[torch.Tensor, torch.Tensor]
+    ] = _compiled_rk4_affine_chunk if y0.is_cuda else _rk4_affine_chunk;
 
-    # ---------------------------------------------------------------------------------------------
-    # Apply RK4 steps 
+    # Initialize lists to hold the displacement, velocity solutions (grouped by chunk).
+    # Add a column axis to each initial state for the three-dimensional batched matmuls.
+    yn          : torch.Tensor          = y0.unsqueeze(-1);                 # [B, d, 1]
+    vn          : torch.Tensor          = Dy0.unsqueeze(-1);                # [B, d, 1]
+    D_chunks    : list[torch.Tensor]    = [yn.unsqueeze(0)];
+    V_chunks    : list[torch.Tensor]    = [vn.unsqueeze(0)];
 
-    step = _compiled_rk4_affine_step if y0.is_cuda else _rk4_affine_step;
-    for n in range(n_steps):
-        KC_start, KC_mid, KC_end = KC_steps[n];
-        b_start, b_mid, b_end = b_steps[n];
+    # Loop through chunks of RK4 steps.
+    # Every invocation has the same eight-step shape, regardless of rollout duration.
+    # Zero factors and coefficients make the final chunk's extra steps exact no-ops.
+    for KC_chunk, b_chunk, factors_chunk in zip(
+            KC.split(_RK4_AFFINE_CHUNK_SIZE, dim=0),
+            b.split(_RK4_AFFINE_CHUNK_SIZE, dim=0),
+            step_factors.split(_RK4_AFFINE_CHUNK_SIZE, dim=0)):
+        #   KC_chunk.shape      = [<= _RK4_AFFINE_CHUNK_SIZE, 3, B, d, 2d]
+        #   b_chunk.shape       = [<= _RK4_AFFINE_CHUNK_SIZE, 3, B, d]
+        #   factors_chunk.shape = [<= _RK4_AFFINE_CHUNK_SIZE, 6, padded B]
 
-        # Fetch y, y' (v) from the previous time step
-        yn          : torch.Tensor  = D_list[-1];           # [B, d, 1]
-        vn          : torch.Tensor  = V_list[-1];           # [B, d, 1]
+        # Keep compiled input shapes fixed as rollout duration changes. Otherwise a short final
+        # chunk could trigger shape-specialized recompilation. Zero-pad it to eight steps, then
+        # discard the extra output frames below.
+        n_padding : int = _RK4_AFFINE_CHUNK_SIZE - KC_chunk.shape[0];
+        if n_padding:
+            KC_chunk        = torch.cat((KC_chunk, KC_chunk.new_zeros((n_padding, 3, B, d, 2 * d))), dim=0);
+            b_chunk         = torch.cat((b_chunk, b_chunk.new_zeros((n_padding, 3, B, d))), dim=0);
+            factors_chunk   = torch.cat((factors_chunk, factors_chunk.new_zeros((n_padding, 6, step_factors.shape[2]))), dim=0);
 
-        # Pass one contiguous [6, padded B] tensor to the compiled step.
-        step_factors_n : torch.Tensor = step_factors[n];
+        # Run one chunk of RK4 steps.
+        #   D_chunk, V_chunk have shape [_RK4_AFFINE_CHUNK_SIZE, B, d, 1]
+        D_chunk, V_chunk = solve_chunk(yn, vn, KC_chunk, b_chunk, factors_chunk);
 
-        yn1, vn1 = step(
-            yn, vn, KC_start, KC_mid, KC_end,
-            b_start, b_mid, b_end, step_factors_n);
-        D_list.append(yn1);
-        V_list.append(vn1);
+        # Package the results.
+        D_chunks.append(D_chunk);
+        V_chunks.append(V_chunk);
+
+        # Carry the final displacement and velocity into the next chunk.
+        yn = D_chunk[-1];
+        vn = V_chunk[-1];
+
+    # Discard the extra frames from final-chunk padding and remove the column axis; this also 
+    # discards any extra frames resulting from zero-padding the final chunk. 
+    D : torch.Tensor = torch.cat(D_chunks, dim=0)[:n_steps + 1].squeeze(-1);        # [T, B, d]
+    V : torch.Tensor = torch.cat(V_chunks, dim=0)[:n_steps + 1].squeeze(-1);        # [T, B, d]
 
     # All done :)
-    return torch.stack(D_list, dim=0).squeeze(-1), torch.stack(V_list, dim=0).squeeze(-1);
+    return D, V;
