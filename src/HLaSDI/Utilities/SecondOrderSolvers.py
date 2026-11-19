@@ -486,36 +486,48 @@ def _rk4_affine_step(
         h_squared_half    : torch.Tensor,
         h_squared_sixth   : torch.Tensor,
         h_sixth           : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    r"""Advance one batched affine RK4 interval, preserving the eager equations."""
+    r"""Advance one batched affine RK4 interval with column-vector stage states."""
+
+    # Keep every intermediate state and acceleration in [B, d, 1] form so
+    # the compiled BMMs receive column vectors directly, without repeatedly
+    # squeezing and expanding their pointwise-produced operands.
+    y : torch.Tensor = yn.unsqueeze(-1);
+    v : torch.Tensor = vn.unsqueeze(-1);
+    h_col                 : torch.Tensor = h.unsqueeze(-1);
+    h_half_col            : torch.Tensor = h_half.unsqueeze(-1);
+    h_squared_quarter_col : torch.Tensor = h_squared_quarter.unsqueeze(-1);
+    h_squared_half_col    : torch.Tensor = h_squared_half.unsqueeze(-1);
+    h_squared_sixth_col   : torch.Tensor = h_squared_sixth.unsqueeze(-1);
+    h_sixth_col           : torch.Tensor = h_sixth.unsqueeze(-1);
 
     # Each batched matrix-vector product handles all windows. For item i,
     # stage 1 is l1_i = K_start,i @ y_n,i + C_start,i @ v_n,i + b_start,i.
-    l1 : torch.Tensor = (torch.bmm(K_start, yn.unsqueeze(-1)).squeeze(-1)
-                         + torch.bmm(C_start, vn.unsqueeze(-1)).squeeze(-1) + b_start);
+    l1 : torch.Tensor = (torch.bmm(K_start, y)
+                         + torch.bmm(C_start, v) + b_start.unsqueeze(-1));
 
     # Stage 2: y2_i = y_n,i + h_i*v_n,i/2, v2_i = v_n,i + h_i*l1_i/2,
     # then l2_i = K_mid,i @ y2_i + C_mid,i @ v2_i + b_mid,i.
-    y2 : torch.Tensor = yn + h_half * vn;
-    v2 : torch.Tensor = vn + h_half * l1;
-    l2 : torch.Tensor = (torch.bmm(K_mid, y2.unsqueeze(-1)).squeeze(-1)
-                         + torch.bmm(C_mid, v2.unsqueeze(-1)).squeeze(-1) + b_mid);
+    y2 : torch.Tensor = y + h_half_col * v;
+    v2 : torch.Tensor = v + h_half_col * l1;
+    l2 : torch.Tensor = (torch.bmm(K_mid, y2)
+                         + torch.bmm(C_mid, v2) + b_mid.unsqueeze(-1));
 
     # Stage 3 reuses midpoint coefficients, but evaluates them at a new state.
-    y3 : torch.Tensor = y2 + h_squared_quarter * l1;
-    v3 : torch.Tensor = vn + h_half * l2;
-    l3 : torch.Tensor = (torch.bmm(K_mid, y3.unsqueeze(-1)).squeeze(-1)
-                         + torch.bmm(C_mid, v3.unsqueeze(-1)).squeeze(-1) + b_mid);
+    y3 : torch.Tensor = y2 + h_squared_quarter_col * l1;
+    v3 : torch.Tensor = v + h_half_col * l2;
+    l3 : torch.Tensor = (torch.bmm(K_mid, y3)
+                         + torch.bmm(C_mid, v3) + b_mid.unsqueeze(-1));
 
     # Stage 4 uses the end coefficients.
-    y4 : torch.Tensor = yn + h * vn + h_squared_half * l2;
-    v4 : torch.Tensor = vn + h * l3;
-    l4 : torch.Tensor = (torch.bmm(K_end, y4.unsqueeze(-1)).squeeze(-1)
-                         + torch.bmm(C_end, v4.unsqueeze(-1)).squeeze(-1) + b_end);
+    y4 : torch.Tensor = y + h_col * v + h_squared_half_col * l2;
+    v4 : torch.Tensor = v + h_col * l3;
+    l4 : torch.Tensor = (torch.bmm(K_end, y4)
+                         + torch.bmm(C_end, v4) + b_end.unsqueeze(-1));
 
     # Classical second-order RK4 update.
-    yn1 : torch.Tensor = yn + h * vn + h_squared_sixth * (l1 + l2 + l3);
-    vn1 : torch.Tensor = vn + h_sixth * (l1 + 2 * l2 + 2 * l3 + l4);
-    return yn1, vn1;
+    yn1 : torch.Tensor = y + h_col * v + h_squared_sixth_col * (l1 + l2 + l3);
+    vn1 : torch.Tensor = v + h_sixth_col * (l1 + 2 * l2 + 2 * l3 + l4);
+    return yn1.squeeze(-1), vn1.squeeze(-1);
 
 
 # Compile only one interval. Compiling the 250-interval loop would create a very

@@ -171,22 +171,52 @@ def test_affine_batched_rk4_dense_time_dependent_coefficients_match_scalar_refer
         torch.testing.assert_close(actual, expected, rtol=1.0e-11, atol=1.0e-12)
 
 
+def test_affine_rk4_step_uses_column_vectors_for_bmm(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each RK stage passes a contiguous [B, d, 1] state to its two BMMs."""
+    batch_size, state_size = 3, 2
+    y = torch.randn(batch_size, state_size)
+    v = torch.randn(batch_size, state_size)
+    matrix = torch.eye(state_size).expand(batch_size, -1, -1)
+    bias = torch.zeros(batch_size, state_size)
+    h = torch.full((batch_size, 1), 0.1)
+    original_bmm = torch.bmm
+    bmm_calls = 0
+
+    def check_bmm(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
+        """Verify the operand layout seen by eager BMM without changing its result."""
+        nonlocal bmm_calls
+        assert right.shape == (batch_size, state_size, 1)
+        assert right.stride() == (state_size, 1, 1)
+        bmm_calls += 1
+        return original_bmm(left, right)
+
+    monkeypatch.setattr(torch, "bmm", check_bmm)
+    second_order_solvers._rk4_affine_step(
+        y, v, matrix, matrix, matrix, matrix, matrix, matrix,
+        bias, bias, bias, h, h / 2, h.square() / 4,
+        h.square() / 2, h.square() / 6, h / 6)
+    assert bmm_calls == 8
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
 def test_affine_batched_rk4_compiled_step_matches_eager(
         monkeypatch: pytest.MonkeyPatch) -> None:
-    """CUDA compilation preserves padded trajectories and all input gradients."""
+    """CUDA compilation preserves trajectories and gradients at the profiled B/d."""
     torch.manual_seed(21)
     device = "cuda"
     dtype = torch.float32
-    grid = torch.tensor([[0.0, 0.1, 0.23, 0.4], [0.0, 0.18, 0.3, 0.3]],
-                        device=device, dtype=dtype)
-    lengths = torch.tensor([4, 3], device=device)
+    batch_size, state_size = 16, 20
+    grid = torch.tensor([[0.0, 0.1, 0.23, 0.4]], device=device, dtype=dtype).expand(
+        batch_size, -1).clone()
+    grid[1, 3] = grid[1, 2]
+    lengths = torch.full((batch_size,), 4, dtype=torch.long, device=device)
+    lengths[1] = 3
     values = (
-        torch.randn(2, 3, device=device, dtype=dtype),
-        torch.randn(2, 3, device=device, dtype=dtype),
-        0.1 * torch.randn(2, 3, 3, 3, 3, device=device, dtype=dtype),
-        0.1 * torch.randn(2, 3, 3, 3, 3, device=device, dtype=dtype),
-        0.1 * torch.randn(2, 3, 3, 3, device=device, dtype=dtype),
+        torch.randn(batch_size, state_size, device=device, dtype=dtype),
+        torch.randn(batch_size, state_size, device=device, dtype=dtype),
+        0.1 * torch.randn(batch_size, 3, 3, state_size, state_size, device=device, dtype=dtype),
+        0.1 * torch.randn(batch_size, 3, 3, state_size, state_size, device=device, dtype=dtype),
+        0.1 * torch.randn(batch_size, 3, 3, state_size, device=device, dtype=dtype),
     )
 
     def solve() -> tuple[tuple[torch.Tensor, torch.Tensor], tuple[torch.Tensor, ...]]:
