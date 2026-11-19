@@ -2,9 +2,9 @@ trainer:
   type:                     "Second_Order_Rollout"
 
   # Short diagnostic run: profile one warmed-up epoch with the mature rollout workload.
-  max_iter:                 4
-  n_iter:                   4
-  max_greedy_iter:          4
+  max_iter:                 50
+  n_iter:                   50
+  max_greedy_iter:          50
 
   # If true, compute a single global mean/std from TRAINING data only, and normalize
   # all training/testing trajectories using these values.
@@ -12,7 +12,7 @@ trainer:
   device:                   'cuda:0'
   noise_ratio:              0.0
 
-  profiler_epoch:            2
+  profiler_epoch:           25
 
   Second_Order_Rollout:
     lr:                     0.001

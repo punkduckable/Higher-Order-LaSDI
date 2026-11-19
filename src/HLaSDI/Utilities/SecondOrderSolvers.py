@@ -532,33 +532,37 @@ def RK4_affine_batched(
         K       : torch.Tensor,
         C       : torch.Tensor,
         b       : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    r"""Integrate a batch of affine second-order ODEs using classical RK4.
+    r"""Integrate a batch of B \in \mathbb{N} affine second-order ODEs using classical RK4.
 
-    Each batch item solves ``y''(t) = K(t) @ y(t) + C(t) @ y'(t) + b(t)``. The
-    three coefficient sets for each interval correspond to its start, midpoint,
-    and end. RK stages 2 and 3 reuse the midpoint coefficients, but evaluate
-    them at different intermediate states, so their accelerations differ.
+    For each batch item, the goal is to solve ``y''(t) = K(t) @ y(t) + C(t) @ y'(t) + b(t)`` for 
+    some K(t), C(t), and b(t) specific to that batch. For each batch item, y lives in \mathbb{R}^d.
+    The caller supplies K, C, and b at the start, midpoint, and end of each interval. A grid
+    with T time points has T - 1 RK4 intervals.
 
-    CUDA compiles one RK4 interval to fuse tiny pointwise operations; CPU uses
-    the same equations eagerly. The existing scalar RK4 remains the independent
-    CPU/NumPy reference.
+    CUDA uses a compiled RK4 step to fuse tiny pointwise operations; CPU uses the same step eagerly.
+
+    Assumptions:
+        - all floating point tensor inputs have the same dtype and device
+
 
     -----------------------------------------------------------------------------------------------
     Arguments
     -----------------------------------------------------------------------------------------------
 
     y0 : torch.Tensor, shape = (B, d)
-        Initial displacement for each batch item.
+        Initial displacement for each batch item. Here, B is the batch size.
 
     Dy0 : torch.Tensor, shape = (B, d)
         Initial velocity for each batch item.
 
     t_grid : torch.Tensor, shape = (B, T)
-        Time grid for each item. Valid times increase strictly; after the final
-        valid time, padding repeats that time through column T - 1.
+        The (b, t) element is the t'th time point for batch item b. After its final valid time,
+        padding repeats that time through column T - 1.
 
     lengths : torch.Tensor, shape = (B,)
-        Integer number of valid time points per item, satisfying 1 <= lengths <= T.
+        The b'th element specifies its number of valid time points, with 1 <= lengths[b] <= T.
+        Inactive intervals use zero step size, so padded output frames repeat the last valid state.
+        Value bounds are not checked here because that would synchronize CUDA.
 
     K : torch.Tensor, shape = (B, T - 1, 3, d, d)
         Effective displacement matrices at each interval's start, midpoint, and end. Specifically,
@@ -579,26 +583,21 @@ def RK4_affine_batched(
         Displacement and velocity trajectories, including frozen padded frames. Specifically,
         D[i, j, :] gives the solved displacement at the j'th time step for the i'th batch item.
         Both retain gradients through the initial states and coefficients.
-
-    All floating inputs must have the same dtype and device; lengths must be on
-    that device. Value checks for lengths, times, and finite coefficients are
-    left to the caller to avoid GPU synchronization. Inactive intervals use a
-    zero step size, so finite RHS values leave their states unchanged.
     """
 
     # Checks.
     if y0.ndim != 2 or Dy0.shape != y0.shape:
         raise ValueError("y0 and Dy0 must have matching shape [B, d]");
-    batch_size : int = y0.shape[0];
-    state_size : int = y0.shape[1];
-    if t_grid.ndim != 2 or t_grid.shape[0] != batch_size or t_grid.shape[1] < 1:
+    B : int = y0.shape[0];
+    d : int = y0.shape[1];
+    if t_grid.ndim != 2 or t_grid.shape[0] != B or t_grid.shape[1] < 1:
         raise ValueError("t_grid must have shape [B, T] with T >= 1");
-    if lengths.shape != (batch_size,) or lengths.dtype not in (torch.int32, torch.int64):
+    if lengths.shape != (B,) or lengths.dtype not in (torch.int32, torch.int64):
         raise ValueError("lengths must have shape [B] and an integer dtype");
     n_steps : int = t_grid.shape[1] - 1;
-    if K.shape != (batch_size, n_steps, 3, state_size, state_size):
+    if K.shape != (B, n_steps, 3, d, d):
         raise ValueError("K must have shape [B, T-1, 3, d, d]");
-    if C.shape != K.shape or b.shape != (batch_size, n_steps, 3, state_size):
+    if C.shape != K.shape or b.shape != (B, n_steps, 3, d):
         raise ValueError("C and b must have shapes [B, T-1, 3, d, d] and [B, T-1, 3, d]");
     floating_tensors : tuple[torch.Tensor, ...] = (y0, Dy0, t_grid, K, C, b);
     if not y0.is_floating_point() or any(t.dtype != y0.dtype or t.device != y0.device for t in floating_tensors):
@@ -606,20 +605,42 @@ def RK4_affine_batched(
     if lengths.device != y0.device:
         raise ValueError("lengths must be on the state device");
 
-    # Mask every invalid interval once, outside the sequential RK loop. A zero h
-    # makes the RK update exactly retain the last valid state; no per-row Python
-    # branch or per-step torch.where kernel is needed.
-    active  : torch.Tensor = torch.arange(n_steps, device=y0.device)[None, :] < (lengths[:, None] - 1); # [B, T-1]
-    h_all   : torch.Tensor = torch.where(active, t_grid[:, 1:] - t_grid[:, :-1], 0);                    # [B, T-1]
+    # ---------------------------------------------------------------------------------------------
+    # Compute, pad the "step factors" (step size and values derived from them)
 
-    # Compute all step-size factors across the time grid before the sequential loop.
-    # Slicing these tensors below is a view, rather than a GPU operation per factor and step.
-    h_half_all            : torch.Tensor = h_all / 2;
-    h_squared_all         : torch.Tensor = h_all * h_all;
-    h_squared_quarter_all : torch.Tensor = h_squared_all / 4;
-    h_squared_half_all    : torch.Tensor = h_squared_all / 2;
-    h_squared_sixth_all   : torch.Tensor = h_squared_all / 6;
-    h_sixth_all           : torch.Tensor = h_all / 6;
+    # Item b has lengths[b] valid time points, hence lengths[b] - 1 valid intervals.
+    # Zero step sizes after that freeze the final valid state through padded frames.
+    active  : torch.Tensor = torch.arange(n_steps, device = y0.device)[None, :] < (lengths[:, None] - 1); # [B, T-1]
+    h_all   : torch.Tensor = torch.where(active, t_grid[:, 1:] - t_grid[:, :-1], 0);                      # [B, T-1]
+
+    # Transpose h_all to have time as the first axis.
+    h_all = h_all.transpose(0, 1);                                                                       # [T-1, B]
+
+    # Pad each time row of h to a multiple of 16 bytes. Why do we do this? Because 
+    # otherwise the compile Inductor views each row of h_all as "misaligned" and makes
+    # a bunch of device-to-device clones. Padding solves this. 
+    elements_per_16_bytes : int = max(1, 16 // y0.element_size());
+    num_padding_columns   : int = (-B) % elements_per_16_bytes;
+    if num_padding_columns:
+        h_all = torch.nn.functional.pad(h_all, (0, num_padding_columns)); # [T-1, padded B]
+
+    # Now, pre-compute the "step factors"; all the various modifications of h we need to 
+    # evaluate one RK4 step.
+    h_half_all            : torch.Tensor = h_all / 2;                                                   # [T-1, padded B]
+    h_squared_all         : torch.Tensor = h_all * h_all;                                               # [T-1, padded B]
+    h_squared_quarter_all : torch.Tensor = h_squared_all / 4;                                           # [T-1, padded B]
+    h_squared_half_all    : torch.Tensor = h_squared_all / 2;                                           # [T-1, padded B]
+    h_squared_sixth_all   : torch.Tensor = h_squared_all / 6;                                           # [T-1, padded B]
+    h_sixth_all           : torch.Tensor = h_all / 6;                                                   # [T-1, padded B]
+
+    # Stack along the factor axis: [T-1, 6, padded B]. No further permutation is needed.
+    step_factors : torch.Tensor = torch.stack(
+        (h_all, h_half_all, h_squared_quarter_all, h_squared_half_all,
+         h_squared_sixth_all, h_sixth_all), dim=1);
+    step_factors = step_factors.contiguous();                           # [T-1, 6, padded B]
+
+    # ---------------------------------------------------------------------------------------------
+    # Next, unpack the K, C, and b tensors.
 
     # Unbind time and stage views once. Repeated K[:, n, stage] indexing creates
     # separate select/slice backward nodes that scatter into full-size zeros.
@@ -629,6 +650,10 @@ def RK4_affine_batched(
 
     D_list : list[torch.Tensor] = [y0];  # Each entry has shape [B, d].
     V_list : list[torch.Tensor] = [Dy0]; # Each entry has shape [B, d].
+
+    # ---------------------------------------------------------------------------------------------
+    # Apply RK4 steps 
+
     step = _compiled_rk4_affine_step if y0.is_cuda else _rk4_affine_step;
     for n in range(n_steps):
         K_start, K_mid, K_end = K_steps[n];
@@ -639,13 +664,9 @@ def RK4_affine_batched(
         yn          : torch.Tensor  = D_list[-1];           # [B, d]
         vn          : torch.Tensor  = V_list[-1];           # [B, d]
 
-        # Fetch this interval's precomputed step-size factors as [B, 1] views.
-        h                 : torch.Tensor = h_all[:, n:n + 1];
-        h_half            : torch.Tensor = h_half_all[:, n:n + 1];
-        h_squared_quarter : torch.Tensor = h_squared_quarter_all[:, n:n + 1];
-        h_squared_half    : torch.Tensor = h_squared_half_all[:, n:n + 1];
-        h_squared_sixth   : torch.Tensor = h_squared_sixth_all[:, n:n + 1];
-        h_sixth           : torch.Tensor = h_sixth_all[:, n:n + 1];
+        # Fetch aligned [B, 1] views to avoid per-step misalignment copies.
+        h, h_half, h_squared_quarter, h_squared_half, h_squared_sixth, h_sixth = (
+            factor.unsqueeze(-1) for factor in step_factors[n, :, :B].unbind(dim=0));
 
         yn1, vn1 = step(
             yn, vn, K_start, K_mid, K_end, C_start, C_mid, C_end,

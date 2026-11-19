@@ -41,6 +41,20 @@ The new run `results/Telegraphers_11_17_18_14_14_906981` uses sampled rollout (`
 
 This is a **10.7x reduction in measured step wall time**. The new run reports 16 sampled windows, 251 frames per window, and essentially 100% padding efficiency at this stage. The November 2 baseline is closer than the October 31 run: both use 16 displacement and 12 velocity experts and the same sampled-rollout weight. They are not identical configurations (`n_active_V` changed from 8 to 5, and the obsolete `use_z_in_gate: false` key was removed), so the ratio is strong practical evidence rather than an isolated solver-only measurement. The October 31 run used 50/50 experts but had a similar saturated step time (4.429 s). Phase timers are host-side and CUDA-asynchronous; use a matched profiler comparison to attribute the gain among simulation, decoding, and backward, rather than treating their ratios as independent GPU timings.
 
+### Matched H100 follow-up profiles (November 18)
+
+These three `Telegraphers_Profile.yml` runs use the same configuration and each captures one mature sampled-rollout step with 16 windows, 251 frames per window, and 100% padding efficiency. The unprofiled numbers are medians of epochs 3--4 in each short run, **not** a long-run benchmark.
+
+| Solver version / results directory | Kernel events | CUDA launch calls | GPU activity | Unprofiled `time/step` | Unprofiled `time/Rollout` | Unprofiled `time/backwards` |
+|---|---:|---:|---:|---:|---:|---:|
+| Batched, before coefficient-view unbinding / `Telegraphers_11_18_11_26_29_1937405` | 46,882 | 46,694 | 151.6 ms | 0.528 s | 0.125 s | 0.374 s |
+| Unbind `K/C/b` time/stage views / `Telegraphers_11_18_11_42_20_1941101` | 30,391 | 30,203 | 51.8 ms | 0.351 s | 0.112 s | 0.211 s |
+| Also precompute RK4 step-size factors / `Telegraphers_11_18_12_07_50_3107201` | 28,897 | 28,709 | 50.0 ms | 0.343 s | 0.102 s | 0.213 s |
+
+"CUDA launch calls" counts both `cudaLaunchKernel` and `cudaLaunchKernelExC`; "GPU activity" sums kernel, copy, and memset durations, not elapsed step time. Unbinding left the 12,313 forward-simulation kernels unchanged but reduced backward kernels from 32,672 to 16,181. It replaced thousands of select/slice backward scatters: `aten::zeros` fell from 9,317 to 317 and device-to-device copies from 3,462 to 462. Step-size-factor precomputation then removed another 1,494 launches, all from forward simulation, with essentially unchanged backward work. The roughly 10% rollout-timer improvement in this last comparison is promising but based on only two unprofiled steps per run; measure more warmed-up steps before treating it as a stable speedup.
+
+The latest trace still has 20,707 elementwise kernels (71.7% of kernel events; 27.2 ms of its 49.3 ms of kernel execution), mostly tiny add/multiply operations. Its 6,024 `aten::bmm` calls are expected: 250 intervals × four RK stages × two affine matrix-vector products = 2,000 forward BMMs, approximately 4,000 BMMs in backward, plus 24 outside the RK loop. There is no evidence of missing RK stages. The recurring largest GPU-idle gap is instead inside the *profiled* gradient-clipping Python call, before `aten::_foreach_mul_` begins; it varies from 712 ms in the unbind-only run to 1,073 ms in the step-size run. Together with per-operation profiler overhead, this makes profiled step wall time unsuitable for estimating production runtime. Keep using matched traces for operation counts and unprofiled mature steps for speed comparisons.
+
 ## Assumptions
 
 - Different parameter values may use different time-step sizes and rollout durations.
@@ -528,9 +542,10 @@ Benchmark CPU scalar versus batched execution as well as GPU execution; batching
 
 ## Follow-up optimizations (only after re-profiling)
 
-1. **Length bucketing:** Use if padding efficiency is poor.
-2. **More coefficient reuse:** Evaluate shared stage times/parameters only once across overlapping windows when this is measurably useful and numerically equivalent.
-3. **`torch.compile`:** Consider compiling a fixed-shape batched RK4 step after graph breaks and shape stability are understood; keep CPU eager or benchmark a separate CPU-compiled path.
-4. **Expert contraction tuning:** Benchmark `einsum`, effective-matrix construction, and direct expert-output weighting on representative `B`, `n_z`, and expert counts.
+1. **Compile one RK4 step (next sampled-rollout performance experiment):** Extract a small, reusable step function and benchmark `torch.compile` on that function, rather than compiling an unrolled 250-step graph. Measure compilation cost, graph breaks, launch counts, and at least 20 warmed-up *unprofiled* full-step times on the H100. Compare trajectories and gradients against eager batched RK4 and independent scalar `RK4`, including nonuniform and padded windows. Keep an eager fallback; fusion may change floating-point evaluation order, and cuBLAS BMMs may remain separate kernels. Do not assume a speedup until measured.
+2. **Reduce launch spacing if fusion is insufficient:** Eager dispatch leaves roughly 13-microsecond median gaps between kernels in the latest trace, while many kernels run for only 1--2 microseconds. A capture-safe CUDA Graph of a fixed-shape step or solve could reduce host launch overhead without necessarily reducing kernel count, but dynamic inputs, autograd, and CPU synchronizations make this a separate, higher-risk experiment. A custom fused forward/backward kernel is a later option only if compiler-based approaches fail and the numerical/maintenance cost is justified.
+3. **Length bucketing:** Use if padding efficiency is poor; the measured 16-window workload currently has 100% efficiency.
+4. **More coefficient reuse:** Evaluate shared stage times/parameters only once across overlapping windows when this is measurably useful and numerically equivalent.
+5. **Expert contraction tuning:** Benchmark `einsum`, effective-matrix construction, and direct expert-output weighting on representative `B`, `n_z`, and expert counts.
 
-The next implementation step is second-order IC batching, followed by the first-order solver/trainer extension. Keep both separately reviewable and benchmarked against their scalar references before exploring compilation or fused kernels.
+Second-order IC batching and the first-order solver/trainer extension remain separate functional milestones. For the current sampled-rollout performance path, the next experiment is compiling one RK4 step; do not conflate its effect with those functional changes.
