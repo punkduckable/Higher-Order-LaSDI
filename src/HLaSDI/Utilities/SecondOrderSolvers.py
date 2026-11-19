@@ -525,8 +525,7 @@ def _rk4_affine_step(
 # Compile only one interval. Compiling the 250-interval loop would create a very
 # large graph; reusing this callable also lets AOTAutograd fuse pointwise backward
 # work without changing the reference CPU path.
-_compiled_rk4_affine_step = torch.compile(_rk4_affine_step, mode="reduce-overhead", fullgraph=True);
-
+_compiled_rk4_affine_step = torch.compile(_rk4_affine_step, fullgraph = True);
 
 def RK4_affine_batched(
         y0      : torch.Tensor,
