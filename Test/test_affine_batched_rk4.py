@@ -178,7 +178,9 @@ def test_affine_rk4_step_uses_column_vectors_for_bmm(monkeypatch: pytest.MonkeyP
     v = torch.randn(batch_size, state_size, 1)
     matrix = torch.eye(state_size).expand(batch_size, -1, -1)
     bias = torch.zeros(batch_size, state_size)
-    h = torch.full((batch_size, 1, 1), 0.1)
+    h = torch.tensor([0.1, 0.1, 0.1, 0.0])
+    step_factors = torch.stack((h, h / 2, h.square() / 4,
+                                h.square() / 2, h.square() / 6, h / 6))
     original_bmm = torch.bmm
     bmm_calls = 0
 
@@ -193,8 +195,7 @@ def test_affine_rk4_step_uses_column_vectors_for_bmm(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(torch, "bmm", check_bmm)
     next_y, next_v = second_order_solvers._rk4_affine_step(
         y, v, matrix, matrix, matrix, matrix, matrix, matrix,
-        bias, bias, bias, h, h / 2, h.square() / 4,
-        h.square() / 2, h.square() / 6, h / 6)
+        bias, bias, bias, step_factors)
     assert bmm_calls == 8
     assert next_y.shape == next_v.shape == (batch_size, state_size, 1)
 
@@ -243,7 +244,7 @@ def test_affine_batched_rk4_compiled_step_matches_eager(
 @pytest.mark.parametrize("batch_size", [3, 16])
 def test_affine_batched_rk4_step_factors_are_aligned(
         batch_size: int, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every step receives the same factors in contiguous, aligned batch views."""
+    """Every step receives one contiguous factor tensor with aligned rows."""
     grid = torch.tensor([[0.0, 0.1, 0.3, 0.6, 1.0]]).expand(batch_size, -1).clone()
     lengths = torch.full((batch_size,), 5, dtype=torch.long)
     lengths[-1] = 3
@@ -255,18 +256,20 @@ def test_affine_batched_rk4_step_factors_are_aligned(
     checked_steps = 0
 
     def check_step(*args: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Inspect the six factor views before running the unchanged RK4 step."""
+        """Inspect the packed factors before running the unchanged RK4 step."""
         nonlocal checked_steps
-        factors = args[-6:]
+        factors = args[-1]
         h = grid[:, checked_steps + 1] - grid[:, checked_steps]
         h = torch.where(checked_steps < lengths - 1, h, 0)
         expected = (h, h / 2, h.square() / 4, h.square() / 2,
                     h.square() / 6, h / 6)
-        for actual, reference in zip(factors, expected):
-            assert actual.shape == (batch_size, 1, 1)
-            assert actual.is_contiguous()
+        padded_size = batch_size + (-batch_size) % 4
+        assert factors.shape == (6, padded_size)
+        assert factors.is_contiguous()
+        for actual, reference in zip(factors.unbind(dim=0), expected):
             assert actual.data_ptr() % 16 == 0
-            torch.testing.assert_close(actual[:, 0, 0], reference, rtol=0, atol=0)
+            torch.testing.assert_close(actual[:batch_size], reference, rtol=0, atol=0)
+            assert torch.count_nonzero(actual[batch_size:]) == 0
         checked_steps += 1
         return original_step(*args)
 

@@ -480,18 +480,18 @@ def _rk4_affine_step(
         b_start           : torch.Tensor,  # [B, d]
         b_mid             : torch.Tensor,  # [B, d]
         b_end             : torch.Tensor,  # [B, d]
-        h                 : torch.Tensor,  # [B, 1, 1]
-        h_half            : torch.Tensor,  # [B, 1, 1]
-        h_squared_quarter : torch.Tensor,  # [B, 1, 1]
-        h_squared_half    : torch.Tensor,  # [B, 1, 1]
-        h_squared_sixth   : torch.Tensor,  # [B, 1, 1]
-        h_sixth           : torch.Tensor,  # [B, 1, 1]
+        step_factors_n    : torch.Tensor,  # [6, padded B]
         ) -> tuple[torch.Tensor, torch.Tensor]:
     r"""Advance one batched affine RK4 interval with [B, d, 1] states."""
 
     # Keep every intermediate state and acceleration in [B, d, 1] form so
     # the compiled BMMs receive column vectors directly. The caller passes
     # the previous displacement and velocity in this layout as well.
+    # Each factor row is 16-byte aligned; select its active entries and add
+    # singleton axes so it broadcasts over the column-vector states.
+    h, h_half, h_squared_quarter, h_squared_half, h_squared_sixth, h_sixth = (
+        step_factors_n[:, :yn.shape[0], None, None].unbind(dim=0));
+
     # Each batched matrix-vector product handles all windows. For item i,
     # stage 1 is l1_i = K_start,i @ y_n,i + C_start,i @ v_n,i + b_start,i.
     l1 : torch.Tensor = (torch.bmm(K_start, yn)
@@ -668,14 +668,12 @@ def RK4_affine_batched(
         yn          : torch.Tensor  = D_list[-1];           # [B, d, 1]
         vn          : torch.Tensor  = V_list[-1];           # [B, d, 1]
 
-        # Fetch aligned [B, 1, 1] views to avoid per-step misalignment copies.
-        h, h_half, h_squared_quarter, h_squared_half, h_squared_sixth, h_sixth = (
-            factor[:, None, None] for factor in step_factors[n, :, :B].unbind(dim=0));
+        # Pass one contiguous [6, padded B] tensor to the compiled step.
+        step_factors_n : torch.Tensor = step_factors[n];
 
         yn1, vn1 = step(
             yn, vn, K_start, K_mid, K_end, C_start, C_mid, C_end,
-            b_start, b_mid, b_end, h, h_half, h_squared_quarter,
-            h_squared_half, h_squared_sixth, h_sixth);
+            b_start, b_mid, b_end, step_factors_n);
         D_list.append(yn1);
         V_list.append(vn1);
 
