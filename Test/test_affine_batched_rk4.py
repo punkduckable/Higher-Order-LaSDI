@@ -67,8 +67,12 @@ def test_affine_batched_rk4_matches_scalar_on_nonuniform_padded_windows(device: 
     C = (-0.1 + 0.05 * stage_times)[..., None, None] * eye
     b = (0.2 + 0.1 * stage_times)[..., None] * torch.tensor([1.0, -1.0], dtype=dtype, device=device)
 
-    y_batch, v_batch = RK4_affine_batched(y0, v0, grid, lengths, K, C, b)
-    assert y_batch.shape == v_batch.shape == (3, 4, 2)
+    y_batch, v_batch = RK4_affine_batched(
+        y0, v0, grid.T.contiguous(), lengths,
+        K.permute(1, 2, 0, 3, 4).contiguous(),
+        C.permute(1, 2, 0, 3, 4).contiguous(),
+        b.permute(1, 2, 0, 3).contiguous())
+    assert y_batch.shape == v_batch.shape == (4, 3, 2)
     assert y_batch.dtype == v_batch.dtype == dtype
     assert y_batch.device == v_batch.device == grid.device
 
@@ -79,10 +83,10 @@ def test_affine_batched_rk4_matches_scalar_on_nonuniform_padded_windows(device: 
                     + (0.2 + 0.1 * t) * torch.tensor([1.0, -1.0], dtype=dtype, device=device))
 
         y_scalar, v_scalar = RK4(rhs, y0[row], v0[row], grid[row, :length].cpu().numpy())
-        torch.testing.assert_close(y_batch[row, :length], y_scalar, rtol=1.0e-12, atol=1.0e-12)
-        torch.testing.assert_close(v_batch[row, :length], v_scalar, rtol=1.0e-12, atol=1.0e-12)
-        assert torch.equal(y_batch[row, length:], y_batch[row, length - 1].expand(4 - length, 2))
-        assert torch.equal(v_batch[row, length:], v_batch[row, length - 1].expand(4 - length, 2))
+        torch.testing.assert_close(y_batch[:length, row], y_scalar, rtol=1.0e-12, atol=1.0e-12)
+        torch.testing.assert_close(v_batch[:length, row], v_scalar, rtol=1.0e-12, atol=1.0e-12)
+        assert torch.equal(y_batch[length:, row], y_batch[length - 1, row].expand(4 - length, 2))
+        assert torch.equal(v_batch[length:, row], v_batch[length - 1, row].expand(4 - length, 2))
 
 
 @pytest.mark.parametrize("device", ["cpu", pytest.param(
@@ -100,11 +104,11 @@ def test_affine_batched_rk4_gradients_match_scalar_reference(device: str) -> Non
 
     y0, v0, K0, C0, b0 = [x.clone().requires_grad_() for x in
                           (y_values, v_values, K_values, C_values, b_values)]
-    K = K0.expand(2, 2, 3, 2, 2)
-    C = C0.expand(2, 2, 3, 2, 2)
-    b = b0.expand(2, 2, 3, 2)
-    y_batch, v_batch = RK4_affine_batched(y0, v0, grid, lengths, K, C, b)
-    valid = (torch.arange(3, device=device)[None, :] < lengths[:, None])[..., None]
+    K = K0.expand(2, 3, 2, 2, 2).contiguous()
+    C = C0.expand(2, 3, 2, 2, 2).contiguous()
+    b = b0.expand(2, 3, 2, 2).contiguous()
+    y_batch, v_batch = RK4_affine_batched(y0, v0, grid.T.contiguous(), lengths, K, C, b)
+    valid = (torch.arange(3, device=device)[:, None] < lengths[None, :])[..., None]
     loss_batch = ((y_batch.square() + v_batch.square()) * valid).sum()
     grads_batch = torch.autograd.grad(loss_batch, (y0, v0, K0, C0, b0))
 
@@ -149,9 +153,13 @@ def test_affine_batched_rk4_dense_time_dependent_coefficients_match_scalar_refer
     K = K0[:, None, None] + stage_times[..., None, None] * K1[:, None, None]
     C = C0[:, None, None] + stage_times[..., None, None] * C1[:, None, None]
     b = b0[:, None, None] + stage_times[..., None] * b1[:, None, None]
-    y_batch, v_batch = RK4_affine_batched(y0, v0, grid, lengths, K, C, b)
+    y_batch, v_batch = RK4_affine_batched(
+        y0, v0, grid.T.contiguous(), lengths,
+        K.permute(1, 2, 0, 3, 4).contiguous(),
+        C.permute(1, 2, 0, 3, 4).contiguous(),
+        b.permute(1, 2, 0, 3).contiguous())
 
-    valid = (torch.arange(grid.shape[1], device=device)[None, :] < lengths[:, None])[..., None]
+    valid = (torch.arange(grid.shape[1], device=device)[:, None] < lengths[None, :])[..., None]
     loss_batch = ((y_batch.square() + 0.37 * v_batch.square()) * valid).sum()
     grads_batch = torch.autograd.grad(loss_batch, (y0, v0, K0, K1, C0, C1, b0, b1))
 
@@ -163,8 +171,8 @@ def test_affine_batched_rk4_dense_time_dependent_coefficients_match_scalar_refer
                     + (Cs0[row] + t * Cs1[row]) @ v + bs0[row] + t * bs1[row])
 
         y_ref, v_ref = RK4(rhs, ys[row], vs[row], grid[row, :length].cpu().numpy())
-        torch.testing.assert_close(y_batch[row, :length], y_ref, rtol=1.0e-11, atol=1.0e-12)
-        torch.testing.assert_close(v_batch[row, :length], v_ref, rtol=1.0e-11, atol=1.0e-12)
+        torch.testing.assert_close(y_batch[:length, row], y_ref, rtol=1.0e-11, atol=1.0e-12)
+        torch.testing.assert_close(v_batch[:length, row], v_ref, rtol=1.0e-11, atol=1.0e-12)
         loss_scalar = loss_scalar + y_ref.square().sum() + 0.37 * v_ref.square().sum()
     grads_scalar = torch.autograd.grad(loss_scalar, (ys, vs, Ks0, Ks1, Cs0, Cs1, bs0, bs1))
     for actual, expected in zip(grads_batch, grads_scalar):
@@ -209,16 +217,16 @@ def test_affine_batched_rk4_compiled_step_matches_eager(
     dtype = torch.float32
     batch_size, state_size = 16, 20
     grid = torch.tensor([[0.0, 0.1, 0.23, 0.4]], device=device, dtype=dtype).expand(
-        batch_size, -1).clone()
-    grid[1, 3] = grid[1, 2]
+        batch_size, -1).T.contiguous()
+    grid[3, 1] = grid[2, 1]
     lengths = torch.full((batch_size,), 4, dtype=torch.long, device=device)
     lengths[1] = 3
     values = (
         torch.randn(batch_size, state_size, device=device, dtype=dtype),
         torch.randn(batch_size, state_size, device=device, dtype=dtype),
-        0.1 * torch.randn(batch_size, 3, 3, state_size, state_size, device=device, dtype=dtype),
-        0.1 * torch.randn(batch_size, 3, 3, state_size, state_size, device=device, dtype=dtype),
-        0.1 * torch.randn(batch_size, 3, 3, state_size, device=device, dtype=dtype),
+        0.1 * torch.randn(3, 3, batch_size, state_size, state_size, device=device, dtype=dtype),
+        0.1 * torch.randn(3, 3, batch_size, state_size, state_size, device=device, dtype=dtype),
+        0.1 * torch.randn(3, 3, batch_size, state_size, device=device, dtype=dtype),
     )
 
     def solve() -> tuple[tuple[torch.Tensor, torch.Tensor], tuple[torch.Tensor, ...]]:
@@ -238,19 +246,19 @@ def test_affine_batched_rk4_compiled_step_matches_eager(
                                 eager_outputs + eager_gradients):
         torch.testing.assert_close(actual, expected, rtol=2.0e-5, atol=2.0e-6)
     for trajectory in compiled_outputs:
-        assert torch.equal(trajectory[1, 3], trajectory[1, 2])
+        assert torch.equal(trajectory[3, 1], trajectory[2, 1])
 
 
 @pytest.mark.parametrize("batch_size", [3, 16])
 def test_affine_batched_rk4_step_factors_are_aligned(
         batch_size: int, monkeypatch: pytest.MonkeyPatch) -> None:
     """Every step receives one contiguous factor tensor with aligned rows."""
-    grid = torch.tensor([[0.0, 0.1, 0.3, 0.6, 1.0]]).expand(batch_size, -1).clone()
+    grid = torch.tensor([[0.0, 0.1, 0.3, 0.6, 1.0]]).expand(batch_size, -1).T.contiguous()
     lengths = torch.full((batch_size,), 5, dtype=torch.long)
     lengths[-1] = 3
-    n_steps = grid.shape[1] - 1
-    coefficients = torch.zeros(batch_size, n_steps, 3, 2, 2)
-    biases = torch.zeros(batch_size, n_steps, 3, 2)
+    n_steps = grid.shape[0] - 1
+    coefficients = torch.zeros(n_steps, 3, batch_size, 2, 2)
+    biases = torch.zeros(n_steps, 3, batch_size, 2)
     initial = torch.zeros(batch_size, 2)
     original_step = second_order_solvers._rk4_affine_step
     checked_steps = 0
@@ -259,7 +267,7 @@ def test_affine_batched_rk4_step_factors_are_aligned(
         """Inspect the packed factors before running the unchanged RK4 step."""
         nonlocal checked_steps
         factors = args[-1]
-        h = grid[:, checked_steps + 1] - grid[:, checked_steps]
+        h = grid[checked_steps + 1] - grid[checked_steps]
         h = torch.where(checked_steps < lengths - 1, h, 0)
         expected = (h, h / 2, h.square() / 4, h.square() / 2,
                     h.square() / 6, h / 6)
@@ -278,12 +286,90 @@ def test_affine_batched_rk4_step_factors_are_aligned(
     assert checked_steps == n_steps
 
 
+@pytest.mark.parametrize("batch_size", [3, 16])
+def test_affine_batched_rk4_stage_strides_do_not_depend_on_duration(
+        batch_size: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Compiled-step coefficient inputs have the same contiguous layout for different T."""
+    state_size = 2
+    original_step = second_order_solvers._rk4_affine_step
+    checked_steps = 0
+
+    def check_step(*args: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Check all coefficient-stage views before evaluating the eager RK4 step."""
+        nonlocal checked_steps
+        for matrix in args[2:8]:
+            assert matrix.is_contiguous()
+            assert matrix.stride() == (state_size * state_size, state_size, 1)
+        for bias in args[8:11]:
+            assert bias.is_contiguous()
+            assert bias.stride() == (state_size, 1)
+        checked_steps += 1
+        return original_step(*args)
+
+    monkeypatch.setattr(second_order_solvers, "_rk4_affine_step", check_step)
+    for n_steps in (2, 5):
+        grid = torch.arange(n_steps + 1, dtype=torch.float32)[:, None].expand(-1, batch_size)
+        lengths = torch.full((batch_size,), n_steps + 1, dtype=torch.long)
+        matrices = torch.zeros(n_steps, 3, batch_size, state_size, state_size)
+        biases = torch.zeros(n_steps, 3, batch_size, state_size)
+        initial = torch.zeros(batch_size, state_size)
+        RK4_affine_batched(initial, initial, grid, lengths, matrices, matrices, biases)
+
+    assert checked_steps == 7
+
+
+def test_affine_batched_rk4_backward_step_strides_do_not_depend_on_duration(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """Per-window losses send contiguous, duration-independent gradients to RK4 steps."""
+    batch_size, state_size = 3, 2
+    original_step = second_order_solvers._rk4_affine_step
+    observed_strides: list[tuple[int, ...]] = []
+
+    def check_step(*args: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Record the gradient layouts received by each eager RK4 step output."""
+        y, v = original_step(*args)
+        y.register_hook(lambda grad: observed_strides.append(grad.stride()))
+        v.register_hook(lambda grad: observed_strides.append(grad.stride()))
+        return y, v
+
+    monkeypatch.setattr(second_order_solvers, "_rk4_affine_step", check_step)
+    for n_steps in (2, 5):
+        grid = torch.arange(n_steps + 1, dtype=torch.float32)[:, None].expand(-1, batch_size)
+        lengths = torch.tensor([n_steps + 1, n_steps, n_steps - 1])
+        matrices = torch.zeros(n_steps, 3, batch_size, state_size, state_size)
+        biases = torch.zeros(n_steps, 3, batch_size, state_size)
+        y0 = torch.ones(batch_size, state_size, requires_grad=True)
+        v0 = torch.ones(batch_size, state_size, requires_grad=True)
+        y, v = RK4_affine_batched(y0, v0, grid, lengths, matrices, matrices, biases)
+        windows = [torch.cat((y[:length, i], v[:length, i]), dim=1)
+                   for i, length in enumerate(lengths.tolist())]
+        torch.cat(windows, dim=0).square().sum().backward()
+
+    assert len(observed_strides) == 14
+    assert set(observed_strides) == {(state_size, 1, 1)}
+
+
+def test_affine_batched_rk4_rejects_noncontiguous_coefficients() -> None:
+    """A time-major shape alone cannot guarantee stable per-step coefficient strides."""
+    batch_size, state_size, n_steps = 2, 2, 3
+    grid = torch.zeros(n_steps + 1, batch_size)
+    lengths = torch.full((batch_size,), n_steps + 1, dtype=torch.long)
+    initial = torch.zeros(batch_size, state_size)
+    matrices = torch.zeros(batch_size, n_steps, 3, state_size, state_size)
+    noncontiguous = matrices.permute(1, 2, 0, 3, 4)
+    biases = torch.zeros(n_steps, 3, batch_size, state_size)
+
+    with pytest.raises(ValueError, match="contiguous time-major"):
+        RK4_affine_batched(initial, initial, grid, lengths,
+                           noncontiguous, noncontiguous, biases)
+
+
 def test_some_batched_single_frame_returns_initial_state() -> None:
     """A one-frame window needs no gate evaluation or RK stages."""
     model = SOME(n_z=1, Uniform_t_Grid=True, n_p=1, config=_some_config(False, True))
     y0 = torch.tensor([[0.4], [-0.3]], requires_grad=True)
     v0 = torch.tensor([[0.2], [0.1]], requires_grad=True)
-    grid = torch.tensor([[0.1], [0.5]])
+    grid = torch.tensor([[0.1, 0.5]])
     lengths = torch.ones(2, dtype=torch.long)
     params = torch.tensor([[0.2], [0.8]])
     reference_t0 = torch.zeros(2)
@@ -291,11 +377,11 @@ def test_some_batched_single_frame_returns_initial_state() -> None:
 
     K, C, b = model._precompute_affine_stage_coefficients(
         grid, lengths, params, reference_t0, reference_t_span, state_dtype=y0.dtype)
-    assert K.shape == C.shape == (2, 0, 3, 1, 1)
-    assert b.shape == (2, 0, 3, 1)
+    assert K.shape == C.shape == (0, 3, 2, 1, 1)
+    assert b.shape == (0, 3, 2, 1)
     y, v = RK4_affine_batched(y0, v0, grid, lengths, K, C, b)
-    assert torch.equal(y[:, 0], y0)
-    assert torch.equal(v[:, 0], v0)
+    assert torch.equal(y[0], y0)
+    assert torch.equal(v[0], v0)
     (y.sum() + v.sum()).backward()
     assert torch.equal(y0.grad, torch.ones_like(y0))
     assert torch.equal(v0.grad, torch.ones_like(v0))
@@ -328,12 +414,12 @@ def test_some_batched_stage_coefficients_match_scalar_simulation_and_gradients(
     v0 = initial_v_values.clone().requires_grad_()
 
     K, C, b = batched._precompute_affine_stage_coefficients(
-        grid, lengths, params, reference_t0, reference_t_span, state_dtype=y0.dtype)
-    assert K.shape == C.shape == (2, 3, 3, 1, 1)
-    assert b.shape == (2, 3, 3, 1)
+        grid.T.contiguous(), lengths, params, reference_t0, reference_t_span, state_dtype=y0.dtype)
+    assert K.shape == C.shape == (3, 3, 2, 1, 1)
+    assert b.shape == (3, 3, 2, 1)
     # Window 1's last interval is padding: all three stages use its final valid time.
     for coefficients in (K, C, b):
-        padded_stages = coefficients[1, 2]
+        padded_stages = coefficients[2, :, 1]
         torch.testing.assert_close(
             padded_stages, padded_stages[0].expand_as(padded_stages), rtol=0, atol=0)
     terminal_weights_D, terminal_weights_V = batched._weights(
@@ -342,13 +428,13 @@ def test_some_batched_stage_coefficients_match_scalar_simulation_and_gradients(
     terminal_coefficients = batched._effective_coefficients(
         terminal_weights_D, terminal_weights_V, grid.device, y0.dtype)
     for padded, terminal in zip((K, C, b), terminal_coefficients):
-        torch.testing.assert_close(padded[1, 2, 0], terminal[0], rtol=1.0e-6, atol=1.0e-7)
+        torch.testing.assert_close(padded[2, 0, 1], terminal[0], rtol=1.0e-6, atol=1.0e-7)
     assert K.requires_grad and C.requires_grad
     assert b.requires_grad == use_biases
     if not use_biases:
         assert torch.count_nonzero(b) == 0
-    y_batch, v_batch = RK4_affine_batched(y0, v0, grid, lengths, K, C, b)
-    valid = (torch.arange(4)[None, :] < lengths[:, None])[..., None]
+    y_batch, v_batch = RK4_affine_batched(y0, v0, grid.T.contiguous(), lengths, K, C, b)
+    valid = (torch.arange(4)[:, None] < lengths[None, :])[..., None]
     loss_batch = ((y_batch.square() + v_batch.square()) * valid).sum()
     grads_batch = torch.autograd.grad(loss_batch, (y0, v0, *batched.parameters()))
 
@@ -363,8 +449,8 @@ def test_some_batched_stage_coefficients_match_scalar_simulation_and_gradients(
             t_Grid=[grid_np],
             params=params[row:row + 1].numpy(),
             time_domain=[domain])[0]
-        torch.testing.assert_close(y_batch[row, :length], y_ref, rtol=3.0e-5, atol=3.0e-6)
-        torch.testing.assert_close(v_batch[row, :length], v_ref, rtol=3.0e-5, atol=3.0e-6)
+        torch.testing.assert_close(y_batch[:length, row], y_ref, rtol=3.0e-5, atol=3.0e-6)
+        torch.testing.assert_close(v_batch[:length, row], v_ref, rtol=3.0e-5, atol=3.0e-6)
         loss_scalar = loss_scalar + y_ref.square().sum() + v_ref.square().sum()
     grads_scalar = torch.autograd.grad(loss_scalar, (ys, vs, *scalar.parameters()))
     for actual, expected in zip(grads_batch, grads_scalar):

@@ -733,11 +733,11 @@ class SOME(LatentDynamics):
             # Determine the time window with the most time steps.
             max_length  : int = max(lengths);
 
-            # Pad the t_Grids
+            # Pad the t_Grids with time first, matching the affine solver layout.
             padded_t_Grid : torch.Tensor = torch.stack([
                 torch.cat((grid, grid[-1].expand(max_length - length)))
                 for grid, length in zip(Tensor_t_Grid, lengths)
-            ]);  # [B, T_max]; padding repeats each final valid time.
+            ], dim=1);  # [T_max, B]; padding repeats each final valid time.
 
             # Batch up t_Grid lengths, parameters, initial times, time spans, and ICs.
             lengths_tensor  : torch.Tensor  = torch.tensor(lengths, dtype = torch.long, device = state_device); # [B]
@@ -770,7 +770,7 @@ class SOME(LatentDynamics):
                 b       = b);
 
             # Exclude padded frames without detaching valid trajectories.
-            return [[D[i, :length], V[i, :length]] for i, length in enumerate(lengths)];
+            return [[D[:length, i], V[:length, i]] for i, length in enumerate(lengths)];
 
         # -----------------------------------------------------------------------------------------
         # CPU path: independent scalar RK4 solves remain the readable reference.
@@ -837,7 +837,7 @@ class SOME(LatentDynamics):
         r"""Precompute the affine RHS coefficients at every batched RK4 stage time.
 
         The time/parameter-only gate is evaluated for all intervals in one call.
-        For each interval, stage axis 2 stores coefficients at its start,
+        For each interval, stage axis 1 stores coefficients at its start,
         midpoint, and end. The two midpoint RK4 evaluations share coefficients
         but use different intermediate latent states.
 
@@ -846,10 +846,10 @@ class SOME(LatentDynamics):
         Arguments
         -------------------------------------------------------------------------------------------
 
-        t_grid : torch.Tensor, shape = (B, T)
+        t_grid : torch.Tensor, shape = (T, B)
             Padded, per-window time grids. Valid times increase strictly. If window i has
-            L_i = lengths[i] valid times, then t_grid[i, L_i:] repeats its final valid time,
-            t_grid[i, L_i - 1].
+            L_i = lengths[i] valid times, then t_grid[L_i:, i] repeats its final valid time,
+            t_grid[L_i - 1, i].
 
         lengths : torch.Tensor, shape = (B,)
             Integer number of valid time points in each window; lengths[i] is L_i.
@@ -873,17 +873,17 @@ class SOME(LatentDynamics):
         Returns
         -------------------------------------------------------------------------------------------
 
-        K, C : torch.Tensor, shape = (B, T - 1, 3, n_z, n_z)
-            Effective displacement and velocity matrices for each interval. K[i, j, s, :, :]
-            belongs to window i and interval j; stage index s = 0, 1, or 2 selects the
+        K, C : torch.Tensor, shape = (T - 1, 3, B, n_z, n_z)
+            Effective displacement and velocity matrices for each interval. K[j, s, i, :, :]
+            belongs to interval j, stage s, and window i; s = 0, 1, or 2 selects the
             start, midpoint, or end time. C has the same indexing convention.
 
-        b : torch.Tensor, shape = (B, T - 1, 3, n_z)
-            Effective affine bias at the same stage times. b[i, j, s, :] belongs to window i,
-            interval j, and stage s. The tensor is zero when expert biases are disabled.
+        b : torch.Tensor, shape = (T - 1, 3, B, n_z)
+            Effective affine bias at the same stage times. b[j, s, i, :] belongs to interval j,
+            stage s, and window i. The tensor is zero when expert biases are disabled.
 
         For a padded interval j >= lengths[i] - 1, the masked step size is zero and all
-        three stage times equal t_grid[i, lengths[i] - 1]. Its K/C/b entries are therefore
+        three stage times equal t_grid[lengths[i] - 1, i]. Its K/C/b entries are therefore
         the ordinary effective coefficients at that final valid time, not zeros. They are
         still computed, but a finite RHS cannot change the state when RK4 uses h = 0.
         If T = 1, there are no intervals and the returned tensors have a zero-length
@@ -895,10 +895,10 @@ class SOME(LatentDynamics):
         """
 
         # Checks
-        if t_grid.ndim != 2 or t_grid.shape[1] < 1:
-            raise ValueError("t_grid must have shape [B, T] with T >= 1");
-        batch_size : int = t_grid.shape[0];
-        n_times    : int = t_grid.shape[1];
+        if t_grid.ndim != 2 or t_grid.shape[0] < 1:
+            raise ValueError("t_grid must have shape [T, B] with T >= 1");
+        batch_size : int = t_grid.shape[1];
+        n_times    : int = t_grid.shape[0];
         if lengths.shape != (batch_size,) or lengths.dtype not in (torch.int32, torch.int64):
             raise ValueError("lengths must have shape [B] and an integer dtype");
         if params.shape != (batch_size, self.n_p):
@@ -920,42 +920,42 @@ class SOME(LatentDynamics):
         # Return if there are no steps.
         n_steps : int = n_times - 1;
         if n_steps == 0:
-            empty_matrices : torch.Tensor = t_grid.new_empty((batch_size, 0, 3, self.n_z, self.n_z), dtype=state_dtype);
-            empty_biases   : torch.Tensor = t_grid.new_empty((batch_size, 0, 3, self.n_z), dtype=state_dtype);
+            empty_matrices : torch.Tensor = t_grid.new_empty((0, 3, batch_size, self.n_z, self.n_z), dtype=state_dtype);
+            empty_biases   : torch.Tensor = t_grid.new_empty((0, 3, batch_size, self.n_z), dtype=state_dtype);
             return empty_matrices, empty_matrices.clone(), empty_biases;
 
         # Construct stage times using the same t_n + h/2 and t_n + h arithmetic
         # as scalar RK4, including on nonuniform grids. The mask sets h to zero
         # on padded intervals without a GPU-to-CPU synchronization.
-        t_start : torch.Tensor = t_grid[:, :-1];                                        # [B, T-1]
-        active  : torch.Tensor = (torch.arange(n_steps, device=t_grid.device)[None, :]
-                                  < (lengths[:, None] - 1));                            # [B, T-1]
-        h       : torch.Tensor = torch.where(active, t_grid[:, 1:] - t_start, 0);       # [B, T-1]
+        t_start : torch.Tensor = t_grid[:-1, :];                                        # [T-1, B]
+        active  : torch.Tensor = (torch.arange(n_steps, device=t_grid.device)[:, None]
+                                  < (lengths[None, :] - 1));                            # [T-1, B]
+        h       : torch.Tensor = torch.where(active, t_grid[1:, :] - t_start, 0);       # [T-1, B]
         stage_times : torch.Tensor = torch.stack(
-            (t_start, t_start + h / 2, t_start + h), dim=2);                            # [B, T-1, 3]
+            (t_start, t_start + h / 2, t_start + h), dim=1);                            # [T-1, 3, B]
 
         # Build gate inputs: Compute scaled times and fetch parameter values
-        tau : torch.Tensor = ((stage_times - reference_t0[:, None, None])
-                              / reference_t_span[:, None, None]);                       # [B, T-1, 3]
-        param_grid : torch.Tensor = params[:, None, None, :].expand(
-            batch_size, n_steps, 3, self.n_p);                                          # [B, T-1, 3, n_p]
+        tau : torch.Tensor = ((stage_times - reference_t0[None, None, :])
+                              / reference_t_span[None, None, :]);                       # [T-1, 3, B]
+        param_grid : torch.Tensor = params[None, None, :, :].expand(
+            n_steps, 3, batch_size, self.n_p);                                          # [T-1, 3, B, n_p]
         gate_inputs : torch.Tensor = torch.cat(
-            (tau.unsqueeze(-1), param_grid), dim=-1)                                    # [B, T-1, 3, n_p+1]
-        gate_inputs = gate_inputs.reshape(-1, self.n_p + 1).to(dtype=gate_param.dtype)  # [B*(T-1)*3, n_p+1]
+            (tau.unsqueeze(-1), param_grid), dim=-1)                                    # [T-1, 3, B, n_p+1]
+        gate_inputs = gate_inputs.reshape(-1, self.n_p + 1).to(dtype=gate_param.dtype)  # [(T-1)*3*B, n_p+1]
 
         # Evaluate gate and fetch velocity/displacement weights.
-        logits     : torch.Tensor = self.w(gate_inputs)                                 # [B*(T-1)*3, n_experts_D+n_experts_V]
-        weights_D : torch.Tensor = torch.softmax(logits[:, :self.n_experts_D], dim=1)   # [B*(T-1)*3, n_experts_D]
-        weights_V : torch.Tensor = torch.softmax(logits[:, self.n_experts_D:], dim=1)   # [B*(T-1)*3, n_experts_V]
+        logits     : torch.Tensor = self.w(gate_inputs)                                 # [(T-1)*3*B, n_experts_D+n_experts_V]
+        weights_D : torch.Tensor = torch.softmax(logits[:, :self.n_experts_D], dim=1)   # [(T-1)*3*B, n_experts_D]
+        weights_V : torch.Tensor = torch.softmax(logits[:, self.n_experts_D:], dim=1)   # [(T-1)*3*B, n_experts_V]
 
         # Compute effective coefficients.
         K_flat, C_flat, b_flat = self._effective_coefficients(
             weights_D, weights_V, t_grid.device, state_dtype);
 
         # Reshape and return.
-        K : torch.Tensor = K_flat.reshape(batch_size, n_steps, 3, self.n_z, self.n_z);  # [B, T-1, 3, n_z, n_z]
-        C : torch.Tensor = C_flat.reshape(batch_size, n_steps, 3, self.n_z, self.n_z);  # [B, T-1, 3, n_z, n_z]
-        b : torch.Tensor = b_flat.reshape(batch_size, n_steps, 3, self.n_z);            # [B, T-1, 3, n_z]
+        K : torch.Tensor = K_flat.reshape(n_steps, 3, batch_size, self.n_z, self.n_z);  # [T-1, 3, B, n_z, n_z]
+        C : torch.Tensor = C_flat.reshape(n_steps, 3, batch_size, self.n_z, self.n_z);  # [T-1, 3, B, n_z, n_z]
+        b : torch.Tensor = b_flat.reshape(n_steps, 3, batch_size, self.n_z);            # [T-1, 3, B, n_z]
         return K, C, b;
 
 

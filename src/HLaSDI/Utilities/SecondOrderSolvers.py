@@ -558,33 +558,34 @@ def RK4_affine_batched(
     Dy0 : torch.Tensor, shape = (B, d)
         Initial velocity for each batch item.
 
-    t_grid : torch.Tensor, shape = (B, T)
-        The (b, t) element is the t'th time point for batch item b. After its final valid time,
-        padding repeats that time through column T - 1.
+    t_grid : torch.Tensor, shape = (T, B)
+        The (t, b) element is the t'th time point for batch item b. After its final valid time,
+        padding repeats that time through row T - 1.
 
     lengths : torch.Tensor, shape = (B,)
         The b'th element specifies its number of valid time points, with 1 <= lengths[b] <= T.
         Inactive intervals use zero step size, so padded output frames repeat the last valid state.
         Value bounds are not checked here because that would synchronize CUDA.
 
-    K : torch.Tensor, shape = (B, T - 1, 3, d, d)
+    K : torch.Tensor, shape = (T - 1, 3, B, d, d)
         Effective displacement matrices at each interval's start, midpoint, and end. Specifically,
-        K[i, j, :, :, :] contains three effective K matrices for the i'th batch item during its
-        j'th RK4 step. They represent K at the step's start, midpoint, and end, in that order.
+        K[j, s, i, :, :] gives the `K` matrix for interval j, stage s, and batch item i. The stage
+        index, s, specifies the start, midpoint, or end time, in that order. This tensor must be 
+        contiguous.
 
-    C : torch.Tensor, shape = (B, T - 1, 3, d, d)
-        Effective velocity matrices with the same stage ordering as K.
+    C : torch.Tensor, shape = (T - 1, 3, B, d, d)
+        Contiguous effective velocity matrices with the same ordering as K.
 
-    b : torch.Tensor, shape = (B, T - 1, 3, d)
-        Effective affine biases with the same stage ordering as K.
+    b : torch.Tensor, shape = (T - 1, 3, B, d)
+        Contiguous effective affine biases with the same ordering as K.
 
     -----------------------------------------------------------------------------------------------
     Returns
     -----------------------------------------------------------------------------------------------
 
-    D, V : tuple[torch.Tensor, torch.Tensor], each shape = (B, T, d)
+    D, V : tuple[torch.Tensor, torch.Tensor], each shape = (T, B, d)
         Displacement and velocity trajectories, including frozen padded frames. Specifically,
-        D[i, j, :] gives the solved displacement at the j'th time step for the i'th batch item.
+        D[j, i, :] gives the solved displacement at the j'th time step for the i'th batch item.
         Both retain gradients through the initial states and coefficients.
     """
 
@@ -593,15 +594,17 @@ def RK4_affine_batched(
         raise ValueError("y0 and Dy0 must have matching shape [B, d]");
     B : int = y0.shape[0];
     d : int = y0.shape[1];
-    if t_grid.ndim != 2 or t_grid.shape[0] != B or t_grid.shape[1] < 1:
-        raise ValueError("t_grid must have shape [B, T] with T >= 1");
+    if t_grid.ndim != 2 or t_grid.shape[1] != B or t_grid.shape[0] < 1:
+        raise ValueError("t_grid must have shape [T, B] with T >= 1");
     if lengths.shape != (B,) or lengths.dtype not in (torch.int32, torch.int64):
         raise ValueError("lengths must have shape [B] and an integer dtype");
-    n_steps : int = t_grid.shape[1] - 1;
-    if K.shape != (B, n_steps, 3, d, d):
-        raise ValueError("K must have shape [B, T-1, 3, d, d]");
-    if C.shape != K.shape or b.shape != (B, n_steps, 3, d):
-        raise ValueError("C and b must have shapes [B, T-1, 3, d, d] and [B, T-1, 3, d]");
+    n_steps : int = t_grid.shape[0] - 1;
+    if K.shape != (n_steps, 3, B, d, d):
+        raise ValueError("K must have shape [T-1, 3, B, d, d]");
+    if C.shape != K.shape or b.shape != (n_steps, 3, B, d):
+        raise ValueError("C and b must have shapes [T-1, 3, B, d, d] and [T-1, 3, B, d]");
+    if not K.is_contiguous() or not C.is_contiguous() or not b.is_contiguous():
+        raise ValueError("K, C, and b must be contiguous time-major tensors");
     floating_tensors : tuple[torch.Tensor, ...] = (y0, Dy0, t_grid, K, C, b);
     if not y0.is_floating_point() or any(t.dtype != y0.dtype or t.device != y0.device for t in floating_tensors):
         raise ValueError("states, time grid, and coefficients must share floating dtype and device");
@@ -613,11 +616,8 @@ def RK4_affine_batched(
 
     # Item b has lengths[b] valid time points, hence lengths[b] - 1 valid intervals.
     # Zero step sizes after that freeze the final valid state through padded frames.
-    active  : torch.Tensor = torch.arange(n_steps, device = y0.device)[None, :] < (lengths[:, None] - 1); # [B, T-1]
-    h_all   : torch.Tensor = torch.where(active, t_grid[:, 1:] - t_grid[:, :-1], 0);                      # [B, T-1]
-
-    # Transpose h_all to have time as the first axis.
-    h_all = h_all.transpose(0, 1);                                                                       # [T-1, B]
+    active  : torch.Tensor = torch.arange(n_steps, device = y0.device)[:, None] < (lengths[None, :] - 1); # [T-1, B]
+    h_all   : torch.Tensor = torch.where(active, t_grid[1:, :] - t_grid[:-1, :], 0);                       # [T-1, B]
 
     # Pad each time row of h to a multiple of 16 bytes. Why do we do this? Because 
     # otherwise the compile Inductor views each row of h_all as "misaligned" and makes
@@ -645,11 +645,13 @@ def RK4_affine_batched(
     # ---------------------------------------------------------------------------------------------
     # Next, unpack the K, C, and b tensors.
 
-    # Unbind time and stage views once. Repeated K[:, n, stage] indexing creates
-    # separate select/slice backward nodes that scatter into full-size zeros.
-    K_steps : tuple[tuple[torch.Tensor, ...], ...] = tuple(step.unbind(dim=1) for step in K.unbind(dim=1));
-    C_steps : tuple[tuple[torch.Tensor, ...], ...] = tuple(step.unbind(dim=1) for step in C.unbind(dim=1));
-    b_steps : tuple[tuple[torch.Tensor, ...], ...] = tuple(step.unbind(dim=1) for step in b.unbind(dim=1));
+    # Coefficients arrive contiguous and time-major, so every [B, d, d] stage
+    # view has a batch stride independent of rollout duration. Unbind once
+    # rather than indexing each stage, which creates expensive select/slice
+    # backward nodes that scatter into full-size zeros.
+    K_steps : tuple[tuple[torch.Tensor, ...], ...] = tuple(step.unbind(dim=0) for step in K.unbind(dim=0));
+    C_steps : tuple[tuple[torch.Tensor, ...], ...] = tuple(step.unbind(dim=0) for step in C.unbind(dim=0));
+    b_steps : tuple[tuple[torch.Tensor, ...], ...] = tuple(step.unbind(dim=0) for step in b.unbind(dim=0));
 
     D_list : list[torch.Tensor] = [y0.unsqueeze(-1)];  # Each entry has shape [B, d, 1].
     V_list : list[torch.Tensor] = [Dy0.unsqueeze(-1)]; # Each entry has shape [B, d, 1].
@@ -677,4 +679,4 @@ def RK4_affine_batched(
         V_list.append(vn1);
 
     # All done :)
-    return torch.stack(D_list, dim=1).squeeze(-1), torch.stack(V_list, dim=1).squeeze(-1);
+    return torch.stack(D_list, dim=0).squeeze(-1), torch.stack(V_list, dim=0).squeeze(-1);

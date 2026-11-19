@@ -135,9 +135,9 @@ def RK4_affine_batched(
     Dy0: torch.Tensor,
     t_grid: torch.Tensor,
     lengths: torch.Tensor,
-    K: torch.Tensor,  # [B, T-1, 3, n_z, n_z]
-    C: torch.Tensor,  # [B, T-1, 3, n_z, n_z]
-    b: torch.Tensor,  # [B, T-1, 3, n_z]
+    K: torch.Tensor,  # [T-1, 3, B, n_z, n_z], contiguous
+    C: torch.Tensor,  # [T-1, 3, B, n_z, n_z], contiguous
+    b: torch.Tensor,  # [T-1, 3, B, n_z], contiguous
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Integrate a padded batch of affine second-order systems with classical RK4."""
 ```
@@ -146,7 +146,7 @@ Requirements:
 
 - Validate that:
   - `y0` and `Dy0` have shape `[B, n_z]` and matching dtype/device.
-  - `t_grid` has shape `[B, T_max]`.
+  - `t_grid` has shape `[T_max, B]`.
   - `lengths` has shape `[B]`, is integral, and satisfies `1 <= lengths <= T_max`.
   - Valid portions of each time grid are strictly increasing. Expensive validation may be limited to tests/debug assertions if it would synchronize the GPU in normal training.
 - Use one Python loop over `range(T_max - 1)`, not a Python loop over `B`.
@@ -164,12 +164,12 @@ Requirements:
 - Freeze completed trajectories without host synchronization. Mask all interval step sizes once before the loop so inactive intervals have `h_n == 0`; with finite coefficients, the RK4 update is then an exact no-op. An additional per-step state mask is unnecessary:
 
   ```python
-  active = torch.arange(T_max - 1, device=t_grid.device)[None, :] < lengths[:, None] - 1
-  h_all = torch.where(active, t_grid[:, 1:] - t_grid[:, :-1], 0)
+  active = torch.arange(T_max - 1, device=t_grid.device)[:, None] < lengths[None, :] - 1
+  h_all = torch.where(active, t_grid[1:, :] - t_grid[:-1, :], 0)
   ```
 
 - Do not use `if active.any():`, `.item()`, or another data-dependent CPU/GPU synchronization in the time loop.
-- Stack the per-step tensors at the end and transpose/stack into `[B, T_max, n_z]`.
+- Stack the per-step tensors at the end into `[T_max, B, n_z]`.
 - Preserve autograd through every valid stage and the precomputed coefficient tensors.
 
 Keep the completed-state invariant in tests. Avoid synchronizing validation (`.item()`, `active.any()`) inside the time loop.
@@ -182,7 +182,7 @@ Keep the existing scalar path as the oracle. For the new path, evaluate gate wei
 
 The batched evaluation must accept:
 
-- `t`: scalar, `[N]`, or `[B, T_max - 1, 3]` stage times (flattened to `[N]` for a gate-network call) as appropriate for the caller.
+- `t`: scalar, `[N]`, or `[T_max - 1, 3, B]` stage times (flattened to `[N]` for a gate-network call) as appropriate for the caller.
 - parameters:
   - a shared row `[n_p]`, expanded across samples, or
   - one row per sample `[N, n_p]` / `[B, n_p]`.
@@ -227,7 +227,7 @@ Keep `simulate(...)` as the only trainer-facing method. Trainers pass a list of 
 Design notes:
 
 - Keep the CUDA solver inputs tensor-only. `simulate()` packs variable-length CUDA windows and unpads the results; its return format remains a list of trajectory pairs.
-- Return two internal tensors with shape `[B, T_max, n_z]`.
+- Return two internal tensors with shape `[T_max, B, n_z]`.
 - Form stage-time coefficients from `params`, `reference_t0`, and `reference_t_span` before integration; the batched RK4 core consumes them through its explicit affine interface. A general batched-RHS solver for other models is not part of this phase.
 - `SOME_weak` should inherit this implementation unless it truly changes rollout dynamics.
 - CPU/NumPy inputs continue through the independent scalar `RK4` path, so users can switch devices and still have a readable reference implementation. Other latent-dynamics models retain their existing `simulate()` behavior.
